@@ -17,6 +17,7 @@ use risingwave_common::error::{Result, RwError};
 
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
+use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
@@ -62,10 +63,8 @@ impl DebeziumParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        let key_config = props
-            .key_encoding_config
-            .unwrap_or(props.encoding_config.clone());
-        let key_builder = build_accessor_builder(key_config, EncodingType::Key).await?;
+        let (key_config, key_type) = extract_key_config!(props);
+        let key_builder = build_accessor_builder(key_config, key_type).await?;
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
         Ok(Self {

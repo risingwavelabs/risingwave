@@ -52,6 +52,11 @@ pub struct StoreLocalStatistic {
     pub sub_iter_count: u64,
     pub found_key: bool,
 
+    pub staging_imm_get_count: u64,
+    pub staging_sst_get_count: u64,
+    pub overlapping_get_count: u64,
+    pub non_overlapping_get_count: u64,
+
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     reported: AtomicBool,
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
@@ -228,6 +233,11 @@ struct LocalStoreMetrics {
     get_filter_metrics: BloomFilterLocalMetrics,
     may_exist_filter_metrics: BloomFilterLocalMetrics,
     collect_count: usize,
+
+    staging_imm_get_count: LocalHistogram,
+    staging_sst_get_count: LocalHistogram,
+    overlapping_get_count: LocalHistogram,
+    non_overlapping_get_count: LocalHistogram,
 }
 
 const FLUSH_LOCAL_METRICS_TIMES: usize = 32;
@@ -312,6 +322,24 @@ impl LocalStoreMetrics {
         let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
         let may_exist_filter_metrics =
             BloomFilterLocalMetrics::new(metrics, table_id_label, "may_exist");
+
+        let staging_imm_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "staging-imm-get"])
+            .local();
+        let staging_sst_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "staging-sst-get"])
+            .local();
+        let overlapping_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "committed-overlapping-get"])
+            .local();
+        let non_overlapping_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "committed-non-overlapping-get"])
+            .local();
+
         Self {
             cache_data_block_total,
             cache_data_block_miss,
@@ -333,6 +361,10 @@ impl LocalStoreMetrics {
             iter_filter_metrics,
             may_exist_filter_metrics,
             collect_count: 0,
+            staging_imm_get_count,
+            staging_sst_get_count,
+            overlapping_get_count,
+            non_overlapping_get_count,
         }
     }
 
@@ -377,7 +409,11 @@ add_local_metrics_histogram!(
     overlapping_iter_count,
     non_overlapping_iter_count,
     sub_iter_count,
-    may_exist_check_sstable_count
+    may_exist_check_sstable_count,
+    staging_imm_get_count,
+    staging_sst_get_count,
+    overlapping_get_count,
+    non_overlapping_get_count
 );
 
 macro_rules! add_local_metrics_count {

@@ -407,6 +407,9 @@ where
         let stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
             .map_err(|err| PsqlError::QueryError(err.into()))?;
+        if stmts.is_empty() {
+            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        }
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {

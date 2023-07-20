@@ -40,8 +40,8 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
+        let table_desc: &StorageTableDesc = node.get_table_desc()?;
         let table = {
-            let table_desc: &StorageTableDesc = node.get_table_desc()?;
             let table_id = TableId {
                 table_id: table_desc.table_id,
             };
@@ -110,6 +110,12 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             )
         };
 
+        let table_stream_key_indices = table_desc
+            .stream_key
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let left_join_keys = node
@@ -160,6 +166,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             pk_indices: params.pk_indices,
             output_indices,
             table_output_indices,
+            table_stream_key_indices,
             executor_id: params.executor_id,
             watermark_epoch: stream.get_watermark_epoch(),
             chunk_size: params.env.config().developer.chunk_size,
@@ -184,6 +191,7 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
+    table_stream_key_indices: Vec<usize>,
     executor_id: u64,
     watermark_epoch: AtomicU64Ref,
     chunk_size: usize,
@@ -215,6 +223,7 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     self.pk_indices,
                     self.output_indices,
                     self.table_output_indices,
+                    self.table_stream_key_indices,
                     self.executor_id,
                     self.watermark_epoch,
                     self.metrics,

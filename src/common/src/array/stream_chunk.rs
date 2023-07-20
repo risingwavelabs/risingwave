@@ -23,9 +23,9 @@ use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
-use crate::row::{OwnedRow, Row};
+use crate::row::Row;
 use crate::types::{DataType, DefaultOrdered, ToText};
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::ZipEqDebug;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -109,7 +109,7 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, OwnedRow)], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
@@ -118,7 +118,7 @@ impl StreamChunk {
 
         for (op, row) in rows {
             ops.push(*op);
-            for (datum, builder) in row.iter().zip_eq_fast(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
                 builder.append(datum);
             }
         }
