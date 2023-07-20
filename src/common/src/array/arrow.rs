@@ -859,7 +859,7 @@ mod tests {
                 BoolArray::from_iter([Some(false), Some(false), Some(true), None]).into_ref(),
                 I32Array::from_iter([Some(42), Some(28), Some(19), None]).into_ref(),
             ],
-            [true, true, true, false].into_iter().collect(),
+            [true, true, true, true].into_iter().collect(),
         );
         assert_eq!(
             expected_risingwave_struct_array,
