@@ -116,7 +116,10 @@ async fn main_okk() {
     #[cfg(feature = "bpf")]
     tokio::spawn(bpf::bpf(args.clone(), bpf_stop_rx));
 
-    bench::run(args.clone(), bench_stop_rx).await;s
+    bench::run(args.clone(), bench_stop_rx).await;
+
+    #[cfg(feature = "trace")]
+    opentelemetry::global::shutdown_tracer_provider();
 }
 
 #[tokio::main]

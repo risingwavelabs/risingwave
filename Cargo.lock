@@ -5565,6 +5565,7 @@ dependencies = [
  "libc",
  "madsim-tokio",
  "nix 0.25.1",
+ "opentelemetry",
  "parking_lot 0.12.1",
  "prometheus",
  "rand",
