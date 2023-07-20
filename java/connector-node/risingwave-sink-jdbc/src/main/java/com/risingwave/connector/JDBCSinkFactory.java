@@ -23,11 +23,9 @@ import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.sql.*;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,11 +100,7 @@ public class JDBCSinkFactory implements SinkFactory {
         if (sinkType == SinkType.UPSERT) {
             // For upsert JDBC sink, the primary key defined on the table must match the one in
             // config and cannot be empty
-            var pkInWith =
-                    Arrays.stream(config.getPrimaryKey().split(","))
-                            .map(String::trim)
-                            .collect(Collectors.toSet());
-
+            var pkInWith = new HashSet<>(tableSchema.getPrimaryKeys());
             if (jdbcPks.isEmpty() || !jdbcPks.equals(pkInWith)) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription(
