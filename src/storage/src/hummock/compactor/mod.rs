@@ -39,6 +39,7 @@ use futures::future::try_join_all;
 use futures::{pin_mut, stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
+use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{
@@ -474,6 +475,9 @@ impl Compactor {
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
 
+        assert_ge!(max_compactor_task_multiplier, 0.0);
+        let max_pull_task_count = (cpu_core_num as f32 * max_compactor_task_multiplier) as u32;
+
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
@@ -483,9 +487,7 @@ impl Compactor {
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 // reset state
-                running_task_count.store(0, Ordering::SeqCst);
                 pull_task_ack.store(true, Ordering::SeqCst);
-
                 tokio::select! {
                     // Wait for interval.
                     _ = min_interval.tick() => {},
@@ -552,7 +554,8 @@ impl Compactor {
                             if pull_task_ack.load(Ordering::SeqCst) {
                                 // reset pending_pull_task_count when all pending task had been refill
                                 pending_pull_task_count = {
-                                   (cpu_core_num as f32 * max_compactor_task_multiplier) as u32 - running_task_count.load(Ordering::Relaxed)
+                                    assert_ge!(max_pull_task_count, running_task_count.load(Ordering::SeqCst));
+                                    max_pull_task_count - running_task_count.load(Ordering::SeqCst)
                                 };
 
                                 if pending_pull_task_count > 0 {
