@@ -102,7 +102,7 @@ impl LevelCompactionPicker {
         let strict_check = level_handlers[0]
             .get_pending_tasks()
             .iter()
-            .all(|task| task.target_level == 0);
+            .any(|task| task.target_level != 0);
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
@@ -830,7 +830,7 @@ pub mod tests {
                 level_type: pending_level.level_type,
                 table_infos: pending_level.table_infos.clone(),
             }],
-            target_level: 0,
+            target_level: 1,
             target_sub_level_id: pending_level.sub_level_id,
         };
         assert!(!levels_handler[0].is_level_pending_compact(&pending_level));
