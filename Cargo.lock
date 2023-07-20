@@ -3517,7 +3517,8 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.22"
-source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7777a8bc4e68878b6e5433ac7b9bc196d9ccdfeef1f7cb3d23193cb997a520c9"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3563,7 +3564,8 @@ dependencies = [
 [[package]]
 name = "madsim-etcd-client"
 version = "0.3.0+0.11.1"
-source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c26d21c8d69c25db9d461ab7dfa4b09bd982687546c8ca2c43d743533a8f1c3f"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3582,7 +3584,8 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -3627,7 +3630,8 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.3.0+0.9.2"
-source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd91945c26b262333e10025306a3bd75b50f43222086fe1d0afee1b5c663e787"
 dependencies = [
  "async-stream",
  "chrono",
@@ -3640,7 +3644,8 @@ dependencies = [
 [[package]]
 name = "madsim-tonic-build"
 version = "0.3.0+0.9.2"
-source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa4b467f3c8bb59b7faabe632a65b9731c8a412a5c7d698cba21fe2caa859e71"
 dependencies = [
  "prettyplease",
  "proc-macro2",
