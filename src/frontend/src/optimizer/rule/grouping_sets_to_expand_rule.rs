@@ -77,7 +77,7 @@ impl Rule for GroupingSetsToExpandRule {
         let agg = Self::prune_column_for_agg(agg);
         let (agg_calls, mut group_keys, grouping_sets, input) = agg.decompose();
 
-        let original_group_keys_num = group_keys.len();
+        let flag_col_idx = group_keys.len();
         let input_schema_len = input.schema().len();
 
         // TODO: support GROUPING expression.
@@ -127,7 +127,7 @@ impl Rule for GroupingSetsToExpandRule {
                             vec![
                                 ExprImpl::literal_bigint(i as i64),
                                 ExprImpl::InputRef(
-                                    InputRef::new(original_group_keys_num, DataType::Int64).into(),
+                                    InputRef::new(flag_col_idx, DataType::Int64).into(),
                                 ),
                             ],
                             DataType::Boolean,
@@ -163,7 +163,7 @@ impl Rule for GroupingSetsToExpandRule {
         }
 
         let new_agg = Agg::new(new_agg_calls, group_keys, expand);
-        let project_exprs = (0..original_group_keys_num)
+        let project_exprs = (0..flag_col_idx)
             .map(|i| {
                 ExprImpl::InputRef(
                     InputRef::new(i, new_agg.schema().fields()[i].data_type.clone()).into(),
