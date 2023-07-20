@@ -10,8 +10,8 @@ cargo-cache: &cargo-cache
     args: "--no-progress"
   paths:
     - ".cargo/advisory-db"
-    - "risingwave/target/*/deps/*_sys*"
-    - "risingwave/target/*/deps/*_src*"
+    - "target/*/deps/*_sys*"
+    - "target/*/deps/*_src*"
   pipeline-slug-override: "shared"
 
 steps:
