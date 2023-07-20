@@ -54,8 +54,10 @@ cargo build \
     -p risingwave_backup_cmd \
     -p risingwave_e2e_extended_mode_test \
     $RISINGWAVE_FEATURE_FLAGS \
-    --profile "$profile"
+    --profile "$profile" \
+    --timings
 
+buildkite-agent artifact upload target/"$profile"/cargo-timings/cargo-timing.html
 
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
 
