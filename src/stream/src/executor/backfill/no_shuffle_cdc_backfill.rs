@@ -27,8 +27,11 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::batch_table::external_table::ExternalUpstreamTable;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::batch_table::{UpstreamTable, UpstreamTableFacade};
+use risingwave_storage::table::batch_table::{
+    SnapshotRead, SnapshotReadArgs, UpstreamTable, UpstreamTableFacade,
+};
 use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
@@ -45,33 +48,10 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
-/// `BackfillExecutor` is used to create a materialized view on another materialized view.
-///
-/// It can only buffer chunks between two barriers instead of unbundled memory usage of
-/// `RearrangedChainExecutor`.
-///
-/// It uses the latest epoch to read the snapshot of the upstream mv during two barriers and all the
-/// `StreamChunk` of the snapshot read will forward to the downstream.
-///
-/// It uses `current_pos` to record the progress of the backfill (the pk of the upstream mv) and
-/// `current_pos` is initiated as an empty `Row`.
-///
-/// All upstream messages during the two barriers interval will be buffered and decide to forward or
-/// ignore based on the `current_pos` at the end of the later barrier. Once `current_pos` reaches
-/// the end of the upstream mv pk, the backfill would finish.
-///
-/// Notice:
-/// The pk we are talking about here refers to the storage primary key.
-/// We rely on the scheduler to schedule the `BackfillExecutor` together with the upstream mv/table
-/// in the same worker, so that we can read uncommitted data from the upstream table without
-/// waiting.
-pub struct BackfillExecutor<S: StateStore> {
+pub struct CdcBackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StorageTable<S>,
-
-    upstream_table_new: UpstreamTableFacade<StorageTable<S>>,
-
+    // upstream_table: StorageTable<S>,
+    upstream_table: UpstreamTableFacade<ExternalUpstreamTable<S>>,
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
@@ -92,13 +72,13 @@ pub struct BackfillExecutor<S: StateStore> {
     chunk_size: usize,
 }
 
-impl<S> BackfillExecutor<S>
+impl<S> CdcBackfillExecutor<S>
 where
     S: StateStore,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        upstream_table: StorageTable<S>,
+        upstream_table: ExternalUpstreamTable<S>,
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
@@ -112,9 +92,10 @@ where
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "BackfillExecutor".to_owned(),
+                identity: "CdcBackfillExecutor".to_owned(),
             },
-            upstream_table,
+            // upstream_table,
+            upstream_table: UpstreamTableFacade::new(upstream_table),
             upstream,
             state_table,
             output_indices,
@@ -245,8 +226,8 @@ where
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
-                // TODO: abstract the snapshot read logic to allow
-                // TODO: different implememntation snapshot read
+                // TODO: abstract the snapshot read logic to allow different implememntation
+                // snapshot read
                 let right_snapshot = pin!(Self::snapshot_read(
                     &self.upstream_table,
                     snapshot_read_epoch,
@@ -461,7 +442,7 @@ where
             Some(range_bounds) => range_bounds,
         };
 
-        // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
+        // We use uncommitted read here, because we have already scheduled the `CdcBackfillExecutor`
         // together with the upstream mv.
         let iter = upstream_table
             .batch_iter_with_pk_bounds(
@@ -506,7 +487,7 @@ where
     }
 }
 
-impl<S> Executor for BackfillExecutor<S>
+impl<S> Executor for CdcBackfillExecutor<S>
 where
     S: StateStore,
 {

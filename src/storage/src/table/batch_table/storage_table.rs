@@ -45,6 +45,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
+use crate::table::batch_table::UpstreamTable;
 use crate::table::merge_sort::merge_sort;
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
@@ -107,6 +108,11 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
 /// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
 /// non-versioned tables with the same type.
+/// TODO: we can make the storage table as an abstract layer to represent a table that support
+/// snapshot read options:
+///     - enum StorageTableImpl
+///     - trait StorageTable<S> { Inner: StorageTableInner
+///     }
 pub type StorageTable<S> = StorageTableInner<S, EitherSerde>;
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {
@@ -254,34 +260,34 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     }
 }
 
-impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
-    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+impl<S: StateStore, SD: ValueRowSerde> UpstreamTable for StorageTableInner<S, SD> {
+    fn pk_serializer(&self) -> &OrderedRowSerde {
         &self.pk_serializer
     }
 
-    pub fn schema(&self) -> &Schema {
+    fn schema(&self) -> &Schema {
         &self.schema
     }
 
-    pub fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
 
-    pub fn output_indices(&self) -> &[usize] {
+    fn output_indices(&self) -> &[usize] {
         &self.output_indices
     }
 
     /// Get the indices of the primary key columns in the output columns.
     ///
     /// Returns `None` if any of the primary key columns is not in the output columns.
-    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+    fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
         self.pk_indices
             .iter()
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect()
     }
 
-    pub fn table_id(&self) -> TableId {
+    fn table_id(&self) -> TableId {
         self.table_id
     }
 }
