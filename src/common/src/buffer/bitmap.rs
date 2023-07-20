@@ -38,7 +38,7 @@
 
 use std::iter::{self, TrustedLen};
 use std::mem::size_of;
-use std::ops::{BitAnd, BitOr, BitXor, Not, RangeInclusive};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
@@ -463,6 +463,12 @@ impl BitAnd for Bitmap {
     }
 }
 
+impl BitAndAssign<&Bitmap> for Bitmap {
+    fn bitand_assign(&mut self, rhs: &Bitmap) {
+        *self = &*self & rhs;
+    }
+}
+
 impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     type Output = Bitmap;
 
@@ -504,6 +510,18 @@ impl BitOr for Bitmap {
 
     fn bitor(self, rhs: Bitmap) -> Self::Output {
         (&self).bitor(&rhs)
+    }
+}
+
+impl BitOrAssign<&Bitmap> for Bitmap {
+    fn bitor_assign(&mut self, rhs: &Bitmap) {
+        *self = &*self | rhs;
+    }
+}
+
+impl BitOrAssign<Bitmap> for Bitmap {
+    fn bitor_assign(&mut self, rhs: Bitmap) {
+        *self |= &rhs;
     }
 }
 
