@@ -24,6 +24,7 @@ use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::func::{func_sigs, FuncSign as RwFuncSig};
 use risingwave_frontend::expr::ExprType;
+use risingwave_pb::expr::expr_node::PbType;
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
@@ -186,6 +187,12 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
                 .iter()
                 .all(|t| *t != DataTypeName::Timestamptz)
                 && !FUNC_BAN_LIST.contains(&func.func)
+                && (func.func != PbType::Cardinality
+                    || !(func.inputs_type[0] == DataTypeName::List
+                        && func.ret_type == DataTypeName::Int64))
+                && (func.func != PbType::ArrayLength
+                    || !(func.inputs_type[0] == DataTypeName::List
+                        && func.ret_type == DataTypeName::Int64))
         })
         .filter_map(|func| func.try_into().ok())
         .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));

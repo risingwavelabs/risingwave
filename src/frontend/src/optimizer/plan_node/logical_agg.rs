@@ -423,6 +423,26 @@ impl LogicalAggBuilder {
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
 
+        if matches!(agg_kind, AggKind::Grouping) {
+            if self.grouping_sets.is_empty() {
+                return Err(ErrorCode::NotSupported(
+                    "GROUPING must be used in a query with grouping sets".into(),
+                    "try to use grouping sets instead".into(),
+                ));
+            }
+            if inputs.len() >= 32 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUPING must have fewer than 32 arguments".into(),
+                ));
+            }
+            if inputs.iter().any(|x| self.try_as_group_expr(x).is_none()) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "arguments to GROUPING must be grouping expressions of the associated query level"
+                        .into(),
+                ));
+            }
+        }
+
         let inputs: Vec<_> = inputs
             .iter()
             .map(|expr| {
@@ -647,7 +667,6 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-
             _ => Ok(self
                 .push_agg_call(PlanAggCall {
                     agg_kind,
