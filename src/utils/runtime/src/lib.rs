@@ -66,8 +66,10 @@ pub struct LoggerSettings {
     colorful: bool,
     /// Output to `stderr` instead of `stdout`.
     stderr: bool,
-    /// Override default target settings.
+    /// Override target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
+    /// Override the default level.
+    default_level: Option<tracing::metadata::LevelFilter>,
 }
 
 impl Default for LoggerSettings {
@@ -84,6 +86,7 @@ impl LoggerSettings {
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             stderr: false,
             targets: vec![],
+            default_level: None,
         }
     }
 
@@ -106,6 +109,12 @@ impl LoggerSettings {
         level: impl Into<tracing::metadata::LevelFilter>,
     ) -> Self {
         self.targets.push((target.into(), level.into()));
+        self
+    }
+
+    /// Overrides the default level.
+    pub fn with_default(mut self, level: impl Into<tracing::metadata::LevelFilter>) -> Self {
+        self.default_level = Some(level.into());
         self
     }
 }
@@ -205,6 +214,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         // Overrides from settings
         filter = filter.with_targets(settings.targets);
+        if let Some(default_level) = settings.default_level {
+            filter = filter.with_default(default_level);
+        }
 
         // Overrides from env var
         if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
