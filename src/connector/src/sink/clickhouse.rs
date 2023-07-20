@@ -21,6 +21,7 @@ use clickhouse::update::Field;
 use clickhouse::{Client, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DatumRef, ScalarRefImpl, ToText};
@@ -32,8 +33,8 @@ use serde_with::serde_as;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::ClickHouseCommon;
 use crate::sink::{
-    Result, Sink, SinkError, SinkWriterV1, SinkWriterV1Adapter, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::source::DataType;
 
@@ -92,6 +93,11 @@ impl ClickHouseSink {
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
         let fields = self.schema.fields().clone();
+        assert_eq!(
+            fields.len(),
+            clickhouse_column.len(),
+            "Schema len not match"
+        );
         fields
             .iter()
             .zip_eq_fast(clickhouse_column)
@@ -168,7 +174,7 @@ impl ClickHouseSink {
 #[async_trait::async_trait]
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = SinkWriterV1Adapter<ClickHouseSinkWriter>;
+    type Writer = ClickHouseSinkWriter;
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
@@ -189,7 +195,7 @@ impl Sink for ClickHouseSink {
             .bind("position")
             .fetch_all::<SystemColumn>()
             .await
-            .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+            .map_err(SinkError::from)?;
         assert!(
             !clickhouse_column.is_empty(),
             "table {:?}.{:?} is not find in clickhouse",
@@ -201,15 +207,13 @@ impl Sink for ClickHouseSink {
     }
 
     async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(SinkWriterV1Adapter::new(
-            ClickHouseSinkWriter::new(
-                self.config.clone(),
-                self.schema.clone(),
-                self.pk_indices.clone(),
-                self.is_append_only,
-            )
-            .await?,
-        ))
+        Ok(ClickHouseSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.is_append_only,
+        )
+        .await?)
     }
 }
 pub struct ClickHouseSinkWriter {
@@ -232,10 +236,7 @@ impl ClickHouseSinkWriter {
         if !is_append_only {
             tracing::warn!("Update and delete are not recommended because of their impact on clickhouse performance.");
         }
-        let client = config
-            .common
-            .build_client()
-            .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+        let client = config.common.build_client().map_err(SinkError::from)?;
         let query_column = "select distinct ?fields from system.columns where database = ? and table = ? order by position".to_string();
         let clickhouse_column = client
             .query(&query_column)
@@ -243,7 +244,7 @@ impl ClickHouseSinkWriter {
             .bind(config.common.table.clone())
             .fetch_all::<SystemColumn>()
             .await
-            .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+            .map_err(SinkError::from)?;
         let column_correct_vec: Result<Vec<(bool, u8)>> = clickhouse_column
             .iter()
             .map(Self::build_column_correct_vec)
@@ -272,7 +273,9 @@ impl ClickHouseSinkWriter {
                 .next()
                 .ok_or(SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(e.to_string()))?
+                .map_err(|e| {
+                    SinkError::ClickHouse(format!("clickhouse sink error {}", e.to_string()))
+                })?
         } else {
             0_u8
         };
@@ -289,7 +292,7 @@ impl ClickHouseSinkWriter {
         let mut inter = self
             .client
             .insert_with_filed::<Rows>(&self.config.common.table, Some(file_name))
-            .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+            .map_err(SinkError::from)?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 continue;
@@ -299,12 +302,9 @@ impl ClickHouseSinkWriter {
             inter
                 .write_row_binary(buffer)
                 .await
-                .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+                .map_err(SinkError::from)?;
         }
-        inter
-            .end()
-            .await
-            .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+        inter.end().await.map_err(SinkError::from)?;
         Ok(())
     }
 
@@ -401,7 +401,7 @@ impl ClickHouseSinkWriter {
                 if can_null {
                     buffer.put_u8(0);
                 }
-                let time = v.get_timestamp_nsecs() / 10_i32.pow((9 - accuracy_time).into()) as i64;
+                let time = v.get_timestamp_nanos() / 10_i32.pow((9 - accuracy_time).into()) as i64;
                 buffer.put_i64_le(time);
             }
             Some(ScalarRefImpl::Timestamptz(_v)) => {
@@ -478,17 +478,14 @@ impl ClickHouseSinkWriter {
                             &self.config.common.table,
                             Some(field_names.clone()),
                         )
-                        .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+                        .map_err(SinkError::from)?;
                     let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
                     self.build_row_binary(row, &mut buffer)?;
                     inter
                         .write_row_binary(buffer)
                         .await
-                        .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
-                    inter
-                        .end()
-                        .await
-                        .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+                        .map_err(SinkError::from)?;
+                    inter.end().await.map_err(SinkError::from)?;
                 }
                 Op::Delete => match Self::build_ck_fields(row.datum_at(index), accuracy_time)? {
                     Some(f) => {
@@ -496,7 +493,7 @@ impl ClickHouseSinkWriter {
                             .delete(&self.config.common.table, pk_name_0, vec![f])
                             .delete()
                             .await
-                            .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+                            .map_err(SinkError::from)?;
                     }
                     None => return Err(SinkError::ClickHouse("pk can not be null".to_string())),
                 },
@@ -513,7 +510,7 @@ impl ClickHouseSinkWriter {
                         )
                         .update_fields(fields_vec, pk)
                         .await
-                        .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
+                        .map_err(SinkError::from)?;
                 }
             }
         }
@@ -570,7 +567,7 @@ impl ClickHouseSinkWriter {
                 ))
             }
             Some(ScalarRefImpl::Timestamp(v)) => {
-                let time = v.get_timestamp_nsecs() / 10_i32.pow((9 - accuracy_time).into()) as i64;
+                let time = v.get_timestamp_nanos() / 10_i32.pow((9 - accuracy_time).into()) as i64;
                 Some(Field::DateTime64(time))
             }
             Some(ScalarRefImpl::Timestamptz(_)) => {
@@ -594,7 +591,7 @@ impl ClickHouseSinkWriter {
     }
 }
 #[async_trait::async_trait]
-impl SinkWriterV1 for ClickHouseSinkWriter {
+impl SinkWriter for ClickHouseSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
             self.append_only(chunk).await
@@ -612,11 +609,15 @@ impl SinkWriterV1 for ClickHouseSinkWriter {
         Ok(())
     }
 
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
+        Ok(())
+    }
+
     async fn abort(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

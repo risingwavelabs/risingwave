@@ -305,7 +305,7 @@ impl Timestamp {
             .map_err(Into::into)
     }
 
-    pub fn get_timestamp_nsecs(&self) -> i64 {
+    pub fn get_timestamp_nanos(&self) -> i64 {
         self.0.timestamp_nanos()
     }
 

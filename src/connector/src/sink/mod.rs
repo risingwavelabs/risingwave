@@ -22,6 +22,7 @@ pub mod utils;
 
 use std::collections::HashMap;
 
+use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -424,6 +425,12 @@ pub enum SinkError {
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
         SinkError::Remote(format!("{}", value))
+    }
+}
+
+impl From<ClickHouseError> for SinkError {
+    fn from(value: ClickHouseError) -> Self {
+        SinkError::ClickHouse(format!("{}", value))
     }
 }
 
