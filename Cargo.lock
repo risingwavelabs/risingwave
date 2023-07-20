@@ -177,13 +177,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e10849b60c17dbabb334be1f4ef7550701aa58082b71335ce1ed586601b2f423"
 dependencies = [
  "ahash 0.8.3",
- "arrow-buffer",
- "arrow-data",
- "arrow-schema",
+ "arrow-buffer 36.0.0",
+ "arrow-data 36.0.0",
+ "arrow-schema 36.0.0",
  "chrono",
  "half 2.2.1",
  "hashbrown 0.13.2",
  "num",
+]
+
+[[package]]
+name = "arrow-array"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e09d42ecd482a864445ed95bf78fb159e37b4d879ca08405b247170fb331daf5"
+dependencies = [
+ "ahash 0.8.3",
+ "arrow-buffer 44.0.0",
+ "arrow-data 44.0.0",
+ "arrow-schema 44.0.0",
+ "chrono",
+ "half 2.2.1",
+ "hashbrown 0.14.0",
+ "num",
+ "num-complex",
 ]
 
 [[package]]
@@ -197,15 +214,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-buffer"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe5044e672568feeb9e134a96781c8fdee3bce58df889f463517880d4992f751"
+dependencies = [
+ "half 2.2.1",
+ "num",
+]
+
+[[package]]
 name = "arrow-cast"
 version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b88897802515d7b193e38b27ddd9d9e43923d410a9e46307582d756959ee9595"
 dependencies = [
- "arrow-array",
- "arrow-buffer",
- "arrow-data",
- "arrow-schema",
+ "arrow-array 36.0.0",
+ "arrow-buffer 36.0.0",
+ "arrow-data 36.0.0",
+ "arrow-schema 36.0.0",
  "arrow-select",
  "chrono",
  "lexical-core",
@@ -218,8 +245,20 @@ version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "533f937efa1aaad9dc86f6a0e382c2fa736a4943e2090c946138079bdf060cef"
 dependencies = [
- "arrow-buffer",
- "arrow-schema",
+ "arrow-buffer 36.0.0",
+ "arrow-schema 36.0.0",
+ "half 2.2.1",
+ "num",
+]
+
+[[package]]
+name = "arrow-data"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "425a65a08947ed20b54e66749e9a56ed5a1cb1366c001329470dff365dd8411a"
+dependencies = [
+ "arrow-buffer 44.0.0",
+ "arrow-schema 44.0.0",
  "half 2.2.1",
  "num",
 ]
@@ -230,11 +269,11 @@ version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd1362a6a02e31734c67eb2e9a30dca1689d306cfe2fc00bc6430512091480ce"
 dependencies = [
- "arrow-array",
- "arrow-buffer",
+ "arrow-array 36.0.0",
+ "arrow-buffer 36.0.0",
  "arrow-cast",
  "arrow-ipc",
- "arrow-schema",
+ "arrow-schema 36.0.0",
  "base64 0.21.0",
  "bytes",
  "futures",
@@ -250,11 +289,11 @@ version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18b75296ff01833f602552dff26a423fc213db8e5049b540ca4a00b1c957e41c"
 dependencies = [
- "arrow-array",
- "arrow-buffer",
+ "arrow-array 36.0.0",
+ "arrow-buffer 36.0.0",
  "arrow-cast",
- "arrow-data",
- "arrow-schema",
+ "arrow-data 36.0.0",
+ "arrow-schema 36.0.0",
  "flatbuffers",
 ]
 
@@ -265,15 +304,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d04f17f7b86ded0b5baf98fe6123391c4343e031acc3ccc5fa604cc180bff220"
 
 [[package]]
+name = "arrow-schema"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dceed0efbaf304aaa296169c9eedde4e0ec90e0dc2010a88ea79ea6d86046ae9"
+
+[[package]]
 name = "arrow-select"
 version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "163e35de698098ff5f5f672ada9dc1f82533f10407c7a11e2cd09f3bcf31d18a"
 dependencies = [
- "arrow-array",
- "arrow-buffer",
- "arrow-data",
- "arrow-schema",
+ "arrow-array 36.0.0",
+ "arrow-buffer 36.0.0",
+ "arrow-data 36.0.0",
+ "arrow-schema 36.0.0",
  "num",
 ]
 
@@ -2707,6 +2752,12 @@ checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash 0.8.3",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
 
 [[package]]
 name = "hdrhistogram"
@@ -5635,9 +5686,9 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow-array",
- "arrow-buffer",
- "arrow-schema",
+ "arrow-array 44.0.0",
+ "arrow-buffer 36.0.0",
+ "arrow-schema 36.0.0",
  "async-trait",
  "auto_enums",
  "bitflags 2.2.1",
@@ -5952,8 +6003,8 @@ version = "1.0.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "arrow-array",
- "arrow-schema",
+ "arrow-array 44.0.0",
+ "arrow-schema 36.0.0",
  "async-trait",
  "auto_enums",
  "await-tree",
@@ -6008,7 +6059,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow-schema",
+ "arrow-schema 36.0.0",
  "assert_matches",
  "async-recursion",
  "async-trait",
@@ -6626,9 +6677,9 @@ dependencies = [
 name = "risingwave_udf"
 version = "0.1.0"
 dependencies = [
- "arrow-array",
+ "arrow-array 44.0.0",
  "arrow-flight",
- "arrow-schema",
+ "arrow-schema 36.0.0",
  "arrow-select",
  "futures-util",
  "madsim-tokio",
