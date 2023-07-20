@@ -59,8 +59,6 @@ cargo build \
 
 buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 
-find . -name '*openssl*'
-
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
 
 echo "--- Show link info"
