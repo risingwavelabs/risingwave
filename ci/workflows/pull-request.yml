@@ -37,8 +37,8 @@ cargo-build-cache-sim: &cargo-build-cache-sim
     bucket: ci-cache-bucket
     args: "--no-progress"
   paths:
-    - "target/ci-sim/deps/*_sys*"
-    - "target/ci-sim/deps/*_src*"
+    - "target/sim/ci-sim/deps/*_sys*"
+    - "target/sim/ci-sim/deps/*_src*"
   pipeline-slug-override: "shared"
 advisory-db-cache: &advisory-db-cache
   id: advisory-db

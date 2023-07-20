@@ -28,10 +28,6 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
 fi
 
 echo "--- Rust cargo-sort check"
-
-pwd
-ls -al
-
 cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
@@ -71,6 +67,3 @@ echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile
 
 echo "--- Show sccache stats"
 sccache --show-stats
-
-pwd
-ls -al
