@@ -497,6 +497,7 @@ impl SstableStore {
         sst: &Sstable,
         block_index: Option<usize>,
     ) -> HummockResult<BlockStream> {
+        fail_point!("get_stream_err");
         let start_pos = match block_index {
             None => None,
             Some(index) => {
@@ -903,6 +904,9 @@ impl BlockStream {
         let (block_stream_size, block_full_size) =
             *self.block_size_vec.get(self.block_idx).unwrap();
         let mut buffer = vec![0; block_stream_size];
+        fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
+            ObjectError::internal("stream read error")
+        )));
 
         let bytes_read = self
             .byte_stream
@@ -911,12 +915,10 @@ impl BlockStream {
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 
         if bytes_read != block_stream_size {
-            return Err(HummockError::object_io_error(ObjectError::internal(
-                format!(
-                    "unexpected number of bytes: expected: {} read: {}",
-                    block_stream_size, bytes_read
-                ),
-            )));
+            return Err(HummockError::decode_error(ObjectError::internal(format!(
+                "unexpected number of bytes: expected: {} read: {}",
+                block_stream_size, bytes_read
+            ))));
         }
 
         let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);

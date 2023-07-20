@@ -37,7 +37,7 @@ pub use compaction_filter::{
 pub use context::CompactorContext;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
-pub use iterator::ConcatSstableIterator;
+pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;

@@ -20,6 +20,7 @@ use std::sync::{atomic, Arc};
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
+use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -36,7 +37,7 @@ use crate::monitor::StoreLocalStatistic;
 const MAX_RETRY_TIME: u64 = 600; // 10min
 
 /// Iterates over the KV-pairs of an SST while downloading it.
-struct SstableStreamIterator {
+pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
     table_holder: TableHolder,
     /// The downloading stream.
@@ -74,7 +75,7 @@ impl SstableStreamIterator {
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         table_holder: TableHolder,
-        sstable_info: &SstableInfo,
+        sstable_info: SstableInfo,
         existing_table_ids: HashSet<StateTableId>,
         start_block_idx: usize,
         stats: &StoreLocalStatistic,
@@ -88,7 +89,7 @@ impl SstableStreamIterator {
             seek_block_idx: start_block_idx,
             stats_ptr: stats.remote_io_time.clone(),
             existing_table_ids,
-            sstable_info: sstable_info.clone(),
+            sstable_info,
             create_time: Instant::now(),
             sstable_store,
             task_progress,
@@ -172,10 +173,13 @@ impl SstableStreamIterator {
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        if self.create_time.elapsed().as_secs() > MAX_RETRY_TIME {
+                        if !e.is_object_error()
+                            || self.create_time.elapsed().as_secs() > MAX_RETRY_TIME
+                        {
                             return Err(e);
                         }
                         self.block_stream.take();
+                        fail_point!("create_stream_err");
                     }
                 }
                 self.stats_ptr
@@ -209,14 +213,14 @@ impl SstableStreamIterator {
         Ok(())
     }
 
-    fn key(&self) -> FullKey<&[u8]> {
+    pub fn key(&self) -> FullKey<&[u8]> {
         self.block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
             .key()
     }
 
-    fn value(&self) -> HummockValue<&[u8]> {
+    pub fn value(&self) -> HummockValue<&[u8]> {
         let raw_value = self
             .block_iter
             .as_ref()
@@ -226,7 +230,7 @@ impl SstableStreamIterator {
             .unwrap_or_else(|_| panic!("decode error sstinfo={}", self.sst_debug_info()))
     }
 
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
@@ -387,7 +391,7 @@ impl ConcatSstableIterator {
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let mut sstable_iter = SstableStreamIterator::new(
                     sstable,
-                    table_info,
+                    table_info.clone(),
                     self.existing_table_ids.clone(),
                     start_index,
                     &self.stats,
