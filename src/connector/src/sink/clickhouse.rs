@@ -273,9 +273,7 @@ impl ClickHouseSinkWriter {
                 .next()
                 .ok_or(SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| {
-                    SinkError::ClickHouse(format!("clickhouse sink error {}", e.to_string()))
-                })?
+                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?
         } else {
             0_u8
         };

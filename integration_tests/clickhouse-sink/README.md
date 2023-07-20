@@ -14,7 +14,7 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 2. Create the Iceberg table:
 
 ```sh
-docker compose exec clickhouse-server_1 bash clickhouse-client create_clickhouse_table.sql
+docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sql-file.sh create_clickhouse_table 
 ```
 
 3. Execute the SQL queries in sequence:
@@ -26,7 +26,7 @@ docker compose exec clickhouse-server_1 bash clickhouse-client create_clickhouse
 4. Execute a simple query:
 
 ```sh
-docker compose exec clickhouse-server_1 bash clickhouse-client clickhouse-query.sql
+docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sql-file.sh clickhouse_query 
 
 ```
 
