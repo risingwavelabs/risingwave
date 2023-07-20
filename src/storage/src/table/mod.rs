@@ -24,6 +24,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
@@ -93,19 +94,7 @@ pub async fn collect_data_chunk<E, S>(
 where
     S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
-    let builders = schema.create_array_builders(chunk_size.unwrap_or(0));
-    collect_data_chunk_with_builders(stream, chunk_size, builders).await
-}
-
-/// Collects data chunks from stream of rows.
-pub async fn collect_data_chunk_with_builders<E, S>(
-    stream: &mut S,
-    chunk_size: Option<usize>,
-    mut builders: Vec<ArrayBuilderImpl>,
-) -> Result<Option<DataChunk>, E>
-where
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
-{
+    let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
     let mut row_count = 0;
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
@@ -127,6 +116,38 @@ where
             .collect();
         DataChunk::new(columns, row_count)
     };
+
+    if chunk.cardinality() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(chunk))
+    }
+}
+
+/// Collects data chunks from stream of rows.
+pub async fn collect_data_chunk_with_builder<E, S>(
+    stream: &mut S,
+    chunk_size: Option<usize>,
+    builder: &mut DataChunkBuilder,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+{
+    let mut row_count = 0;
+    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+        match stream.next().await.transpose()? {
+            // FIXME: Should be raw append 1 row, no check for chunk.
+            // Need create a new method for it.
+            Some(row) => {
+                let _ = builder.append_one_row(row);
+            }
+            None => break,
+        }
+
+        row_count += 1;
+    }
+
+    let chunk = builder.build_data_chunk();
 
     if chunk.cardinality() == 0 {
         Ok(None)

@@ -24,6 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
@@ -151,6 +152,9 @@ where
             !first_barrier.is_newly_added(self.actor_id)
         };
 
+        let mut builder =
+            DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
+
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
         // finished state to state store first.
@@ -166,6 +170,7 @@ where
                     None,
                     false,
                     self.chunk_size,
+                    &mut builder,
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -244,6 +249,7 @@ where
                     current_pos.clone(),
                     true,
                     self.chunk_size,
+                    &mut builder
                 )
                 .map(Either::Right),);
 
@@ -442,6 +448,7 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
         chunk_size: usize,
+        builder: &mut DataChunkBuilder,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
@@ -468,7 +475,7 @@ where
         pin_mut!(iter);
 
         #[for_await]
-        for chunk in iter_chunks(iter, upstream_table.schema(), chunk_size) {
+        for chunk in iter_chunks(iter, chunk_size, builder) {
             yield chunk?;
         }
     }

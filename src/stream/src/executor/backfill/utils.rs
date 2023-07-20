@@ -28,11 +28,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_storage::table::{collect_data_chunk, collect_data_chunk_with_builders};
+use risingwave_storage::table::{
+    collect_data_chunk, collect_data_chunk_with_builder, collect_data_chunk_with_builders,
+};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;
@@ -384,15 +387,14 @@ pub(crate) fn compute_bounds(
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
 pub(crate) async fn iter_chunks<'a, S, E>(
     mut iter: S,
-    upstream_table_schema: &'a Schema,
     chunk_size: usize,
-    builders: Vec<ArrayBuilderImpl>,
+    builder: &mut DataChunkBuilder,
 ) where
     StreamExecutorError: From<E>,
     S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) =
-        collect_data_chunk_with_builders(&mut iter, Some(chunk_size), builders)
+        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
             .instrument_await("backfill_snapshot_read")
             .await?
     {
