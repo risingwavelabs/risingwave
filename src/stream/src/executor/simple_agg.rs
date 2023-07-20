@@ -102,7 +102,7 @@ impl<S: StateStore> ExecutorInner<S> {
 
 struct ExecutionVars<S: StateStore> {
     /// The single [`AggGroup`].
-    agg_group: AggGroup,
+    agg_group: AggGroup<S, AlwaysOutput>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
@@ -230,7 +230,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
             // Retrieve modified states and put the changes into the builders.
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            match vars.agg_group.build_change::<AlwaysOutput>(curr_outputs) {
+            match vars.agg_group.build_change(curr_outputs) {
                 Some(change) => {
                     this.result_table.write_record(change.as_ref());
                     this.result_table.commit(epoch).await?;
