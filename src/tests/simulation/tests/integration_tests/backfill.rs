@@ -16,15 +16,17 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::join;
 use itertools::Itertools;
 use madsim::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
+use tokio::join;
 
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
-const INSERT_SEED_SQL: &str = r#"insert into t1 values (1, '{"orders": {"id": 1, "price": "2.30", "customer_id": 2}}');"#;
+const INSERT_SEED_SQL: &str =
+    r#"insert into t1 values (1, '{"orders": {"id": 1, "price": "2.30", "customer_id": 2}}');"#;
+const INSERT_AND_FLUSH_SQL: &str = r#"insert into t1 values (1, '{"orders": {"id": 1, "price": "2.30", "customer_id": 2}}'); FLUSH;"#;
 const INSERT_RECURSE_SQL: &str = "insert into t1 select _id + 1, data from t1;";
 const MV1: &str = r#"
 create materialized view mv1 as
@@ -64,20 +66,17 @@ async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
     session.run(INSERT_SEED_SQL).await?;
     session.run("flush").await?;
 
-    for _ in 0..18 {
+    for _ in 0..20 {
         session.run(INSERT_RECURSE_SQL).await?;
-        session.run("flush").await?;
     }
 
     // Run create mv async
     let mv1_task = tokio::spawn(async move { session.run(MV1).await });
 
     // Create lots of base table update + barrier
-    for _ in 0..1000 {
-            match session2.run(INSERT_SEED_SQL).await.map(|_| ()) {
-                Ok(_) => session2.run("flush").await.map(|_| ())?,
-                e @ Err(_) => e?,
-            };
+    for _ in 0..1000_000 {
+        session2.run(INSERT_AND_FLUSH_SQL).await?;
     }
-    join!(mv1_task).0?.map(|_| ())
+    mv1_task.await??;
+    Ok(())
 }
