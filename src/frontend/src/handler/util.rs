@@ -150,13 +150,7 @@ fn to_pg_rows(
     formats: &[Format],
     session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
-    assert_eq!(
-        chunk.dimension(),
-        column_types.len(),
-        "chunk: {:#?}\ncolumn_types: {:?}",
-        chunk,
-        column_types
-    );
+    assert_eq!(chunk.dimension(), column_types.len());
 
     chunk
         .rows()

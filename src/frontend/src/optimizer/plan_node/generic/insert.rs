@@ -32,7 +32,7 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub table_name: String, // explain-only
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
-    pub table_all_columns: Vec<ColumnCatalog>,
+    pub table_visible_columns: Vec<ColumnCatalog>,
     pub input: PlanRef,
     pub column_indices: Vec<usize>, // columns in which to insert
     pub default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
@@ -47,8 +47,10 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
 
     pub fn schema(&self) -> Schema {
         if self.returning {
+            // We cannot directly use `self.input.schema()` here since it may omit some columns that
+            // will be filled with default values.
             Schema::new(
-                self.table_all_columns
+                self.table_visible_columns
                     .iter()
                     .map(|c| Field::from(&c.column_desc))
                     .collect(),
@@ -100,7 +102,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
         table_name: String,
         table_id: TableId,
         table_version_id: TableVersionId,
-        table_all_columns: Vec<ColumnCatalog>,
+        table_visible_columns: Vec<ColumnCatalog>,
         column_indices: Vec<usize>,
         default_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
@@ -110,7 +112,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
             table_name,
             table_id,
             table_version_id,
-            table_all_columns,
+            table_visible_columns,
             input,
             column_indices,
             default_columns,

@@ -43,7 +43,6 @@ impl LogicalProject {
     }
 
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        tracing::warn!(?exprs);
         let core = generic::Project::new(exprs, input);
         Self::with_core(core)
     }

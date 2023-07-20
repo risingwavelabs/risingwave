@@ -218,12 +218,10 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         let exprs = &self.exprs;
         let input_len = self.input.schema().len();
-        tracing::warn!("schema!!!! {:?}", self.input.schema());
         let mut map = vec![None; input_len];
         for (i, expr) in exprs.iter().enumerate() {
             if let ExprImpl::InputRef(input) = expr {
-                *map.get_mut(input.index())
-                    .unwrap_or_else(|| panic!("schema!!!! {:?}", self.input.schema())) = Some(i)
+                map[input.index()] = Some(i)
             }
         }
         ColIndexMapping::with_target_size(map, exprs.len())

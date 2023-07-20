@@ -121,6 +121,7 @@ impl InsertExecutor {
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
+        // Return the returning chunk.
         let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
@@ -146,6 +147,7 @@ impl InsertExecutor {
                 .map(|(_, column)| column)
                 .collect_vec();
 
+            // Construct the returning chunk, without the `row_id` column.
             let returning_chunk = DataChunk::new(columns.clone(), vis.clone());
 
             // If the user does not specify the primary key, then we need to add a column as the

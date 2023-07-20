@@ -101,11 +101,8 @@ impl Distill for LogicalInsert {
 
 impl ColPrunable for LogicalInsert {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        // No pruning.
         LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().copied()).into()
-        // let input = &self.core.input;
-        // let required_cols: Vec<_> = (0..input.schema().len()).collect();
-        // self.clone_with_input(input.prune_col(&required_cols, ctx))
-        //     .into()
     }
 }
 

@@ -39,7 +39,9 @@ pub struct BoundInsert {
     /// Name of the table to perform inserting.
     pub table_name: String,
 
-    pub table_all_columns: Vec<ColumnCatalog>,
+    /// All visible columns of the table, used as the output schema of `Insert` plan node if
+    /// `RETURNING` is specified.
+    pub table_visible_columns: Vec<ColumnCatalog>,
 
     /// Owner of the table to perform inserting.
     pub owner: UserId,
@@ -108,7 +110,7 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
-        let table_all_columns = table_catalog
+        let table_visible_columns = table_catalog
             .columns()
             .iter()
             .filter(|c| !c.is_hidden())
@@ -280,7 +282,7 @@ impl Binder {
             table_id,
             table_version_id,
             table_name,
-            table_all_columns,
+            table_visible_columns,
             owner,
             row_id_index,
             column_indices: col_indices_to_insert,
