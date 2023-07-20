@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod arrangement_backfill;
+pub mod external_table;
 pub mod no_shuffle_backfill;
-pub mod no_shuffle_cdc_backfill;
+pub mod upstream_table_reader;
 pub mod utils;

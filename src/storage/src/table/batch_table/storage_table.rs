@@ -45,7 +45,6 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
-use crate::table::batch_table::UpstreamTable;
 use crate::table::merge_sort::merge_sort;
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
@@ -260,38 +259,37 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     }
 }
 
-impl<S: StateStore, SD: ValueRowSerde> UpstreamTable for StorageTableInner<S, SD> {
-    fn pk_serializer(&self) -> &OrderedRowSerde {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
         &self.pk_serializer
     }
 
-    fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
 
-    fn output_indices(&self) -> &[usize] {
+    pub fn output_indices(&self) -> &[usize] {
         &self.output_indices
     }
 
     /// Get the indices of the primary key columns in the output columns.
     ///
     /// Returns `None` if any of the primary key columns is not in the output columns.
-    fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
         self.pk_indices
             .iter()
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect()
     }
 
-    fn table_id(&self) -> TableId {
+    pub fn table_id(&self) -> TableId {
         self.table_id
     }
 }
-
 /// Point get
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get vnode value with given primary key.

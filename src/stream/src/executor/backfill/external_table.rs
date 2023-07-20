@@ -12,45 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
-use std::ops::Bound::{self, Excluded, Included, Unbounded};
-use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
 
-use auto_enums::auto_enum;
-use await_tree::InstrumentAwait;
-use bytes::Bytes;
-use futures::future::try_join_all;
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
-use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::catalog::{Schema, TableId, TableOption};
+use risingwave_common::row::Row;
 use risingwave_common::util::row_serde::*;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
-use risingwave_hummock_sdk::HummockReadEpoch;
-use tracing::trace;
+use risingwave_common::util::value_encoding::EitherSerde;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
+use risingwave_storage::row_serde::ColumnMapping;
+use risingwave_storage::StateStore;
 
-use crate::error::{StorageError, StorageResult};
-use crate::hummock::CachePolicy;
-use crate::row_serde::row_serde_util::{
-    parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
-};
-use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use crate::row_serde::{find_columns_by_ids, ColumnMapping};
-use crate::store::{PrefetchOptions, ReadOptions};
-use crate::table::batch_table::{UpstreamCdcTable, UpstreamTable};
-use crate::table::merge_sort::merge_sort;
-use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
-use crate::StateStore;
-
-pub type ExternalUpstreamTable<S> = ExternalTableInner<S, EitherSerde>;
+pub type ExternalStorageTable<S> = ExternalTableInner<S, EitherSerde>;
 
 #[derive(Clone)]
 pub struct ExternalTableInner<S: StateStore, SD: ValueRowSerde> {
@@ -106,40 +79,34 @@ pub struct ExternalTableInner<S: StateStore, SD: ValueRowSerde> {
     read_prefix_len_hint: usize,
 }
 
-impl<S: StateStore, SD: ValueRowSerde> UpstreamTable for ExternalTableInner<S, SD> {
-    fn pk_serializer(&self) -> &OrderedRowSerde {
+impl<S: StateStore, SD: ValueRowSerde> ExternalTableInner<S, SD> {
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
         &self.pk_serializer
     }
 
-    fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
 
-    fn output_indices(&self) -> &[usize] {
+    pub fn output_indices(&self) -> &[usize] {
         &self.output_indices
     }
 
     /// Get the indices of the primary key columns in the output columns.
     ///
     /// Returns `None` if any of the primary key columns is not in the output columns.
-    fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
         self.pk_indices
             .iter()
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect()
     }
 
-    fn table_id(&self) -> TableId {
+    pub fn table_id(&self) -> TableId {
         self.table_id
-    }
-}
-
-impl<S: StateStore> UpstreamCdcTable for ExternalUpstreamTable<S> {
-    async fn get_current_wal_offset(&self) -> Option<String> {
-        None
     }
 }

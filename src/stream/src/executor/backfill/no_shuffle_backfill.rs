@@ -28,11 +28,13 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::batch_table::{UpstreamTable, UpstreamTableFacade};
 use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::upstream_table_reader::{
+    SnapshotReadArgs, UpstreamSnapshotRead, UpstreamTableReader,
+};
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
@@ -69,8 +71,6 @@ use crate::task::{ActorId, CreateMviewProgress};
 pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
     upstream_table: StorageTable<S>,
-
-    upstream_table_new: UpstreamTableFacade<StorageTable<S>>,
 
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
@@ -125,15 +125,20 @@ where
         }
     }
 
-    // #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
 
-        let pk_order = self.upstream_table.pk_serializer().get_order_types();
+        let pk_order = self
+            .upstream_table
+            .pk_serializer()
+            .get_order_types()
+            .to_vec();
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
+        let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
 
         let mut upstream = self.upstream.execute();
 
@@ -167,13 +172,8 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(
-                    &self.upstream_table,
-                    init_epoch,
-                    None,
-                    false,
-                    self.chunk_size,
-                );
+                let args = SnapshotReadArgs::new(init_epoch, None, false, self.chunk_size);
+                let snapshot = upstream_table_reader.snapshot_read(args);
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
             }
@@ -245,16 +245,14 @@ where
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
-                // TODO: abstract the snapshot read logic to allow
-                // TODO: different implememntation snapshot read
-                let right_snapshot = pin!(Self::snapshot_read(
-                    &self.upstream_table,
+                let args = SnapshotReadArgs::new(
                     snapshot_read_epoch,
                     current_pos.clone(),
                     true,
                     self.chunk_size,
-                )
-                .map(Either::Right),);
+                );
+                let right_snapshot =
+                    pin!(upstream_table_reader.snapshot_read(args).map(Either::Right));
 
                 // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
                 // comes.
@@ -288,7 +286,7 @@ where
                                                     chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
-                                                    pk_order,
+                                                    &pk_order,
                                                 ),
                                                 &self.output_indices,
                                             ));
@@ -441,44 +439,6 @@ where
                     }
                 yield msg;
             }
-        }
-    }
-
-    // #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(
-        upstream_table: &StorageTable<S>,
-        epoch: u64,
-        current_pos: Option<OwnedRow>,
-        ordered: bool,
-        chunk_size: usize,
-    ) {
-        let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
-        let range_bounds = match range_bounds {
-            None => {
-                yield None;
-                return Ok(());
-            }
-            Some(range_bounds) => range_bounds,
-        };
-
-        // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
-        // together with the upstream mv.
-        let iter = upstream_table
-            .batch_iter_with_pk_bounds(
-                HummockReadEpoch::NoWait(epoch),
-                row::empty(),
-                range_bounds,
-                ordered,
-                PrefetchOptions::new_for_exhaust_iter(),
-            )
-            .await?
-            .map(get_second);
-
-        pin_mut!(iter);
-
-        #[for_await]
-        for chunk in iter_chunks(iter, upstream_table.schema(), chunk_size) {
-            yield chunk?;
         }
     }
 
