@@ -379,35 +379,45 @@ message CompactorWorkload {
 }
 
 message SubscribeCompactionEventRequest {
+  // `Register` provides the context_id of the corresponding Compactor 
   message Register {
     uint32 context_id = 1;
   }
 
+  // `PullTask`` provides the number of tasks needed for the Compactor. 
   message PullTask {
     uint32 pull_task_count = 4;
   }
 
+  // `ReportTask` provides the compact task to report to the meta.
   message ReportTask {
     CompactTask compact_task = 2;
     map<uint32, TableStats> table_stats_change = 3;
   }
 
+  // `HeartBeat` provides the progress status of all tasks on the Compactor.
   message HeartBeat {
     repeated CompactTaskProgress progress = 2;
   }
 
   oneof event {
+    // Compactor will register its own context_id with Meta via `Register`` and establish a bi-directional streaming rpc.
     Register register = 1;
 
+    // Compactor will recalculate the number of tasks needed locally after receiving the `PullTaskAck` and get the next batch of tasks from Meta via PullTask.
     PullTask pull_task = 2;
 
+    // When the execution of each task completes/fails, Compactor returns the task to the meta via `ReportTask`. 
     ReportTask report_task = 3;
 
+    // Periodically, `HeartBeat`` carries the progress of all tasks on the Compactor, and the meta will cancel the task when it expires.
     HeartBeat heart_beat = 4;
   }
 }
 
 message SubscribeCompactionEventResponse {
+  // `PullTaskAck` is a response, the meta will return a `PullTaskAck`` after distributing the task requested by the `PullTask`.
+  // The Compactor receives the `PullTaskAck`` and remakes its state and tries to initiate the next `PullTask``.
   message PullTaskAck {}
 
   oneof event {

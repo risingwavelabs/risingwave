@@ -228,33 +228,17 @@ impl HummockMetaClient for MockHummockMetaClient {
         let hummock_manager_compact = self.hummock_manager.clone();
         let handle = tokio::spawn(async move {
             loop {
-                use rand::prelude::SliceRandom;
-                use rand::thread_rng;
-                let mut compaction_group_ids = hummock_manager_compact.compaction_group_ids().await;
-                compaction_group_ids.shuffle(&mut thread_rng());
+                let group_and_type = hummock_manager_compact
+                    .auto_pick_compaction_group_and_type()
+                    .await;
 
-                let (group, task_type) = {
-                    let (mut group, mut task_type) = (None, None);
-                    for cg_id in compaction_group_ids {
-                        if let Some(pick_type) = hummock_manager_compact
-                            .compaction_state
-                            .auto_pick_type(cg_id)
-                        {
-                            group = Some(cg_id);
-                            task_type = Some(pick_type);
-
-                            break;
-                        }
-                    }
-
-                    (group, task_type)
-                };
-
-                if task_type.is_none() {
+                if group_and_type.is_none() {
                     break;
                 }
 
-                let mut selector: Box<dyn LevelSelector> = match task_type.unwrap() {
+                let (group, task_type) = group_and_type.unwrap();
+
+                let mut selector: Box<dyn LevelSelector> = match task_type {
                     compact_task::TaskType::Dynamic => default_level_selector(),
                     compact_task::TaskType::SpaceReclaim => {
                         Box::<SpaceReclaimCompactionSelector>::default()
@@ -263,7 +247,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group.unwrap(), &mut selector)
+                    .get_compact_task(group, &mut selector)
                     .await
                     .unwrap()
                 {

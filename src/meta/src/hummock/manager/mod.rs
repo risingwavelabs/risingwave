@@ -2462,26 +2462,7 @@ where
                             }) => {
                                 assert_ne!(0, pull_task_count);
                                 if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
-                                    use rand::prelude::SliceRandom;
-                                    use rand::thread_rng;
-                                    let mut compaction_group_ids = hummock_manager.compaction_group_ids().await;
-                                    compaction_group_ids.shuffle(&mut thread_rng());
-
-                                    let (group, task_type) = {
-                                        let (mut group,mut task_type) = (None, None);
-                                        for cg_id in compaction_group_ids {
-                                            if let Some(pick_type) = hummock_manager.compaction_state.auto_pick_type(cg_id) {
-                                                group = Some(cg_id);
-                                                task_type = Some(pick_type);
-
-                                                break;
-                                            }
-                                        }
-
-                                        (group, task_type)
-                                    };
-
-                                    if let (Some(group), Some(task_type)) = (group, task_type) {
+                                    if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
                                         let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
                                         for _ in 0..pull_task_count {
                                             let compact_task =
@@ -2523,7 +2504,7 @@ where
                                             };
                                         }
                                     } else {
-                                        tracing::debug!("Fail auto_pick_type group {:?} task_type {:?}", group, task_type);
+                                        tracing::debug!("Fail auto_pick_type group");
                                     }
 
                                     // ack to compactor
@@ -2635,6 +2616,23 @@ where
                 );
             }
         }
+    }
+
+    pub async fn auto_pick_compaction_group_and_type(
+        &self,
+    ) -> Option<(CompactionGroupId, compact_task::TaskType)> {
+        use rand::prelude::SliceRandom;
+        use rand::thread_rng;
+        let mut compaction_group_ids = self.compaction_group_ids().await;
+        compaction_group_ids.shuffle(&mut thread_rng());
+
+        for cg_id in compaction_group_ids {
+            if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
+                return Some((cg_id, pick_type));
+            }
+        }
+
+        None
     }
 }
 
