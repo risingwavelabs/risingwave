@@ -1,58 +1,34 @@
+cache-config: &cache-config
+  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+  restore-keys:
+    - "v1-cache-{{ id }}-{{ runner.os }}-"
+    - "v1-cache-{{ id }}-"
+  backend: s3
+  s3:
+    bucket: ci-cache-bucket
+    args: "--no-progress"
+  pipeline-slug-override: "shared"
+cache-dependencies: &cache-dependencies
+  - "target/**/deps/*_sys*"
+  - "target/**/deps/*_src*"
+  - "target/**/deps/*aws*"
 cargo-build-cache-dev: &cargo-build-cache-dev
   id: cargo-build-cache-dev
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: ci-cache-bucket
-    args: "--no-progress"
-  paths:
-    - "target/ci-dev/deps/*_sys*"
-    - "target/ci-dev/deps/*_src*"
-  pipeline-slug-override: "shared"
+  paths: *cache-dependencies
+  << : *cache-config
 cargo-build-cache-release: &cargo-build-cache-release
   id: cargo-build-cache-release
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: ci-cache-bucket
-    args: "--no-progress"
-  paths:
-    - "target/ci-release/deps/*_sys*"
-    - "target/ci-release/deps/*_src*"
-  pipeline-slug-override: "shared"
+  paths: *cache-dependencies
+  << : *cache-config
 cargo-build-cache-sim: &cargo-build-cache-sim
   id: cargo-build-cache-sim
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: ci-cache-bucket
-    args: "--no-progress"
-  paths:
-    - "target/sim/ci-sim/deps/*_sys*"
-    - "target/sim/ci-sim/deps/*_src*"
-  pipeline-slug-override: "shared"
+  paths: *cache-dependencies
+  << : *cache-config
 advisory-db-cache: &advisory-db-cache
   id: advisory-db
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: ci-cache-bucket
-    args: "--no-progress"
   paths:
     - ".cargo/advisory-db"
-  pipeline-slug-override: "shared"
+  << : *cache-config
 
 steps:
   - label: "check ci image rebuild"
