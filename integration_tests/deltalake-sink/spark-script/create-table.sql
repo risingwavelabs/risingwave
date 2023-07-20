@@ -1,0 +1,1 @@
+create table delta.`s3a://deltalake/delta`(id int, name string) using delta
