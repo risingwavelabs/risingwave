@@ -241,7 +241,7 @@ dependencies = [
  "prost",
  "prost-derive",
  "tokio",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -1424,7 +1424,7 @@ checksum = "e57ff02e8ad8e06ab9731d5dc72dc23bef9200778eae1a89d555d8c42e5d4a86"
 dependencies = [
  "prost",
  "prost-types",
- "tonic",
+ "tonic 0.8.3",
  "tracing-core",
 ]
 
@@ -1446,7 +1446,7 @@ dependencies = [
  "thread_local",
  "tokio",
  "tokio-stream",
- "tonic",
+ "tonic 0.8.3",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -2208,7 +2208,7 @@ dependencies = [
  "prost",
  "tokio",
  "tokio-stream",
- "tonic",
+ "tonic 0.8.3",
  "tonic-build",
  "tower",
  "tower-service",
@@ -2602,7 +2602,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-retry",
- "tonic",
+ "tonic 0.8.3",
  "tower",
  "tracing",
 ]
@@ -2615,7 +2615,18 @@ checksum = "629f516672e1d057d76070f8ae59469a9a88ed5bfbe7076883da216f2d14a491"
 dependencies = [
  "prost",
  "prost-types",
- "tonic",
+ "tonic 0.8.3",
+]
+
+[[package]]
+name = "google-cloud-googleapis"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a3b24a3f57be08afc02344e693afb55e48172c9c2ab86ff3fdb8efff550e4b9"
+dependencies = [
+ "prost",
+ "prost-types",
+ "tonic 0.9.2",
 ]
 
 [[package]]
@@ -2627,7 +2638,7 @@ dependencies = [
  "async-channel",
  "async-stream",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.8.0",
  "google-cloud-token",
  "prost-types",
  "thiserror",
@@ -3469,7 +3480,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.3",
- "tonic",
+ "tonic 0.8.3",
  "tracing",
 ]
 
@@ -3529,7 +3540,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "madsim",
- "tonic",
+ "tonic 0.8.3",
  "tracing",
 ]
 
@@ -4195,7 +4206,7 @@ dependencies = [
  "prost",
  "thiserror",
  "tokio",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -4208,7 +4219,7 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "prost",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -4792,7 +4803,7 @@ name = "prepare_ci_pubsub"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.10.0",
  "google-cloud-pubsub",
  "madsim-tokio",
 ]
@@ -8016,6 +8027,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonic"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3082666a3a6433f7f511c7192923fa1fe07c69332d3c6a2e6bb040b569199d5a"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64 0.21.0",
+ "bytes",
+ "flate2",
+ "futures-core",
+ "futures-util",
+ "h2",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-timeout",
+ "percent-encoding",
+ "pin-project",
+ "prost",
+ "rustls-pemfile",
+ "tokio",
+ "tokio-rustls 0.24.1",
+ "tokio-stream",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "tonic-build"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8875,7 +8918,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream",
  "tokio-util",
- "tonic",
+ "tonic 0.8.3",
  "tower",
  "tracing",
  "tracing-core",
