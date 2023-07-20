@@ -49,7 +49,7 @@ pub trait AggStateCache: EstimateSize {
     fn begin_syncing(&mut self) -> Box<dyn AggStateCacheFiller + Send + Sync + '_>;
 
     /// Output batches from the cache.
-    fn output_batches(&self) -> Box<dyn Iterator<Item = StreamChunk> + '_>;
+    fn output_batches(&self, chunk_size: usize) -> Box<dyn Iterator<Item = StreamChunk> + '_>;
 
     /// Output the first value.
     fn output_first(&self) -> Datum;
@@ -134,12 +134,11 @@ where
         })
     }
 
-    fn output_batches(&self) -> Box<dyn Iterator<Item = StreamChunk> + '_> {
+    fn output_batches(&self, chunk_size: usize) -> Box<dyn Iterator<Item = StreamChunk> + '_> {
         let mut values = self.state_cache.values();
         Box::new(std::iter::from_fn(move || {
             // build data chunk from rows
-            const CHUNK_SIZE: usize = 1024;
-            let mut builder = DataChunkBuilder::new(self.input_types.clone(), CHUNK_SIZE);
+            let mut builder = DataChunkBuilder::new(self.input_types.clone(), chunk_size);
             for row in &mut values {
                 if let Some(chunk) = builder.append_one_row(row.0.as_slice()) {
                     return Some(chunk.into());

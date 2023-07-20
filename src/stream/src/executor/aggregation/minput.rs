@@ -220,7 +220,8 @@ impl MaterializedInputState {
         assert!(self.cache.is_synced());
 
         if let Some(aggregator) = &mut self.aggregator {
-            let chunks = self.cache.output_batches().collect_vec();
+            const CHUNK_SIZE: usize = 1024;
+            let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
             for chunk in chunks {
                 aggregator.update(&chunk).await?;
             }
