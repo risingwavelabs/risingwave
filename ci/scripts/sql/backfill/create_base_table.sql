@@ -1,0 +1,1 @@
+create table t1 (_id int, data jsonb);
