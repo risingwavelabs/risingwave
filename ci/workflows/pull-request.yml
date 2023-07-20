@@ -11,9 +11,15 @@ cache-config: &cache-config
   compress: true
   compress-program: zstd
 cache-dependencies: &cache-dependencies
-  - "target/**/*sys*"
-  - "target/**/*src*"
-  - "target/**/*aws*"
+  - "target/**/.fingerprint/*sys*"
+  - "target/**/.fingerprint/*src*"
+  - "target/**/.fingerprint/*aws*"
+  - "target/**/build/*sys*"
+  - "target/**/build/*src*"
+  - "target/**/build/*aws*"
+  - "target/**/deps/*sys*"
+  - "target/**/deps/*src*"
+  - "target/**/deps/*aws*"
 cargo-build-cache-dev: &cargo-build-cache-dev
   id: cargo-build-cache-dev
   paths: *cache-dependencies
