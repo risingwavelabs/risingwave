@@ -479,9 +479,13 @@ where
                 Status::invalid_argument("subscribe_compaction_event request is empty")
             })??;
 
-            match req.event.unwrap() {
-                RequestEvent::Register(register) => register,
-                _ => unreachable!("the first message must be `Register`"),
+            match req.event {
+                Some(RequestEvent::Register(register)) => register,
+                _ => {
+                    return Err(Status::invalid_argument(
+                        "the first message must be `Register`",
+                    ))
+                }
             }
         };
 
