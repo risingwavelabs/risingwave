@@ -8,6 +8,8 @@ cache-config: &cache-config
     bucket: ci-cache-bucket
     args: "--no-progress"
   pipeline-slug-override: "shared"
+  compress: true
+  compress-program: zstd
 cache-dependencies: &cache-dependencies
   - "target/**/*sys*"
   - "target/**/*src*"
