@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 pub use compaction_executor::CompactionExecutor;
@@ -463,8 +463,6 @@ impl Compactor {
         max_compactor_task_multiplier: f32,
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
-        const MAX_STREAMING_EVENT_WAIT_INTERVAL_SEC: u64 = 600; // 10min
-
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(30);
         let task_progress = compactor_context.task_progress_manager.clone();
@@ -487,10 +485,6 @@ impl Compactor {
                 // reset state
                 running_task_count.store(0, Ordering::SeqCst);
                 pull_task_ack.store(true, Ordering::SeqCst);
-
-                // In order to avoid streaming event not returning, add a timed check to make sure
-                // the connection is actively re-established when the timeout occurs.
-                let mut streaming_alive_check = Instant::now();
 
                 tokio::select! {
                     // Wait for interval.
@@ -530,12 +524,6 @@ impl Compactor {
                     let request_sender = request_sender.clone();
                     let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
                         _ = periodic_event_interval.tick() => {
-                            if streaming_alive_check.elapsed().as_secs() > MAX_STREAMING_EVENT_WAIT_INTERVAL_SEC {
-                                // streaming rpc drop
-                                continue 'start_stream;
-                            }
-
-
                             let mut progress_list = Vec::new();
                             for (&task_id, progress) in task_progress.lock().iter() {
                                 progress_list.push(CompactTaskProgress {
@@ -562,9 +550,6 @@ impl Compactor {
 
                             let mut pending_pull_task_count = 0;
                             if pull_task_ack.load(Ordering::SeqCst) {
-                                 // reset interval check after we receive `PullTaskAck` successfully
-                                 streaming_alive_check = Instant::now();
-
                                 // reset pending_pull_task_count when all pending task had been refill
                                 pending_pull_task_count = {
                                    (cpu_core_num as f32 * max_compactor_task_multiplier) as u32 - running_task_count.load(Ordering::Relaxed)
