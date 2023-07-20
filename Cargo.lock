@@ -177,7 +177,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e10849b60c17dbabb334be1f4ef7550701aa58082b71335ce1ed586601b2f423"
 dependencies = [
  "ahash 0.8.3",
- "arrow-buffer",
+ "arrow-buffer 36.0.0",
  "arrow-data",
  "arrow-schema",
  "chrono",
@@ -197,13 +197,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-buffer"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe5044e672568feeb9e134a96781c8fdee3bce58df889f463517880d4992f751"
+dependencies = [
+ "half 2.2.1",
+ "num",
+]
+
+[[package]]
 name = "arrow-cast"
 version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b88897802515d7b193e38b27ddd9d9e43923d410a9e46307582d756959ee9595"
 dependencies = [
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 36.0.0",
  "arrow-data",
  "arrow-schema",
  "arrow-select",
@@ -218,7 +228,7 @@ version = "36.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "533f937efa1aaad9dc86f6a0e382c2fa736a4943e2090c946138079bdf060cef"
 dependencies = [
- "arrow-buffer",
+ "arrow-buffer 36.0.0",
  "arrow-schema",
  "half 2.2.1",
  "num",
@@ -231,7 +241,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd1362a6a02e31734c67eb2e9a30dca1689d306cfe2fc00bc6430512091480ce"
 dependencies = [
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 36.0.0",
  "arrow-cast",
  "arrow-ipc",
  "arrow-schema",
@@ -251,7 +261,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18b75296ff01833f602552dff26a423fc213db8e5049b540ca4a00b1c957e41c"
 dependencies = [
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 36.0.0",
  "arrow-cast",
  "arrow-data",
  "arrow-schema",
@@ -271,7 +281,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "163e35de698098ff5f5f672ada9dc1f82533f10407c7a11e2cd09f3bcf31d18a"
 dependencies = [
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 36.0.0",
  "arrow-data",
  "arrow-schema",
  "num",
@@ -5636,7 +5646,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arrow-array",
- "arrow-buffer",
+ "arrow-buffer 44.0.0",
  "arrow-schema",
  "async-trait",
  "auto_enums",
