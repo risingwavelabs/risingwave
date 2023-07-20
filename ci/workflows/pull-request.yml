@@ -9,7 +9,7 @@ cache-config: &cache-config
     args: "--no-progress"
   pipeline-slug-override: "shared"
   compress: true
-  compress-program: zstd
+  # compress-program: zstd
 cache-dependencies: &cache-dependencies
   - "target/**/.fingerprint/*sys*"
   - "target/**/.fingerprint/*src*"
