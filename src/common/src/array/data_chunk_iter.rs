@@ -309,8 +309,8 @@ mod tests {
             + 4 0 2",
         );
         let (_, row1) = chunk1.rows().nth(1).unwrap(); // 4 2
-        let (_, row2) = chunk2.rows().nth(0).unwrap(); // 4 2
-        let (_, row3) = chunk1.rows().nth(0).unwrap(); // 4 1
+        let (_, row2) = chunk2.rows().next().unwrap(); // 4 2
+        let (_, row3) = chunk1.rows().next().unwrap(); // 4 1
 
         let pk1 = PkRef::new(row1, &pk_indices);
         let pk2 = PkRef::new(row2, &pk_indices);

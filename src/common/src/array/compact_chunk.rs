@@ -174,10 +174,8 @@ pub fn gen_update_from_pk(pk_indices: &[usize], chunk: StreamChunk) -> StreamChu
                         // is different from the value to be deleted here.
                         panic!("deleting a non-existing record {:?}", key.row());
                     }
-                } else {
-                    if !delete_cache.contains(&key) {
-                        delete_cache.insert(key);
-                    }
+                } else if !delete_cache.contains(&key) {
+                    delete_cache.insert(key);
                 }
             }
             _ => unreachable!(),
@@ -188,7 +186,7 @@ pub fn gen_update_from_pk(pk_indices: &[usize], chunk: StreamChunk) -> StreamChu
         DataChunkBuilder::new(chunk.data_chunk().data_types(), chunk.cardinality() + 1);
     let mut ops = Vec::with_capacity(chunk.cardinality());
 
-    for deleted_pk in delete_cache.into_iter() {
+    for deleted_pk in delete_cache {
         if let Some(inserted_pk) = insert_cache.take(&deleted_pk) {
             //
             ops.push(Op::UpdateDelete);
@@ -205,7 +203,7 @@ pub fn gen_update_from_pk(pk_indices: &[usize], chunk: StreamChunk) -> StreamChu
         }
     }
 
-    for inserted_pk in insert_cache.into_iter() {
+    for inserted_pk in insert_cache {
         ops.push(Op::Insert);
         let returned_chunk = chunk_builder.append_one_row(inserted_pk.row());
         debug_assert_eq!(returned_chunk, None);
