@@ -1,5 +1,5 @@
 query IIITTTT
-select * from nexmark_q19_rewrite order by auction, price desc, bidder;
+select * from nexmark_q19 order by auction, price desc, bidder;
 ----
 1000	1001	73134520	channel-7568	https://www.nexmark.com/rswp/ygi/_gwv/item.htm?query=1&channel_id=163053568	2015-07-15 00:00:01	bxkfohfuvlkvjarjgrngycoibaooinpatxmrmhotgsqtdarhxlbrgroteageapilufrwznnvea	1
 1000	1001	43672280	channel-9550	https://www.nexmark.com/_nq/nslg/wvuo/item.htm?query=1&channel_id=1923350528	2015-07-15 00:00:04.001	ckqgmlisexypszjgjbudoejevhpdvdwdvwcwgkyosfhungfqrvtgaw	2
