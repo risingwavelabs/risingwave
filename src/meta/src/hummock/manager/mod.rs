@@ -2483,8 +2483,6 @@ where
                                                             e
                                                         );
 
-                                                        // try cancel on compactor
-                                                        let _ = compactor.cancel_task(task_id);
                                                         hummock_manager.compactor_manager
                                                             .remove_compactor(compactor.context_id());
 
