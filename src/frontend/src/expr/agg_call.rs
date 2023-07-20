@@ -96,7 +96,7 @@ impl AggCall {
                 _ => return Err(err()),
             },
             (AggKind::PercentileDisc | AggKind::Mode, [input]) => input.clone(),
-
+            (AggKind::Grouping, _) => Int32,
             // other functions are handled by signature map
             _ => {
                 let args = args.iter().map(|t| t.into()).collect::<Vec<_>>();
