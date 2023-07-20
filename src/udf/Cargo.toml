@@ -18,4 +18,4 @@ arrow-select = "36"
 futures-util = "0.3.25"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }

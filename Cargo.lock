@@ -241,7 +241,7 @@ dependencies = [
  "prost",
  "prost-derive",
  "tokio",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -1430,7 +1430,7 @@ checksum = "e57ff02e8ad8e06ab9731d5dc72dc23bef9200778eae1a89d555d8c42e5d4a86"
 dependencies = [
  "prost",
  "prost-types",
- "tonic",
+ "tonic 0.8.3",
  "tracing-core",
 ]
 
@@ -1452,7 +1452,7 @@ dependencies = [
  "thread_local",
  "tokio",
  "tokio-stream",
- "tonic",
+ "tonic 0.8.3",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -2236,15 +2236,15 @@ dependencies = [
 
 [[package]]
 name = "etcd-client"
-version = "0.10.4"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4319dc0fb739a6e84cb8678b8cf50c9bcfa4712ae826b33ecf00cc0850550a58"
+checksum = "f4b0ea5ef6dc2388a4b1669fa32097249bc03a15417b97cb75e38afb309e4a89"
 dependencies = [
  "http",
  "prost",
  "tokio",
  "tokio-stream",
- "tonic",
+ "tonic 0.9.2",
  "tonic-build",
  "tower",
  "tower-service",
@@ -2638,7 +2638,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-retry",
- "tonic",
+ "tonic 0.8.3",
  "tower",
  "tracing",
 ]
@@ -2651,7 +2651,7 @@ checksum = "629f516672e1d057d76070f8ae59469a9a88ed5bfbe7076883da216f2d14a491"
 dependencies = [
  "prost",
  "prost-types",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -3476,8 +3476,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7777a8bc4e68878b6e5433ac7b9bc196d9ccdfeef1f7cb3d23193cb997a520c9"
+source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3522,9 +3521,8 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ad4d69f43b9dc6463eca29edd83ac0dba36308c0e7b88ea83b87aff43649a1a"
+version = "0.3.0+0.11.1"
+source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3536,15 +3534,14 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.3",
- "tonic",
+ "tonic 0.9.2",
  "tracing",
 ]
 
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -3588,23 +3585,21 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe20f1ea4dcec4518527299b2313c680d7f064140e026c0fa4c2857649d982f4"
+version = "0.3.0+0.9.2"
+source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
 dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
  "madsim",
- "tonic",
+ "tonic 0.9.2",
  "tracing",
 ]
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0243f3ed18b8d3fcd902c846ae454ec53cd7a48f6b9cd48f195a7df86cb2b65f"
+version = "0.3.0+0.9.2"
+source = "git+https://github.com/xxchan/madsim.git?rev=55e1490#55e1490bf9a06e78820985379d1b6492e8c1f60c"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -4314,7 +4309,7 @@ dependencies = [
  "prost",
  "thiserror",
  "tokio",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -4327,7 +4322,7 @@ dependencies = [
  "futures-util",
  "opentelemetry 0.19.0",
  "prost",
- "tonic",
+ "tonic 0.8.3",
 ]
 
 [[package]]
@@ -8077,8 +8072,8 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.12"
-source = "git+https://github.com/madsim-rs/tokio.git?rev=ab251ad#ab251ad1fae8e16d9a1df74e301dbf3ed9d4d3af"
+version = "0.1.14"
+source = "git+https://github.com/madsim-rs/tokio.git?rev=fe39bb8e#fe39bb8e8ab0ed96ee1b4477ab5508c20ce017fb"
 dependencies = [
  "futures-core",
  "madsim-tokio",
@@ -8179,10 +8174,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "tonic-build"
-version = "0.8.4"
+name = "tonic"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bf5e9b9c0f7e0a7c027dcfaba7b2c60816c7049171f679d99ee2ff65d0de8c4"
+checksum = "3082666a3a6433f7f511c7192923fa1fe07c69332d3c6a2e6bb040b569199d5a"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.21.0",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "h2",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-timeout",
+ "percent-encoding",
+ "pin-project",
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic-build"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6fdaae4c2c638bb70fe42803a26fbd6fc6ac8c72f5c59f67ecc2a2dcabf4b07"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -9052,7 +9075,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream",
  "tokio-util",
- "tonic",
+ "tonic 0.8.3",
  "tower",
  "tracing",
  "tracing-core",
