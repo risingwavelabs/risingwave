@@ -21,7 +21,7 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{compact_chunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
@@ -34,7 +34,6 @@ use risingwave_connector::sink::{
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
-use crate::common::compact_chunk;
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};

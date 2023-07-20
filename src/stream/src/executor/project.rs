@@ -16,12 +16,11 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{compact_chunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
 use super::*;
-use crate::common::compact_chunk;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete

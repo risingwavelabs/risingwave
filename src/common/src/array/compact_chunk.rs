@@ -1,8 +1,10 @@
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use crate::array::data_chunk_iter::PkRef;
+use crate::array::{Op, RowRef, StreamChunk};
+use crate::buffer::BitmapBuilder;
+use crate::util::chunk_coalesce::DataChunkBuilder;
 
 /// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT and
 /// UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to certain rules
@@ -139,12 +141,70 @@ fn compact_delete<'a>(
     }
 }
 
+/// Convert DELETE and INSERT on the same key to UPDATE messages.
+///
+/// This function must be called on a chunk with INSERT and DELETE ops only.
+pub fn gen_update_from_pk(pk_indices: &[usize], chunk: StreamChunk) -> StreamChunk {
+    let mut delete_cache = HashSet::new();
+    let mut insert_cache = HashSet::new();
+    for (op, row) in chunk.rows() {
+        let key = PkRef::new(row, pk_indices);
+        match op {
+            Op::Insert => {
+                insert_cache.insert(key);
+            }
+            Op::Delete => {
+                if let Some(inserted_pk) = insert_cache.take(&key) {
+                    if inserted_pk.row() != key.row() {
+                        // It's invalid that `key` has already had an inserted value and this value
+                        // is different from the value to be deleted here.
+                        panic!("deleting a non-existing record {:?}", key.row());
+                    }
+                } else {
+                    if !delete_cache.contains(&key) {
+                        delete_cache.insert(key);
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let mut chunk_builder =
+        DataChunkBuilder::new(chunk.data_chunk().data_types(), chunk.cardinality() + 1);
+    let mut ops = Vec::with_capacity(chunk.cardinality());
+
+    for deleted_pk in delete_cache.into_iter() {
+        if let Some(inserted_pk) = insert_cache.take(&deleted_pk) {
+            //
+            ops.push(Op::UpdateDelete);
+            let returned_chunk = chunk_builder.append_one_row(deleted_pk.row());
+            debug_assert_eq!(returned_chunk, None);
+
+            ops.push(Op::UpdateInsert);
+            let returned_chunk = chunk_builder.append_one_row(inserted_pk.row());
+            debug_assert_eq!(returned_chunk, None);
+        } else {
+            ops.push(Op::Delete);
+            let returned_chunk = chunk_builder.append_one_row(deleted_pk.row());
+            debug_assert_eq!(returned_chunk, None);
+        }
+    }
+
+    for inserted_pk in insert_cache.into_iter() {
+        ops.push(Op::Insert);
+        let returned_chunk = chunk_builder.append_one_row(inserted_pk.row());
+        debug_assert_eq!(returned_chunk, None);
+    }
+
+    StreamChunk::from_data_chunk(ops, chunk_builder.consume_all().unwrap())
+}
+
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::test_prelude::StreamChunkTestExt;
-
-    use super::compact_chunk;
+    use super::*;
+    use crate::array::StreamChunk;
+    use crate::test_prelude::StreamChunkTestExt;
 
     #[test]
     fn test_compact_chunk() {
@@ -213,6 +273,57 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I
                 + 8 7 3",
+            )
+        );
+    }
+
+    #[test]
+    fn test_gen_update_from_pk() {
+        let pk_indices = [0, 1];
+
+        let chunk = StreamChunk::from_pretty(
+            " I I I
+            + 2 5 1
+            + 4 9 2
+            - 2 5 1",
+        );
+        assert_eq!(
+            gen_update_from_pk(&pk_indices, chunk),
+            StreamChunk::from_pretty(
+                " I I I
+                + 4 9 2",
+            )
+        );
+
+        let chunk = StreamChunk::from_pretty(
+            " I I I
+            - 2 5 1
+            + 6 6 6
+            + 2 5 3",
+        );
+        assert_eq!(
+            gen_update_from_pk(&pk_indices, chunk),
+            StreamChunk::from_pretty(
+                "  I I I
+                U- 2 5 1
+                U+ 2 5 3
+                 + 6 6 6",
+            )
+        );
+
+        let chunk = StreamChunk::from_pretty(
+            " I I I
+            - 2 5 1
+            + 4 9 2
+            + 2 5 3
+            - 2 5 3",
+        );
+        assert_eq!(
+            gen_update_from_pk(&pk_indices, chunk),
+            StreamChunk::from_pretty(
+                " I I I
+                - 2 5 1
+                + 4 9 2",
             )
         );
     }

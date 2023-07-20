@@ -218,10 +218,48 @@ impl<'a> Iterator for RowRefIter<'a> {
 impl ExactSizeIterator for RowRefIter<'_> {}
 unsafe impl TrustedLen for RowRefIter<'_> {}
 
+#[derive(Clone, Copy, Debug)]
+pub struct PkRef<'a, 'b> {
+    row: RowRef<'a>,
+    pk_indices: &'b [usize],
+}
+
+impl<'a, 'b> PkRef<'a, 'b> {
+    pub fn new(row: RowRef<'a>, pk_indices: &'b [usize]) -> Self {
+        Self { row, pk_indices }
+    }
+
+    pub fn row(&self) -> RowRef<'_> {
+        self.row
+    }
+}
+
+impl PartialEq for PkRef<'_, '_> {
+    fn eq(&self, other: &Self) -> bool {
+        debug_assert_eq!(self.pk_indices, other.pk_indices);
+        for i in self.pk_indices {
+            if self.row.datum_at(*i).ne(&other.row.datum_at(*i)) {
+                return false;
+            }
+        }
+        true
+    }
+}
+impl Eq for PkRef<'_, '_> {}
+
+impl Hash for PkRef<'_, '_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for i in self.pk_indices {
+            self.row.datum_at(*i).hash(state);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
+    use crate::array::data_chunk_iter::PkRef;
     use crate::array::StreamChunk;
     use crate::test_prelude::StreamChunkTestExt;
 
@@ -256,5 +294,30 @@ mod tests {
             set.insert(row);
         }
         assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn test_pk_ref_eq() {
+        let pk_indices = [0, 2];
+        let chunk1 = StreamChunk::from_pretty(
+            " I I I
+            + 4 5 1
+            + 4 9 2",
+        );
+        let chunk2 = StreamChunk::from_pretty(
+            " I I I
+            + 4 0 2",
+        );
+        let (_, row1) = chunk1.rows().nth(1).unwrap(); // 4 2
+        let (_, row2) = chunk2.rows().nth(0).unwrap(); // 4 2
+        let (_, row3) = chunk1.rows().nth(0).unwrap(); // 4 1
+
+        let pk1 = PkRef::new(row1, &pk_indices);
+        let pk2 = PkRef::new(row2, &pk_indices);
+        let pk3 = PkRef::new(row3, &pk_indices);
+
+        assert_eq!(pk1, pk2);
+        assert_ne!(pk2, pk3);
+        assert_ne!(pk1, pk3);
     }
 }

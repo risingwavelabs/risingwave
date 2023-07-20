@@ -18,6 +18,7 @@ mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
+pub mod compact_chunk;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
@@ -47,6 +48,7 @@ pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
     TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
+pub use compact_chunk::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};

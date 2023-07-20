@@ -24,7 +24,7 @@ use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{gen_update_from_pk, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
@@ -306,6 +306,7 @@ impl KafkaSinkWriter {
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        let chunk = gen_update_from_pk(&self.pk_indices, chunk);
         let dbz_stream = gen_debezium_message_stream(
             &self.schema,
             &self.pk_indices,
