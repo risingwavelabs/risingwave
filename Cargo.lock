@@ -9058,6 +9058,8 @@ dependencies = [
  "tracing-core",
  "tracing-futures",
  "tracing-subscriber",
+ "unicode-bidi",
+ "unicode-normalization",
  "url",
  "uuid",
 ]
