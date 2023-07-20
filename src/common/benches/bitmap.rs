@@ -21,8 +21,8 @@ fn bench_bitmap(c: &mut Criterion) {
     let bytes = vec![0x33; CHUNK_SIZE / 8];
     let zeros = Bitmap::zeros(CHUNK_SIZE);
     let ones = Bitmap::ones(CHUNK_SIZE);
-    let sparse = Bitmap::from_bytes(&vec![0x01; CHUNK_SIZE / 8]); // 1/16 set
-    let dense = Bitmap::from_bytes(&vec![0x7f; CHUNK_SIZE / 8]); // 15/16 set
+    let sparse = Bitmap::from_bytes(&[0x01; CHUNK_SIZE / 8]); // 1/16 set
+    let dense = Bitmap::from_bytes(&[0x7f; CHUNK_SIZE / 8]); // 15/16 set
     let x = sparse.clone();
     let y = dense.clone();
     let i = 0x123;
@@ -34,7 +34,7 @@ fn bench_bitmap(c: &mut Criterion) {
     c.bench_function("and", |b| b.iter(|| &x & &y));
     c.bench_function("or", |b| b.iter(|| &x | &y));
     c.bench_function("not", |b| b.iter(|| !&x));
-    c.bench_function("eq", |b| b.iter(|| x == y));
+    c.bench_function("eq", |b| b.iter(|| x == sparse));
     c.bench_function("iter", |b| b.iter(|| iter_all(x.iter())));
     c.bench_function("iter_on_ones", |b| b.iter(|| iter_all(ones.iter())));
     c.bench_function("iter_ones_on_zeros", |b| {

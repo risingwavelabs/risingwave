@@ -361,7 +361,7 @@ impl Bitmap {
             BitmapOnesIter::Buffer {
                 bits: &bits[..],
                 cur_idx: 0,
-                cur_bits: bits.get(0).cloned(),
+                cur_bits: bits.first().cloned(),
             }
         } else {
             // all zeros or all ones
