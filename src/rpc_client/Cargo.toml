@@ -40,7 +40,7 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tower = "0.4"
 tracing = "0.1"
-url = "2.3.1"
+url = "2.4.0"
 
 [target.'cfg(not(madsim))'.dependencies]
 moka = { version = "0.10", features = ["future"] }
