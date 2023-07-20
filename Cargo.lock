@@ -1009,6 +1009,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
 
 [[package]]
+name = "bitmaps"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "703642b98a00b3b90513279a8ede3fcfa479c126c5fb46e78f3051522f021403"
+
+[[package]]
 name = "bk-tree"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,7 +2420,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=f7953be#f7953bed19ff57e5d486eb6992a567433cae6ef5"
+source = "git+https://github.com/mrcroxx/foyer?rev=9f523b3#9f523b3aa865df919f31bf66d1ce46ebd98062a5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2441,7 +2447,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=f7953be#f7953bed19ff57e5d486eb6992a567433cae6ef5"
+source = "git+https://github.com/mrcroxx/foyer?rev=9f523b3#9f523b3aa865df919f31bf66d1ce46ebd98062a5"
 dependencies = [
  "bytes",
  "parking_lot 0.12.1",
@@ -2452,7 +2458,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=f7953be#f7953bed19ff57e5d486eb6992a567433cae6ef5"
+source = "git+https://github.com/mrcroxx/foyer?rev=9f523b3#9f523b3aa865df919f31bf66d1ce46ebd98062a5"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2469,11 +2475,12 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=f7953be#f7953bed19ff57e5d486eb6992a567433cae6ef5"
+source = "git+https://github.com/mrcroxx/foyer?rev=9f523b3#9f523b3aa865df919f31bf66d1ce46ebd98062a5"
 dependencies = [
  "async-channel",
  "async-trait",
  "bitflags 2.3.3",
+ "bitmaps",
  "bytes",
  "cmsketch",
  "foyer-common",

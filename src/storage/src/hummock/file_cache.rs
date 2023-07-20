@@ -378,7 +378,7 @@ where
                                 tokio::spawn(async move {
                                     let mut writer = store
                                         .writer(key, key.serialized_len() + value_serialized_len);
-                                    let res = if !writer.judge().await {
+                                    let res = if !writer.judge() {
                                         Ok(false)
                                     } else {
                                         match fetch_value
@@ -498,7 +498,7 @@ where
             FileCache::None => Ok(false),
             FileCache::Foyer(store) => {
                 let mut writer = store.writer(key, key.serialized_len() + value_serialized_len);
-                if !writer.judge().await {
+                if !writer.judge() {
                     return Ok(false);
                 }
                 match fetch_value
