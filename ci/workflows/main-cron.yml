@@ -9,9 +9,9 @@ cache-config: &cache-config
     args: "--no-progress"
   pipeline-slug-override: "shared"
 cache-dependencies: &cache-dependencies
-  - "target/**/*_sys*"
-  - "target/**/*_src*"
-  - "target/**/*aws*"
+  - "target/**/deps/*_sys*"
+  - "target/**/deps/*_src*"
+  - "target/**/deps/*aws*"
 cargo-build-cache-dev: &cargo-build-cache-dev
   id: cargo-build-cache-dev
   paths: *cache-dependencies
