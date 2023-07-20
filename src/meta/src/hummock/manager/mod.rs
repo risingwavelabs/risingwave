@@ -123,9 +123,6 @@ pub struct HummockManager<S: MetaStore> {
 
     pub metrics: Arc<MetaMetrics>,
 
-    // `compaction_request_channel` is used to schedule a compaction for specified
-    // CompactionGroupId
-    // compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
 
@@ -135,7 +132,12 @@ pub struct HummockManager<S: MetaStore> {
     history_table_throughput: parking_lot::RwLock<HashMap<u32, VecDeque<u64>>>,
 
     // for compactor
+    // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
+    // and is maintained in memory. All event_streams are consumed through a separate event loop
     compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
+
+    // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
+    // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
 }
 
@@ -1836,7 +1838,7 @@ where
     ) -> Result<()> {
         let start_time = Instant::now();
 
-        // // 1. Get idle compactor.
+        // 1. Get idle compactor.
         let compactor = match self.compactor_manager.next_compactor() {
             Some(compactor) => compactor,
             None => {
@@ -1849,7 +1851,7 @@ where
             }
         };
 
-        // // 2. Get manual compaction task.
+        // 2. Get manual compaction task.
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
@@ -2451,7 +2453,7 @@ where
                             (Some(Ok(req)), stream) => {
                                 (req.event.unwrap(), stream)
                             }
-                            _ => {continue;}
+                            _ => continue,
                         };
 
                         match event {
@@ -2563,6 +2565,7 @@ where
                                 let compactor_manager = hummock_manager.compactor_manager.clone();
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
 
+                                // TODO: task cancellation can be batched
                                 for mut task in cancel_tasks {
                                     tracing::info!(
                                         "Task with task_id {} with context_id {} has expired due to lack of visible progress",

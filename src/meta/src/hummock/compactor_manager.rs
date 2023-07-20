@@ -348,7 +348,6 @@ impl CompactorManagerInner {
     pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
         self.task_heartbeats
             .values()
-            // .flat_map(|m| m.values())
             .map(|hb| CompactTaskProgress {
                 task_id: hb.task.task_id,
                 num_ssts_sealed: hb.num_ssts_sealed,

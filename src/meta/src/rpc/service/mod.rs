@@ -35,7 +35,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::MetaError;
 
-/// `RwReceiverStream` is a wrapper around `tokio::sync::mpsc::Receiver` that implements
+/// `RwReceiverStream` is a wrapper around `tokio::sync::mpsc::UnboundedReceiver` that implements
 /// Stream. `RwReceiverStream` is similar to `tokio_stream::wrappers::ReceiverStream`, but it
 /// maps Result<S, `MetaError`> to Result<S, `tonic::Status`>.
 pub struct RwReceiverStream<S> {
