@@ -17,6 +17,9 @@ done
 
 source ci/scripts/common.sh
 
+echo "--- Run audit check"
+cargo audit
+
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
@@ -28,6 +31,3 @@ cargo doc --document-private-items --no-deps
 
 echo "--- Run doctest"
 cargo test --doc
-
-echo "--- Run audit check"
-cargo audit

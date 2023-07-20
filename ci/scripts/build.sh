@@ -30,7 +30,7 @@ fi
 echo "--- Rust cargo-sort check"
 
 pwd
-ls
+ls -al
 
 cargo sort --check --workspace
 
@@ -69,8 +69,8 @@ ldd target/"$profile"/risingwave
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && compress-and-upload-artifact ./{}-$profile"
 
-# This magically makes it faster to exit the docker
-rm -rf target
-
 echo "--- Show sccache stats"
 sccache --show-stats
+
+pwd
+ls -al

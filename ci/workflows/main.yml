@@ -9,8 +9,8 @@ cargo-build-cache-dev: &cargo-build-cache-dev
     bucket: ci-cache-bucket
     args: "--no-progress"
   paths:
-    - "risingwave/target/ci-dev/deps/*_sys*"
-    - "risingwave/target/ci-dev/deps/*_src*"
+    - "target/ci-dev/deps/*_sys*"
+    - "target/ci-dev/deps/*_src*"
   pipeline-slug-override: "shared"
 cargo-build-cache-release: &cargo-build-cache-release
   id: cargo-build-cache-release
@@ -23,8 +23,8 @@ cargo-build-cache-release: &cargo-build-cache-release
     bucket: ci-cache-bucket
     args: "--no-progress"
   paths:
-    - "risingwave/target/ci-release/deps/*_sys*"
-    - "risingwave/target/ci-release/deps/*_src*"
+    - "target/ci-release/deps/*_sys*"
+    - "target/ci-release/deps/*_src*"
   pipeline-slug-override: "shared"
 cargo-build-cache-sim: &cargo-build-cache-sim
   id: cargo-build-cache-sim
@@ -37,8 +37,8 @@ cargo-build-cache-sim: &cargo-build-cache-sim
     bucket: ci-cache-bucket
     args: "--no-progress"
   paths:
-    - "risingwave/target/ci-sim/deps/*_sys*"
-    - "risingwave/target/ci-sim/deps/*_src*"
+    - "target/ci-sim/deps/*_sys*"
+    - "target/ci-sim/deps/*_src*"
   pipeline-slug-override: "shared"
 advisory-db-cache: &advisory-db-cache
   id: advisory-db
