@@ -52,9 +52,6 @@ select
 from p2;
 "#;
 
-// FIXME: This test fails to get backfill to process updates
-// concurrently with Materialized View Creation.
-// It mirrors the process in `run-backfill-tests.sh`.
 #[madsim::test]
 async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
