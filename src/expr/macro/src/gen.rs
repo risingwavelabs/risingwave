@@ -348,14 +348,14 @@ impl FunctionAttr {
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
         let args = quote! { #(#args,)* };
         let retract = match self.user_fn.retract {
-            true => quote! { matches!(input.ops()[row_id], Op::Delete | Op::UpdateDelete) },
+            true => quote! { matches!(op, Op::Delete | Op::UpdateDelete) },
             false => quote! {},
         };
         let check_retract = match self.user_fn.retract {
             true => quote! {},
             false => {
                 let msg = format!("aggregate function {} only supports append", self.name);
-                quote! { assert_eq!(input.ops()[row_id], Op::Insert, #msg); }
+                quote! { assert_eq!(op, Op::Insert, #msg); }
             }
         };
         let mut next_state = quote! { #fn_name(state, #args #retract) };
@@ -430,6 +430,7 @@ impl FunctionAttr {
                                     } else if row_id >= end_row_id {
                                         break;
                                     }
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
                                     #check_retract
                                     #(#let_values)*
                                     state = #next_state;
@@ -437,6 +438,7 @@ impl FunctionAttr {
                             }
                             Vis::Compact(_) => {
                                 for row_id in start_row_id..end_row_id {
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
                                     #check_retract
                                     #(#let_values)*
                                     state = #next_state;
