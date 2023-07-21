@@ -21,10 +21,10 @@ use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
@@ -33,7 +33,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_storage::table::{collect_data_chunk, collect_data_chunk_with_builder};
+use risingwave_storage::table::{collect_data_chunk_with_builder};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;

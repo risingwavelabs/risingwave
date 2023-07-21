@@ -160,7 +160,6 @@ where
                 false
             } else {
                 let snapshot = Self::snapshot_read_per_vnode(
-                    schema.clone(),
                     &upstream_table,
                     backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                     self.chunk_size,
@@ -243,7 +242,6 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
-                        schema.clone(),
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
@@ -486,7 +484,6 @@ where
     /// For now we only support the case where all iterators are complete.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
-        schema: Arc<Schema>,
         upstream_table: &'a ReplicatedStateTable<S>,
         backfill_state: BackfillState,
         chunk_size: usize,

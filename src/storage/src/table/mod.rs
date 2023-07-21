@@ -133,8 +133,7 @@ pub async fn collect_data_chunk_with_builder<E, S>(
 where
     S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
-    let mut row_count = 0;
-    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+    for row_count in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             // FIXME: Should be raw append 1 row, no check for chunk.
             // Need create a new method for it.
@@ -143,8 +142,6 @@ where
             }
             None => break,
         }
-
-        row_count += 1;
     }
 
     let chunk = builder.build_data_chunk();

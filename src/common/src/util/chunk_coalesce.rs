@@ -16,7 +16,7 @@ use std::iter::FusedIterator;
 use std::mem::swap;
 
 use super::iter_util::ZipEqDebug;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
