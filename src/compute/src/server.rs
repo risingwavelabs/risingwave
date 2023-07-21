@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -227,10 +228,11 @@ pub async fn compute_node_serve(
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
+                running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+                Compactor::start_compactor(compactor_context, hummock_meta_client, 2.0);
             sub_tasks.push((handle, shutdown_sender));
         }
         let memory_limiter = storage.get_memory_limiter();

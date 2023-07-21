@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
 use super::CompactorManagerRef;
@@ -133,14 +133,11 @@ where
             };
 
             // 2. Send task.
-            match compactor
-                .send_task(Task::VacuumTask(VacuumTask {
-                    // The SST id doesn't necessarily have a counterpart SST file in S3, but
-                    // it's OK trying to delete it.
-                    sstable_object_ids: delete_batch.clone(),
-                }))
-                .await
-            {
+            match compactor.send_event(ResponseEvent::VacuumTask(VacuumTask {
+                // The SST id doesn't necessarily have a counterpart SST file in S3, but
+                // it's OK trying to delete it.
+                sstable_object_ids: delete_batch.clone(),
+            })) {
                 Ok(_) => {
                     tracing::debug!(
                         "Try to vacuum SSTs {:?} in worker {}.",
@@ -157,7 +154,7 @@ where
                         err
                     );
                     self.compactor_manager
-                        .pause_compactor(compactor.context_id());
+                        .remove_compactor(compactor.context_id());
                 }
             }
         }
@@ -213,7 +210,7 @@ where
     /// 3. Meta node decides which SSTs to delete. See `VacuumManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
-    pub async fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
+    pub fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
         self.hummock_manager.metrics.full_gc_trigger_count.inc();
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
         let sst_retention_time = cmp::max(
@@ -232,10 +229,9 @@ where
             Some(compactor) => compactor,
         };
         compactor
-            .send_task(Task::FullScanTask(FullScanTask {
+            .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
             }))
-            .await
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)
     }
@@ -356,7 +352,7 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
-    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+    use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
     use risingwave_pb::hummock::VacuumTask;
 
     use crate::backup_restore::BackupManager;
@@ -402,7 +398,7 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
-        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
+        let _receiver = compactor_manager.add_compactor(context_id);
         // SST deletion is scheduled.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -458,19 +454,17 @@ mod tests {
             .start_full_gc(Duration::from_secs(
                 vacuum.env.opts.min_sst_retention_time_sec - 1
             ))
-            .await
             .unwrap());
 
-        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
+        let mut receiver = compactor_manager.add_compactor(context_id);
 
         assert!(vacuum
             .start_full_gc(Duration::from_secs(
                 vacuum.env.opts.min_sst_retention_time_sec - 1
             ))
-            .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().task.unwrap() {
-            Task::FullScanTask(task) => task,
+        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+            ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
@@ -485,10 +479,9 @@ mod tests {
             .start_full_gc(Duration::from_secs(
                 vacuum.env.opts.min_sst_retention_time_sec + 1
             ))
-            .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().task.unwrap() {
-            Task::FullScanTask(task) => task,
+        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+            ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
