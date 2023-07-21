@@ -425,14 +425,15 @@ struct FunctionAttr {
     user_fn: UserFunctionAttr,
 }
 
+/// Attributes from function signature `fn(..)`
 #[derive(Debug, Clone)]
 struct UserFunctionAttr {
     /// Function name
     name: String,
-    /// The last argument type is `&mut dyn Write`.
-    write: bool,
-    /// The last argument type is `&Context`.
+    /// Whether contains argument `&Context`.
     context: bool,
+    /// Whether contains argument `&mut dyn Write`.
+    writer: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
     /// The return type.
@@ -443,10 +444,6 @@ struct UserFunctionAttr {
     generic: usize,
     /// The span of return type.
     return_type_span: proc_macro2::Span,
-    // /// `#[list(0)]` in arguments.
-    // list: Vec<(usize, usize)>,
-    // /// `#[struct(0)]` in arguments.
-    // struct_: Vec<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -469,6 +466,6 @@ impl FunctionAttr {
 impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write && !self.context && !self.arg_option && self.return_type == ReturnType::T
+        !self.writer && !self.context && !self.arg_option && self.return_type == ReturnType::T
     }
 }

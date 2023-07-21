@@ -146,7 +146,7 @@ impl FunctionAttr {
             true => quote! { &self.context, },
             false => quote! {},
         };
-        let writer = match self.user_fn.write {
+        let writer = match self.user_fn.writer {
             true => quote! { &mut writer, },
             false => quote! {},
         };
@@ -167,7 +167,7 @@ impl FunctionAttr {
             };
         };
         // output: Option<impl ScalarRef or Scalar>
-        let append_output = match self.user_fn.write {
+        let append_output = match self.user_fn.writer {
             true => quote! {{
                 let mut writer = builder.writer().begin();
                 _ = #output;
@@ -178,7 +178,7 @@ impl FunctionAttr {
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
         };
-        let row_output = match self.user_fn.write {
+        let row_output = match self.user_fn.writer {
             true => quote! {{
                 let mut writer = String::new();
                 _ = #output;

@@ -79,8 +79,8 @@ impl UserFunctionAttr {
         };
         Ok(UserFunctionAttr {
             name: item.sig.ident.to_string(),
-            write: last_arg_is_write(item),
-            context: last_arg_is_context(item),
+            writer: item.sig.inputs.iter().any(arg_is_writer),
+            context: item.sig.inputs.iter().any(arg_is_context),
             arg_option: args_are_all_option(item),
             return_type,
             iterator_item_type,
@@ -90,24 +90,19 @@ impl UserFunctionAttr {
     }
 }
 
-/// Check if the last argument is `&mut impl Write`.
-fn last_arg_is_write(item: &syn::ItemFn) -> bool {
-    let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
-    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
-        return false;
-    };
-    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else {
-        return false;
-    };
-    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
-        return false;
-    };
-    path.segments.last().map_or(false, |s| s.ident == "Write")
+/// Check if the argument is `&mut impl Write`.
+fn arg_is_writer(arg: &syn::FnArg) -> bool {
+    let syn::FnArg::Typed(arg) = arg else { return false };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false; };
+    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else { return false; };
+    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else { return false; };
+    let Some(seg) = path.segments.last() else { return false };
+    seg.ident == "Write"
 }
 
-/// Check if the last argument is `&Context`.
-fn last_arg_is_context(item: &syn::ItemFn) -> bool {
-    let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
+/// Check if the argument is `&Context`.
+fn arg_is_context(arg: &syn::FnArg) -> bool {
+    let syn::FnArg::Typed(arg) = arg else { return false };
     let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false; };
     let syn::Type::Path(path) = elem.as_ref() else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
