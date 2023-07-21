@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 27] = [
+const CONFIG_KEYS: [&str; 28] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -62,6 +62,7 @@ const CONFIG_KEYS: [&str; 27] = [
     "SERVER_VERSION_NUM",
     "RW_FORCE_SPLIT_DISTINCT_AGG",
     "CLIENT_MIN_MESSAGES",
+    "CLIENT_ENCODING",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -93,6 +94,7 @@ const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
 const CLIENT_MIN_MESSAGES: usize = 26;
+const CLIENT_ENCODING: usize = 27;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -300,6 +302,7 @@ type ServerVersion = ConfigString<SERVER_VERSION>;
 type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
+type ClientEncoding = ConfigString<CLIENT_ENCODING>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -403,6 +406,10 @@ pub struct ConfigMap {
         expression = "ConfigString::<CLIENT_MIN_MESSAGES>(String::from(\"notice\"))"
     ))]
     client_min_messages: ClientMinMessages,
+
+    /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
+    #[educe(Default(expression = "ConfigString::<CLIENT_ENCODING>(String::from(\"UTF8\"))"))]
+    client_encoding: ClientEncoding,
 }
 
 impl ConfigMap {
@@ -479,6 +486,16 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(ClientMinMessages::entry_name()) {
             // TODO: validate input and fold to lowercase after #10697 refactor
             self.client_min_messages = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
+            let enc: ClientEncoding = val.as_slice().try_into()?;
+            if !enc.as_str().eq_ignore_ascii_case("UTF8") {
+                return Err(ErrorCode::InvalidConfigValue {
+                    config_entry: ClientEncoding::entry_name().into(),
+                    config_value: enc.0,
+                }
+                .into());
+            }
+            // No actual assignment because we only support UTF8.
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -543,6 +560,8 @@ impl ConfigMap {
             Ok(self.force_split_distinct_agg.to_string())
         } else if key.eq_ignore_ascii_case(ClientMinMessages::entry_name()) {
             Ok(self.client_min_messages.to_string())
+        } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
+            Ok(self.client_encoding.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -680,6 +699,11 @@ impl ConfigMap {
                 setting : self.client_min_messages.to_string(),
                 description : String::from("Sets the message levels that are sent to the client.")
             },
+            VariableInfo{
+                name : ClientEncoding::entry_name().to_lowercase(),
+                setting : self.client_encoding.to_string(),
+                description : String::from("Sets the client's character set encoding.")
+            },
         ]
     }
 
@@ -790,5 +814,9 @@ impl ConfigMap {
 
     pub fn get_client_min_message(&self) -> &str {
         &self.client_min_messages
+    }
+
+    pub fn get_client_encoding(&self) -> &str {
+        &self.client_encoding
     }
 }
