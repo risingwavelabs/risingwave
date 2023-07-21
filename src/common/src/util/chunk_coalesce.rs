@@ -157,15 +157,20 @@ impl DataChunkBuilder {
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
     pub fn append_one_row(&mut self, row: impl Row) -> Option<DataChunk> {
-        assert!(self.buffered_count < self.batch_size);
-        self.ensure_builders();
-
-        self.do_append_one_row_from_datums(row.iter());
+        self.append_one_row_no_finish(row);
         if self.buffered_count == self.batch_size {
             Some(self.build_data_chunk())
         } else {
             None
         }
+    }
+
+    /// Append one row from the given [`Row`].
+
+    pub fn append_one_row_no_finish(&mut self, row: impl Row) {
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
+        self.do_append_one_row_from_datums(row.iter());
     }
 
     /// Append one row from the given two arrays.

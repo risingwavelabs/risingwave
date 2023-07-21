@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock};
 
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
@@ -133,12 +133,10 @@ pub async fn collect_data_chunk_with_builder<E, S>(
 where
     S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
-    for row_count in 0..chunk_size.unwrap_or(usize::MAX) {
+    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
-            // FIXME: Should be raw append 1 row, no check for chunk.
-            // Need create a new method for it.
             Some(row) => {
-                let _ = builder.append_one_row(row);
+                builder.append_one_row_no_finish(row);
             }
             None => break,
         }
