@@ -35,7 +35,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -68,6 +68,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
+        cardinality: Cardinality,
     ) -> Self {
         generic::Scan::new(
             table_name,
@@ -78,6 +79,7 @@ impl LogicalScan {
             ctx,
             Condition::true_cond(),
             for_system_time_as_of_proctime,
+            cardinality,
         )
         .into()
     }
@@ -92,6 +94,10 @@ impl LogicalScan {
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
         self.core.for_system_time_as_of_proctime
+    }
+
+    pub fn cardinality(&self) -> Cardinality {
+        self.core.cardinality
     }
 
     /// Get a reference to the logical scan's table desc.
@@ -240,6 +246,7 @@ impl LogicalScan {
             self.ctx(),
             Condition::true_cond(),
             self.for_system_time_as_of_proctime(),
+            self.cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -259,6 +266,7 @@ impl LogicalScan {
             self.base.ctx.clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
+            self.cardinality(),
         )
         .into()
     }
@@ -273,6 +281,7 @@ impl LogicalScan {
             self.base.ctx.clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
+            self.cardinality(),
         )
         .into()
     }

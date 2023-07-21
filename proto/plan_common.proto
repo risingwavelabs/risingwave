@@ -106,3 +106,8 @@ message IndexAndExpr {
 message DefaultColumns {
   repeated IndexAndExpr default_columns = 1;
 }
+
+message Cardinality {
+  uint64 lo = 1;
+  optional uint64 hi = 2;
+}

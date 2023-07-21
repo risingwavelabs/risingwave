@@ -15,6 +15,8 @@
 use std::cmp::{max, min, Ordering};
 use std::ops::{Add, Mul, RangeFrom, RangeInclusive, Sub};
 
+use risingwave_pb::plan_common::PbCardinality;
+
 /// The upper bound of the [`Cardinality`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hi {
@@ -55,7 +57,7 @@ impl From<usize> for Hi {
 ///
 /// The default value is `0..`, i.e. the number of rows is unknown.
 // TODO: Make this the property of each plan node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Cardinality {
     lo: usize,
     hi: Hi,
@@ -305,5 +307,18 @@ impl Cardinality {
     /// ```
     pub fn is_at_most(self, count: usize) -> bool {
         self.hi().is_some_and(|hi| hi <= count)
+    }
+}
+
+impl Cardinality {
+    pub fn to_protobuf(self) -> PbCardinality {
+        PbCardinality {
+            lo: self.lo as u64,
+            hi: self.hi().map(|hi| hi as u64),
+        }
+    }
+
+    pub fn from_protobuf(pb: &PbCardinality) -> Self {
+        Self::new(pb.lo as usize, pb.hi.map(|hi| hi as usize))
     }
 }
