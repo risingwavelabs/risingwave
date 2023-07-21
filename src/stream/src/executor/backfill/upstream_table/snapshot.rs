@@ -1,17 +1,3 @@
-// Copyright 2023 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -24,8 +10,17 @@ use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::executor::backfill::external_table::ExternalStorageTable;
+use crate::executor::backfill::upstream_table::UpstreamTable;
 use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
 use crate::executor::StreamExecutorResult;
+
+pub trait UpstreamSnapshotRead {
+    type SnapshotStream<'a>: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + 'a
+    where
+        Self: 'a;
+
+    fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_>;
+}
 
 #[derive(Debug, Default)]
 pub struct SnapshotReadArgs {
@@ -51,11 +46,9 @@ impl SnapshotReadArgs {
     }
 }
 
-pub trait UpstreamTable {
-    fn identity(&self) -> &str;
-}
-
 /// A wrapper of upstream table for snapshot read
+/// becasue we need to customize the snapshot read for managed upsream table (e.g. mv, index)
+/// and external upstream table.
 pub struct UpstreamTableReader<T: UpstreamTable> {
     inner: T,
 }
@@ -68,30 +61,6 @@ impl<T: UpstreamTable> UpstreamTableReader<T> {
     pub fn new(table: T) -> Self {
         Self { inner: table }
     }
-}
-
-impl<S: StateStore> UpstreamTable for StorageTable<S> {
-    fn identity(&self) -> &str {
-        "StorageTable"
-    }
-}
-
-impl<S: StateStore> UpstreamTable for ExternalStorageTable<S> {
-    fn identity(&self) -> &str {
-        "ExternalStorageTable"
-    }
-}
-
-pub trait UpstreamSnapshotRead {
-    type SnapshotStream<'a>: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + 'a
-    where
-        Self: 'a;
-
-    fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_>;
-}
-
-pub trait UpstreamBinlogOffsetRead {
-    fn current_binlog_offset(&self) -> Option<String>;
 }
 
 // TODO: we can customize the snapshot read for different kind of table
@@ -134,19 +103,14 @@ impl<S: StateStore> UpstreamSnapshotRead for UpstreamTableReader<StorageTable<S>
     }
 }
 
-impl<S: StateStore> UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable<S>> {
+impl UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable> {
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn snapshot_read(&self, _args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
         #[try_stream]
         async move {
+            // TODO:
             yield None;
         }
-    }
-}
-
-impl<S: StateStore> UpstreamBinlogOffsetRead for UpstreamTableReader<ExternalStorageTable<S>> {
-    fn current_binlog_offset(&self) -> Option<String> {
-        todo!()
     }
 }

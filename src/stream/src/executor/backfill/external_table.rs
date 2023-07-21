@@ -23,15 +23,14 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::row_serde::ColumnMapping;
 use risingwave_storage::StateStore;
 
-pub type ExternalStorageTable<S> = ExternalTableInner<S, EitherSerde>;
+use crate::executor::backfill::upstream_table::binlog::UpstreamBinlogOffsetRead;
+
+pub type ExternalStorageTable = ExternalTableInner<EitherSerde>;
 
 #[derive(Clone)]
-pub struct ExternalTableInner<S: StateStore, SD: ValueRowSerde> {
+pub struct ExternalTableInner<SD: ValueRowSerde> {
     /// Id for this table.
     table_id: TableId,
-
-    /// State store backend.
-    store: S,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
@@ -79,7 +78,7 @@ pub struct ExternalTableInner<S: StateStore, SD: ValueRowSerde> {
     read_prefix_len_hint: usize,
 }
 
-impl<S: StateStore, SD: ValueRowSerde> ExternalTableInner<S, SD> {
+impl<SD: ValueRowSerde> ExternalTableInner<SD> {
     pub fn pk_serializer(&self) -> &OrderedRowSerde {
         &self.pk_serializer
     }
@@ -108,5 +107,16 @@ impl<S: StateStore, SD: ValueRowSerde> ExternalTableInner<S, SD> {
 
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+}
+
+impl UpstreamBinlogOffsetRead for ExternalStorageTable {
+    fn current_binlog_offset(&self) -> Option<String> {
+        // todo(siyuan): issue different sql query to get the binlog offset
+        match self {
+            &_ => {}
+        }
+
+        todo!()
     }
 }

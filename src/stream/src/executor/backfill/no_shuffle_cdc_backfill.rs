@@ -68,7 +68,9 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// We rely on the scheduler to schedule the `BackfillExecutor` together with the upstream mv/table
 /// in the same worker, so that we can read uncommitted data from the upstream table without
 /// waiting.
-pub struct BackfillExecutor<S: StateStore> {
+/// TODO(siyuan): most code can be reused, I want to implement the cdc backfill logic first then
+/// unify the two executor to one
+pub struct CdcBackfillExecutor<S: StateStore> {
     /// Upstream table
     upstream_table: StorageTable<S>,
 
@@ -81,8 +83,6 @@ pub struct BackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
-    progress: CreateMviewProgress,
-
     actor_id: ActorId,
 
     info: ExecutorInfo,
@@ -92,7 +92,7 @@ pub struct BackfillExecutor<S: StateStore> {
     chunk_size: usize,
 }
 
-impl<S> BackfillExecutor<S>
+impl<S> CdcBackfillExecutor<S>
 where
     S: StateStore,
 {
@@ -102,7 +102,7 @@ where
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
-        progress: CreateMviewProgress,
+        _progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
@@ -112,14 +112,13 @@ where
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "BackfillExecutor".to_owned(),
+                identity: "CdcBackfillExecutor".to_owned(),
             },
             upstream_table,
             upstream,
             state_table,
             output_indices,
-            actor_id: progress.actor_id(),
-            progress,
+            actor_id: 0,
             metrics,
             chunk_size,
         }
@@ -313,12 +312,6 @@ where
                                     // Update snapshot read epoch.
                                     snapshot_read_epoch = barrier.epoch.prev;
 
-                                    self.progress.update(
-                                        barrier.epoch.curr,
-                                        snapshot_read_epoch,
-                                        total_snapshot_processed_rows,
-                                    );
-
                                     // Persist state on barrier
                                     Self::persist_state(
                                         barrier.epoch,
@@ -421,7 +414,6 @@ where
                         &mut current_state,
                     )
                     .await?;
-                    self.progress.finish(barrier.epoch.curr);
                     yield msg;
                     break;
                 }
@@ -467,7 +459,7 @@ where
     }
 }
 
-impl<S> Executor for BackfillExecutor<S>
+impl<S> Executor for CdcBackfillExecutor<S>
 where
     S: StateStore,
 {
