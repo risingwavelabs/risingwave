@@ -115,7 +115,7 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
-debug = "line-tables-only"
+debug = 1 # FIXME(kwannoel): Should be "line-tables-only", but seems like `nextest` can't find the test binaries if this is set.
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
