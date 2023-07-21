@@ -37,7 +37,7 @@ done
 run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
 # Create lots of update + barrier,
-for i in $(seq 1 100)
+for i in $(seq 1 1000)
 do
   run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql &
 done

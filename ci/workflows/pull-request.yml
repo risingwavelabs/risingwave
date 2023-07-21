@@ -418,6 +418,7 @@ steps:
 
   - label: "Backfill tests"
     command: "ci/scripts/backfill-test.sh -p ci-dev"
+    if: build.pull_request.labels includes "ci/run-backfill-tests"
     depends_on:
       - "build"
     plugins:
@@ -425,4 +426,4 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
