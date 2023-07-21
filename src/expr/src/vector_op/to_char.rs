@@ -17,8 +17,12 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use risingwave_common::types::Timestamp;
+use risingwave_common::bail;
+use risingwave_common::types::{Datum, ScalarImpl, Timestamp};
+use risingwave_expr_macro::function;
 use static_assertions::const_assert_eq;
+
+use crate::Result;
 
 type Pattern<'a> = Vec<chrono::format::Item<'a>>;
 
@@ -38,44 +42,57 @@ impl Debug for ChronoPattern {
     }
 }
 
-/// Compile the pg pattern to chrono pattern.
-// TODO: Chrono can not fully support the pg format, so consider using other implementations later.
-pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
-    // https://www.postgresql.org/docs/current/functions-formatting.html
-    const PG_PATTERNS: &[&str] = &[
-        "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
-        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd", "US", "us", "MS",
-        "ms", "TZH:TZM", "tzh:tzm", "TZHTZM", "tzhtzm", "TZH", "tzh",
-    ];
-    // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
-    const CHRONO_PATTERNS: &[&str] = &[
-        "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
-        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f", "%:z",
-        "%:z", "%z", "%z", "%#z", "%#z",
-    ];
-    const_assert_eq!(PG_PATTERNS.len(), CHRONO_PATTERNS.len());
-    static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
-        AhoCorasickBuilder::new()
-            .ascii_case_insensitive(false)
-            .match_kind(aho_corasick::MatchKind::LeftmostLongest)
-            .build(PG_PATTERNS)
-            .expect("failed to build an Aho-Corasick automaton")
-    });
+impl ChronoPattern {
+    /// Compile the pg pattern to chrono pattern.
+    // TODO: Chrono can not fully support the pg format, so consider using other implementations
+    // later.
+    pub fn compile(tmpl: &str) -> Self {
+        // https://www.postgresql.org/docs/current/functions-formatting.html
+        const PG_PATTERNS: &[&str] = &[
+            "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy",
+            "YY", "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd", "US",
+            "us", "MS", "ms", "TZH:TZM", "tzh:tzm", "TZHTZM", "tzhtzm", "TZH", "tzh",
+        ];
+        // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+        const CHRONO_PATTERNS: &[&str] = &[
+            "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y",
+            "%G", "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f",
+            "%:z", "%:z", "%z", "%z", "%#z", "%#z",
+        ];
+        const_assert_eq!(PG_PATTERNS.len(), CHRONO_PATTERNS.len());
+        static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
+            AhoCorasickBuilder::new()
+                .ascii_case_insensitive(false)
+                .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+                .build(PG_PATTERNS)
+                .expect("failed to build an Aho-Corasick automaton")
+        });
 
-    let mut chrono_tmpl = String::new();
-    AC.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
-        dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
-        true
-    });
-    tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
-    ChronoPattern::new(chrono_tmpl, |tmpl| {
-        StrftimeItems::new(tmpl).collect::<Vec<_>>()
-    })
+        let mut chrono_tmpl = String::new();
+        AC.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
+            dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
+            true
+        });
+        tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
+        ChronoPattern::new(chrono_tmpl, |tmpl| {
+            StrftimeItems::new(tmpl).collect::<Vec<_>>()
+        })
+    }
+
+    pub fn from_datum(pattern: Datum) -> Result<Self> {
+        let pattern = match &pattern {
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        Ok(Self::compile(pattern))
+    }
 }
 
-// #[function("to_char(timestamp, varchar) -> varchar")]
-pub fn to_char_timestamp(data: Timestamp, tmpl: &str, writer: &mut dyn Write) {
-    let pattern = compile_pattern_to_chrono(tmpl);
+#[function(
+    "to_char(timestamp, varchar) -> varchar",
+    prebuild = "ChronoPattern::from_datum($1)?"
+)]
+fn to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
 }

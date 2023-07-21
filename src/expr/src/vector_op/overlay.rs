@@ -27,7 +27,7 @@ use crate::{ExprError, Result};
 /// αβ💯δεζ
 /// ```
 #[function("overlay(varchar, varchar, int32) -> varchar")]
-pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
+pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut impl Write) -> Result<()> {
     let sub_len = new_sub_str
         .chars()
         .count()
@@ -88,7 +88,7 @@ pub fn overlay_for(
     new_sub_str: &str,
     start: i32,
     count: i32,
-    writer: &mut dyn Write,
+    writer: &mut impl Write,
 ) -> Result<()> {
     if start <= 0 {
         return Err(ExprError::InvalidParam {

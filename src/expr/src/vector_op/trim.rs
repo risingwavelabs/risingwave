@@ -17,7 +17,7 @@ use std::fmt::Write;
 use risingwave_expr_macro::function;
 
 #[function("trim(varchar) -> varchar")]
-pub fn trim(s: &str, writer: &mut dyn Write) {
+pub fn trim(s: &str, writer: &mut impl Write) {
     writer.write_str(s.trim()).unwrap();
 }
 
@@ -25,7 +25,7 @@ pub fn trim(s: &str, writer: &mut dyn Write) {
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[function("ltrim(varchar) -> varchar")]
-pub fn ltrim(s: &str, writer: &mut dyn Write) {
+pub fn ltrim(s: &str, writer: &mut impl Write) {
     writer.write_str(s.trim_start()).unwrap();
 }
 
@@ -33,12 +33,12 @@ pub fn ltrim(s: &str, writer: &mut dyn Write) {
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[function("rtrim(varchar) -> varchar")]
-pub fn rtrim(s: &str, writer: &mut dyn Write) {
+pub fn rtrim(s: &str, writer: &mut impl Write) {
     writer.write_str(s.trim_end()).unwrap();
 }
 
 #[function("trim(varchar, varchar) -> varchar")]
-pub fn trim_characters(s: &str, characters: &str, writer: &mut dyn Write) {
+pub fn trim_characters(s: &str, characters: &str, writer: &mut impl Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     // We remark that feeding a &str and a slice of chars into trim_left/right_matches
     // means different, one is matching with the entire string and the other one is matching
@@ -47,13 +47,13 @@ pub fn trim_characters(s: &str, characters: &str, writer: &mut dyn Write) {
 }
 
 #[function("ltrim(varchar, varchar) -> varchar")]
-pub fn ltrim_characters(s: &str, characters: &str, writer: &mut dyn Write) {
+pub fn ltrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     writer.write_str(s.trim_start_matches(pattern)).unwrap();
 }
 
 #[function("rtrim(varchar, varchar) -> varchar")]
-pub fn rtrim_characters(s: &str, characters: &str, writer: &mut dyn Write) {
+pub fn rtrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     writer.write_str(s.trim_end_matches(pattern)).unwrap();
 }

@@ -17,7 +17,7 @@ use std::fmt::Write;
 use risingwave_expr_macro::function;
 
 #[function("lower(varchar) -> varchar")]
-pub fn lower(s: &str, writer: &mut dyn Write) {
+pub fn lower(s: &str, writer: &mut impl Write) {
     for c in s.chars() {
         writer.write_char(c.to_ascii_lowercase()).unwrap();
     }

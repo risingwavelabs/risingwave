@@ -14,13 +14,16 @@
 
 use chrono::format::Parsed;
 use risingwave_common::types::Timestamp;
+use risingwave_expr_macro::function;
 
-// use risingwave_expr_macro::function;
-use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
+use super::to_char::ChronoPattern;
 use crate::Result;
 
-#[inline(always)]
-pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
+#[function(
+    "to_timestamp1(varchar, varchar) -> timestamp",
+    prebuild = "ChronoPattern::from_datum($1)?"
+)]
+fn to_timestamp1(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_dependent().iter())?;
 
@@ -64,10 +67,4 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestam
     // FIXME: We should return `TimestampTz` here.
     parsed.offset.get_or_insert(0);
     Ok(Timestamp(parsed.to_datetime()?.naive_utc()))
-}
-
-// #[function("to_timestamp(varchar, varchar) -> timestamp")]
-pub fn to_timestamp(s: &str, tmpl: &str) -> Result<Timestamp> {
-    let pattern = compile_pattern_to_chrono(tmpl);
-    to_timestamp_const_tmpl(s, &pattern)
 }

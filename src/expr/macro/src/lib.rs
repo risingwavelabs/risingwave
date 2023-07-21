@@ -431,6 +431,8 @@ struct UserFunctionAttr {
     name: String,
     /// The last argument type is `&mut dyn Write`.
     write: bool,
+    /// The last argument type is `&Context`.
+    context: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
     /// The return type.
@@ -475,10 +477,6 @@ impl FunctionAttr {
 }
 
 impl UserFunctionAttr {
-    fn is_writer_style(&self) -> bool {
-        self.write && !self.arg_option
-    }
-
     fn is_pure(&self) -> bool {
         !self.write && !self.arg_option && self.return_type == ReturnType::T
     }

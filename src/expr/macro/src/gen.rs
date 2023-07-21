@@ -87,189 +87,174 @@ impl FunctionAttr {
     fn generate_build_fn(&self) -> Result<TokenStream2> {
         let num_args = self.args.len();
         let fn_name = format_ident!("{}", self.user_fn.name);
+        let struct_name = format_ident!("{}", self.ident_name());
+        let arg_ids = (0..num_args)
+            .filter(|i| match &self.prebuild {
+                Some(s) => !s.contains(&format!("${i}")),
+                None => true,
+            })
+            .collect_vec();
+        let const_ids = (0..num_args).filter(|i| match &self.prebuild {
+            Some(s) => s.contains(&format!("${i}")),
+            None => false,
+        });
+        let inputs: Vec<_> = arg_ids.iter().map(|i| format_ident!("i{i}")).collect();
+        let all_child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
+        let const_child: Vec<_> = const_ids.map(|i| format_ident!("child{i}")).collect();
+        let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
+        let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
+        let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
+        let datums: Vec<_> = arg_ids.iter().map(|i| format_ident!("v{i}")).collect();
         let arg_arrays = self
             .args
             .iter()
             .map(|t| format_ident!("{}", types::array_type(t)));
-        let ret_array = format_ident!("{}", types::array_type(&self.ret));
         let arg_types = self
             .args
             .iter()
             .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
-        let ret_type = types::ref_type(&self.ret).parse::<TokenStream2>().unwrap();
-        let exprs = (0..num_args)
-            .map(|i| format_ident!("e{i}"))
-            .collect::<Vec<_>>();
-        #[expect(
-            clippy::redundant_clone,
-            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
-        )]
-        let exprs0 = exprs.clone();
-
-        let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {
-            let template_struct = match num_args {
-                1 => format_ident!("UnaryBytesExpression"),
-                2 => format_ident!("BinaryBytesExpression"),
-                3 => format_ident!("TernaryBytesExpression"),
-                4 => format_ident!("QuaternaryBytesExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let args = (0..=num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let func = match self.user_fn.return_type {
-                ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
-                ReturnType::Result => quote! { #fn_name(#(#args1),*) },
-                _ => todo!("returning Option is not supported yet"),
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, _>::new(
-                    #(#exprs),*,
-                    return_type,
-                    |#(#args),*| #func,
-                )))
-            }
-        } else if self.args.iter().all(|t| t == "boolean")
-            && self.ret == "boolean"
-            && !self.user_fn.return_type.contains_result()
-            && self.batch_fn.is_some()
-        {
-            let template_struct = match num_args {
-                1 => format_ident!("BooleanUnaryExpression"),
-                2 => format_ident!("BooleanBinaryExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let batch_fn = format_ident!("{}", self.batch_fn.as_ref().unwrap());
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let func = if self.user_fn.arg_option && self.user_fn.return_type == ReturnType::Option
-            {
-                quote! { #fn_name(#(#args1),*) }
-            } else if self.user_fn.arg_option {
-                quote! { Some(#fn_name(#(#args1),*)) }
-            } else {
-                let args2 = args.clone();
-                let args3 = args.clone();
-                quote! {
-                    match (#(#args1),*) {
-                        (#(Some(#args2)),*) => Some(#fn_name(#(#args3),*)),
-                        _ => None,
-                    }
-                }
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template_fast::#template_struct::new(
-                    #(#exprs,)*
-                    #batch_fn,
-                    |#(#args),*| #func,
-                )))
-            }
-        } else if self.args.len() == 2 && self.ret == "boolean" && self.user_fn.is_pure() {
+        let ret_type = types::owned_type(&self.ret)
+            .parse::<TokenStream2>()
+            .unwrap();
+        let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
+        let const_arg_type = match &self.prebuild {
+            Some(s) => s.split("::").next().unwrap().parse().unwrap(),
+            None => quote! { () },
+        };
+        let const_arg_value = match &self.prebuild {
+            Some(s) => s
+                .replace('$', "child")
+                .parse()
+                .expect("invalid prebuild syntax"),
+            None => quote! { () },
+        };
+        let generic = if self.ret == "boolean" && self.user_fn.generic == 3 {
+            // XXX: for generic compare functions, we need to specify the compatible type
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let generic = if self.user_fn.generic == 3 {
-                // XXX: for generic compare functions, we need to specify the compatible type
-                quote! { ::<_, _, #compatible_type> }
-            } else {
-                quote! {}
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template_fast::CompareExpression::<_, #(#arg_arrays),*>::new(
-                    #(#exprs,)*
-                    |#(#args),*| #fn_name #generic(#(#args1),*),
-                )))
-            }
-        } else if self.args.iter().all(|t| types::is_primitive(t)) && self.user_fn.is_pure() {
-            let template_struct = match num_args {
-                0 => format_ident!("NullaryExpression"),
-                1 => format_ident!("UnaryExpression"),
-                2 => format_ident!("BinaryExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template_fast::#template_struct::<_, #(#arg_types,)* #ret_type>::new(
-                    #(#exprs,)*
-                    return_type,
-                    #fn_name,
-                )))
-            }
-        } else if self.user_fn.arg_option || self.user_fn.return_type.contains_option() {
-            let template_struct = match num_args {
-                1 => format_ident!("UnaryNullableExpression"),
-                2 => format_ident!("BinaryNullableExpression"),
-                3 => format_ident!("TernaryNullableExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let generic = if self.user_fn.generic == 3 {
-                // XXX: for generic compare functions, we need to specify the compatible type
-                let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
-                    .parse::<TokenStream2>()
-                    .unwrap();
-                quote! { ::<_, _, #compatible_type> }
-            } else {
-                quote! {}
-            };
-            let mut func = quote! { #fn_name #generic(#(#args1),*) };
-            func = match self.user_fn.return_type {
-                ReturnType::T => quote! { Ok(Some(#func)) },
-                ReturnType::Option => quote! { Ok(#func) },
-                ReturnType::Result => quote! { #func.map(Some) },
-                ReturnType::ResultOption => quote! { #func },
-            };
-            if !self.user_fn.arg_option {
-                let args2 = args.clone();
-                let args3 = args.clone();
-                func = quote! {
-                    match (#(#args2),*) {
-                        (#(Some(#args3)),*) => #func,
-                        _ => Ok(None),
-                    }
-                };
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays,)* #ret_array, _>::new(
-                    #(#exprs,)*
-                    return_type,
-                    |#(#args),*| #func,
-                )))
-            }
+            quote! { ::<_, _, #compatible_type> }
         } else {
-            let template_struct = match num_args {
-                0 => format_ident!("NullaryExpression"),
-                1 => format_ident!("UnaryExpression"),
-                2 => format_ident!("BinaryExpression"),
-                3 => format_ident!("TernaryExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let func = match self.user_fn.return_type {
-                ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
-                ReturnType::Result => quote! { #fn_name(#(#args1),*) },
-                _ => panic!("return type should not contain Option"),
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays,)* #ret_array, _>::new(
-                    #(#exprs,)*
-                    return_type,
-                    |#(#args),*| #func,
-                )))
-            }
+            quote! {}
         };
+        let const_arg = match &self.prebuild {
+            Some(_) => quote! { &self.const_arg, },
+            None => quote! {},
+        };
+        let context = match self.user_fn.context {
+            true => quote! { &self.context, },
+            false => quote! {},
+        };
+        let writer = match self.user_fn.write {
+            true => quote! { &mut writer, },
+            false => quote! {},
+        };
+        // inputs: [ Option<impl ScalarRef> ]
+        let mut output = quote! { #fn_name #generic(#(#inputs,)* #const_arg #context #writer) };
+        output = match self.user_fn.return_type {
+            ReturnType::T => quote! { Some(#output) },
+            ReturnType::Option => output,
+            ReturnType::Result => quote! { Some(#output?) },
+            ReturnType::ResultOption => quote! { #output? },
+        };
+        if !self.user_fn.arg_option {
+            output = quote! {
+                match (#(#inputs,)*) {
+                    (#(Some(#inputs),)*) => #output,
+                    _ => None,
+                }
+            };
+        };
+        // output: Option<impl ScalarRef or Scalar>
+        let append_output = match self.user_fn.write {
+            true => quote! {{
+                let mut writer = builder.writer().begin();
+                _ = #output;
+                writer.finish();
+            }},
+            false => quote! {
+                let output: Option<#ret_type> = #output;
+                builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
+            },
+        };
+        let row_output = match self.user_fn.write {
+            true => quote! {{
+                let mut writer = String::new();
+                _ = #output;
+                Some(Box::<str>::from(writer).to_scalar_value())
+            }},
+            false => quote! {{
+                let output: Option<#ret_type> = #output;
+                output.map(|s| s.to_scalar_value())
+            }},
+        };
+
         Ok(quote! {
             |return_type, children| {
+                use std::sync::Arc;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
+                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::row::OwnedRow;
+                use risingwave_common::util::iter_util::ZipEqFast;
+                use itertools::multizip;
+
+                use crate::expr::{Context, BoxedExpression};
+                use crate::Result;
 
                 crate::ensure!(children.len() == #num_args);
+                let context = Context {
+                    return_type,
+                    arg_types: children.iter().map(|c| c.return_type()).collect(),
+                };
                 let mut iter = children.into_iter();
-                #(let #exprs0 = iter.next().unwrap();)*
+                #(let #all_child = iter.next().unwrap();)*
+                // evaluate const arguments
+                #(let #const_child = #const_child.eval_const()?;)*
 
-                #build_expr
+                #[derive(Debug)]
+                struct #struct_name {
+                    context: Context,
+                    #(#child: BoxedExpression,)*
+                    const_arg: #const_arg_type,
+                }
+                #[async_trait::async_trait]
+                impl crate::expr::Expression for #struct_name {
+                    fn return_type(&self) -> DataType {
+                        self.context.return_type.clone()
+                    }
+                    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+                        // evaluate children and downcast arrays
+                        #(
+                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                        )*
+
+                        let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
+
+                        for ((#(#inputs,)*), visible) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()) {
+                            if !visible {
+                                builder.append_null();
+                                continue;
+                            }
+                            #append_output
+                        }
+                        Ok(Arc::new(builder.finish().into()))
+                    }
+                    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+                        #(
+                            let #datums = self.#child.eval_row(input).await?;
+                            let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+                        )*
+                        Ok(#row_output)
+                    }
+                }
+
+                Ok(Box::new(#struct_name {
+                    context,
+                    #(#child,)*
+                    const_arg: #const_arg_value,
+                }))
             }
         })
     }

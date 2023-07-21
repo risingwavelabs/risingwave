@@ -80,6 +80,7 @@ impl UserFunctionAttr {
         Ok(UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
+            context: last_arg_is_context(item),
             arg_option: args_are_all_option(item),
             return_type,
             iterator_item_type,
@@ -89,19 +90,28 @@ impl UserFunctionAttr {
     }
 }
 
-/// Check if the last argument is `&mut dyn Write`.
+/// Check if the last argument is `&mut impl Write`.
 fn last_arg_is_write(item: &syn::ItemFn) -> bool {
     let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
     let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
         return false;
     };
-    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else {
+    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else {
         return false;
     };
     let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
         return false;
     };
     path.segments.last().map_or(false, |s| s.ident == "Write")
+}
+
+/// Check if the last argument is `&Context`.
+fn last_arg_is_context(item: &syn::ItemFn) -> bool {
+    let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false; };
+    let syn::Type::Path(path) = elem.as_ref() else { return false };
+    let Some(seg) = path.path.segments.last() else { return false };
+    seg.ident == "Context"
 }
 
 /// Check if all arguments are `Option`s.
