@@ -40,7 +40,7 @@ use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -69,8 +69,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, SstableWriterFactory,
-    StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, MonotonicDeleteEvent,
+    SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -259,7 +259,6 @@ impl Compactor {
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &sstable_infos,
-            compact_task.gc_delete_keys,
             &compactor_context.sstable_store,
             &mut multi_filter,
         )
@@ -648,6 +647,7 @@ impl Compactor {
 
     pub async fn compact_and_build_sst<F>(
         sst_builder: &mut CapacitySplitTableBuilder<F>,
+        del_agg: Arc<CompactionDeleteRanges>,
         task_config: &TaskConfig,
         compactor_metrics: Arc<CompactorMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
@@ -657,25 +657,37 @@ impl Compactor {
     where
         F: TableBuilderFactory,
     {
-        let mut del_iter = sst_builder.del_agg.iter();
-
-        if !task_config.key_range.left.is_empty() {
+        let mut del_iter = del_agg.iter();
+        let start_key = if !task_config.key_range.left.is_empty() {
             let full_key = FullKey::decode(&task_config.key_range.left);
             iter.seek(full_key)
                 .verbose_instrument_await("iter_seek")
                 .await?;
             del_iter.seek(full_key.user_key);
+            full_key.user_key.to_vec()
         } else {
             iter.rewind().verbose_instrument_await("rewind").await?;
             del_iter.rewind();
+            UserKey::default()
+        };
+        if !task_config.gc_delete_keys
+            && del_iter.is_valid()
+            && del_iter.earliest_epoch() != HummockEpoch::MAX
+        {
+            sst_builder
+                .add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key: PointRange::from_user_key(start_key, false),
+                    new_epoch: del_iter.earliest_epoch(),
+                })
+                .await?;
         }
 
-        let max_key = if task_config.key_range.right.is_empty() {
+        let end_key = if task_config.key_range.right.is_empty() {
             FullKey::default()
         } else {
             FullKey::decode(&task_config.key_range.right).to_vec()
         };
-        let max_key = max_key.to_ref();
+        let max_key = end_key.to_ref();
 
         let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
@@ -729,8 +741,21 @@ impl Compactor {
                 last_table_id = Some(last_key.user_key.table_id.table_id);
             }
 
+            let target_extended_user_key = PointRange::from_user_key(iter_key.user_key, false);
+            while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
+                del_iter.update_range();
+                if !task_config.gc_delete_keys {
+                    sst_builder
+                        .add_monotonic_delete(MonotonicDeleteEvent {
+                            event_key: del_iter.key().clone(),
+                            new_epoch: del_iter.earliest_epoch(),
+                        })
+                        .await?;
+                }
+                del_iter.next();
+            }
             let earliest_range_delete_which_can_see_iter_key =
-                del_iter.earliest_delete_which_can_see_key(iter_key.user_key, epoch);
+                del_iter.earliest_delete_since(epoch);
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
@@ -807,6 +832,33 @@ impl Compactor {
                 .await?;
 
             iter.next().verbose_instrument_await("iter_next").await?;
+        }
+
+        let extended_largest_user_key = PointRange::from_user_key(end_key.user_key.clone(), false);
+        while del_iter.is_valid() {
+            if !extended_largest_user_key.is_empty()
+                && del_iter.key().ge(&extended_largest_user_key)
+            {
+                if !task_config.gc_delete_keys {
+                    sst_builder
+                        .add_monotonic_delete(MonotonicDeleteEvent {
+                            event_key: extended_largest_user_key,
+                            new_epoch: HummockEpoch::MAX,
+                        })
+                        .await?;
+                }
+                break;
+            }
+            del_iter.update_range();
+            if !task_config.gc_delete_keys {
+                sst_builder
+                    .add_monotonic_delete(MonotonicDeleteEvent {
+                        event_key: del_iter.key().clone(),
+                        new_epoch: del_iter.earliest_epoch(),
+                    })
+                    .await?;
+            }
+            del_iter.next();
         }
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
@@ -990,14 +1042,13 @@ impl Compactor {
             builder_factory,
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
-            del_agg,
-            self.task_config.key_range.clone(),
             self.task_config.is_target_l0_or_lbase,
             self.task_config.split_by_table,
             self.task_config.split_weight_by_vnode,
         );
         let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,
+            del_agg,
             &self.task_config,
             self.context.compactor_metrics.clone(),
             iter,
