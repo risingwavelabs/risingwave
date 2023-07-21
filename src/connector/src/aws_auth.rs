@@ -88,8 +88,8 @@ impl AwsAuthProps {
 
     fn build_credential_provider(&self) -> SharedCredentialsProvider {
         SharedCredentialsProvider::new(aws_credential_types::Credentials::from_keys(
-            self.access_key.as_ref().unwrap_or("".into()),
-            self.secret_key.as_ref().unwrap_or("".into()),
+            self.access_key.as_ref().unwrap_or(&"".into()),
+            self.secret_key.as_ref().unwrap_or(&"".into()),
             self.session_token.clone(),
         ))
     }
