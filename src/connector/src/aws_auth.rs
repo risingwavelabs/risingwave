@@ -86,20 +86,12 @@ impl AwsAuthProps {
         }
     }
 
-    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
-        if self.access_key.is_some() && self.secret_key.is_some() {
-            Ok(SharedCredentialsProvider::new(
-                aws_credential_types::Credentials::from_keys(
-                    self.access_key.as_ref().unwrap(),
-                    self.secret_key.as_ref().unwrap(),
-                    self.session_token.clone(),
-                ),
-            ))
-        } else {
-            Err(anyhow!(
-                "access_key and secret_key should be provided for aws auth"
-            ))
-        }
+    fn build_credential_provider(&self) -> SharedCredentialsProvider {
+        SharedCredentialsProvider::new(aws_credential_types::Credentials::from_keys(
+            self.access_key.as_ref().unwrap_or("".into()),
+            self.secret_key.as_ref().unwrap_or("".into()),
+            self.session_token.clone(),
+        ))
     }
 
     async fn with_role_provider(
@@ -123,7 +115,7 @@ impl AwsAuthProps {
     pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
         let region = self.build_region().await?;
         let credentials_provider = self
-            .with_role_provider(self.build_credential_provider()?)
+            .with_role_provider(self.build_credential_provider())
             .await?;
         let config_loader = aws_config::from_env()
             .region(region)
