@@ -17,5 +17,6 @@ def gen_row(index):
 
 
 data_size = int(sys.argv[1])
-data = [gen_row(i) for i in range(data_size)]
-print(', '.join(data))
+table = sys.argv[2]
+data = ['INSERT INTO {} VALUES {};'.format(table, gen_row(i)) for i in range(data_size)]
+print('\n'.join(data))
