@@ -46,10 +46,6 @@ import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.types.Types;
 
 public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
-    private final HadoopCatalog hadoopCatalog;
-    private final Table icebergTable;
-    private final FileFormat fileFormat;
-    private final Schema rowSchema;
     private final Schema deleteRowSchema;
     private final List<Integer> pkIndices;
     private boolean closed = false;
@@ -61,11 +57,12 @@ public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
             HadoopCatalog hadoopCatalog,
             Table icebergTable,
             FileFormat fileFormat) {
-        super(tableSchema);
-        this.hadoopCatalog = hadoopCatalog;
-        this.icebergTable = icebergTable;
-        this.fileFormat = fileFormat;
-        this.rowSchema = icebergTable.schema().select(Arrays.asList(tableSchema.getColumnNames()));
+        super(
+                tableSchema,
+                icebergTable,
+                hadoopCatalog,
+                icebergTable.schema().select(Arrays.asList(tableSchema.getColumnNames())),
+                fileFormat);
         this.deleteRowSchema = icebergTable.schema().select(tableSchema.getPrimaryKeys());
         this.pkIndices =
                 tableSchema.getPrimaryKeys().stream()

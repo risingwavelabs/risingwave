@@ -36,31 +36,20 @@ import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
 
 public class AppendOnlyIcebergSinkWriter extends IcebergSinkWriterBase {
-    private final HadoopCatalog hadoopCatalog;
-    private final FileFormat fileFormat;
-    private final Schema rowSchema;
-    private final Table icebergTable;
     private Map<PartitionKey, DataWriter<Record>> dataWriterMap = new HashMap<>();
     private boolean closed = false;
-
-    public HadoopCatalog getHadoopCatalog() {
-        return this.hadoopCatalog;
-    }
-
-    public Table getIcebergTable() {
-        return this.icebergTable;
-    }
 
     public AppendOnlyIcebergSinkWriter(
             TableSchema tableSchema,
             HadoopCatalog hadoopCatalog,
             Table icebergTable,
             FileFormat fileFormat) {
-        super(tableSchema);
-        this.hadoopCatalog = hadoopCatalog;
-        this.icebergTable = icebergTable;
-        this.rowSchema = icebergTable.schema().select(Arrays.asList(tableSchema.getColumnNames()));
-        this.fileFormat = fileFormat;
+        super(
+                tableSchema,
+                icebergTable,
+                hadoopCatalog,
+                icebergTable.schema().select(Arrays.asList(tableSchema.getColumnNames())),
+                fileFormat);
     }
 
     @Override
