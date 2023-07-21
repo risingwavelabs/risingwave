@@ -28,7 +28,7 @@ flush() {
 
 run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql
-for i in $(seq 1 16)
+for i in $(seq 1 18)
 do
   run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql
   flush
@@ -37,7 +37,7 @@ done
 run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
 # Create lots of update + barrier,
-for i in $(seq 1 100)
+for i in $(seq 1 10000)
 do
   run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql &
 done

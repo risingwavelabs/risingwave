@@ -8,7 +8,6 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 export RUST_LOG=info
-export SQLSMITH_COUNT=100
 
 while getopts 'p:' opt; do
     case ${opt} in
