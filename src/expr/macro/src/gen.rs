@@ -114,7 +114,7 @@ impl FunctionAttr {
             .iter()
             .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
         let ret_type: TokenStream2 = match &self.user_fn.core_return_type {
-            s if s.contains("&") || s.contains("Ref") => {
+            s if s.contains('&') || s.contains("Ref") => {
                 types::ref_type(&self.ret).parse().unwrap()
             }
             _ => types::owned_type(&self.ret).parse().unwrap(),
@@ -209,24 +209,24 @@ impl FunctionAttr {
             && self.user_fn.is_pure()
         {
             // SIMD optimization for primitive types
-            if self.args.len() == 0 {
-                quote! {
+            match self.args.len() {
+                0 => quote! {
                     let c = #ret_array_type::from_iter_bitmap(
                         std::iter::repeat_with(|| #fn_name()).take(input.capacity())
                         Bitmap::ones(input.capacity()),
                     );
                     Ok(Arc::new(c.into()))
-                }
-            } else if self.args.len() == 1 {
-                quote! {
+                },
+                1 => quote! {
                     let c = #ret_array_type::from_iter_bitmap(
                         a0.raw_iter().map(|a| #fn_name(a)),
                         a0.null_bitmap().clone()
                     );
                     Ok(Arc::new(c.into()))
-                }
-            } else if self.args.len() == 2 {
-                quote! {
+                },
+                2 => quote! {
+                    // allow using `zip` for performance
+                    #[allow(clippy::disallowed_methods)]
                     let c = #ret_array_type::from_iter_bitmap(
                         a0.raw_iter()
                             .zip(a1.raw_iter())
@@ -234,9 +234,8 @@ impl FunctionAttr {
                         a0.null_bitmap() & a1.null_bitmap(),
                     );
                     Ok(Arc::new(c.into()))
-                }
-            } else {
-                todo!("SIMD optimization for {} arguments", self.args.len())
+                },
+                n => todo!("SIMD optimization for {n} arguments"),
             }
         } else {
             // no optimization
