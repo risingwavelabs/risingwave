@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
@@ -87,7 +86,7 @@ impl AwsAuthProps {
         }
     }
 
-    async fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
+    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
         if self.access_key.is_some() && self.secret_key.is_some() {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
@@ -97,7 +96,9 @@ impl AwsAuthProps {
                 ),
             ))
         } else {
-            Err(anyhow!("access_key and secret_key should be provided for aws auth").into())
+            Err(anyhow!(
+                "access_key and secret_key should be provided for aws auth"
+            ))
         }
     }
 
@@ -122,7 +123,7 @@ impl AwsAuthProps {
     pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
         let region = self.build_region().await?;
         let credentials_provider = self
-            .with_role_provider(self.build_credential_provider().await?)
+            .with_role_provider(self.build_credential_provider()?)
             .await?;
         let config_loader = aws_config::from_env()
             .region(region)
