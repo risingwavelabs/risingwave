@@ -275,15 +275,16 @@ impl Binder {
                     select_list.push(expr);
                     aliases.push(Some(alias.real_value()));
                 }
-                SelectItem::QualifiedWildcard(obj_name) => {
+                SelectItem::QualifiedWildcard(obj_name, except) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
+                    let except_indices = self.generate_except_indices(except)?;
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[*begin..*end]
                             .iter()
-                            .filter(|c| !c.is_hidden),
+                            .filter(|c| !c.is_hidden && !except_indices.contains(&c.index)),
                     );
                     select_list.extend(exprs);
                     aliases.extend(names);
@@ -293,7 +294,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::WildcardOrWithExcept(w) => {
+                SelectItem::Wildcard(except) => {
                     if self.context.range_of.is_empty() {
                         return Err(ErrorCode::BindError(
                             "SELECT * with no tables specified is not valid".into(),
@@ -308,25 +309,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
 
-                    let mut except_indices: HashSet<usize> = HashSet::new();
-                    if let Some(exprs) = w {
-                        for expr in exprs {
-                            let bound = self.bind_expr(expr)?;
-                            if let ExprImpl::InputRef(inner) = bound {
-                                if !except_indices.insert(inner.index) {
-                                    return Err(ErrorCode::BindError(
-                                        "Duplicate entry in except list".into(),
-                                    )
-                                    .into());
-                                }
-                            } else {
-                                return Err(ErrorCode::BindError(
-                                    "Need column name in except list".into(),
-                                )
-                                .into());
-                            }
-                        }
-                    }
+                    let except_indices = self.generate_except_indices(except)?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -774,6 +757,32 @@ impl Binder {
                 BoundDistinct::DistinctOn(bound_exprs)
             }
         })
+    }
+
+    fn generate_except_indices(&mut self, except: Option<Vec<Expr>>) -> Result<HashSet<usize>> {
+        let mut except_indices: HashSet<usize> = HashSet::new();
+        if let Some(exprs) = except {
+            for expr in exprs {
+                let bound = self.bind_expr(expr)?;
+                match bound {
+                    ExprImpl::InputRef(inner) => {
+                        if !except_indices.insert(inner.index) {
+                            return Err(ErrorCode::BindError(
+                                "Duplicate entry in except list".into(),
+                            )
+                            .into());
+                        }
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "Only support column name in except list".into(),
+                        )
+                        .into())
+                    }
+                }
+            }
+        }
+        Ok(except_indices)
     }
 }
 

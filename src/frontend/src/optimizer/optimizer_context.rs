@@ -164,7 +164,7 @@ impl OptimizerContext {
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         let string = str.into();
-        tracing::trace!("{}", string);
+        tracing::trace!(target: "explain_trace", "{}", string);
         optimizer_trace.push(string);
         optimizer_trace.push("\n".to_string());
     }

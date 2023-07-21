@@ -244,9 +244,9 @@ impl QueryRewriter<'_> {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
                 }
-                FunctionArgExpr::QualifiedWildcard(_)
-                | FunctionArgExpr::WildcardOrWithExcept(None) => {}
-                FunctionArgExpr::WildcardOrWithExcept(Some(exprs)) => {
+                FunctionArgExpr::QualifiedWildcard(_, None) | FunctionArgExpr::Wildcard(None) => {}
+                FunctionArgExpr::QualifiedWildcard(_, Some(exprs))
+                | FunctionArgExpr::Wildcard(Some(exprs)) => {
                     for expr in exprs {
                         self.visit_expr(expr);
                     }
@@ -352,8 +352,8 @@ impl QueryRewriter<'_> {
             SelectItem::UnnamedExpr(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
-            SelectItem::QualifiedWildcard(_) | SelectItem::WildcardOrWithExcept(None) => {}
-            SelectItem::WildcardOrWithExcept(Some(exprs)) => {
+            SelectItem::QualifiedWildcard(_, None) | SelectItem::Wildcard(None) => {}
+            SelectItem::QualifiedWildcard(_, Some(exprs)) | SelectItem::Wildcard(Some(exprs)) => {
                 for expr in exprs {
                     self.visit_expr(expr);
                 }

@@ -117,7 +117,6 @@ pub struct CompactorConfig {
     pub provide_tempo: Option<Vec<TempoConfig>>,
 
     pub user_managed: bool,
-    pub max_concurrent_task_number: u64,
     pub compaction_worker_threads_number: Option<usize>,
 }
 

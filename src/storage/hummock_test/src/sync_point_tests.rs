@@ -24,6 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
+use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
@@ -244,17 +245,18 @@ pub async fn compact_once(
         .unwrap()
         .unwrap();
     compact_task.gc_delete_keys = false;
-    let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-    hummock_manager_ref
-        .assign_compaction_task(&compact_task, compactor.context_id())
-        .await
-        .unwrap();
 
     let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+    let (mut result_task, task_stats) =
+        Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+
+    hummock_manager_ref
+        .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -285,9 +287,6 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         &hummock_meta_client,
         existing_table_id,
     ));
-
-    let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-    compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
 
     let mut local = storage
         .new_local(NewLocalOptions::for_test(existing_table_id.into()))

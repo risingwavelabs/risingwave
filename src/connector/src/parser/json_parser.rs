@@ -16,14 +16,10 @@ use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 
 use super::unified::json::JsonParseOptions;
+use super::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use super::unified::AccessImpl;
 use super::{AccessBuilder, ByteStreamSourceParser};
 use crate::parser::unified::json::JsonAccess;
-use crate::parser::unified::upsert::UpsertChangeEvent;
-use crate::parser::unified::util::{
-    apply_row_operation_on_stream_chunk_writer_with_op, apply_upsert_on_stream_chunk_writer,
-};
-use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -58,7 +54,6 @@ impl JsonAccessBuilder {
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
-    enable_upsert: bool,
 }
 
 impl JsonParser {
@@ -66,7 +61,6 @@ impl JsonParser {
         Ok(Self {
             rw_columns,
             source_ctx,
-            enable_upsert: false,
         })
     }
 
@@ -74,95 +68,47 @@ impl JsonParser {
         Ok(Self {
             rw_columns,
             source_ctx: Default::default(),
-            enable_upsert: false,
-        })
-    }
-
-    pub fn new_with_upsert(
-        rw_columns: Vec<SourceColumnDesc>,
-        source_ctx: SourceContextRef,
-    ) -> Result<Self> {
-        Ok(Self {
-            rw_columns,
-            source_ctx,
-            enable_upsert: true,
         })
     }
 
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        key: Option<Vec<u8>>,
         mut payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        if self.enable_upsert {
-            let mut primary_key = key.unwrap_or(vec![]);
-            let mut record = payload.unwrap_or(vec![]);
-
-            let change_event_op = if record.is_empty() {
-                ChangeEventOperation::Delete
-            } else {
-                ChangeEventOperation::Upsert
-            };
-
-            let key_decoded = simd_json::to_borrowed_value(&mut primary_key)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-            let value_decoded = if record.is_empty() {
-                None
-            } else {
-                Some(
-                    simd_json::to_borrowed_value(&mut record)
-                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-                )
-            };
-
-            let mut accessor = UpsertChangeEvent::default().with_key(JsonAccess::new(key_decoded));
-            if let Some(value) = value_decoded {
-                accessor = accessor.with_value(JsonAccess::new(value));
-            }
-            apply_row_operation_on_stream_chunk_writer_with_op(
-                accessor,
-                &mut writer,
-                change_event_op,
-            )
+        if payload.is_none() {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "Empty payload with nonempty key for non-upsert".into(),
+            )));
+        }
+        let value = simd_json::to_borrowed_value(payload.as_mut().unwrap())
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let values = if let simd_json::BorrowedValue::Array(arr) = value {
+            arr
         } else {
-            if payload.is_none() {
-                return Err(RwError::from(ErrorCode::InternalError(
-                    "Empty payload with nonempty key for non-upsert".into(),
-                )));
+            vec![value]
+        };
+        let mut errors = Vec::new();
+        let mut guard = None;
+        for value in values {
+            let accessor = JsonAccess::new(value);
+            match apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer) {
+                Ok(this_guard) => guard = Some(this_guard),
+                Err(err) => errors.push(err),
             }
-            let value = simd_json::to_borrowed_value(payload.as_mut().unwrap())
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            let values = if let simd_json::BorrowedValue::Array(arr) = value {
-                arr
-            } else {
-                vec![value]
-            };
-            let mut errors = Vec::new();
-            let mut guard = None;
-            for value in values {
-                let accessor: UpsertChangeEvent<JsonAccess<'_, '_>, JsonAccess<'_, '_>> =
-                    UpsertChangeEvent::default().with_value(JsonAccess::new(value));
+        }
 
-                match apply_upsert_on_stream_chunk_writer(accessor, &mut writer) {
-                    Ok(this_guard) => guard = Some(this_guard),
-                    Err(err) => errors.push(err),
-                }
+        if let Some(guard) = guard {
+            if !errors.is_empty() {
+                tracing::error!(?errors, "failed to parse some columns");
             }
-
-            if let Some(guard) = guard {
-                if !errors.is_empty() {
-                    tracing::error!(?errors, "failed to parse some columns");
-                }
-                Ok(guard)
-            } else {
-                Err(RwError::from(ErrorCode::InternalError(format!(
-                    "failed to parse all columns: {:?}",
-                    errors
-                ))))
-            }
+            Ok(guard)
+        } else {
+            Err(RwError::from(ErrorCode::InternalError(format!(
+                "failed to parse all columns: {:?}",
+                errors
+            ))))
         }
     }
 }
@@ -178,11 +124,11 @@ impl ByteStreamSourceParser for JsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
+        _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(key, payload, writer).await
+        self.parse_inner(payload, writer).await
     }
 }
 
@@ -199,7 +145,11 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
 
-    use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
+    use crate::parser::upsert_parser::UpsertParser;
+    use crate::parser::{
+        EncodingProperties, JsonParser, JsonProperties, ParserProperties, ProtocolProperties,
+        SourceColumnDesc, SourceStreamChunkBuilder,
+    };
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![
@@ -234,10 +184,7 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -337,10 +284,7 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
         // Parse an incorrect record.
@@ -348,20 +292,14 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
-            assert!(parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .is_err());
+            assert!(parser.parse_inner(Some(payload), writer).await.is_err());
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -420,10 +358,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -463,17 +398,28 @@ mod tests {
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
         ];
-        let parser = JsonParser::new_with_upsert(descs.clone(), Default::default()).unwrap();
+        let props = ParserProperties {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            protocol_config: ProtocolProperties::Upsert,
+        };
+        let mut parser = UpsertParser::new(props, descs.clone(), Default::default())
+            .await
+            .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in items {
-            parser
+            let test = parser
                 .parse_inner(
                     Some(item.0.as_bytes().to_vec()),
-                    Some(item.1.as_bytes().to_vec()),
+                    if !item.1.is_empty() {
+                        Some(item.1.as_bytes().to_vec())
+                    } else {
+                        None
+                    },
                     builder.row_writer(),
                 )
-                .await
-                .unwrap();
+                .await;
+            println!("{:?}", test);
         }
 
         let chunk = builder.finish();
