@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
+use aws_sdk_s3::error::DisplayErrorContext;
 use itertools::Itertools;
 
 use crate::aws_auth::AwsAuthProps;
@@ -106,7 +107,10 @@ impl SplitEnumerator for S3SplitEnumerator {
             if let Some(continuation_token) = next_continuation_token.take() {
                 req = req.continuation_token(continuation_token);
             }
-            let mut res = req.send().await?;
+            let mut res = req
+                .send()
+                .await
+                .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
             objects.extend(res.contents.take().unwrap_or_default());
             if res.is_truncated() {
                 next_continuation_token = Some(res.next_continuation_token.unwrap())
