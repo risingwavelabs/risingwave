@@ -44,7 +44,6 @@ mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_proctime;
-pub mod expr_regexp;
 mod expr_some_all;
 pub(crate) mod expr_udf;
 mod expr_unary;
