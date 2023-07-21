@@ -779,6 +779,12 @@ impl From<&String> for ScalarImpl {
     }
 }
 
+impl From<JsonbRef<'_>> for ScalarImpl {
+    fn from(jsonb: JsonbRef<'_>) -> Self {
+        Self::Jsonb(jsonb.to_owned_scalar())
+    }
+}
+
 impl ScalarImpl {
     pub fn from_binary(bytes: &Bytes, data_type: &DataType) -> RwResult<Self> {
         let res = match data_type {

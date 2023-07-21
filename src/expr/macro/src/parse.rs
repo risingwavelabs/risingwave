@@ -69,12 +69,17 @@ impl FunctionAttr {
 
 impl UserFunctionAttr {
     fn parse(item: &mut syn::ItemFn) -> Result<Self> {
-        let (return_type, iterator_item_type) = match &item.sig.output {
-            syn::ReturnType::Default => (ReturnType::T, None),
+        let (return_type_kind, iterator_item_kind, core_return_type) = match &item.sig.output {
+            syn::ReturnType::Default => (ReturnTypeKind::T, None, "()".into()),
             syn::ReturnType::Type(_, ty) => {
-                let (return_type, inner) = check_type(ty);
-                let iterator_item_type = strip_iterator(inner).map(|ty| check_type(ty).0);
-                (return_type, iterator_item_type)
+                let (kind, inner) = check_type(ty);
+                match strip_iterator(inner) {
+                    Some(ty) => {
+                        let (inner_kind, inner) = check_type(ty);
+                        (kind, Some(inner_kind), inner.to_token_stream().to_string())
+                    }
+                    None => (kind, None, inner.to_token_stream().to_string()),
+                }
             }
         };
         Ok(UserFunctionAttr {
@@ -82,8 +87,9 @@ impl UserFunctionAttr {
             writer: item.sig.inputs.iter().any(arg_is_writer),
             context: item.sig.inputs.iter().any(arg_is_context),
             arg_option: args_are_all_option(item),
-            return_type,
-            iterator_item_type,
+            return_type_kind,
+            iterator_item_kind,
+            core_return_type,
             generic: item.sig.generics.params.len(),
             return_type_span: item.sig.output.span(),
         })
@@ -126,19 +132,19 @@ fn args_are_all_option(item: &syn::ItemFn) -> bool {
 }
 
 /// Check the return type.
-fn check_type(ty: &syn::Type) -> (ReturnType, &syn::Type) {
+fn check_type(ty: &syn::Type) -> (ReturnTypeKind, &syn::Type) {
     if let Some(inner) = strip_outer_type(ty, "Result") {
         if let Some(inner) = strip_outer_type(inner, "Option") {
-            (ReturnType::ResultOption, inner)
+            (ReturnTypeKind::ResultOption, inner)
         } else {
-            (ReturnType::Result, inner)
+            (ReturnTypeKind::Result, inner)
         }
     } else if let Some(inner) = strip_outer_type(ty, "Option") {
-        (ReturnType::Option, inner)
+        (ReturnTypeKind::Option, inner)
     } else if let Some(inner) = strip_outer_type(ty, "DatumRef") {
-        (ReturnType::Option, inner)
+        (ReturnTypeKind::Option, inner)
     } else {
-        (ReturnType::T, ty)
+        (ReturnTypeKind::T, ty)
     }
 }
 

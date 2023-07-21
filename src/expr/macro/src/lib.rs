@@ -436,10 +436,12 @@ struct UserFunctionAttr {
     writer: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
-    /// The return type.
-    return_type: ReturnType,
-    /// The inner type `T` in `impl Iterator<Item = T>`
-    iterator_item_type: Option<ReturnType>,
+    /// The return type kind.
+    return_type_kind: ReturnTypeKind,
+    /// The kind of inner type `T` in `impl Iterator<Item = T>`
+    iterator_item_kind: Option<ReturnTypeKind>,
+    /// The core return type without `Option` or `Result`.
+    core_return_type: String,
     /// The number of generic types.
     generic: usize,
     /// The span of return type.
@@ -447,7 +449,7 @@ struct UserFunctionAttr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum ReturnType {
+enum ReturnTypeKind {
     T,
     Option,
     Result,
@@ -466,6 +468,9 @@ impl FunctionAttr {
 impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.writer && !self.context && !self.arg_option && self.return_type == ReturnType::T
+        !self.writer
+            && !self.context
+            && !self.arg_option
+            && self.return_type_kind == ReturnTypeKind::T
     }
 }

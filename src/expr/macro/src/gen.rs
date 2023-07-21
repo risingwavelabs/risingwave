@@ -113,9 +113,12 @@ impl FunctionAttr {
             .args
             .iter()
             .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
-        let ret_type = types::owned_type(&self.ret)
-            .parse::<TokenStream2>()
-            .unwrap();
+        let ret_type: TokenStream2 = match &self.user_fn.core_return_type {
+            s if s.contains("&") || s.contains("Ref") => {
+                types::ref_type(&self.ret).parse().unwrap()
+            }
+            _ => types::owned_type(&self.ret).parse().unwrap(),
+        };
         let ret_array_type = format_ident!("{}", types::array_type(&self.ret));
         let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
         let const_arg_type = match &self.prebuild {
@@ -152,11 +155,11 @@ impl FunctionAttr {
         };
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(#(#inputs,)* #const_arg #context #writer) };
-        output = match self.user_fn.return_type {
-            ReturnType::T => quote! { Some(#output) },
-            ReturnType::Option => output,
-            ReturnType::Result => quote! { Some(#output?) },
-            ReturnType::ResultOption => quote! { #output? },
+        output = match self.user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { Some(#output) },
+            ReturnTypeKind::Option => output,
+            ReturnTypeKind::Result => quote! { Some(#output?) },
+            ReturnTypeKind::ResultOption => quote! { #output? },
         };
         if !self.user_fn.arg_option {
             output = quote! {
@@ -170,10 +173,15 @@ impl FunctionAttr {
         let append_output = match self.user_fn.writer {
             true => quote! {{
                 let mut writer = builder.writer().begin();
-                _ = #output;
-                writer.finish();
+                if #output.is_some() {
+                    writer.finish();
+                } else {
+                    drop(writer);
+                    builder.append_null();
+                }
             }},
             false => quote! {
+                // type annotation for generic functions
                 let output: Option<#ret_type> = #output;
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
@@ -181,12 +189,12 @@ impl FunctionAttr {
         let row_output = match self.user_fn.writer {
             true => quote! {{
                 let mut writer = String::new();
-                _ = #output;
-                Some(Box::<str>::from(writer).to_scalar_value())
+                #output.map(|_| writer.into())
             }},
             false => quote! {{
+                // type annotation for generic functions
                 let output: Option<#ret_type> = #output;
-                output.map(|s| s.to_scalar_value())
+                output.map(|s| s.into())
             }},
         };
         let eval = if let Some(batch_fn) = &self.batch_fn {
@@ -379,11 +387,11 @@ impl FunctionAttr {
         };
         let fn_name = format_ident!("{}", self.user_fn.name);
         let mut next_state = quote! { #fn_name(state, #args) };
-        next_state = match self.user_fn.return_type {
-            ReturnType::T => quote! { Some(#next_state) },
-            ReturnType::Option => next_state,
-            ReturnType::Result => quote! { Some(#next_state?) },
-            ReturnType::ResultOption => quote! { #next_state? },
+        next_state = match self.user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { Some(#next_state) },
+            ReturnTypeKind::Option => next_state,
+            ReturnTypeKind::Result => quote! { Some(#next_state?) },
+            ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
         if !self.user_fn.arg_option {
             if self.args.len() > 1 {
@@ -582,23 +590,23 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match self.user_fn.return_type {
-            ReturnType::T => quote! { iter },
-            ReturnType::Option => quote! { iter.flatten() },
-            ReturnType::Result => quote! { iter? },
-            ReturnType::ResultOption => quote! { value?.flatten() },
+        let iter = match self.user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { iter },
+            ReturnTypeKind::Option => quote! { iter.flatten() },
+            ReturnTypeKind::Result => quote! { iter? },
+            ReturnTypeKind::ResultOption => quote! { value?.flatten() },
         };
-        let iterator_item_type = self.user_fn.iterator_item_type.clone().ok_or_else(|| {
+        let iterator_item_type = self.user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(
                 self.user_fn.return_type_span,
                 "expect `impl Iterator` in return type",
             )
         })?;
         let output = match iterator_item_type {
-            ReturnType::T => quote! { Some(output) },
-            ReturnType::Option => quote! { output },
-            ReturnType::Result => quote! { Some(output?) },
-            ReturnType::ResultOption => quote! { output? },
+            ReturnTypeKind::T => quote! { Some(output) },
+            ReturnTypeKind::Option => quote! { output },
+            ReturnTypeKind::Result => quote! { Some(output?) },
+            ReturnTypeKind::ResultOption => quote! { output? },
         };
 
         Ok(quote! {
