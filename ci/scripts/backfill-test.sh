@@ -29,12 +29,12 @@ git config --global --add safe.directory /risingwave
 
 download_and_prepare_rw "$profile" common
 
-echo "--- e2e, ci-3cn-1fe, build"
-cargo make ci-start ci-3cn-1fe
+echo "--- e2e, ci-backfill, build"
+cargo make ci-start ci-backfill
 
 ################ TESTS
 
-echo "--- e2e, ci-3cn-1fe, run backfill test"
+echo "--- e2e, ci-backfill, run backfill test"
 ./ci/scripts/run-backfill-tests.sh
 
 echo "Backfill tests complete"
