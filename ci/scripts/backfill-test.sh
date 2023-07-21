@@ -36,7 +36,7 @@ cargo make ci-start ci-3cn-1fe
 ################ TESTS
 
 echo "--- e2e, ci-3cn-1fe, run backfill test"
-./run-backfill-tests.sh
+./ci/scripts/run-backfill-tests.sh
 
 echo "Backfill tests complete"
 
