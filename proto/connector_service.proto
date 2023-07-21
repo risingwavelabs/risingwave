@@ -98,6 +98,16 @@ message ValidateSinkResponse {
   ValidationError error = 1;
 }
 
+message SinkMetadata {
+  message SerializedMetadata {
+    bytes metadata = 1;
+  }
+
+  oneof metadata {
+    SerializedMetadata serialized = 1;
+  }
+}
+
 /* Source Service */
 
 message CdcMessage {
