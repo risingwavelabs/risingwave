@@ -91,8 +91,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             )));
         }
 
-        let parser_config =
-            SpecificParserConfig::new(format, info, &source_node.properties).await?;
+        let parser_config = SpecificParserConfig::new(format, info, &source_node.properties)?;
 
         let columns: Vec<_> = source_node
             .columns

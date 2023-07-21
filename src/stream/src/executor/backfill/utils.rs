@@ -167,7 +167,7 @@ fn mark_chunk_inner(
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
         let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos.project(pk_in_output_indices);
+        let rhs = current_pos;
         let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
         match order {
             Ordering::Less | Ordering::Equal => true,
