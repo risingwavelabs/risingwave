@@ -337,6 +337,7 @@ where
                     Some(barrier) => barrier,
                     None => bail!("BUG: current_backfill loop exited without a barrier"),
                 };
+                // TODO: Process existing buffered snapshots.
                 let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
