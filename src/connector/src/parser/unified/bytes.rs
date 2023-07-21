@@ -12,60 +12,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::from_utf8;
+
+use anyhow::anyhow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+use super::{Access, AccessError, AccessResult};
 
 // where do we put data
 
-pub struct BytesAccess {
+pub struct BytesAccess<'a> {
+    // whether to treat the bytes as bytea or string
+    as_str: bool,
+    column_name: &'a Option<String>,
     bytes: Vec<u8>,
 }
 
-impl BytesAccess {
-    pub fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes }
-    }
-}
-
-pub struct BytesChangeEvent {
-    value_accessor: BytesAccess,
-    key_accessor: Option<BytesAccess>,
-}
-
-impl BytesChangeEvent {
-    pub fn with_value(value_accessor: BytesAccess) -> Self {
-        Self::new(None, value_accessor)
-    }
-
-    pub fn new(key_accessor: Option<BytesAccess>, value_accessor: BytesAccess) -> Self {
+impl<'a> BytesAccess<'a> {
+    pub fn new(as_str: bool, column_name: &'a Option<String>, bytes: Vec<u8>) -> Self {
         Self {
-            value_accessor,
-            key_accessor,
+            as_str,
+            column_name,
+            bytes,
         }
     }
 }
 
-impl ChangeEvent for BytesChangeEvent {
-    fn op(&self) -> std::result::Result<ChangeEventOperation, super::AccessError> {
-        Ok(ChangeEventOperation::Upsert)
-    }
-
-    fn access_field(&self, name: &str, type_expected: &DataType) -> super::AccessResult {
-        self.value_accessor.access(&[name], Some(type_expected))
-    }
-}
-
-impl Access for BytesAccess {
+impl<'a> Access for BytesAccess<'a> {
     /// path is empty currently, `type_expected` should be `Bytea`
-    fn access(&self, _path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
-        if let Some(DataType::Bytea) = type_expected {
-            return Ok(Some(ScalarImpl::Bytea(Box::from(self.bytes.as_slice()))));
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+        match (self.as_str, type_expected) {
+            (true, Some(DataType::Varchar)) => {
+                if path.len() == 1 && self.column_name.as_ref().unwrap() == path[0] {
+                    let str = from_utf8(&self.bytes).map_err(|e| AccessError::Other(anyhow!(e)))?;
+                    Ok(Some(str.into()))
+                } else {
+                    Err(AccessError::Undefined {
+                        name: path[0].into(),
+                        path: self.column_name.clone().unwrap(),
+                    })
+                }
+            }
+            (false, Some(DataType::Bytea)) => {
+                Ok(Some(ScalarImpl::Bytea(Box::from(self.bytes.as_slice()))))
+            }
+            (_, _) => Err(AccessError::TypeError {
+                expected: if self.as_str {
+                    "Varchar".to_string()
+                } else {
+                    "Bytea".to_string()
+                },
+                got: format!("{:?}", type_expected),
+                value: "".to_string(),
+            }),
         }
-        Err(AccessError::TypeError {
-            expected: "Bytea".to_string(),
-            got: format!("{:?}", type_expected),
-            value: "".to_string(),
-        })
     }
 }

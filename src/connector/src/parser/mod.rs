@@ -61,6 +61,7 @@ mod schema_registry;
 mod unified;
 mod upsert_parser;
 mod util;
+
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
@@ -432,7 +433,9 @@ impl AccessBuilderImpl {
                 let config = ProtobufParserConfig::new(config).await?;
                 AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config)?)
             }
-            EncodingProperties::Bytes => AccessBuilderImpl::Bytes(BytesAccessBuilder::new()?),
+            EncodingProperties::Bytes(_) => {
+                AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
+            }
             EncodingProperties::Json(_) => AccessBuilderImpl::Json(JsonAccessBuilder::new()?),
             EncodingProperties::Csv(_) => unreachable!(),
             EncodingProperties::None => unreachable!(),
@@ -598,12 +601,18 @@ pub struct CsvProperties {
 pub struct JsonProperties {}
 
 #[derive(Debug, Default, Clone)]
+pub struct BytesProperties {
+    pub as_str: bool,
+    pub column_name: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
 pub enum EncodingProperties {
     Avro(AvroProperties),
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    Bytes,
+    Bytes(BytesProperties),
     #[default]
     None,
 }
@@ -729,7 +738,13 @@ impl ParserProperties {
                 EncodingProperties::Json(JsonProperties {}),
                 ProtocolProperties::Upsert,
             ),
-            SourceFormat::Bytes => (EncodingProperties::Bytes, ProtocolProperties::Plain),
+            SourceFormat::Bytes => (
+                EncodingProperties::Bytes(BytesProperties {
+                    as_str: false,
+                    column_name: None,
+                }),
+                ProtocolProperties::Plain,
+            ),
             SourceFormat::Native | SourceFormat::Invalid => {
                 (EncodingProperties::None, ProtocolProperties::Plain)
             }
@@ -762,7 +777,7 @@ impl SpecificParserConfig {
                 EncodingProperties::Avro(_) => SourceFormat::Avro,
                 EncodingProperties::Protobuf(_) => SourceFormat::Protobuf,
                 EncodingProperties::Csv(_) => SourceFormat::Csv,
-                EncodingProperties::Bytes => SourceFormat::Bytes,
+                EncodingProperties::Bytes(_) => SourceFormat::Bytes,
                 _ => unreachable!(),
             },
             SpecificParserConfig::Maxwell(_) => SourceFormat::Maxwell,

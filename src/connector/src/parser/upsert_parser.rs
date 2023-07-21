@@ -15,12 +15,13 @@
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use super::bytes_parser::BytesAccessBuilder;
 use super::unified::upsert::UpsertChangeEvent;
 use super::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
 use super::unified::{AccessImpl, ChangeEventOperation};
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
+    ParserProperties, SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::extract_key_config;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -50,21 +51,38 @@ async fn build_accessor_builder(
     }
 }
 
+fn check_rw_kafka_key(columns: &Vec<SourceColumnDesc>) -> bool {
+    for col in columns {
+        if col.name.starts_with("_rw_kafka_key") {
+            return true;
+        }
+    }
+    false
+}
+
 impl UpsertParser {
     pub async fn new(
         props: ParserProperties,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        // TODO: should check where to find name(key or value) when there is such circumstances.
-        let avro_primary_key_column_name =
+        let mut avro_primary_key_column_name = None;
+        let key_builder: AccessBuilderImpl;
+        // check whether columns has `_rw_kafka_key`, if so, the key accessor should be bytes
+        if check_rw_kafka_key(&rw_columns) {
+            key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+                EncodingProperties::Bytes(BytesProperties {
+                    as_str: true,
+                    column_name: Some("_rw_kafka_key".into()),
+                }),
+            )?);
+        } else {
             if let EncodingProperties::Avro(config) = &props.encoding_config {
-                Some(config.upsert_primary_key.clone())
-            } else {
-                None
-            };
-        let (key_config, key_type) = extract_key_config!(props);
-        let key_builder = build_accessor_builder(key_config, key_type).await?;
+                avro_primary_key_column_name = Some(config.upsert_primary_key.clone())
+            }
+            let (key_config, key_type) = extract_key_config!(props);
+            key_builder = build_accessor_builder(key_config, key_type).await?;
+        }
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
         Ok(Self {
