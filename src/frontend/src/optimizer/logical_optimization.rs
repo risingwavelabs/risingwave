@@ -271,7 +271,7 @@ static PROJECT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static SPLIT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Split Over Window",
-        vec![OverWindowSplitByWindowRule::create()],
+        vec![OverWindowSplitRule::create()],
         ApplyOrder::TopDown,
     )
 });

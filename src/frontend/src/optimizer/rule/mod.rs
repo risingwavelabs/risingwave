@@ -149,7 +149,7 @@ macro_rules! for_all_rules {
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
-            , { OverWindowSplitByWindowRule }
+            , { OverWindowSplitRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
