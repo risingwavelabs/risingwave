@@ -33,8 +33,7 @@ use serde_with::serde_as;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::ClickHouseCommon;
 use crate::sink::{
-    Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::source::DataType;
 
@@ -180,9 +179,7 @@ impl Sink for ClickHouseSink {
         // For upsert clickhouse sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for {} clickhouse sink (please define in `primary_key` field)",
-                self.config.r#type
-            )));
+                "Primary key not defined for upsert clickhouse sink (please define in `primary_key` field)")));
         }
 
         // check reachability
@@ -194,8 +191,7 @@ impl Sink for ClickHouseSink {
             .bind(self.config.common.table.clone())
             .bind("position")
             .fetch_all::<SystemColumn>()
-            .await
-            .map_err(SinkError::from)?;
+            .await?;
         assert!(
             !clickhouse_column.is_empty(),
             "table {:?}.{:?} is not find in clickhouse",
@@ -236,15 +232,14 @@ impl ClickHouseSinkWriter {
         if !is_append_only {
             tracing::warn!("Update and delete are not recommended because of their impact on clickhouse performance.");
         }
-        let client = config.common.build_client().map_err(SinkError::from)?;
+        let client = config.common.build_client()?;
         let query_column = "select distinct ?fields from system.columns where database = ? and table = ? order by position".to_string();
         let clickhouse_column = client
             .query(&query_column)
             .bind(config.common.database.clone())
             .bind(config.common.table.clone())
             .fetch_all::<SystemColumn>()
-            .await
-            .map_err(SinkError::from)?;
+            .await?;
         let column_correct_vec: Result<Vec<(bool, u8)>> = clickhouse_column
             .iter()
             .map(Self::build_column_correct_vec)
@@ -289,20 +284,16 @@ impl ClickHouseSinkWriter {
             .collect_vec();
         let mut inter = self
             .client
-            .insert_with_filed::<Rows>(&self.config.common.table, Some(file_name))
-            .map_err(SinkError::from)?;
+            .insert_with_filed::<Rows>(&self.config.common.table, Some(file_name))?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 continue;
             }
             let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
             self.build_row_binary(row, &mut buffer)?;
-            inter
-                .write_row_binary(buffer)
-                .await
-                .map_err(SinkError::from)?;
+            inter.write_row_binary(buffer).await?;
         }
-        inter.end().await.map_err(SinkError::from)?;
+        inter.end().await?;
         Ok(())
     }
 
@@ -470,28 +461,21 @@ impl ClickHouseSinkWriter {
             let &(_, accuracy_time) = self.column_correct_vec.get(index).unwrap();
             match op {
                 Op::Insert => {
-                    let mut inter = self
-                        .client
-                        .insert_with_filed::<Rows>(
-                            &self.config.common.table,
-                            Some(field_names.clone()),
-                        )
-                        .map_err(SinkError::from)?;
+                    let mut inter = self.client.insert_with_filed::<Rows>(
+                        &self.config.common.table,
+                        Some(field_names.clone()),
+                    )?;
                     let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
                     self.build_row_binary(row, &mut buffer)?;
-                    inter
-                        .write_row_binary(buffer)
-                        .await
-                        .map_err(SinkError::from)?;
-                    inter.end().await.map_err(SinkError::from)?;
+                    inter.write_row_binary(buffer).await?;
+                    inter.end().await?;
                 }
                 Op::Delete => match Self::build_ck_fields(row.datum_at(index), accuracy_time)? {
                     Some(f) => {
                         self.client
                             .delete(&self.config.common.table, pk_name_0, vec![f])
                             .delete()
-                            .await
-                            .map_err(SinkError::from)?;
+                            .await?;
                     }
                     None => return Err(SinkError::ClickHouse("pk can not be null".to_string())),
                 },
@@ -507,8 +491,7 @@ impl ClickHouseSinkWriter {
                             field_names_update.clone(),
                         )
                         .update_fields(fields_vec, pk)
-                        .await
-                        .map_err(SinkError::from)?;
+                        .await?;
                 }
             }
         }
@@ -593,12 +576,8 @@ impl SinkWriter for ClickHouseSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
             self.append_only(chunk).await
-        } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
-            unreachable!()
-        } else if self.config.r#type == SINK_TYPE_UPSERT {
-            self.upsert(chunk).await
         } else {
-            unreachable!()
+            self.upsert(chunk).await
         }
     }
 
