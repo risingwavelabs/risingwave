@@ -40,16 +40,11 @@ impl ConnectorSource {
     pub fn new(
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
-        connector_node_addr: Option<String>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
-        let mut config =
+        let config =
             ConnectorProperties::extract(properties).map_err(|e| ConnectorError(e.into()))?;
-        if let Some(addr) = connector_node_addr {
-            // fixme: require source_id
-            config.init_properties_for_cdc(0, addr, None)
-        }
 
         Ok(Self {
             config,
@@ -111,8 +106,6 @@ impl ConnectorSource {
             // source_ctx to live in a single actor.
             let source_ctx = source_ctx.clone();
             async move {
-                // InnerConnectorSourceReader::new(props, split, columns, metrics,
-                // source_info).await
                 let parser_config = ParserConfig {
                     specific: self.parser_config.clone(),
                     common: CommonParserConfig {

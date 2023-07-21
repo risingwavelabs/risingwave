@@ -88,11 +88,11 @@ impl JoinEntry {
     }
 
     /// Delete from the cache.
-    pub fn remove(&mut self, pk: &OwnedRow) {
-        if let Some(value) = self.cached.remove(pk) {
-            self.kv_heap_size.sub(pk, &value);
+    pub fn remove(&mut self, key: &OwnedRow) {
+        if let Some(value) = self.cached.remove(key) {
+            self.kv_heap_size.sub(key, &value);
         } else {
-            panic!("pk {:?} should be in the cache", pk);
+            panic!("key {:?} should be in the cache", key);
         }
     }
 
@@ -134,7 +134,7 @@ impl DerefMut for JoinEntryWrapper {
 
 struct TemporalSide<K: HashKey, S: StateStore> {
     source: StorageTable<S>,
-    pk: Vec<usize>,
+    table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
     cache: ManagedLruCache<K, JoinEntryWrapper, DefaultHasher, SharedStatsAlloc<Global>>,
     ctx: ActorContextRef,
@@ -182,7 +182,9 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
             pin_mut!(iter);
             while let Some(row) = iter.next_row().await? {
                 entry.insert(
-                    row.as_ref().project(&self.pk).into_owned_row(),
+                    row.as_ref()
+                        .project(&self.table_stream_key_indices)
+                        .into_owned_row(),
                     row.project(&self.table_output_indices).into_owned_row(),
                 );
             }
@@ -197,17 +199,22 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         &mut self,
         chunks: Vec<StreamChunk>,
         join_keys: &[usize],
+        right_stream_key_indices: &[usize],
     ) -> StreamExecutorResult<()> {
         for chunk in chunks {
+            // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
+            let chunk = chunk.compact();
             let keys = K::build(join_keys, chunk.data_chunk())?;
             for ((op, row), key) in chunk.rows().zip_eq_debug(keys.into_iter()) {
                 if self.cache.contains(&key) {
                     // Update cache
                     let mut entry = self.cache.get_mut(&key).unwrap();
-                    let pk = row.project(&self.pk).into_owned_row();
+                    let stream_key = row.project(right_stream_key_indices).into_owned_row();
                     match op {
-                        Op::Insert | Op::UpdateInsert => entry.insert(pk, row.into_owned_row()),
-                        Op::Delete | Op::UpdateDelete => entry.remove(&pk),
+                        Op::Insert | Op::UpdateInsert => {
+                            entry.insert(stream_key, row.into_owned_row())
+                        }
+                        Op::Delete | Op::UpdateDelete => entry.remove(&stream_key),
                     };
                 }
             }
@@ -306,6 +313,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         table_output_indices: Vec<usize>,
+        table_stream_key_indices: Vec<usize>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
@@ -335,15 +343,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             alloc,
         );
 
-        let pk = table.pk_in_output_indices().unwrap();
-
         Self {
             ctx: ctx.clone(),
             left,
             right,
             right_table: TemporalSide {
                 source: table,
-                pk,
+                table_stream_key_indices,
                 table_output_indices,
                 cache,
                 ctx,
@@ -369,6 +375,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             self.left.schema().len(),
             self.right.schema().len(),
         );
+
+        let right_stream_key_indices = self.right.pk_indices().to_vec();
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
@@ -441,7 +449,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         }
                     }
                     self.right_table.cache.update_epoch(barrier.epoch.curr);
-                    self.right_table.update(updates, &self.right_join_keys)?;
+                    self.right_table.update(
+                        updates,
+                        &self.right_join_keys,
+                        &right_stream_key_indices,
+                    )?;
                     prev_epoch = Some(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
