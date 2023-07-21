@@ -22,15 +22,19 @@ run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
 }
 
+run_sql() {
+  psql -h localhost -p 4566 -d dev -U root -c "$@"
+}
+
 flush() {
-  psql -h localhost -p 4566 -d dev -U root -c "FLUSH;"
+  run_sql "FLUSH;"
 }
 
 run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql
 
 # Provide snapshot
-for i in $(seq 1 16)
+for i in $(seq 1 12)
 do
   run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql
   flush
@@ -39,7 +43,7 @@ done
 run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
 # Provide upstream updates
-for i in $(seq 1 3)
+for i in $(seq 1 5)
 do
   run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql &
 done

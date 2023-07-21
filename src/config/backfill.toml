@@ -1,6 +1,5 @@
 [streaming.developer]
-stream_chunk_size = 1000000
+stream_chunk_size = 1
 
 [system]
 barrier_interval_ms = 1
-checkpoint_frequency = 1
