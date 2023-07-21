@@ -21,7 +21,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
         let message_id = msg.message_id.id;
 
         SourceMessage {
-            key: None,
+            key: msg.key().map(|key| key.into_bytes()),
             payload: Some(msg.payload.data),
             offset: format!(
                 "{}:{}:{}:{}",
