@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
@@ -96,13 +97,7 @@ impl AwsAuthProps {
                 ),
             ))
         } else {
-            let region = self.build_region().await?;
-            let mut chain = DefaultCredentialsChain::builder().region(region);
-
-            if let Some(profile_name) = self.profile.as_ref() {
-                chain = chain.profile_name(profile_name)
-            }
-            Ok(SharedCredentialsProvider::new(chain.build().await))
+            Err(anyhow!("access_key and secret_key should be provided for aws auth").into())
         }
     }
 
