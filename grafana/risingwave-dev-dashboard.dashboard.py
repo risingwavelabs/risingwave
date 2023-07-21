@@ -1594,10 +1594,16 @@ def section_hummock(panels):
     table = '$table'
     mv_id = '{{id}}'
     mv_remote_read_query = f'sum(histogram_quantile(0.9, sum(rate(state_store_iter_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(id) materialized_info) by (id) + sum((histogram_quantile(0.9, sum(rate(state_store_get_key_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile(0.9, sum(rate(state_store_get_value_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(id) materialized_info) by (id)'
-    mv_remote_read_query_legend = f'p90 - materialized view {mv_id}'
+    mv_remote_read_query_legend = f'read p90 - materialized view {mv_id}'
 
     mv_remote_read_query_pmax = f'sum(histogram_quantile(1.0, sum(rate(state_store_iter_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(id) materialized_info) by (id) + sum((histogram_quantile(0.9, sum(rate(state_store_get_key_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile(1.0, sum(rate(state_store_get_value_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(id) materialized_info) by (id)'
-    mv_remote_read_query_legend_pmax = f'pmax - materialized view {mv_id}'
+    mv_remote_read_query_legend_pmax = f'read pmax - materialized view {mv_id}'
+
+    mv_write_size_p90 = f'sum(histogram_quantile(0.9, sum(rate(state_store_write_batch_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(id) materialized_info) by (id)'
+    mv_write_size_p90_legend = f'write p90 - materialized view {mv_id}'
+
+    mv_write_size_pmax = f'sum(histogram_quantile(1.0, sum(rate(state_store_write_batch_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(id) materialized_info) by (id)'
+    mv_write_size_pmax_legend = f'write pmax - materialized view {mv_id}'
     return [
         panels.row("Hummock"),
         panels.timeseries_latency(
@@ -1756,6 +1762,22 @@ def section_hummock(panels):
                 panels.target(
                         mv_remote_read_query_pmax,
                         mv_remote_read_query_legend_pmax,
+                    ),
+            ],
+        ),
+
+        panels.timeseries_bytes(
+            "Materialized View Write Size",
+            "",
+            [
+                
+                panels.target(
+                        mv_write_size_p90,
+                        mv_write_size_p90_legend,
+                    ),
+                panels.target(
+                        mv_write_size_pmax,
+                        mv_write_size_pmax_legend,
                     ),
             ],
         ),
