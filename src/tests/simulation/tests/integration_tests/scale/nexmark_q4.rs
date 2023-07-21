@@ -104,7 +104,7 @@ async fn nexmark_q4_materialize_agg() -> Result<()> {
 
 #[madsim::test]
 async fn nexmark_q4_source() -> Result<()> {
-    nexmark_q4_common([identity_contains("source: \"bid\"")]).await
+    nexmark_q4_common([identity_contains("source: bid")]).await
 }
 
 #[madsim::test]
