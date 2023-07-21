@@ -277,6 +277,16 @@ pub fn is_not_false(v: Option<bool>) -> bool {
     v != Some(false)
 }
 
+#[function("is_null(*) -> boolean", batch_fn = "batch_is_null")]
+fn is_null<T>(v: Option<T>) -> bool {
+    v.is_none()
+}
+
+#[function("is_not_null(*) -> boolean", batch_fn = "batch_is_not_null")]
+fn is_not_null<T>(v: Option<T>) -> bool {
+    v.is_some()
+}
+
 // optimized functions for bool arrays
 
 fn boolarray_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
@@ -341,6 +351,14 @@ fn boolarray_is_false(a: &BoolArray) -> BoolArray {
 
 fn boolarray_is_not_false(a: &BoolArray) -> BoolArray {
     BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn batch_is_null(a: &impl Array) -> BoolArray {
+    BoolArray::new(!a.null_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn batch_is_not_null(a: &impl Array) -> BoolArray {
+    BoolArray::new(a.null_bitmap().clone(), Bitmap::ones(a.len()))
 }
 
 #[cfg(test)]

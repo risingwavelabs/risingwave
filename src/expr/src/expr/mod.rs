@@ -40,7 +40,6 @@ mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;
-mod expr_is_null;
 mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
