@@ -72,7 +72,6 @@ impl UpsertParser {
         if check_rw_kafka_key(&rw_columns) {
             key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
                 EncodingProperties::Bytes(BytesProperties {
-                    as_str: true,
                     column_name: Some("_rw_kafka_key".into()),
                 }),
             )?);

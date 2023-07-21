@@ -21,7 +21,6 @@ use super::{AccessBuilder, EncodingProperties};
 
 #[derive(Debug)]
 pub struct BytesAccessBuilder {
-    as_str: bool,
     column_name: Option<String>,
 }
 
@@ -29,7 +28,6 @@ impl AccessBuilder for BytesAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         Ok(AccessImpl::Bytes(BytesAccess::new(
-            self.as_str,
             &self.column_name,
             payload,
         )))
@@ -40,7 +38,6 @@ impl BytesAccessBuilder {
     pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
         let config = try_match_expand!(encoding_properties, EncodingProperties::Bytes)?;
         Ok(Self {
-            as_str: config.as_str,
             column_name: config.column_name,
         })
     }
@@ -66,10 +63,7 @@ mod tests {
         let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
         let props = ParserProperties {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Bytes(BytesProperties {
-                as_str: false,
-                column_name: None,
-            }),
+            encoding_config: EncodingProperties::Bytes(BytesProperties { column_name: None }),
             protocol_config: ProtocolProperties::Plain,
         };
         let mut parser = PlainParser::new(props, descs.clone(), Default::default())

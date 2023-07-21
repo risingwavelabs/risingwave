@@ -124,7 +124,7 @@ async fn extract_upsert_avro_table_schema(
     } else {
         let kafka_key_column = ColumnCatalog {
             column_desc: ColumnDesc {
-                data_type: DataType::Varchar,
+                data_type: DataType::Bytea,
                 column_id: (vec_column_catalog.len() as i32).into(),
                 name: KAFKA_KEY_COLUMN_NAME.to_string(),
                 field_descs: vec![],

@@ -602,7 +602,6 @@ pub struct JsonProperties {}
 
 #[derive(Debug, Default, Clone)]
 pub struct BytesProperties {
-    pub as_str: bool,
     pub column_name: Option<String>,
 }
 
@@ -739,10 +738,7 @@ impl ParserProperties {
                 ProtocolProperties::Upsert,
             ),
             SourceFormat::Bytes => (
-                EncodingProperties::Bytes(BytesProperties {
-                    as_str: false,
-                    column_name: None,
-                }),
+                EncodingProperties::Bytes(BytesProperties { column_name: None }),
                 ProtocolProperties::Plain,
             ),
             SourceFormat::Native | SourceFormat::Invalid => {
