@@ -20,12 +20,14 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
@@ -141,7 +143,10 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
-        let mut builder = DataChunkBuilder::new(schema.data_types(), self.chunk_size);
+        // let mut builder = DataChunkBuilder::new(schema.data_types(), self.chunk_size);
+        let mut builders = (0..upstream_table.vnodes()).map(|_| {
+            DataChunkBuilder::new(schema.data_types(), self.chunk_size)
+        }).collect_vec();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -157,7 +162,7 @@ where
                     &upstream_table,
                     backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                     self.chunk_size,
-                    &mut builder,
+                    &mut builders,
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -483,10 +488,10 @@ where
         upstream_table: &'a ReplicatedStateTable<S>,
         backfill_state: BackfillState,
         chunk_size: usize,
-        builder: &'a mut DataChunkBuilder,
+        builders: Vec<&'a mut DataChunkBuilder>,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
-        for vnode in upstream_table.vnodes().iter_vnodes() {
+        for (vnode, builder) in upstream_table.vnodes().iter_vnodes().zip_eq_debug(builders.into_iter()) {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::Completed => {
