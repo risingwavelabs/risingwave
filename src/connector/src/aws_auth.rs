@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
