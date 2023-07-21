@@ -38,7 +38,7 @@ use crate::executor::backfill::upstream_table::snapshot::{
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk,
+    iter_chunks, mapping_chunk, mapping_message, mark_chunk, restore_backfill_progress,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -124,7 +124,7 @@ where
         }
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -141,6 +141,10 @@ where
 
         let mut upstream = self.upstream.execute();
 
+        // Current position of the upstream_table storage primary key.
+        // `None` means it starts from the beginning.
+        let mut current_pos: Option<OwnedRow> = None;
+
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
@@ -150,17 +154,11 @@ where
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        // TODO: restore backfill offset from persistent state check whether backfill is finished/
-        // or needed.
-        let is_finished = if let Some(state_table) = self.state_table.as_mut() {
-            let is_finished = check_all_vnode_finished(state_table, state_len).await?;
-            if is_finished {
-                assert!(!first_barrier.is_newly_added(self.actor_id));
-            }
-            is_finished
+        // TODO: restore backfill offset from persistent state
+        let (backfill_offset, is_finished) = if let Some(state_table) = self.state_table.as_mut() {
+            restore_backfill_progress(state_table, state_len).await?
         } else {
-            // Maintain backwards compatibility with no state table
-            !first_barrier.is_newly_added(self.actor_id)
+            (None, false)
         };
 
         // If the snapshot is empty, we don't need to backfill.
@@ -184,10 +182,6 @@ where
         // | f                    | t              | f                |
         // | f                    | f              | t                |
         let to_backfill = !is_finished && !is_snapshot_empty;
-
-        // Current position of the upstream_table storage primary key.
-        // `None` means it starts from the beginning.
-        let mut current_pos: Option<OwnedRow> = None;
 
         // Use these to persist state.
         // They contain the backfill position,

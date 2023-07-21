@@ -35,6 +35,7 @@ lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
 multimap = "0.8"
+mysql_async = { version = "0.30", default-features = false, features = ["default"] }
 num-traits = "0.2"
 parking_lot = "0.12"
 pin-project = "1"
@@ -65,6 +66,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-metrics = "0.1.0"
+tokio-postgres = "0.7.8"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"

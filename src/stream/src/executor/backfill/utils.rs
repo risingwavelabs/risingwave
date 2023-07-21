@@ -35,7 +35,7 @@ use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTableInner;
+use crate::common::table::state_table::{StateTable, StateTableInner};
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -265,6 +265,16 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
         }
     }
     Ok(is_finished)
+}
+
+pub(crate) async fn restore_backfill_progress<S: StateStore>(
+    state_table: &StateTable<S>,
+    state_len: usize,
+) -> StreamExecutorResult<(Option<String>, bool)> {
+    debug_assert!(!state_table.vnode_bitmap().is_empty());
+    // TODO
+    let is_finished = false;
+    Ok((None, is_finished))
 }
 
 /// Flush the data

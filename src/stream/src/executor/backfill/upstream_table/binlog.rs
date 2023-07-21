@@ -21,16 +21,29 @@ impl UpstreamBinlogOffsetRead for UpstreamBinlogReaderImpl {
 
 pub struct PostgresBinlogReader {}
 
-pub struct MySqlBinlogReader {}
+pub struct MySqlBinlogReader {
+    config: Option<()>,
+}
 
 impl UpstreamBinlogOffsetRead for MySqlBinlogReader {
     fn current_binlog_offset(&self) -> Option<String> {
+        println!("current_binlog_offset for mysql");
         todo!()
     }
 }
 
 impl UpstreamBinlogOffsetRead for PostgresBinlogReader {
     fn current_binlog_offset(&self) -> Option<String> {
+        println!("current_binlog_offset for postgres");
         todo!()
     }
+}
+
+// unit test for binlog readers
+#[cfg(test)]
+mod tests {
+
+    // tokio unit test
+    #[tokio::test]
+    async fn test_mysql_binlog_reader() {}
 }
