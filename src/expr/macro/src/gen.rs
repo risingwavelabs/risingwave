@@ -116,6 +116,7 @@ impl FunctionAttr {
         let ret_type = types::owned_type(&self.ret)
             .parse::<TokenStream2>()
             .unwrap();
+        let ret_array_type = format_ident!("{}", types::array_type(&self.ret));
         let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
         let const_arg_type = match &self.prebuild {
             Some(s) => s.split("::").next().unwrap().parse().unwrap(),
@@ -188,6 +189,62 @@ impl FunctionAttr {
                 output.map(|s| s.to_scalar_value())
             }},
         };
+        let eval = if let Some(batch_fn) = &self.batch_fn {
+            // user defined batch function
+            let fn_name = format_ident!("{}", batch_fn);
+            quote! {
+                let c = #fn_name(#(#arrays),*);
+                Ok(Arc::new(c.into()))
+            }
+        } else if self.args.iter().all(|t| types::is_primitive(t))
+            && (types::is_primitive(&self.ret) || self.ret == "boolean")
+            && self.user_fn.is_pure()
+        {
+            // SIMD optimization for primitive types
+            if self.args.len() == 0 {
+                quote! {
+                    let c = #ret_array_type::from_iter_bitmap(
+                        std::iter::repeat_with(|| #fn_name()).take(input.capacity())
+                        Bitmap::ones(input.capacity()),
+                    );
+                    Ok(Arc::new(c.into()))
+                }
+            } else if self.args.len() == 1 {
+                quote! {
+                    let c = #ret_array_type::from_iter_bitmap(
+                        a0.raw_iter().map(|a| #fn_name(a)),
+                        a0.null_bitmap().clone()
+                    );
+                    Ok(Arc::new(c.into()))
+                }
+            } else if self.args.len() == 2 {
+                quote! {
+                    let c = #ret_array_type::from_iter_bitmap(
+                        a0.raw_iter()
+                            .zip(a1.raw_iter())
+                            .map(|(a, b)| #fn_name #generic(a, b)),
+                        a0.null_bitmap() & a1.null_bitmap(),
+                    );
+                    Ok(Arc::new(c.into()))
+                }
+            } else {
+                todo!("SIMD optimization for {} arguments", self.args.len())
+            }
+        } else {
+            // no optimization
+            quote! {
+                let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
+
+                for ((#(#inputs,)*), visible) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()) {
+                    if !visible {
+                        builder.append_null();
+                        continue;
+                    }
+                    #append_output
+                }
+                Ok(Arc::new(builder.finish().into()))
+            }
+        };
 
         Ok(quote! {
             |return_type, children| {
@@ -226,20 +283,10 @@ impl FunctionAttr {
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         // evaluate children and downcast arrays
                         #(
-                        let #array_refs = self.#child.eval_checked(input).await?;
-                        let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                            let #array_refs = self.#child.eval_checked(input).await?;
+                            let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
-
-                        let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
-
-                        for ((#(#inputs,)*), visible) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()) {
-                            if !visible {
-                                builder.append_null();
-                                continue;
-                            }
-                            #append_output
-                        }
-                        Ok(Arc::new(builder.finish().into()))
+                        #eval
                     }
                     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
                         #(

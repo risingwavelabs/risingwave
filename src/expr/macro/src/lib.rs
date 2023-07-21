@@ -457,16 +457,6 @@ enum ReturnType {
     ResultOption,
 }
 
-impl ReturnType {
-    fn contains_result(&self) -> bool {
-        matches!(self, ReturnType::Result | ReturnType::ResultOption)
-    }
-
-    fn contains_option(&self) -> bool {
-        matches!(self, ReturnType::Option | ReturnType::ResultOption)
-    }
-}
-
 impl FunctionAttr {
     /// Return a unique name that can be used as an identifier.
     fn ident_name(&self) -> String {
@@ -477,7 +467,8 @@ impl FunctionAttr {
 }
 
 impl UserFunctionAttr {
+    /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write && !self.arg_option && self.return_type == ReturnType::T
+        !self.write && !self.context && !self.arg_option && self.return_type == ReturnType::T
     }
 }
