@@ -144,9 +144,11 @@ where
         let mut committed_progress = HashMap::new();
 
         // let mut builder = DataChunkBuilder::new(schema.data_types(), self.chunk_size);
-        let mut builders = (0..upstream_table.vnodes()).map(|_| {
-            DataChunkBuilder::new(schema.data_types(), self.chunk_size)
-        }).collect_vec();
+        let mut builders = upstream_table
+            .vnodes()
+            .iter_vnodes()
+            .map(|_| DataChunkBuilder::new(schema.data_types(), self.chunk_size))
+            .collect_vec();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -245,7 +247,7 @@ where
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
-                        &mut builder,
+                        &mut builders,
                     )
                     .map(Either::Right),);
 
@@ -488,10 +490,14 @@ where
         upstream_table: &'a ReplicatedStateTable<S>,
         backfill_state: BackfillState,
         chunk_size: usize,
-        builders: Vec<&'a mut DataChunkBuilder>,
+        builders: &'a mut [DataChunkBuilder],
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
-        for (vnode, builder) in upstream_table.vnodes().iter_vnodes().zip_eq_debug(builders.into_iter()) {
+        for (vnode, builder) in upstream_table
+            .vnodes()
+            .iter_vnodes()
+            .zip_eq_debug(builders.iter_mut())
+        {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::Completed => {
