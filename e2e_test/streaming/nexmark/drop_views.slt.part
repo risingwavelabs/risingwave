@@ -47,7 +47,7 @@ statement ok
 drop materialized view nexmark_q18;
 
 statement ok
-drop materialized view nexmark_q19_rewrite;
+drop materialized view nexmark_q19;
 
 statement ok
 drop materialized view nexmark_q20;

@@ -319,6 +319,7 @@ message AggCall {
     PERCENTILE_DISC = 23;
     MODE = 24;
     LAST_VALUE = 25;
+    GROUPING = 26;
   }
   Type type = 1;
   repeated InputRef args = 2;
