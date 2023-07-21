@@ -61,6 +61,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tower::Layer;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
@@ -396,11 +397,13 @@ pub async fn compute_node_serve(
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
-            .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
             .layer(TracingExtractLayer::new())
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
-            .add_service(StreamServiceServer::new(stream_srv))
+            .add_service(
+                AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg)
+                    .layer(StreamServiceServer::new(stream_srv)),
+            )
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
