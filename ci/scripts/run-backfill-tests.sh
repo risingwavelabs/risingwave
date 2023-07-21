@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 
 # Runs backfill tests.
-# The following scenario can be reproduced in madsim's integration tests as well.
-# But it seems easier (less INSERTs required, more reliable) to reproduce it via this script.
+# NOTE(kwannoel):
+# The following scenario is adapted in madsim's integration tests as well.
+# But this script reproduces it more reliably (I'm not sure why.)
 # Hence keeping it in case we ever need to debug backfill again.
-# NOTE(kwannoel): For now this DOES NOT run in CI.
-# You can run it locally simply with: ./ci/scripts/run-backfill-tests.sh
+
+# USAGE:
+# Start a rw cluster then run this script.
+# ```sh
+# ./risedev d
+# ./ci/scripts/run-backfill-tests.sh
+# ```
+
 
 set -euo pipefail
 
@@ -19,7 +26,6 @@ flush() {
   psql -h localhost -p 4566 -d dev -U root -c "FLUSH;"
 }
 
-./risedev d
 run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql
 for i in $(seq 1 16)
