@@ -25,6 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::types::Datum;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
@@ -140,6 +141,8 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
+        let mut builder = DataChunkBuilder::new(schema.data_types(), self.chunk_size);
+
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
         // finished state to state store first.
@@ -154,6 +157,7 @@ where
                     &upstream_table,
                     backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                     self.chunk_size,
+                    &mut builder,
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -236,6 +240,7 @@ where
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
+                        &mut builder,
                     )
                     .map(Either::Right),);
 
@@ -473,11 +478,12 @@ where
     ///
     /// For now we only support the case where all iterators are complete.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
-    async fn snapshot_read_per_vnode(
+    async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,
-        upstream_table: &ReplicatedStateTable<S>,
+        upstream_table: &'a ReplicatedStateTable<S>,
         backfill_state: BackfillState,
         chunk_size: usize,
+        builder: &'a mut DataChunkBuilder,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {
@@ -489,17 +495,22 @@ where
                 BackfillProgressPerVnode::NotStarted => None,
                 BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
             };
+
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
             if range_bounds.is_none() {
                 continue;
             }
             let range_bounds = range_bounds.unwrap();
+
             let vnode_row_iter = upstream_table
                 .iter_with_pk_range(&range_bounds, vnode, Default::default())
                 .await?;
+
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, chunk_size)
+
+            // FIXME generate n builders per vnode.
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, chunk_size, builder)
                 .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));

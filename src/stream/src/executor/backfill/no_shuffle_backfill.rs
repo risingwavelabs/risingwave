@@ -442,13 +442,13 @@ where
     }
 
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(
-        upstream_table: &StorageTable<S>,
+    async fn snapshot_read<'a>(
+        upstream_table: &'a StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
         chunk_size: usize,
-        builder: &mut DataChunkBuilder,
+        builder: &'a mut DataChunkBuilder,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
