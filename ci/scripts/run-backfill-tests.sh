@@ -50,6 +50,6 @@ done
 
 wait
 
-run_sql_file "$PARENT_PATH"/sql/backfill/select.sql
+run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
 echo "Backfill tests complete"
