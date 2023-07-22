@@ -7,7 +7,8 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-export RUST_LOG=info
+# NOTE: Don't enable RUST_LOG for this test in CI.
+# Otherwise log size too big.
 
 while getopts 'p:' opt; do
     case ${opt} in
