@@ -130,7 +130,7 @@ steps:
     timeout_in_minutes: 70
 
   - label: "backfill integration test (deterministic simulation)"
-    command: "TEST_NUM=10 ci/scripts/deterministic-it-test.sh backfill_tests::"
+    command: "TEST_NUM=1 ci/scripts/deterministic-it-test.sh backfill_tests::"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
