@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::io::Cursor;
 use std::sync::Arc;
 
 use apache_avro::types::Value;
@@ -36,6 +37,7 @@ pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
     value: Option<Value>,
+    payload_no_header: bool,
 }
 
 impl AccessBuilder for AvroAccessBuilder {
@@ -68,6 +70,7 @@ impl AvroAccessBuilder {
             },
             schema_resolver,
             value: None,
+            payload_no_header: config.payload_no_header,
         })
     }
 
@@ -87,12 +90,24 @@ impl AvroAccessBuilder {
                 reader_schema,
             )?))
         } else if let Some(schema) = reader_schema {
-            let mut reader = Reader::with_schema(schema, payload)?;
-            match reader.next() {
-                Some(Ok(v)) => Ok(Some(v)),
-                Some(Err(e)) => Err(e)?,
-                None => {
-                    anyhow::bail!("avro parse unexpected eof")
+            match self.payload_no_header {
+                true => {
+                    let mut file = Cursor::new(payload);
+                    let data = from_avro_datum(schema, &mut file, Some(schema));
+                    match data {
+                        Ok(v) => anyhow::Ok(Some(v)),
+                        Err(e) => anyhow::bail!(e),
+                    }
+                }
+                false => {
+                    let mut reader = Reader::with_schema(schema, payload)?;
+                    match reader.next() {
+                        Some(Ok(v)) => Ok(Some(v)),
+                        Some(Err(e)) => Err(e)?,
+                        None => {
+                            anyhow::bail!("avro parse unexpected eof")
+                        }
+                    }
                 }
             }
         } else {
@@ -107,6 +122,7 @@ pub struct AvroParserConfig {
     pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
     pub upsert_primary_key_column_name: Option<String>,
+    pub payload_no_header: bool,
 }
 
 impl AvroParserConfig {
@@ -114,6 +130,7 @@ impl AvroParserConfig {
         let avro_config = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let enable_upsert = avro_config.enable_upsert;
+        let payload_no_header = avro_config.payload_no_header;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
@@ -143,6 +160,7 @@ impl AvroParserConfig {
                 },
                 schema_resolver: Some(Arc::new(resolver)),
                 upsert_primary_key_column_name,
+                payload_no_header: false,
             })
         } else {
             if enable_upsert {
@@ -169,6 +187,7 @@ impl AvroParserConfig {
                 key_schema: None,
                 schema_resolver: None,
                 upsert_primary_key_column_name: None,
+                payload_no_header,
             })
         }
     }

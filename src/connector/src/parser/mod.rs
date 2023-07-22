@@ -576,6 +576,7 @@ pub struct AvroProperties {
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
     pub enable_upsert: bool,
+    pub payload_no_header: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -659,6 +660,11 @@ impl ParserProperties {
                 if let SourceFormat::UpsertAvro = format {
                     config.enable_upsert = true;
                 }
+
+                if let Some(pnh) = props.get("payload_no_header") {
+                    config.payload_no_header = pnh.parse().unwrap_or(false);
+                }
+
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
