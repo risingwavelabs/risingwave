@@ -50,4 +50,4 @@ done
 
 wait
 
-run_sql_file "$PARENT_PATH"/sql/backfill/select.sql < /dev/null
+run_sql_file "$PARENT_PATH"/sql/backfill/select.sql
