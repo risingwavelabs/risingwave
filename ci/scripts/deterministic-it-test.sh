@@ -5,9 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-echo "--- Running test for:"
-echo "$@"
-
 echo "--- Download artifacts"
 buildkite-agent artifact download simulation-it-test.tar.zst .
 
