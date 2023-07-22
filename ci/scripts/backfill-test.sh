@@ -41,4 +41,4 @@ echo "--- e2e, ci-backfill, run backfill test"
 echo "Backfill tests complete"
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cargo make kill
