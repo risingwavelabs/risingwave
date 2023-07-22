@@ -1,0 +1,32 @@
+# Before running this test:
+#   python3 e2e_test/schema_registry/pb.py
+
+# Create a table.
+statement ok
+create table sr_pb_test with (
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = '127.0.0.1:9092',
+    scan.startup.mode = 'earliest',
+    message = 'test.User')
+FORMAT plain ENCODE protobuf(
+        schema.registry = 'http://127.0.0.1:8081',
+        message = 'test.User'
+    );
+
+# Wait for source
+sleep 10s
+
+query I
+select count(*) from sr_pb_test;
+----
+100
+
+query II
+select min(id), max(id) from sr_pb_test;
+----
+0 99
+
+
+statement ok
+drop table sr_pb_test;
