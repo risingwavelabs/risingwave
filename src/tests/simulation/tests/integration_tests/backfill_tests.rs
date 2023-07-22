@@ -12,17 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-use std::time::Duration;
-
 use anyhow::Result;
-use futures::future::try_join_all;
 use itertools::{any, Itertools};
-use madsim::time::sleep;
-use risingwave_simulation::cluster::{Cluster, Configuration, Session};
-use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
-use risingwave_simulation::utils::AssertResult;
-use tokio::join;
+use risingwave_simulation::cluster::{Cluster, Configuration};
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM=1;";
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
@@ -72,14 +64,29 @@ async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
         session.run("flush").await?;
     }
 
+    let mut tasks = vec![];
+
     // Create sessions for running updates concurrently.
     let sessions = (0..3).map(|_| cluster.start_session()).collect_vec();
-    let mut tasks = vec![];
 
     // Create lots of base table update
     for mut session in sessions.into_iter() {
         let task = tokio::spawn(async move {
             session.run(INSERT_RECURSE_SQL).await?;
+            anyhow::Ok(())
+        });
+        tasks.push(task);
+    }
+
+    // Create sessions for running updates concurrently.
+    let sessions = (0..10).map(|_| cluster.start_session()).collect_vec();
+
+    // Create lots of base table update
+    for mut session in sessions.into_iter() {
+        let task = tokio::spawn(async move {
+            for _ in 0..10 {
+                session.run("FLUSH;").await?;
+            }
             anyhow::Ok(())
         });
         tasks.push(task);
