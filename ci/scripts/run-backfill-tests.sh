@@ -51,3 +51,5 @@ done
 wait
 
 run_sql_file "$PARENT_PATH"/sql/backfill/select.sql
+
+echo "Backfill tests complete"

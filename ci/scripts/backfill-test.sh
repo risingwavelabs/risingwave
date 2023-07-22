@@ -38,7 +38,5 @@ cargo make ci-start ci-backfill
 echo "--- e2e, ci-backfill, run backfill test"
 ./ci/scripts/run-backfill-tests.sh
 
-echo "Backfill tests complete"
-
 echo "--- Kill cluster"
 cargo make kill
