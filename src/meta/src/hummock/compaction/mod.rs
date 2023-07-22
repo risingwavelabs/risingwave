@@ -200,19 +200,6 @@ impl CompactStatus {
         }
     }
 
-    pub fn cancel_compaction_tasks_if<F: Fn(u64) -> bool>(&mut self, should_cancel: F) -> u32 {
-        let mut count: u32 = 0;
-        for level in &mut self.level_handlers {
-            for pending_task_id in level.pending_tasks_ids() {
-                if should_cancel(pending_task_id) {
-                    level.remove_task(pending_task_id);
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
     }

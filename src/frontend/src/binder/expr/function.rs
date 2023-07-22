@@ -1113,10 +1113,10 @@ impl Binder {
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
-            FunctionArgExpr::QualifiedWildcard(_) => todo!(),
+            FunctionArgExpr::QualifiedWildcard(_, _) => todo!(),
             FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
-            FunctionArgExpr::WildcardOrWithExcept(None) => Ok(vec![]),
-            FunctionArgExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
+            FunctionArgExpr::Wildcard(None) => Ok(vec![]),
+            FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
         }
     }
 

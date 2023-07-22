@@ -17,6 +17,7 @@ pub(crate) mod tests {
 
     use std::collections::{BTreeSet, HashMap};
     use std::ops::Bound;
+    use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
@@ -30,6 +31,7 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
@@ -195,6 +197,7 @@ pub(crate) mod tests {
             )),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
+            running_task_count: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -273,21 +276,18 @@ pub(crate) mod tests {
         let mut val = b"0"[..].repeat(1 << 10);
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
-        assert_eq!(compactor.context_id(), worker_node.id);
-
         // assert compact_task
         assert_eq!(compact_task.input_ssts.len(), 128);
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let (mut result_task, task_stats) =
+            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+
+        hummock_manager_ref
+            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .await
+            .unwrap();
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -402,15 +402,6 @@ pub(crate) mod tests {
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         compact_task.current_epoch_time = 0;
 
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
-        assert_eq!(compactor.context_id(), worker_node.id);
-
         // assert compact_task
         assert_eq!(
             compact_task
@@ -424,7 +415,13 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let (mut result_task, task_stats) =
+            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+
+        hummock_manager_ref
+            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .await
+            .unwrap();
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -580,12 +577,11 @@ pub(crate) mod tests {
         unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
             .await;
 
-        // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()
         };
-        // 2. get compact task
+        // 2. get compact task and there should be none
         let compact_task = hummock_manager_ref
             .manual_get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
@@ -595,7 +591,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        // 4. get the latest version and check
+        // 3. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let output_level_info = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
@@ -604,7 +600,7 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(0, output_level_info.total_file_size);
 
-        // 5. get compact task and there should be none
+        // 5. get compact task
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
@@ -721,15 +717,6 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
-        // 3. pick compactor and assign
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
-        assert_eq!(compactor.context_id(), worker_node.id);
         // assert compact_task
         assert_eq!(
             compact_task
@@ -743,7 +730,13 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let (mut result_task, task_stats) =
+            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+
+        hummock_manager_ref
+            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .await
+            .unwrap();
 
         // 5. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
@@ -898,15 +891,6 @@ pub(crate) mod tests {
         )]);
         compact_task.current_epoch_time = epoch;
 
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
-        assert_eq!(compactor.context_id(), worker_node.id);
-
         // assert compact_task
         assert_eq!(
             compact_task
@@ -919,7 +903,13 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let (mut result_task, task_stats) =
+            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+
+        hummock_manager_ref
+            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .await
+            .unwrap();
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
@@ -1084,18 +1074,15 @@ pub(crate) mod tests {
         //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
 
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
-        assert_eq!(compactor.context_id(), worker_node.id);
-
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let (mut result_task, task_stats) =
+            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+
+        hummock_manager_ref
+            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .await
+            .unwrap();
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
@@ -1210,8 +1197,6 @@ pub(crate) mod tests {
         local.seal_current_epoch(u64::MAX);
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
 
         // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
@@ -1226,11 +1211,6 @@ pub(crate) mod tests {
             )
             .await
             .unwrap()
-            .unwrap();
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
             .unwrap();
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
@@ -1247,7 +1227,13 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let (mut result_task, task_stats) =
+            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+
+        hummock_manager_ref
+            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .await
+            .unwrap();
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
