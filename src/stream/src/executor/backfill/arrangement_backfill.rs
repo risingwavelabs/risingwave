@@ -338,6 +338,19 @@ where
                     None => bail!("BUG: current_backfill loop exited without a barrier"),
                 };
                 // TODO: Process existing buffered snapshots.
+
+                // Process barrier:
+                // - consume snapshot rows left in builder.
+                // - consume upstream buffer chunk
+                // - switch snapshot
+
+                // consume snapshot rows left in builder.
+                // TODO:
+                // - Couple vnode with builder, since we need update pos by vnode.
+                // - Take a look at snapshot read to see processing logic.
+                let chunks = builders.iter_mut().map(|b| b.build_data_chunk());
+
+                // consume upstream buffer chunk
                 let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
@@ -403,6 +416,8 @@ where
                 .await?;
 
                 yield Message::Barrier(barrier);
+
+                // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
         }
 

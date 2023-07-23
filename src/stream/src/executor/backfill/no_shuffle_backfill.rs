@@ -271,6 +271,13 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
+                                        // We have to process barrier outside of the loop.
+                                        // This is because the backfill stream holds a mutable
+                                        // reference to our chunk builder.
+                                        // We want to create another mutable reference
+                                        // to flush remaining chunks from the chunk builder
+                                        // on barrier.
+                                        // Hence we break here and process it after this block.
                                         pending_barrier = Some(barrier);
                                         break;
                                     }
@@ -335,10 +342,11 @@ where
                 };
 
                 // Process barrier:
-                // - consume snapshot rows left in builder.
+                // - consume snapshot rows left in builder
                 // - consume upstream buffer chunk
                 // - switch snapshot
 
+                // Consume snapshot rows left in builder
                 let chunk = builder.build_data_chunk();
                 let chunk_cardinality = chunk.cardinality() as u64;
                 if chunk_cardinality > 0 {
@@ -402,6 +410,8 @@ where
                 .await?;
 
                 yield Message::Barrier(barrier);
+
+                // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
         }
 
