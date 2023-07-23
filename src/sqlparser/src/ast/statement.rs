@@ -503,7 +503,7 @@ impl SourceSchemaV2 {
                     (None, Some(schema_registry)) => Ok((schema_registry, true)),
                     (Some(schema_location), None) => Ok((schema_location, false)),
                     (Some(_), Some(_)) => Err(ParserError::ParserError(
-                        "missing either a schema location or a schema registry".to_string(),
+                        "only need either the schema location or the schema registry".to_string(),
                     )),
                 }
             };
