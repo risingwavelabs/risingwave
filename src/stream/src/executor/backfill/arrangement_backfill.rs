@@ -348,6 +348,8 @@ where
                 // TODO:
                 // - Couple vnode with builder, since we need update pos by vnode.
                 // - Take a look at snapshot read to see processing logic.
+                // - Don't make assumptions about vnode iter ordering.
+                // - Clone it if need to.
                 let chunks = builders.iter_mut().map(|b| b.build_data_chunk());
 
                 // consume upstream buffer chunk
