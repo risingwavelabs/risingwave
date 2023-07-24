@@ -23,13 +23,12 @@ use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
-use crate::row::{OwnedRow, Row, Row};
+use crate::row::{OwnedRow, Row};
 use crate::types::{
-    DataType, DataType, DefaultOrdered, DefaultOrdered, ScalarImpl, Timestamp, ToText, ToText, F32,
-    F64,
+    DataType, DefaultOrdered, ScalarImpl, Timestamp, ToText, F32, F64,
 };
 use crate::util::chunk_coalesce::DataChunkBuilder;
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqDebug;
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
