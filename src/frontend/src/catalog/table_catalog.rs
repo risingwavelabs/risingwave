@@ -95,6 +95,7 @@ pub struct TableCatalog {
     /// on this to derive an append-only stream plan.
     pub append_only: bool,
 
+    /// The cardinality of the table.
     pub cardinality: Cardinality,
 
     /// Owner of the table.

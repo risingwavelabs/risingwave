@@ -193,6 +193,7 @@ pub(crate) fn gen_create_index_plan(
         } else {
             distributed_columns_expr.len()
         },
+        table.cardinality,
     )?;
 
     let (index_database_id, index_schema_id) =
@@ -309,6 +310,7 @@ fn assemble_materialize(
     index_columns: &[(ExprImpl, OrderType)],
     include_columns: &[ExprImpl],
     distributed_by_columns_len: usize,
+    cardinality: Cardinality,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
@@ -324,7 +326,7 @@ fn assemble_materialize(
         vec![],
         context,
         false,
-        Cardinality::default(), // TODO
+        cardinality,
     );
 
     let exprs = index_columns

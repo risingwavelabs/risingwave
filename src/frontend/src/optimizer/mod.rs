@@ -398,7 +398,10 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    fn cardinality(&self) -> Cardinality {
+    /// Visit the plan root and compute the cardinality.
+    ///
+    /// Panics if not called on a logical plan.
+    fn compute_cardinality(&self) -> Cardinality {
         assert_matches!(self.plan.convention(), Convention::Logical);
         CardinalityVisitor.visit(self.plan.clone())
     }
@@ -495,7 +498,7 @@ impl PlanRoot {
         definition: String,
         emit_on_window_close: bool,
     ) -> Result<StreamMaterialize> {
-        let cardinality = self.cardinality();
+        let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamMaterialize::create(
@@ -517,7 +520,7 @@ impl PlanRoot {
         index_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
-        let cardinality = self.cardinality();
+        let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
         StreamMaterialize::create(

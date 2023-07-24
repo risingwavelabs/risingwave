@@ -30,6 +30,7 @@ use crate::optimizer::property::Cardinality;
 pub struct CardinalityVisitor;
 
 impl CardinalityVisitor {
+    /// Used for `Filter` and `Scan` with predicate.
     fn visit_predicate(
         input: &dyn PlanNode,
         input_card: Cardinality,

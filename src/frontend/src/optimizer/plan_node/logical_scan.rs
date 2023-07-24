@@ -96,6 +96,7 @@ impl LogicalScan {
         self.core.for_system_time_as_of_proctime
     }
 
+    /// The cardinality of the table **without** applying the predicate.
     pub fn table_cardinality(&self) -> Cardinality {
         self.core.table_cardinality
     }

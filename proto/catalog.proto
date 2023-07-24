@@ -213,6 +213,7 @@ message Table {
   repeated int32 dist_key_in_pk = 25;
   // A dml fragment id corresponds to the table, used to decide where the dml statement is executed.
   optional uint32 dml_fragment_id = 26;
+  // The range of row count of the table.
   plan_common.Cardinality cardinality = 27;
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.

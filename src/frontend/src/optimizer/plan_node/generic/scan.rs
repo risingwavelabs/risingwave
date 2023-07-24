@@ -48,7 +48,7 @@ pub struct Scan {
     pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
     pub for_system_time_as_of_proctime: bool,
-    /// TODO
+    /// The cardinality of the table **without** applying the predicate.
     pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]

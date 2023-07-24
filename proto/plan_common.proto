@@ -107,7 +107,9 @@ message DefaultColumns {
   repeated IndexAndExpr default_columns = 1;
 }
 
+// The cardinality of the output rows of a plan node. Bounds are inclusive.
 message Cardinality {
   uint64 lo = 1;
+  // Unbounded if not set.
   optional uint64 hi = 2;
 }
