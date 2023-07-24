@@ -91,6 +91,16 @@ impl RewriteExprsRecursive for BoundSelect {
                     })
                     .collect::<Vec<_>>(),
             ),
+            GroupBy::Rollup(rollup) => GroupBy::Rollup(
+                std::mem::take(rollup)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         };
         self.group_by = new_group_by;
 
@@ -208,9 +218,11 @@ impl Binder {
 
         // Only support one grouping item in group by clause
         let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
-            GroupBy::GroupingSets(self.bind_grouping_sets_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
+            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
+        } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
+            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
         } else {
-            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_))) {
+            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_))) {
                 return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
             }
             GroupBy::GroupKey(select
@@ -400,14 +412,14 @@ impl Binder {
         }
     }
 
-    fn bind_grouping_sets_expr_in_select(
+    fn bind_grouping_items_expr_in_select(
         &mut self,
-        grouping_sets: Vec<Vec<Expr>>,
+        grouping_items: Vec<Vec<Expr>>,
         name_to_index: &HashMap<String, usize>,
         select_items: &[ExprImpl],
     ) -> Result<Vec<Vec<ExprImpl>>> {
         let mut result = vec![];
-        for set in grouping_sets {
+        for set in grouping_items {
             let mut set_exprs = vec![];
             for expr in set {
                 let name = match &expr {
