@@ -23,10 +23,13 @@ use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
-use crate::row::Row;
-use crate::types::{DataType, DefaultOrdered, ToText};
-use crate::util::iter_util::ZipEqDebug;
-
+use crate::row::{OwnedRow, Row, Row};
+use crate::types::{
+    DataType, DataType, DefaultOrdered, DefaultOrdered, ScalarImpl, Timestamp, ToText, ToText, F32,
+    F64,
+};
+use crate::util::chunk_coalesce::DataChunkBuilder;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
@@ -214,6 +217,60 @@ impl StreamChunk {
             columns.push(ArrayImpl::from_protobuf(column, cardinality)?.into());
         }
         Ok(StreamChunk::new(ops, columns, None))
+    }
+
+    pub fn generate_example_row(index: usize) -> OwnedRow {
+        let mut row_value = Vec::with_capacity(10);
+        row_value.push(Some(ScalarImpl::Int16(index as i16)));
+        row_value.push(Some(ScalarImpl::Int32(index as i32)));
+        row_value.push(Some(ScalarImpl::Int64(index as i64)));
+        row_value.push(Some(ScalarImpl::Float32(F32::from(index as f32))));
+        row_value.push(Some(ScalarImpl::Float64(F64::from(index as f64))));
+        row_value.push(Some(ScalarImpl::Bool(index % 3 == 0)));
+        row_value.push(Some(ScalarImpl::Utf8(
+            format!("{}", index).repeat((index % 10) + 1).into(),
+        )));
+        row_value.push(Some(ScalarImpl::Timestamp(
+            Timestamp::from_timestamp_uncheck(index as _, 0),
+        )));
+        row_value.push(Some(ScalarImpl::Decimal(index.into())));
+        row_value.push(if index % 5 == 0 {
+            None
+        } else {
+            Some(ScalarImpl::Int64(index as i64))
+        });
+
+        OwnedRow::new(row_value)
+    }
+
+    pub fn generate_example_data(row_number: usize) -> Self {
+        let data_types = vec![
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Boolean,
+            DataType::Varchar,
+            DataType::Timestamp,
+            DataType::Decimal,
+            DataType::Int64,
+        ];
+        let mut ops = Vec::with_capacity(row_number);
+        let mut builder = DataChunkBuilder::new(data_types, row_number * 1024);
+        for i in 0..row_number {
+            assert!(
+                builder
+                    .append_one_row(StreamChunk::generate_example_row(i))
+                    .is_none(),
+                "should not finish"
+            );
+            ops.push(Op::Insert);
+        }
+
+        let data_chunk = builder.consume_all().expect("should not be empty");
+        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        return stream_chunk;
     }
 
     pub fn ops(&self) -> &[Op] {

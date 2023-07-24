@@ -18,11 +18,11 @@ import static com.risingwave.java.binding.Utils.validateRow;
 
 import java.io.IOException;
 
-public class StreamChunkDemo {
+public class StreamChunkGeneratorDemo {
 
     public static void main(String[] args) throws IOException {
-        byte[] payload = System.in.readAllBytes();
-        try (StreamChunkIterator iter = new StreamChunkIterator(payload)) {
+        int rowNumber = 1000;
+        try (StreamChunkIterator iter = new StreamChunkIterator(rowNumber)) {
             int count = 0;
             while (true) {
                 try (StreamChunkRow row = iter.next()) {
@@ -33,12 +33,11 @@ public class StreamChunkDemo {
                     validateRow(row);
                 }
             }
-            int expectedCount = 30000;
+            int expectedCount = rowNumber;
             if (count != expectedCount) {
                 throw new RuntimeException(
                         String.format("row count is %s, should be %s", count, expectedCount));
             }
         }
     }
-    
 }

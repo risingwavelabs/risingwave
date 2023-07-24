@@ -345,6 +345,17 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkItera
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorGenerate<'a>(
+    env: EnvParam<'a>,
+    row_number: usize,
+) -> Pointer<'static, StreamChunkIterator> {
+    execute_and_catch(env, move || {
+        let iter = StreamChunkIterator::new(StreamChunk::generate_example_data(row_number));
+        Ok(iter.into())
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, StreamChunkIterator>,

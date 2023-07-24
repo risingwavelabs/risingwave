@@ -23,6 +23,11 @@ public class StreamChunkIterator implements AutoCloseable {
         this.isClosed = false;
     }
 
+    public StreamChunkIterator(int rowNumber) {
+        this.pointer = Binding.streamChunkIteratorGenerate(rowNumber);
+        this.isClosed = false;
+    }
+
     public StreamChunkRow next() {
         long pointer = Binding.streamChunkIteratorNext(this.pointer);
         if (pointer == 0) {
