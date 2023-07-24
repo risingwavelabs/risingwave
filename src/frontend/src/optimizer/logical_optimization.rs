@@ -522,9 +522,6 @@ impl LogicalOptimizer {
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
 
-        // Do column pruning to eliminate unnecessary OverWindow.
-        plan = Self::column_pruning(plan, explain_trace, &ctx);
-
         let force_split_distinct_agg = ctx.session_ctx().config().get_force_split_distinct_agg();
         // TODO: better naming of the OptimizationStage
         // Convert distinct aggregates.
@@ -535,6 +532,10 @@ impl LogicalOptimizer {
         };
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
+
+        // Do a final column pruning and predicate pushing down to clean up the plan.
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
@@ -597,13 +598,14 @@ impl LogicalOptimizer {
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
 
-        // Do column pruning to eliminate unnecessary OverWindow.
-        plan = Self::column_pruning(plan, explain_trace, &ctx);
-
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
+
+        // Do a final column pruning and predicate pushing down to clean up the plan.
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
