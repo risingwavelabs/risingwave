@@ -489,17 +489,14 @@ where
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
     ///
-    /// TODO(kwannoel): Support partially complete snapshot reads.
-    /// That will require the following changes:
-    /// Instead of returning stream chunk and vnode, we need to dispatch 3 diff messages:
-    /// 1. COMPLETE_VNODE(vnode): Current iterator is complete, in that case we need to handle it
-    ///    in arrangement backfill. We should not buffer updates for this vnode, and forward
-    ///    all messages.
-    /// 2. MESSAGE(CHUNK): Current iterator is not complete, in that case we
+    /// We will return chunks based on the state of vnode processed.
+    /// (See `BackfillProgressPerVnode`).
+    /// 1. Completed(vnode): Current iterator is complete, in that case we need to handle it
+    ///    in arrangement backfill. We should not buffer updates for this vnode,
+    ///    and we should forward all messages.
+    /// 2. InProgress(CHUNK): Current iterator is not complete, in that case we
     ///    need to buffer updates for this vnode.
-    /// 3. FINISHED: All iterators finished.
-    ///
-    /// For now we only support the case where all iterators are complete.
+    /// 3. Finished: All iterators finished.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S>,
@@ -535,7 +532,6 @@ where
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);
 
-            // FIXME generate n builders per vnode.
             let vnode_chunk_iter = iter_chunks(vnode_row_iter, chunk_size, builder)
                 .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
             // TODO: Is there some way to avoid double-pin
