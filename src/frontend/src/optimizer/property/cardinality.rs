@@ -18,7 +18,7 @@ use std::ops::{Add, Mul, RangeFrom, RangeInclusive, Sub};
 use risingwave_pb::plan_common::PbCardinality;
 
 /// The upper bound of the [`Cardinality`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Hi {
     Limited(usize),
     Unlimited,

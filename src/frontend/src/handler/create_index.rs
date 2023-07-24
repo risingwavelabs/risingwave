@@ -35,7 +35,7 @@ use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{CheckRelationError, SessionImpl};
@@ -324,6 +324,7 @@ fn assemble_materialize(
         vec![],
         context,
         false,
+        Cardinality::default(), // TODO
     );
 
     let exprs = index_columns

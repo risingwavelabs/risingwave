@@ -30,7 +30,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist, Cardinality};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -214,6 +214,7 @@ impl StreamMaterialize {
             version,
             watermark_columns,
             dist_key_in_pk: vec![],
+            cardinality: Cardinality::default(), // TODO(card)
         })
     }
 

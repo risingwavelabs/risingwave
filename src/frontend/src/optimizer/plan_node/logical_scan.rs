@@ -68,7 +68,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
-        cardinality: Cardinality,
+        table_cardinality: Cardinality,
     ) -> Self {
         generic::Scan::new(
             table_name,
@@ -79,7 +79,7 @@ impl LogicalScan {
             ctx,
             Condition::true_cond(),
             for_system_time_as_of_proctime,
-            cardinality,
+            table_cardinality,
         )
         .into()
     }
@@ -96,8 +96,8 @@ impl LogicalScan {
         self.core.for_system_time_as_of_proctime
     }
 
-    pub fn cardinality(&self) -> Cardinality {
-        self.core.cardinality
+    pub fn table_cardinality(&self) -> Cardinality {
+        self.core.table_cardinality
     }
 
     /// Get a reference to the logical scan's table desc.
@@ -246,7 +246,7 @@ impl LogicalScan {
             self.ctx(),
             Condition::true_cond(),
             self.for_system_time_as_of_proctime(),
-            self.cardinality(),
+            self.table_cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -266,7 +266,7 @@ impl LogicalScan {
             self.base.ctx.clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
-            self.cardinality(),
+            self.table_cardinality(),
         )
         .into()
     }
@@ -281,7 +281,7 @@ impl LogicalScan {
             self.base.ctx.clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
-            self.cardinality(),
+            self.table_cardinality(),
         )
         .into()
     }

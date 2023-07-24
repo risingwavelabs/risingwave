@@ -71,6 +71,7 @@ use crate::optimizer::plan_node::{
     PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
 };
 use crate::optimizer::PlanRef;
+use crate::optimizer::property::Cardinality;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;
@@ -226,6 +227,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            index.index_table.cardinality,
         );
 
         let primary_table_scan = LogicalScan::create(
@@ -235,6 +237,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            index.primary_table.cardinality,
         );
 
         let conjunctions = index
@@ -334,6 +337,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            Cardinality::default(), // TODO(card)
         );
 
         let conjunctions = primary_table_desc
@@ -569,6 +573,7 @@ impl IndexSelectionRule {
                 conjunctions: conjunctions.to_vec(),
             },
             false,
+            Cardinality::default(), // TODO(card)
         );
 
         result.push(primary_access.into());
@@ -609,6 +614,7 @@ impl IndexSelectionRule {
                 ctx,
                 new_predicate,
                 false,
+            Cardinality::default(), // TODO(card)
             )
             .into(),
         )

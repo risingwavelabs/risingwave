@@ -49,7 +49,7 @@ pub struct Scan {
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
     pub for_system_time_as_of_proctime: bool,
     /// TODO
-    pub cardinality: Cardinality,
+    pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
@@ -223,7 +223,7 @@ impl Scan {
             self.ctx.clone(),
             new_predicate,
             self.for_system_time_as_of_proctime,
-            self.cardinality,
+            self.table_cardinality,
         )
     }
 
@@ -238,7 +238,7 @@ impl Scan {
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         for_system_time_as_of_proctime: bool,
-        cardinality: Cardinality,
+        table_cardinality: Cardinality,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -267,7 +267,7 @@ impl Scan {
             chunk_size: None,
             for_system_time_as_of_proctime,
             ctx,
-            cardinality,
+            table_cardinality,
         }
     }
 
