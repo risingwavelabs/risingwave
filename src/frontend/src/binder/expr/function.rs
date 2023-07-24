@@ -888,14 +888,54 @@ impl Binder {
                     };
                     let Some(ScalarImpl::Utf8(input)) = literal.get_data() else {
                         return Err(ErrorCode::ExprError(
-                            "Only string literal is supported in `current_setting`.".into(),
+                            "Only string literal is supported in `setting_name`.".into(),
                         )
                         .into());
                     };
-                    match binder.session_config.get(input.as_ref()) {
-                        Some(setting) => Ok(ExprImpl::literal_varchar(setting.into())),
-                        None => Err(ErrorCode::UnrecognizedConfigurationParameter(input.to_string()).into()),
+                    let session_config = binder.session_config.read();
+                    Ok(ExprImpl::literal_varchar(session_config.get(input.as_ref())?))
+                }))),
+                ("set_config", guard_by_len(3, raw(|binder, inputs| {
+                    let setting_name = if let ExprImpl::Literal(literal) = &inputs[0] && let Some(ScalarImpl::Utf8(input)) = literal.get_data() {
+                        input
+                    } else {
+                        return Err(ErrorCode::ExprError(
+                            "Only string literal is supported in `setting_name`.".into(),
+                        )
+                        .into());
+                    };
+
+                    let new_value = if let ExprImpl::Literal(literal) = &inputs[1] && let Some(ScalarImpl::Utf8(input)) = literal.get_data() {
+                        input
+                    } else {
+                        return Err(ErrorCode::ExprError(
+                            "Only string literal is supported in `setting_name`.".into(),
+                        )
+                        .into());
+                    };
+
+                    let is_local = if let ExprImpl::Literal(literal) = &inputs[2] && let Some(ScalarImpl::Bool(input)) = literal.get_data() {
+                        input
+                    } else {
+                        return Err(ErrorCode::ExprError(
+                            "Only bool literal is supported in `is_local`.".into(),
+                        )
+                        .into());
+                    };
+
+                    if *is_local {
+                        return Err(ErrorCode::ExprError(
+                            "`is_local = true` is not supported now.".into(),
+                        )
+                        .into());
                     }
+
+                    let mut session_config = binder.session_config.write();
+
+                    // TODO: report session config changes if necessary.
+                    session_config.set(&setting_name, vec![new_value.to_string()], ())?;
+
+                    Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
