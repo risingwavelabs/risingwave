@@ -18,7 +18,7 @@ use risingwave_common::buffer::{Bitmap, BitmapIter};
 
 fn bench_bitmap(c: &mut Criterion) {
     const CHUNK_SIZE: usize = 1024;
-    let bytes = vec![0x33; CHUNK_SIZE / 8];
+    let bytes = vec![0b00110011; CHUNK_SIZE / 8];
     let zeros = Bitmap::zeros(CHUNK_SIZE);
     let ones = Bitmap::ones(CHUNK_SIZE);
     let sparse = Bitmap::from_bytes(&[0x01; CHUNK_SIZE / 8]); // 1/16 set
