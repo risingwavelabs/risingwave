@@ -341,7 +341,7 @@ impl Distill for LogicalScan {
             ))
         }
 
-        if self.table_cardinality() != Cardinality::default() {
+        if self.table_cardinality() != Cardinality::unknown() {
             vec.push(("cardinality", Pretty::display(&self.table_cardinality())));
         }
 

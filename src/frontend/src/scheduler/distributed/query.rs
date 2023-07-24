@@ -533,7 +533,7 @@ pub(crate) mod tests {
             vec![],
             ctx,
             false,
-            Cardinality::default(),
+            Cardinality::unknown(),
         )
         .to_batch()
         .unwrap()

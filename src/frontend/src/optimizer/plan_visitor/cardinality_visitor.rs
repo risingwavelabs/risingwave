@@ -129,7 +129,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             .inputs()
             .into_iter()
             .map(|input| self.visit(input))
-            .fold(Cardinality::default(), std::ops::Add::add);
+            .fold(Cardinality::unknown(), std::ops::Add::add);
 
         if plan.all() {
             all
@@ -158,7 +158,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             JoinType::RightSemi | JoinType::RightAnti => right.min(0..),
 
             // TODO: refine the cardinality of full outer join
-            JoinType::FullOuter => Cardinality::default(),
+            JoinType::FullOuter => Cardinality::unknown(),
         }
     }
 

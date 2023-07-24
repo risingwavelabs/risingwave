@@ -487,7 +487,7 @@ impl From<PbTable> for TableCatalog {
             cardinality: tb
                 .cardinality
                 .map(|c| Cardinality::from_protobuf(&c))
-                .unwrap_or_default(),
+                .unwrap_or_else(Cardinality::unknown),
         }
     }
 }
@@ -625,7 +625,7 @@ mod tests {
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
                 dist_key_in_pk: vec![],
-                cardinality: Cardinality::default(),
+                cardinality: Cardinality::unknown(),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

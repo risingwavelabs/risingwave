@@ -65,10 +65,7 @@ pub struct Cardinality {
 
 impl Default for Cardinality {
     fn default() -> Self {
-        Self {
-            lo: 0,
-            hi: Hi::Unlimited,
-        }
+        Self::unknown()
     }
 }
 
@@ -125,6 +122,14 @@ impl From<usize> for Cardinality {
 }
 
 impl Cardinality {
+    /// Creates a new [`Cardinality`] of `0..`, i.e. the number of rows is unknown.
+    pub const fn unknown() -> Self {
+        Self {
+            lo: 0,
+            hi: Hi::Unlimited,
+        }
+    }
+
     /// Creates a new [`Cardinality`] with the given lower and upper bounds.
     pub fn new(lo: usize, hi: impl Into<Hi>) -> Self {
         let hi: Hi = hi.into();

@@ -173,7 +173,7 @@ impl TableCatalogBuilder {
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
             dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
-            cardinality: Cardinality::default(), // TODO(card): cardinality of internal table
+            cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
         }
     }
 

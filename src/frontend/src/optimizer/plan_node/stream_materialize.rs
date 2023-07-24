@@ -118,7 +118,7 @@ impl StreamMaterialize {
             row_id_index,
             TableType::Table,
             version,
-            Cardinality::default(), // unknown cardinality for tables
+            Cardinality::unknown(), // unknown cardinality for tables
         )?;
 
         Ok(Self::new(input, table))
