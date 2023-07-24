@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -34,7 +35,10 @@ pub struct StreamSort {
 
 impl Distill for StreamSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let fields = vec![("sort_column_index", Pretty::debug(&self.sort_column_index))];
+        let fields = vec![(
+            "sort_column",
+            Pretty::display(&FieldDisplay(&self.input.schema()[self.sort_column_index])),
+        )];
         childless_record("StreamSort", fields)
     }
 }
