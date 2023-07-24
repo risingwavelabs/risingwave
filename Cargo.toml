@@ -75,8 +75,8 @@ hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"] }
 criterion = "0.5"
-tonic = { package = "madsim-tonic", version = "0.3" }
-tonic-build = { package = "madsim-tonic-build", version = "0.3" }
+tonic = { package = "madsim-tonic", version = "0.3.1" }
+tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
 
 [profile.dev]
 lto = 'off'

@@ -1042,7 +1042,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4114279215a005bc675e386011e594e1d9b800918cea18fcadadcce864a2046b"
 dependencies = [
  "borsh-derive",
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -3574,9 +3574,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.3.0+0.9.2"
+version = "0.3.1+0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd91945c26b262333e10025306a3bd75b50f43222086fe1d0afee1b5c663e787"
+checksum = "66177cce816367f8358a4dc482eabff8f979cf8a1d3288d3aa8dd822fb327c69"
 dependencies = [
  "async-stream",
  "chrono",
@@ -3588,9 +3588,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.3.0+0.9.2"
+version = "0.3.1+0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa4b467f3c8bb59b7faabe632a65b9731c8a412a5c7d698cba21fe2caa859e71"
+checksum = "55f6b2947243e5ae6a37c7992da07cf3ed60ebeb6a3d2c1e95574a2a2697b0c0"
 dependencies = [
  "prettyplease",
  "proc-macro2",
