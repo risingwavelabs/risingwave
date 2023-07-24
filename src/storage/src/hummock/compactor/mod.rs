@@ -41,7 +41,7 @@ pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
-use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::table_stats::{
     add_table_stats_map, to_prost_table_stats_map, TableStats, TableStatsMap,
 };
@@ -727,29 +727,27 @@ impl Compactor {
         F: TableBuilderFactory,
     {
         let mut del_iter = del_agg.iter();
-        let start_key = if !task_config.key_range.left.is_empty() {
+        if !task_config.key_range.left.is_empty() {
             let full_key = FullKey::decode(&task_config.key_range.left);
             iter.seek(full_key)
                 .verbose_instrument_await("iter_seek")
                 .await?;
             del_iter.seek(full_key.user_key);
-            full_key.user_key.to_vec()
+            if !task_config.gc_delete_keys
+                && del_iter.is_valid()
+                && del_iter.earliest_epoch() != HummockEpoch::MAX
+            {
+                sst_builder
+                    .add_monotonic_delete(MonotonicDeleteEvent {
+                        event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                        new_epoch: del_iter.earliest_epoch(),
+                    })
+                    .await?;
+            }
         } else {
             iter.rewind().verbose_instrument_await("rewind").await?;
             del_iter.rewind();
-            UserKey::default()
         };
-        if !task_config.gc_delete_keys
-            && del_iter.is_valid()
-            && del_iter.earliest_epoch() != HummockEpoch::MAX
-        {
-            sst_builder
-                .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: PointRange::from_user_key(start_key, false),
-                    new_epoch: del_iter.earliest_epoch(),
-                })
-                .await?;
-        }
 
         let end_key = if task_config.key_range.right.is_empty() {
             FullKey::default()
@@ -903,31 +901,30 @@ impl Compactor {
             iter.next().verbose_instrument_await("iter_next").await?;
         }
 
-        let extended_largest_user_key = PointRange::from_user_key(end_key.user_key.clone(), false);
-        while del_iter.is_valid() {
-            if !extended_largest_user_key.is_empty()
-                && del_iter.key().ge(&extended_largest_user_key)
-            {
-                if !task_config.gc_delete_keys {
+        if !task_config.gc_delete_keys {
+            let extended_largest_user_key =
+                PointRange::from_user_key(end_key.user_key.clone(), false);
+            while del_iter.is_valid() {
+                if !extended_largest_user_key.is_empty()
+                    && del_iter.key().ge(&extended_largest_user_key)
+                {
                     sst_builder
                         .add_monotonic_delete(MonotonicDeleteEvent {
                             event_key: extended_largest_user_key,
                             new_epoch: HummockEpoch::MAX,
                         })
                         .await?;
+                    break;
                 }
-                break;
-            }
-            del_iter.update_range();
-            if !task_config.gc_delete_keys {
+                del_iter.update_range();
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: del_iter.key().clone(),
                         new_epoch: del_iter.earliest_epoch(),
                     })
                     .await?;
+                del_iter.next();
             }
-            del_iter.next();
         }
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {

@@ -18,7 +18,7 @@ use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -236,21 +236,9 @@ async fn compaction_test(
     );
     for (group, levels) in &version.levels {
         let l0 = levels.l0.as_ref().unwrap();
-        let sz = levels
-            .levels
-            .iter()
-            .map(|level| level.total_file_size)
-            .sum::<u64>();
-        let count = levels
-            .levels
-            .iter()
-            .map(|level| level.table_infos.len())
-            .sum::<usize>();
         println!(
-            "group-{}: base: {} {} , l0 sz: {}, count: {}",
+            "group-{}: l0 sz: {}, count: {}",
             group,
-            sz,
-            count,
             l0.total_file_size,
             l0.sub_levels
                 .iter()
@@ -276,7 +264,12 @@ async fn run_compare_result(
     const RANGE_BASE: u64 = 400;
     let range_mod = test_range / RANGE_BASE;
 
-    let mut rng = StdRng::seed_from_u64(10097);
+    let seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    println!("========== run with seed: {}", seed);
+    let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
         let epoch = init_epoch + epoch_idx;
@@ -589,7 +582,7 @@ mod tests {
         compaction_config.level0_tier_compact_file_number = 2;
         compaction_config.max_bytes_for_level_base = 512 * 1024;
         compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
-        compaction_test(compaction_config, config, "hummock+memory", 10000, 60)
+        compaction_test(compaction_config, config, "hummock+memory", 1000000, 200)
             .await
             .unwrap();
     }

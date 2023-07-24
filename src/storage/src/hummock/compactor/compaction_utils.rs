@@ -241,7 +241,7 @@ pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &Comp
         .sum::<u64>();
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
-    let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+    let total_file_size = (total_file_size as f64 * 1.4).round() as usize;
 
     match task.compression_algorithm {
         0 => std::cmp::min(capacity, total_file_size),

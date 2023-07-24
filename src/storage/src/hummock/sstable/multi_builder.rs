@@ -269,6 +269,10 @@ where
         }
 
         if self.current_builder.is_none() {
+            if event.new_epoch == HummockEpoch::MAX {
+                return Ok(());
+            }
+
             if let Some(progress) = &self.task_progress {
                 progress
                     .num_pending_write_io

@@ -206,6 +206,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             // This range would never delete any key so we can merge it with last range.
             return;
         }
+        self.stale_key_count += 1;
         self.range_tombstone_size += event.encoded_size();
         self.monotonic_deletes.push(event);
     }
@@ -334,11 +335,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        if self.monotonic_deletes.len() == 1
-            && self.monotonic_deletes[0].new_epoch == HummockEpoch::MAX
-        {
-            self.monotonic_deletes.clear();
-        }
+        assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
             debug_assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);

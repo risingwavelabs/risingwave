@@ -100,6 +100,9 @@ where
     B: AsRef<[u8]> + EmptySliceRef,
 {
     let table_range = info.key_range.as_ref().unwrap();
+    if table_range.left.len() <= 8 {
+        println!("sst-{} table left: {}", info.sst_id, table_range.left.len());
+    }
     let table_start = FullKey::decode(table_range.left.as_slice()).user_key;
     let table_end = FullKey::decode(table_range.right.as_slice()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
