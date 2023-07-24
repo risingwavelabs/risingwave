@@ -489,8 +489,7 @@ where
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
     ///
-    /// We will return chunks based on the state of vnode processed.
-    /// (See `BackfillProgressPerVnode`).
+    /// We will return chunks based on the `BackfillProgressPerVnode`.
     /// 1. Completed(vnode): Current iterator is complete, in that case we need to handle it
     ///    in arrangement backfill. We should not buffer updates for this vnode,
     ///    and we should forward all messages.
