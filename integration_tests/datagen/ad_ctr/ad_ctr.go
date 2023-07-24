@@ -20,14 +20,22 @@ type adImpressionEvent struct {
 	ImpressionTimestamp string `json:"impression_timestamp"`
 }
 
+func (r *adImpressionEvent) Topic() string {
+	return "ad_impression"
+}
+
+func (r *adImpressionEvent) Key() string {
+	return fmt.Sprint(r.BidId)
+}
+
 func (r *adImpressionEvent) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO %s (bid_id, ad_id, impression_timestamp) values ('%d', '%d', '%s')",
 		"ad_impression", r.BidId, r.AdId, r.ImpressionTimestamp)
 }
 
-func (r *adImpressionEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "ad_impression", fmt.Sprint(r.BidId), data
+func (r *adImpressionEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type adClickEvent struct {
@@ -37,14 +45,22 @@ type adClickEvent struct {
 	ClickTimestamp string `json:"click_timestamp"`
 }
 
+func (r *adClickEvent) Topic() string {
+	return "ad_click"
+}
+
+func (r *adClickEvent) Key() string {
+	return fmt.Sprint(r.BidId)
+}
+
 func (r *adClickEvent) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO %s (bid_id, click_timestamp) values ('%d',  '%s')",
 		"ad_click", r.BidId, r.ClickTimestamp)
 }
 
-func (r *adClickEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "ad_click", fmt.Sprint(r.BidId), data
+func (r *adClickEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type adCtrGen struct {
@@ -55,7 +71,7 @@ type adCtrGen struct {
 func NewAdCtrGen() gen.LoadGenerator {
 	return &adCtrGen{
 		ctr:   make(map[int64]float64),
-		faker: gofakeit.New(0),
+		faker: gofakeit.New(1), // Use seed=1 to make it deterministic
 	}
 }
 

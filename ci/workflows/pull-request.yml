@@ -205,20 +205,6 @@ steps:
             - CODECOV_TOKEN
     timeout_in_minutes: 14
 
-  - label: "fuzz test"
-    command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-simulation"
-    plugins:
-      - ./ci/plugins/swapfile
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-
   - label: "check"
     command: "ci/scripts/check.sh"
     plugins:
@@ -261,6 +247,16 @@ steps:
 
   - label: "recovery integration test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh recovery::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+
+  - label: "backfill integration test (deterministic simulation)"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh backfill_tests::"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
@@ -405,3 +401,16 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
+
+  - label: "Backfill tests"
+    command: "ci/scripts/backfill-test.sh -p ci-dev"
+    if: build.pull_request.labels includes "ci/run-backfill-tests"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
