@@ -24,8 +24,8 @@ use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuil
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
-    StreamOverWindow, StreamSort, ToBatch, ToStream,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
+    StreamOverWindow, ToBatch, ToStream,
 };
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
@@ -821,7 +821,7 @@ impl ToStream for LogicalOverWindow {
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let sort = StreamSort::new(sort_input, order_key_index);
+            let sort = StreamEowcSort::new(sort_input, order_key_index);
 
             let mut logical = self.core.clone();
             logical.input = sort.into();

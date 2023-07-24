@@ -78,7 +78,7 @@ pub fn stream_enforce_eowc_requirement(
                 ctx.warn_to_user("There are multiple watermark columns in the query, currently only the first one will be used.");
             }
             let watermark_col_idx = watermark_cols.ones().next().unwrap();
-            Ok(StreamSort::new(plan, watermark_col_idx).into())
+            Ok(StreamEowcSort::new(plan, watermark_col_idx).into())
         }
     } else if !emit_on_window_close && plan.emit_on_window_close() {
         Err(ErrorCode::InternalError(
