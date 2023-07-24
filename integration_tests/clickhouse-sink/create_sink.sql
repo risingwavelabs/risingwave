@@ -6,7 +6,7 @@ FROM
     force_append_only='true',
     clickhouse.url = 'http://127.0.0.1:8123',
     clickhouse.user = 'default',
-    clickehouse.password = '',
+    clickhouse.password = '',
     clickhouse.database = 'default',
     clickhouse.table='demo_test',
 );

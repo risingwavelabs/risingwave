@@ -226,15 +226,15 @@ impl KinesisCommon {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ClickHouseCommon {
-    #[serde(rename = "url", alias = "clickhouse.url")]
+    #[serde(rename = "clickhouse.url")]
     pub url: String,
-    #[serde(rename = "user", alias = "clickhouse.user")]
+    #[serde(rename = "clickhouse.user")]
     pub user: String,
-    #[serde(rename = "password", alias = "clickehouse.password")]
+    #[serde(rename = "clickhouse.password")]
     pub password: String,
-    #[serde(rename = "database", alias = "clickhouse.database")]
+    #[serde(rename = "clickhouse.database")]
     pub database: String,
-    #[serde(rename = "table", alias = "clickhouse.table")]
+    #[serde(rename = "clickhouse.table")]
     pub table: String,
 }
 
