@@ -238,6 +238,12 @@ where
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
+                tracing::trace!(
+                    actor = self.actor_id,
+                    epoch = snapshot_read_epoch,
+                    pos = ?current_pos,
+                    "New snapshot read"
+                );
                 let right_snapshot = pin!(Self::snapshot_read(
                     &self.upstream_table,
                     snapshot_read_epoch,
@@ -264,6 +270,10 @@ where
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    tracing::trace!(
+                                        actor = self.actor_id,
+                                        "backfill upstream barrier"
+                                    );
                                     // If it is a barrier, switch snapshot and consume
                                     // upstream buffer chunk
 
@@ -327,6 +337,10 @@ where
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    tracing::trace!(
+                                        actor = self.actor_id,
+                                        "backfill upstream chunk"
+                                    );
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }
@@ -339,6 +353,10 @@ where
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
+                                    tracing::trace!(
+                                        actor = self.actor_id,
+                                        "snapshot read stream ends"
+                                    );
                                     // End of the snapshot read stream.
                                     // We should not mark the chunk anymore,
                                     // otherwise, we will ignore some rows
@@ -357,6 +375,11 @@ where
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
+                                    tracing::trace!(
+                                        actor = self.actor_id,
+                                        cardinality = chunk.cardinality(),
+                                        "snapshot read stream chunk"
+                                    );
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
