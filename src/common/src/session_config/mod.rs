@@ -503,10 +503,10 @@ impl ConfigMap {
             // No actual assignment because we only support UTF8.
         } else if key.eq_ignore_ascii_case("bytea_output") {
             // TODO: We only support hex now.
-            if !val.get(0).is_some_and(|val| *val == "hex") {
+            if !val.first().is_some_and(|val| *val == "hex") {
                 return Err(ErrorCode::InvalidConfigValue {
                     config_entry: "bytea_output".into(),
-                    config_value: val.get(0).map(ToString::to_string).unwrap_or_default(),
+                    config_value: val.first().map(ToString::to_string).unwrap_or_default(),
                 }
                 .into());
             }
