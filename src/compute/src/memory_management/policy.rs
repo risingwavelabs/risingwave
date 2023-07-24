@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats, prof as jemalloc_prof};
 
 use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
+use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, prof as jemalloc_prof, stats as jemalloc_stats};
 
 use super::{MemoryControl, MemoryControlStats};
 
@@ -34,6 +35,8 @@ pub struct JemallocMemoryControl {
     jemalloc_allocated_mib: jemalloc_stats::allocated_mib,
     jemalloc_active_mib: jemalloc_stats::active_mib,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
+
+    dump_seq: u64,
 }
 
 impl JemallocMemoryControl {
@@ -58,6 +61,7 @@ impl JemallocMemoryControl {
             jemalloc_allocated_mib,
             jemalloc_active_mib,
             jemalloc_dump_mib,
+            dump_seq: 0,
         }
     }
 
@@ -70,7 +74,7 @@ impl JemallocMemoryControl {
         if let Err(e) = jemalloc_epoch_mib.advance() {
             tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
         }
-    
+
         let jemalloc_allocated_bytes = self.jemalloc_allocated_mib.clone();
         let jemalloc_active_bytes = self.jemalloc_active_mib.clone();
         (
@@ -84,6 +88,29 @@ impl JemallocMemoryControl {
             }),
         )
     }
+
+    fn dump_heap_prof(&self, cur_used_memory_bytes: usize, prev_used_memory_bytes: usize) {
+        if cur_used_memory_bytes > self.threshold_aggressive
+            && prev_used_memory_bytes <= self.threshold_aggressive
+        {
+            let file_name = Box::leak(
+                format!(
+                    "exceed_threshold_aggressive_heap_prof.dump.{}\0",
+                    self.dump_seq
+                )
+                .into_boxed_str(),
+            );
+            let file_name_bytes = unsafe { file_name.as_bytes_mut() };
+            let file_name_ptr = file_name_bytes.as_mut_ptr();
+            if let Err(e) = self
+                .jemalloc_dump_mib
+                .write(CStr::from_bytes_with_nul(file_name_bytes).unwrap())
+            {
+                tracing::warn!("Jemalloc dump heap file failed! {:?}", e);
+            }
+            unsafe { Box::from_raw(file_name_ptr) };
+        }
+    }
 }
 
 impl std::fmt::Debug for JemallocMemoryControl {
@@ -93,7 +120,7 @@ impl std::fmt::Debug for JemallocMemoryControl {
             .field("threshold_graceful", &self.threshold_graceful)
             .field("threshold_aggressive", &self.threshold_aggressive)
             .finish()
-    }   
+    }
 }
 
 impl MemoryControl for JemallocMemoryControl {
@@ -108,6 +135,11 @@ impl MemoryControl for JemallocMemoryControl {
         let (jemalloc_allocated_bytes, jemalloc_active_bytes) = self.advance_jemalloc_epoch(
             prev_memory_stats.jemalloc_allocated_bytes,
             prev_memory_stats.jemalloc_active_bytes,
+        );
+
+        self.dump_heap_prof(
+            jemalloc_allocated_bytes,
+            prev_memory_stats.jemalloc_allocated_bytes,
         );
 
         // Streaming memory control
@@ -135,8 +167,6 @@ impl MemoryControl for JemallocMemoryControl {
         }
     }
 }
-
-
 
 fn calculate_lru_watermark(
     cur_used_memory_bytes: usize,
