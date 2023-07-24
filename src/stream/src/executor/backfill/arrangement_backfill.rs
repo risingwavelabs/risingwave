@@ -21,7 +21,7 @@ use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -122,6 +122,7 @@ where
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
+        let vnodes = upstream_table.vnodes().clone();
 
         let schema = Arc::new(self.upstream.schema().clone());
 
@@ -345,12 +346,22 @@ where
                 // - switch snapshot
 
                 // consume snapshot rows left in builder.
-                // TODO:
-                // - Couple vnode with builder, since we need update pos by vnode.
-                // - Take a look at snapshot read to see processing logic.
-                // - Don't make assumptions about vnode iter ordering.
-                // - Clone it if need to.
-                let chunks = builders.iter_mut().map(|b| b.build_data_chunk());
+                // FIXME(kwannoel): `zip_eq_debug` does not work here.
+                for (vnode, chunk) in vnodes.iter_vnodes().zip_eq(builders.iter_mut().map(|b| {
+                    let chunk = b.build_data_chunk();
+                    let ops = vec![Op::Insert; chunk.capacity()];
+                    StreamChunk::from_parts(ops, chunk)
+                })) {
+                    // Raise the current position.
+                    // As snapshot read streams are ordered by pk, so we can
+                    // just use the last row to update `current_pos`.
+                    update_pos_by_vnode(vnode, &chunk, &pk_in_output_indices, &mut backfill_state);
+
+                    let chunk_cardinality = chunk.cardinality() as u64;
+                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                    total_snapshot_processed_rows += chunk_cardinality;
+                    yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                }
 
                 // consume upstream buffer chunk
                 let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
