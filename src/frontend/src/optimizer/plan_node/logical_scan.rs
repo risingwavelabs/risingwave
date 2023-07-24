@@ -340,6 +340,10 @@ impl Distill for LogicalScan {
             ))
         }
 
+        if self.table_cardinality() != Cardinality::default() {
+            vec.push(("cardinality", Pretty::display(&self.table_cardinality())));
+        }
+
         childless_record("LogicalScan", vec)
     }
 }

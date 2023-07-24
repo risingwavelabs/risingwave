@@ -72,6 +72,15 @@ impl Default for Cardinality {
     }
 }
 
+impl std::fmt::Display for Cardinality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.hi {
+            Hi::Limited(hi) => write!(f, "{}..={}", self.lo, hi),
+            Hi::Unlimited => write!(f, "{}..", self.lo),
+        }
+    }
+}
+
 impl From<RangeInclusive<usize>> for Cardinality {
     /// Converts an inclusive range to a [`Cardinality`].
     ///

@@ -25,7 +25,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::PlanRef;
 use crate::optimizer::property::Cardinality;
-use crate::utils::Condition;
 
 /// A visitor that computes the cardinality of a plan node.
 pub struct CardinalityVisitor;
@@ -34,17 +33,13 @@ impl CardinalityVisitor {
     fn visit_predicate(
         input: &dyn PlanNode,
         input_card: Cardinality,
-        predicate: &Condition,
+        eq_set: HashSet<usize>,
     ) -> Cardinality {
-        let eq_set: HashSet<_> = predicate
-            .collect_input_refs(input.schema().len())
-            .ones()
-            .collect();
-
         let mut unique_keys: Vec<HashSet<_>> = vec![input.logical_pk().iter().copied().collect()];
 
         // We don't have UNIQUE key now. So we hack here to support some complex queries on
         // system tables.
+        // TODO(card): remove this after we have UNIQUE key.
         if let Some(scan) = input.as_logical_scan()
             && scan.is_sys_table()
             && scan.table_name() == PG_NAMESPACE_TABLE_NAME
@@ -111,11 +106,21 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
     }
 
     fn visit_logical_filter(&mut self, plan: &plan_node::LogicalFilter) -> Cardinality {
-        Self::visit_predicate(&*plan.input(), self.visit(plan.input()), plan.predicate())
+        let eq_set = plan
+            .predicate()
+            .collect_input_refs(plan.input().schema().len())
+            .ones()
+            .collect();
+        Self::visit_predicate(&*plan.input(), self.visit(plan.input()), eq_set)
     }
 
     fn visit_logical_scan(&mut self, plan: &plan_node::LogicalScan) -> Cardinality {
-        Self::visit_predicate(plan, plan.table_cardinality(), plan.predicate())
+        let eq_set = plan
+            .predicate()
+            .collect_input_refs(plan.table_desc().columns.len())
+            .ones()
+            .collect();
+        Self::visit_predicate(plan, plan.table_cardinality(), eq_set)
     }
 
     fn visit_logical_union(&mut self, plan: &plan_node::LogicalUnion) -> Cardinality {
