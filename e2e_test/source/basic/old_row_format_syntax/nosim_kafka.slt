@@ -1,8 +1,8 @@
 # Start with nosim to avoid running in deterministic test
 
 
-# key schema should be a subset of value schema
-statement error
+# If we cannot extract key schema, use message key as varchar primary key
+statement ok
 CREATE TABLE upsert_avro_json ()
 WITH (
 	connector = 'kafka',
