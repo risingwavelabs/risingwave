@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
@@ -138,7 +138,11 @@ impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
             vec.push(("with_ties", Pretty::debug(&true)));
         }
         if !self.group_key.is_empty() {
-            vec.push(("group_key", Pretty::debug(&self.group_key)));
+            let f = |i| Pretty::display(&FieldDisplay(&self.input.schema()[i]));
+            vec.push((
+                "group_key",
+                Pretty::Array(self.group_key.iter().copied().map(f).collect()),
+            ));
         }
         childless_record(name, vec)
     }

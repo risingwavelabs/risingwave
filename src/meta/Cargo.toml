@@ -25,7 +25,7 @@ clap = { version = "4", features = ["derive", "env"] }
 crepe = "0.1"
 easy-ext = "1"
 either = "1"
-enum-as-inner = "0.5"
+enum-as-inner = "0.6"
 etcd-client = { workspace = true }
 fail = "0.5"
 function_name = "0.3.0"
