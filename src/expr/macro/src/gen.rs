@@ -241,12 +241,21 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                for ((#(#inputs,)*), visible) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()) {
-                    if !visible {
-                        builder.append_null();
-                        continue;
+                match input.vis() {
+                    Vis::Bitmap(vis) => {
+                        for ((#(#inputs,)*), visible) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(vis.iter()) {
+                            if !visible {
+                                builder.append_null();
+                                continue;
+                            }
+                            #append_output
+                        }
                     }
-                    #append_output
+                    Vis::Compact(_) => {
+                        for (#(#inputs,)*) in multizip((#(#arrays.iter(),)*)) {
+                            #append_output
+                        }
+                    }
                 }
                 Ok(Arc::new(builder.finish().into()))
             }
