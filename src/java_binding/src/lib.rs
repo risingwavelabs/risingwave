@@ -349,8 +349,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkItera
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorFromPretty<
     'a,
 >(
-    env: EnvParam<'_>,
-    str: JString<'_>,
+    env: EnvParam<'a>,
+    str: JString<'a>,
 ) -> Pointer<'static, StreamChunkIterator> {
     execute_and_catch(env, move || {
         let iter = StreamChunkIterator::new(StreamChunk::from_pretty(
