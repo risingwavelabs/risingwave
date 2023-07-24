@@ -90,10 +90,6 @@ impl OwnedRow {
         Self::new(datums)
     }
 
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
     pub fn last(&self) -> DatumRef<'_> {
         self.0[self.len() - 1].to_datum_ref()
     }
