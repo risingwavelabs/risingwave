@@ -309,6 +309,11 @@ pub trait ConfigReporter {
     fn report_status(&mut self, key: &str, new_val: String);
 }
 
+// Report nothing.
+impl ConfigReporter for () {
+    fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
+
 #[derive(Educe)]
 #[educe(Default)]
 pub struct ConfigMap {
