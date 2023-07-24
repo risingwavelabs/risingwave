@@ -37,7 +37,6 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
-use std::mem::size_of;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
@@ -173,14 +172,12 @@ impl BitmapBuilder {
         self
     }
 
+    /// Finishes building and returns the bitmap.
     pub fn finish(self) -> Bitmap {
-        if self.len == self.count_ones {
-            return Bitmap::ones(self.len);
-        }
         Bitmap {
             num_bits: self.len(),
-            bits: Some(self.data.into()),
             count_ones: self.count_ones,
+            bits: (self.count_ones != 0 && self.count_ones != self.len).then(|| self.data.into()),
         }
     }
 
@@ -196,7 +193,7 @@ impl BitmapBuilder {
 }
 
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Bitmap {
     /// The useful bits in the bitmap. The total number of bits will usually
     /// be larger than the useful bits due to byte-padding.
@@ -208,14 +205,14 @@ pub struct Bitmap {
     /// Bits are stored in a compact form.
     /// They are packed into `usize`s.
     ///
-    /// Optimization: If all bits are set to 0 or 1, this field is `None`.
+    /// Optimization: If all bits are set to 0 or 1, this field MUST be `None`.
     bits: Option<Box<[usize]>>,
 }
 
 impl EstimateSize for Bitmap {
     fn estimated_heap_size(&self) -> usize {
         match &self.bits {
-            Some(bits) => bits.len() * size_of::<usize>(),
+            Some(bits) => std::mem::size_of_val(bits.as_ref()),
             None => 0,
         }
     }
@@ -263,7 +260,11 @@ impl Bitmap {
 
     /// Creates a new bitmap from bytes.
     pub fn from_bytes(buf: &[u8]) -> Self {
-        let num_bits = buf.len() * 8;
+        Self::from_bytes_with_len(buf, buf.len() * 8)
+    }
+
+    /// Creates a new bitmap from bytes and length.
+    fn from_bytes_with_len(buf: &[u8], num_bits: usize) -> Self {
         let mut bits = Vec::with_capacity(Self::vec_len(num_bits));
         let slice = unsafe {
             bits.set_len(bits.capacity());
@@ -402,22 +403,6 @@ impl Bitmap {
         )
     }
 }
-
-impl PartialEq for Bitmap {
-    fn eq(&self, other: &Self) -> bool {
-        if self.num_bits != other.num_bits || self.count_ones != other.count_ones {
-            return false;
-        }
-        match (&self.bits, &other.bits) {
-            (Some(lbits), Some(rbits)) => lbits == rbits,
-            // at least one is all 0s or all 1s
-            // given that self.count_ones == other.count_ones, they should be equal
-            _ => true,
-        }
-    }
-}
-
-impl Eq for Bitmap {}
 
 impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     type Output = Bitmap;
@@ -626,10 +611,7 @@ impl From<&PbBuffer> for Bitmap {
     fn from(buf: &PbBuffer) -> Self {
         let last_byte_num_bits = buf.body[0];
         let num_bits = ((buf.body.len() - 1) * 8) - ((8 - last_byte_num_bits) % 8) as usize;
-
-        let mut bitmap = Self::from_bytes(&buf.body[1..]);
-        bitmap.num_bits = num_bits;
-        bitmap
+        Self::from_bytes_with_len(&buf.body[1..], num_bits)
     }
 }
 
