@@ -192,9 +192,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let table_id = event.event_key.left_user_key.table_id.table_id();
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             self.table_ids.insert(table_id);
-            self.finalize_last_table_stats();
-            self.last_table_id = Some(table_id);
-            self.last_extract_key.clear();
         }
         if event.new_epoch == HummockEpoch::MAX
             && self.monotonic_deletes.last().map_or(false, |last| {
