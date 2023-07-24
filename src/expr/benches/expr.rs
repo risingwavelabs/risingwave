@@ -26,7 +26,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall};
+use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;
@@ -90,20 +90,42 @@ fn bench_expr(c: &mut Criterion) {
             .into_ref(),
             // 16: extract field for date
             Utf8Array::from_iter_display(
-                ["DAY", "MONTH", "YEAR", "DOW", "DOY"]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE)
-                    .map(Some),
+                [
+                    "DAY",
+                    "MONTH",
+                    "YEAR",
+                    "DOW",
+                    "DOY",
+                    "MILLENNIUM",
+                    "CENTURY",
+                    "DECADE",
+                    "ISOYEAR",
+                    "QUARTER",
+                    "WEEK",
+                    "ISODOW",
+                    "EPOCH",
+                    "JULIAN",
+                ]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE)
+                .map(Some),
             )
             .into_ref(),
             // 17: extract field for time
             Utf8Array::from_iter_display(
-                ["HOUR", "MINUTE", "SECOND"]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE)
-                    .map(Some),
+                [
+                    "Hour",
+                    "Minute",
+                    "Second",
+                    "Millisecond",
+                    "Microsecond",
+                    "Epoch",
+                ]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE)
+                .map(Some),
             )
             .into_ref(),
             // 18: extract field for timestamptz
@@ -153,6 +175,30 @@ fn bench_expr(c: &mut Criterion) {
                 (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
             )
             .into_ref(),
+            // 27: int256 array
+            Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
+            // 28: extract field for interval
+            Utf8Array::from_iter_display(
+                [
+                    "Millennium",
+                    "Century",
+                    "Decade",
+                    "Year",
+                    "Month",
+                    "Day",
+                    "Hour",
+                    "Minute",
+                    "Second",
+                    "Millisecond",
+                    "Microsecond",
+                    "Epoch",
+                ]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE)
+                .map(Some),
+            )
+            .into_ref(),
         ],
         CHUNK_SIZE,
     );
@@ -173,6 +219,7 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Varchar, 12),
         InputRefExpression::new(DataType::Bytea, 13),
         InputRefExpression::new(DataType::Jsonb, 26),
+        InputRefExpression::new(DataType::Int256, 27),
     ];
     let input_index_for_type = |ty: DataType| {
         inputrefs
@@ -187,6 +234,7 @@ fn bench_expr(c: &mut Criterion) {
     const EXTRACT_FIELD_TIME: usize = 17;
     const EXTRACT_FIELD_TIMESTAMP: usize = 16;
     const EXTRACT_FIELD_TIMESTAMPTZ: usize = 18;
+    const EXTRACT_FIELD_INTERVAL: usize = 28;
     const BOOL_STRING: usize = 19;
     const NUMBER_STRING: usize = 12;
     const DATE_STRING: usize = 20;
@@ -220,13 +268,20 @@ fn bench_expr(c: &mut Criterion) {
     let sigs = func_sigs();
     let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
     'sig: for sig in sigs {
-        if sig
-            .inputs_type
-            .iter()
+        if (sig.inputs_type.iter())
+            .chain(&[sig.ret_type])
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
             // TODO: support struct and list
             println!("todo: {sig:?}");
+            continue;
+        }
+        if sig.func == PbType::DateTrunc
+            && sig.inputs_type.len() == 2
+            && sig.ret_type == DataTypeName::Timestamptz
+        {
+            // ignore: date_trunc(varchar, timestamptz) -> timestamptz
+            println!("ignore: {sig:?}");
             continue;
         }
 
@@ -234,7 +289,7 @@ fn bench_expr(c: &mut Criterion) {
         for (i, t) in sig.inputs_type.iter().enumerate() {
             use DataTypeName::*;
             let idx = match (sig.func, i) {
-                (PbType::ToChar, 1) => {
+                (PbType::ToChar | PbType::ToTimestamp1, 1) => {
                     children.push(
                         LiteralExpression::new(
                             DataType::Varchar,
@@ -266,6 +321,7 @@ fn bench_expr(c: &mut Criterion) {
                     Time => EXTRACT_FIELD_TIME,
                     Timestamp => EXTRACT_FIELD_TIMESTAMP,
                     Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
+                    Interval => EXTRACT_FIELD_INTERVAL,
                     t => panic!("unexpected type: {t:?}"),
                 },
                 _ => input_index_for_type((*t).into()),
@@ -278,17 +334,27 @@ fn bench_expr(c: &mut Criterion) {
         });
     }
 
-    for sig in agg_func_sigs() {
-        if sig.inputs_type.len() != 1 {
+    let sigs = agg_func_sigs();
+    let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
+    for sig in sigs {
+        if matches!(sig.func, AggKind::PercentileDisc | AggKind::PercentileCont)
+            || (sig.inputs_type.iter())
+                .chain(&[sig.ret_type])
+                .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
+        {
             println!("todo: {sig:?}");
             continue;
         }
         let agg = match build_agg(AggCall {
             kind: sig.func,
-            args: AggArgs::Unary(
-                sig.inputs_type[0].into(),
-                input_index_for_type(sig.inputs_type[0].into()),
-            ),
+            args: match sig.inputs_type {
+                [] => AggArgs::None,
+                [t] => AggArgs::Unary((*t).into(), input_index_for_type((*t).into())),
+                _ => {
+                    println!("todo: {sig:?}");
+                    continue;
+                }
+            },
             return_type: sig.ret_type.into(),
             column_orders: vec![],
             filter: None,
