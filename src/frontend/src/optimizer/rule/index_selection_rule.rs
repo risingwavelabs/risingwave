@@ -70,8 +70,8 @@ use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
     PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
 };
-use crate::optimizer::PlanRef;
 use crate::optimizer::property::Cardinality;
+use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;
@@ -614,7 +614,7 @@ impl IndexSelectionRule {
                 ctx,
                 new_predicate,
                 false,
-            Cardinality::default(), // TODO(card)
+                index.index_table.cardinality,
             )
             .into(),
         )
