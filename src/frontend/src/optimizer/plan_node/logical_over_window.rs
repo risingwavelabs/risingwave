@@ -646,7 +646,7 @@ impl ColPrunable for LogicalOverWindow {
 
         if req_cols_win_func_part.is_empty() {
             // no window function is needed
-            return self.input().prune_col(required_cols, ctx);
+            return self.input().prune_col(&req_cols_input_part.to_vec(), ctx);
         }
 
         let (input_cols_required_by_this, window_functions) = {
