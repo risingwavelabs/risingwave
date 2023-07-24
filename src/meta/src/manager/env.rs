@@ -15,7 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::config::DefaultParallelism;
+use risingwave_common::config::{CompactionConfig, DefaultParallelism};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 
@@ -130,9 +130,6 @@ pub struct MetaOpts {
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
-    pub max_compactor_task_multiplier: u32,
-
     /// Schedule split_compaction_group for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -149,6 +146,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
+    pub compaction_config: Option<CompactionConfig>,
 }
 
 impl MetaOpts {
@@ -177,7 +175,6 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_split_compact_group_interval_sec: 60,
-            max_compactor_task_multiplier: 2,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
@@ -185,6 +182,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
+            compaction_config: None,
         }
     }
 }

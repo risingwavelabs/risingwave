@@ -15,6 +15,11 @@ select count(*) from t;
 ----
 2
 
+# ensure the snapshot is synchronized to the `other` connection
+connection other
+statement ok
+flush;
+
 connection other
 query I
 select count(*) from t;

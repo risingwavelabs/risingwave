@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+#[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
@@ -29,6 +30,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+#[cfg(test)]
 use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
@@ -48,6 +50,7 @@ pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
         .collect_vec()
 }
 
+#[cfg(test)]
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
     context_id: HummockContextId,
@@ -83,7 +86,7 @@ where
     {
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, u64::MAX, 16);
+            .add_compactor(context_id);
         temp_compactor = true;
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
@@ -93,7 +96,6 @@ where
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
@@ -109,17 +111,17 @@ where
         3
     );
     compact_task.target_level = 6;
-    hummock_manager
-        .assign_compaction_task(&compact_task, compactor.context_id())
-        .await
-        .unwrap();
     if temp_compactor {
+        let compactor = hummock_manager
+            .compactor_manager_ref_for_test()
+            .next_compactor()
+            .unwrap();
         assert_eq!(compactor.context_id(), context_id);
     }
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
     let ret = hummock_manager
-        .report_compact_task(context_id, &mut compact_task, None)
+        .report_compact_task(&mut compact_task, None)
         .await
         .unwrap();
     assert!(ret);
@@ -317,6 +319,9 @@ pub async fn setup_compute_env_with_config(
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
+    let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+
     let hummock_manager = HummockManager::with_config(
         env.clone(),
         cluster_manager.clone(),
@@ -324,6 +329,7 @@ pub async fn setup_compute_env_with_config(
         Arc::new(MetaMetrics::new()),
         compactor_manager,
         config,
+        compactor_streams_change_tx,
     )
     .await;
     let fake_host_address = HostAddress {

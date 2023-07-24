@@ -88,9 +88,9 @@ pub enum WildcardOrExpr {
     ///
     /// See also [`Expr::FieldIdentifier`] for behaviors of parentheses.
     ExprQualifiedWildcard(Expr, Vec<Ident>),
-    QualifiedWildcard(ObjectName),
-    // Either it's `*` or `* excepts (columns)`
-    WildcardOrWithExcept(Option<Vec<Expr>>),
+    /// `QualifiedWildcard` and `Wildcard` can be followed by EXCEPT (columns)
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl From<WildcardOrExpr> for FunctionArgExpr {
@@ -100,8 +100,10 @@ impl From<WildcardOrExpr> for FunctionArgExpr {
             WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Self::ExprQualifiedWildcard(expr, prefix)
             }
-            WildcardOrExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
-            WildcardOrExpr::WildcardOrWithExcept(w) => Self::WildcardOrWithExcept(w),
+            WildcardOrExpr::QualifiedWildcard(prefix, except) => {
+                Self::QualifiedWildcard(prefix, except)
+            }
+            WildcardOrExpr::Wildcard(except) => Self::Wildcard(except),
         }
     }
 }
@@ -321,14 +323,7 @@ impl Parser {
                 return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
             }
             Token::Mul => {
-                if self.parse_keyword(Keyword::EXCEPT) && self.consume_token(&Token::LParen) {
-                    let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-                    if self.consume_token(&Token::RParen) {
-                        return Ok(WildcardOrExpr::WildcardOrWithExcept(Some(exprs)));
-                    }
-                } else {
-                    return Ok(WildcardOrExpr::WildcardOrWithExcept(None));
-                }
+                return Ok(WildcardOrExpr::Wildcard(self.parse_except()?));
             }
             // parses wildcard field selection expression.
             // Code is similar to `parse_struct_selection`
@@ -359,14 +354,30 @@ impl Parser {
         simple_wildcard_expr: WildcardOrExpr,
     ) -> Result<WildcardOrExpr, ParserError> {
         let mut idents = vec![ident];
+        let mut except_cols = vec![];
         match simple_wildcard_expr {
-            WildcardOrExpr::QualifiedWildcard(ids) => idents.extend(ids.0),
-            WildcardOrExpr::WildcardOrWithExcept(None) => {}
+            WildcardOrExpr::QualifiedWildcard(ids, except) => {
+                idents.extend(ids.0);
+                if let Some(cols) = except {
+                    except_cols = cols;
+                }
+            }
+            WildcardOrExpr::Wildcard(except) => {
+                if let Some(cols) = except {
+                    except_cols = cols;
+                }
+            }
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(e) => return Ok(WildcardOrExpr::Expr(e)),
-            WildcardOrExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
-        Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(idents)))
+        Ok(WildcardOrExpr::QualifiedWildcard(
+            ObjectName(idents),
+            if except_cols.is_empty() {
+                None
+            } else {
+                Some(except_cols)
+            },
+        ))
     }
 
     /// Concats `expr` and `wildcard_expr` in `(expr).wildcard_expr`.
@@ -402,11 +413,25 @@ impl Parser {
         };
 
         match simple_wildcard_expr {
-            WildcardOrExpr::QualifiedWildcard(ids) => idents.extend(ids.0),
-            WildcardOrExpr::WildcardOrWithExcept(None) => {}
+            WildcardOrExpr::QualifiedWildcard(ids, except) => {
+                if except.is_some() {
+                    return self.expected(
+                        "Expr quantified wildcard does not support except",
+                        self.peek_token(),
+                    );
+                }
+                idents.extend(ids.0);
+            }
+            WildcardOrExpr::Wildcard(except) => {
+                if except.is_some() {
+                    return self.expected(
+                        "Expr quantified wildcard does not support except",
+                        self.peek_token(),
+                    );
+                }
+            }
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(_) => unreachable!(),
-            WildcardOrExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
         Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, idents))
     }
@@ -425,9 +450,12 @@ impl Parser {
                 Token::Word(w) => id_parts.push(w.to_ident()?),
                 Token::Mul => {
                     return if id_parts.is_empty() {
-                        Ok(WildcardOrExpr::WildcardOrWithExcept(None))
+                        Ok(WildcardOrExpr::Wildcard(self.parse_except()?))
                     } else {
-                        Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(id_parts)))
+                        Ok(WildcardOrExpr::QualifiedWildcard(
+                            ObjectName(id_parts),
+                            self.parse_except()?,
+                        ))
                     }
                 }
                 unexpected => {
@@ -440,6 +468,24 @@ impl Parser {
         }
         self.index = index;
         self.parse_expr().map(WildcardOrExpr::Expr)
+    }
+
+    pub fn parse_except(&mut self) -> Result<Option<Vec<Expr>>, ParserError> {
+        if !self.parse_keyword(Keyword::EXCEPT) {
+            return Ok(None);
+        }
+        if !self.consume_token(&Token::LParen) {
+            return self.expected("EXCEPT should be followed by (", self.peek_token());
+        }
+        let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+        if self.consume_token(&Token::RParen) {
+            Ok(Some(exprs))
+        } else {
+            self.expected(
+                "( should be followed by ) after column names",
+                self.peek_token(),
+            )
+        }
     }
 
     /// Parse a new expression
@@ -840,12 +886,12 @@ impl Parser {
             Ok(Expr::GroupingSets(result))
         } else if self.parse_keyword(Keyword::CUBE) {
             self.expect_token(&Token::LParen)?;
-            let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
+            let result = self.parse_comma_separated(|p| p.parse_tuple(true, false))?;
             self.expect_token(&Token::RParen)?;
             Ok(Expr::Cube(result))
         } else if self.parse_keyword(Keyword::ROLLUP) {
             self.expect_token(&Token::LParen)?;
-            let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
+            let result = self.parse_comma_separated(|p| p.parse_tuple(true, false))?;
             self.expect_token(&Token::RParen)?;
             Ok(Expr::Rollup(result))
         } else {
@@ -4340,11 +4386,13 @@ impl Parser {
                     Some(alias) => SelectItem::ExprWithAlias { expr, alias },
                     None => SelectItem::UnnamedExpr(expr),
                 }),
-            WildcardOrExpr::QualifiedWildcard(prefix) => Ok(SelectItem::QualifiedWildcard(prefix)),
+            WildcardOrExpr::QualifiedWildcard(prefix, except) => {
+                Ok(SelectItem::QualifiedWildcard(prefix, except))
+            }
             WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Ok(SelectItem::ExprQualifiedWildcard(expr, prefix))
             }
-            WildcardOrExpr::WildcardOrWithExcept(w) => Ok(SelectItem::WildcardOrWithExcept(w)),
+            WildcardOrExpr::Wildcard(except) => Ok(SelectItem::Wildcard(except)),
         }
     }
 

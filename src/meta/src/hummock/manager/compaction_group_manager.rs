@@ -54,17 +54,20 @@ impl<S: MetaStore> HummockManager<S> {
     pub(super) async fn build_compaction_group_manager(
         env: &MetaSrvEnv<S>,
     ) -> Result<RwLock<CompactionGroupManager>> {
-        let config = CompactionConfigBuilder::new().build();
-        Self::build_compaction_group_manager_with_config(env, config).await
+        let default_config = match env.opts.compaction_config.as_ref() {
+            None => CompactionConfigBuilder::new().build(),
+            Some(opt) => CompactionConfigBuilder::with_opt(opt).build(),
+        };
+        Self::build_compaction_group_manager_with_config(env, default_config).await
     }
 
     pub(super) async fn build_compaction_group_manager_with_config(
         env: &MetaSrvEnv<S>,
-        config: CompactionConfig,
+        default_config: CompactionConfig,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
-            default_config: config,
+            default_config,
         });
         compaction_group_manager
             .write()
@@ -656,7 +659,7 @@ impl<S: MetaStore> HummockManager<S> {
         for mut task in canceled_tasks {
             task.set_task_status(TaskStatus::ManualCanceled);
             if !self
-                .report_compact_task_impl(None, &mut task, &mut compaction_guard, None)
+                .report_compact_task_impl(&mut task, &mut compaction_guard, None)
                 .await
                 .unwrap_or(false)
             {

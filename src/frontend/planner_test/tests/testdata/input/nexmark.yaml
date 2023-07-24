@@ -31,8 +31,14 @@
         "channel" VARCHAR,
         "url" VARCHAR,
         "date_time" TIMESTAMP,
-        "extra" VARCHAR
+        "extra" VARCHAR,
+        p_time TIMESTAMPTZ as proctime()
     ) append only;
+
+    CREATE TABLE side_input(
+        key BIGINT PRIMARY KEY,
+        value VARCHAR
+    );
   expected_outputs: []
 - id: nexmark_q0
   before:
@@ -161,18 +167,20 @@
   - create_tables
   sql: |
     SELECT
-        Q.seller,
-        AVG(Q.final) OVER
-            (PARTITION BY Q.seller ORDER BY Q.date_time ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
-        as avg
+      Q.seller,
+      AVG(Q.final) OVER
+        (PARTITION BY Q.seller ORDER BY Q.date_time ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
+      as avg
     FROM (
-        SELECT MAX(B.price) AS final, A.seller, B.date_time
-        FROM auction AS A, bid AS B
-        WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
-        GROUP BY A.id, A.seller
-    ) AS Q;
+      SELECT ROW_NUMBER() OVER (PARTITION BY A.id, A.seller ORDER BY B.price) as rank, A.seller, B.price as final,  B.date_time
+      FROM auction AS A, bid AS B
+      WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
+    ) AS Q
+    WHERE Q.rank <= 1
   expected_outputs:
-  - planner_error
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
 - id: nexmark_q7
   before:
   - create_tables
@@ -287,31 +295,26 @@
   before:
   - create_tables
   sql: |
-    SELECT
-        B.bidder,
-        count(*) as bid_count,
-        TUMBLE_START(B.p_time, INTERVAL '10' SECOND) as starttime,
-        TUMBLE_END(B.p_time, INTERVAL '10' SECOND) as endtime
-    FROM (SELECT *, PROCTIME() as p_time FROM bid) B
-    GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
+    SELECT bidder, count(*) as bid_count, window_start, window_end
+    FROM TUMBLE(bid, p_time, INTERVAL '10' SECOND)
+    GROUP BY bidder, window_start, window_end
   expected_outputs:
-  - binder_error
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
 - id: nexmark_q13
   before:
   - create_tables
   sql: |
-    /* SELECT
-        B.auction,
-        B.bidder,
-        B.price,
-        B.date_time,
-        S.value
-    FROM (SELECT *, PROCTIME() as p_time FROM bid) B
-    JOIN side_input FOR SYSTEM_TIME AS OF B.p_time AS S
-    ON mod(B.auction, 10000) = S.key; */
-    select 1;
+    SELECT
+      B.auction, B.bidder, B.price, B.date_time, S.value
+    FROM bid B
+    JOIN side_input FOR SYSTEM_TIME AS OF PROCTIME() S
+    ON mod(B.auction, 10000) = S.key
   expected_outputs:
-  - stream_error
+  - stream_dist_plan
+  - stream_plan
+  - sink_plan
 - id: nexmark_q14
   before:
   - create_tables
@@ -492,11 +495,11 @@
   - stream_plan
   - stream_dist_plan
   - logical_plan
-- id: nexmark_q19
+- id: nexmark_q19_no_rank
   before:
   - create_tables
   sql: |
-    SELECT * FROM
+    SELECT * EXCEPT (rank_number) FROM
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
   expected_outputs:
@@ -504,34 +507,12 @@
   - stream_plan
   - stream_dist_plan
   - batch_plan
-- id: nexmark_q19_rewrite
+- id: nexmark_q19
   before:
   - create_tables
   sql: |
-    SELECT auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER() over (PARTITION BY auction ORDER BY price DESC) as rank_number
-    FROM (
-        SELECT
-            *,
-            ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number
-        FROM bid
-    ) Q
-    WHERE Q.rank_number <= 10;
-  expected_outputs:
-  - logical_plan
-  - stream_plan
-  - stream_dist_plan
-  - batch_plan
-- id: nexmark_q19_no_output
-  before:
-  - create_tables
-  sql: |
-    SELECT auction, bidder, price, channel, url, date_time, extra
-    FROM (
-        SELECT
-            *,
-            ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number
-        FROM bid
-    )
+    SELECT * FROM
+    (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
   expected_outputs:
   - logical_plan
