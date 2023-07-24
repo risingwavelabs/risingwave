@@ -204,8 +204,7 @@ impl FunctionAttr {
                 let c = #fn_name(#(#arrays),*);
                 Ok(Arc::new(c.into()))
             }
-        } else if self.args.iter().all(|t| types::is_primitive(t))
-            && (types::is_primitive(&self.ret) || self.ret == "boolean")
+        } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
             && self.user_fn.is_pure()
         {
             // SIMD optimization for primitive types
