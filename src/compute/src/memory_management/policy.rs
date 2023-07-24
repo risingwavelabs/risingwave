@@ -16,6 +16,7 @@ use std::ffi::CStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use chrono;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
@@ -70,19 +71,16 @@ impl JemallocMemoryControl {
         prev_jemalloc_allocated_bytes: usize,
         prev_jemalloc_active_bytes: usize,
     ) -> (usize, usize) {
-        let jemalloc_epoch_mib = self.jemalloc_epoch_mib.clone();
-        if let Err(e) = jemalloc_epoch_mib.advance() {
+        if let Err(e) = self.jemalloc_epoch_mib.advance() {
             tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
         }
 
-        let jemalloc_allocated_bytes = self.jemalloc_allocated_mib.clone();
-        let jemalloc_active_bytes = self.jemalloc_active_mib.clone();
         (
-            jemalloc_allocated_bytes.read().unwrap_or_else(|e| {
+            self.jemalloc_allocated_mib.read().unwrap_or_else(|e| {
                 tracing::warn!("Jemalloc read allocated failed! {:?}", e);
                 prev_jemalloc_allocated_bytes
             }),
-            jemalloc_active_bytes.read().unwrap_or_else(|e| {
+            self.jemalloc_active_mib.read().unwrap_or_else(|e| {
                 tracing::warn!("Jemalloc read active failed! {:?}", e);
                 prev_jemalloc_active_bytes
             }),
@@ -93,10 +91,11 @@ impl JemallocMemoryControl {
         if cur_used_memory_bytes > self.threshold_aggressive
             && prev_used_memory_bytes <= self.threshold_aggressive
         {
+            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
             let file_name = Box::leak(
                 format!(
-                    "exceed_threshold_aggressive_heap_prof.dump.{}\0",
-                    self.dump_seq
+                    "{}.exceed-threshold-aggressive-heap-prof.dump.{}\0",
+                    time_prefix, self.dump_seq,
                 )
                 .into_boxed_str(),
             );
