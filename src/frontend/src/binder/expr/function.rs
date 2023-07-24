@@ -880,15 +880,13 @@ impl Binder {
                 })),
                 ("current_setting", guard_by_len(1, raw(|binder, inputs| {
                     let input = &inputs[0];
-                    let ExprImpl::Literal(literal) = input else {
+                    let input = if let ExprImpl::Literal(literal) = input &&
+                        let Some(ScalarImpl::Utf8(input)) = literal.get_data()
+                    {
+                        input
+                    } else {
                         return Err(ErrorCode::ExprError(
-                            "Only literal is supported in `current_setting`.".into(),
-                        )
-                        .into());
-                    };
-                    let Some(ScalarImpl::Utf8(input)) = literal.get_data() else {
-                        return Err(ErrorCode::ExprError(
-                            "Only string literal is supported in `setting_name`.".into(),
+                            "Only literal is supported in `setting_name`.".into(),
                         )
                         .into());
                     };
@@ -933,7 +931,7 @@ impl Binder {
                     let mut session_config = binder.session_config.write();
 
                     // TODO: report session config changes if necessary.
-                    session_config.set(&setting_name, vec![new_value.to_string()], ())?;
+                    session_config.set(setting_name, vec![new_value.to_string()], ())?;
 
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
