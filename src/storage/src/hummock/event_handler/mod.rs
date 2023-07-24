@@ -30,7 +30,6 @@ mod cache_refill_policy;
 pub mod hummock_event_handler;
 pub mod uploader;
 
-pub use cache_refill_policy::CacheRefillFilter;
 pub use hummock_event_handler::HummockEventHandler;
 
 use super::store::version::HummockReadVersion;

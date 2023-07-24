@@ -2384,7 +2384,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=67c99d2#67c99d2b69296b509c4e1051b99ee287646bd3aa"
+source = "git+https://github.com/mrcroxx/foyer?rev=21e6ace#21e6acecf051d3155b5cd301bf94d957abe03b9e"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2411,7 +2411,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=67c99d2#67c99d2b69296b509c4e1051b99ee287646bd3aa"
+source = "git+https://github.com/mrcroxx/foyer?rev=21e6ace#21e6acecf051d3155b5cd301bf94d957abe03b9e"
 dependencies = [
  "bytes",
  "parking_lot 0.12.1",
@@ -2422,7 +2422,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=67c99d2#67c99d2b69296b509c4e1051b99ee287646bd3aa"
+source = "git+https://github.com/mrcroxx/foyer?rev=21e6ace#21e6acecf051d3155b5cd301bf94d957abe03b9e"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2439,8 +2439,9 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=67c99d2#67c99d2b69296b509c4e1051b99ee287646bd3aa"
+source = "git+https://github.com/mrcroxx/foyer?rev=21e6ace#21e6acecf051d3155b5cd301bf94d957abe03b9e"
 dependencies = [
+ "anyhow",
  "async-channel",
  "async-trait",
  "bitflags 2.3.3",
@@ -6596,6 +6597,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.0.0-alpha"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "async-trait",
  "auto_enums",

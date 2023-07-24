@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashSet, VecDeque};
-use std::fmt::Debug;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 use tokio::sync::{mpsc, Mutex};
@@ -108,7 +106,7 @@ impl CacheRefillPolicy {
                 policy.metrics.preload_io_count.inc_by(preload_count as u64);
                 let insert_ssts = try_join_all(reqs.into_iter().map(try_join_all)).await;
 
-                if !levels.is_empty() && policy.sstable_store.cache_refill_filter().is_some() {
+                if !levels.is_empty() && !policy.refill_data_file_cache_levels.is_empty() {
                     tokio::spawn({
                         async move {
                             if let Err(e) = Self::refill_data_file_cache(
@@ -153,7 +151,7 @@ impl CacheRefillPolicy {
             .collect_vec();
 
         let mut handles = vec![];
-        let cache_refill_filter = self.sstable_store.cache_refill_filter().as_ref().unwrap();
+        let filter = self.sstable_store.data_file_cache_refill_filter().unwrap();
 
         let start = Instant::now();
 
@@ -181,7 +179,7 @@ impl CacheRefillPolicy {
 
             let mut refill = false;
             for id in removed_ssts {
-                if cache_refill_filter.contains(id) {
+                if filter.contains(id) {
                     refill = true;
                     break;
                 }
@@ -242,67 +240,6 @@ impl CacheRefillPolicy {
         let _ = try_join_all(handles).await;
 
         Ok(())
-    }
-}
-
-pub struct CacheRefillFilter<K>
-where
-    K: Eq + Ord + Debug + Clone,
-{
-    refresh_interval: Duration,
-    inner: RwLock<CacheRefillFilterInner<K>>,
-}
-
-struct CacheRefillFilterInner<K>
-where
-    K: Eq + Ord + Debug + Clone,
-{
-    last_refresh: Instant,
-    layers: VecDeque<RwLock<BTreeSet<K>>>,
-}
-
-impl<K> CacheRefillFilter<K>
-where
-    K: Eq + Ord + Debug + Clone,
-{
-    pub fn new(layers: usize, refresh_interval: Duration) -> Self {
-        assert!(layers > 0);
-        let layers = (0..layers)
-            .map(|_| BTreeSet::new())
-            .map(RwLock::new)
-            .collect();
-        let inner = CacheRefillFilterInner {
-            last_refresh: Instant::now(),
-            layers,
-        };
-        let inner = RwLock::new(inner);
-        Self {
-            refresh_interval,
-            inner,
-        }
-    }
-
-    pub fn insert(&self, key: K) {
-        if let Some(mut inner) = self.inner.try_write() {
-            if inner.last_refresh.elapsed() > self.refresh_interval {
-                inner.layers.pop_front();
-                inner.layers.push_back(RwLock::new(BTreeSet::new()));
-                inner.last_refresh = Instant::now();
-            }
-        }
-
-        let inner = self.inner.read();
-        inner.layers.back().unwrap().write().insert(key);
-    }
-
-    pub fn contains(&self, key: &K) -> bool {
-        let inner = self.inner.read();
-        for layer in inner.layers.iter().rev() {
-            if layer.read().contains(key) {
-                return true;
-            }
-        }
-        false
     }
 }
 

@@ -563,6 +563,7 @@ impl StateStoreImpl {
                 event_listener: vec![],
                 prometheus_registry: Some(state_store_metrics.registry().clone()),
                 prometheus_namespace: Some("data".to_string()),
+                enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
@@ -596,6 +597,7 @@ impl StateStoreImpl {
                 event_listener: vec![],
                 prometheus_registry: Some(state_store_metrics.registry().clone()),
                 prometheus_namespace: Some("meta".to_string()),
+                enable_filter: false,
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,

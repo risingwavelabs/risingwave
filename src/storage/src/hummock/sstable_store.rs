@@ -33,11 +33,10 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
-use super::event_handler::CacheRefillFilter;
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, BlockResponse, FileCache, Sstable, SstableBlockIndex,
-    SstableMeta, SstableWriter,
+    Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
+    SstableBlockIndex, SstableMeta, SstableWriter,
 };
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{
@@ -129,7 +128,7 @@ pub struct SstableStore {
     data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
-    cache_refill_filter: Option<Arc<CacheRefillFilter<HummockSstableObjectId>>>,
+    data_file_cache_refill_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
 }
 
 impl SstableStore {
@@ -152,7 +151,11 @@ impl SstableStore {
             data_file_cache: data_file_cache.clone(),
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
-        let cache_refill_filter = Arc::new(CacheRefillFilter::new(6, Duration::from_secs(10)));
+        let data_file_cache_refill_filter = if data_file_cache.enable_filter() {
+            Some(Arc::new(RecentFilter::new(6, Duration::from_secs(10))))
+        } else {
+            None
+        };
 
         Self {
             path,
@@ -173,7 +176,7 @@ impl SstableStore {
             data_file_cache,
             meta_file_cache,
 
-            cache_refill_filter: Some(cache_refill_filter),
+            data_file_cache_refill_filter,
         }
     }
 
@@ -193,7 +196,8 @@ impl SstableStore {
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
-            cache_refill_filter: None,
+
+            data_file_cache_refill_filter: None,
         }
     }
 
@@ -296,7 +300,7 @@ impl SstableStore {
             policy
         };
 
-        if let Some(filter) = self.cache_refill_filter.as_ref() {
+        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
             filter.insert(object_id);
         }
 
@@ -497,7 +501,7 @@ impl SstableStore {
         block_index: u64,
         block: Box<Block>,
     ) {
-        if let Some(filter) = self.cache_refill_filter.as_ref() {
+        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
             filter.insert(object_id);
         }
         self.block_cache
@@ -539,8 +543,10 @@ impl SstableStore {
         ))
     }
 
-    pub fn cache_refill_filter(&self) -> &Option<Arc<CacheRefillFilter<HummockSstableObjectId>>> {
-        &self.cache_refill_filter
+    pub fn data_file_cache_refill_filter(
+        &self,
+    ) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
+        self.data_file_cache_refill_filter.as_ref()
     }
 
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
@@ -557,34 +563,21 @@ impl SstableStore {
         let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
-        let mut fetch_block = || {
-            let file_cache = self.data_file_cache.clone();
+        let fetch_block = move || {
             stats.cache_data_block_miss += 1;
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
 
             async move {
-                let key = SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as u64,
-                };
+                let data = store.read(&data_path, Some(block_loc)).await?;
+                let block = Block::decode(data, uncompressed_capacity)?;
+                let block = Box::new(block);
 
-                if file_cache
-                    .exists(&key)
-                    .await
-                    .map_err(HummockError::file_cache)?
-                {
-                    return Ok(None);
-                }
-
-                let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
-
-                Ok(Some(block))
+                Ok(block)
             }
         };
 
-        if let Some(filter) = self.cache_refill_filter.as_ref() {
+        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
             filter.insert(object_id);
         }
 
@@ -594,7 +587,7 @@ impl SstableStore {
         };
 
         self.data_file_cache
-            .insert_with(key, fetch_block(), uncompressed_capacity)
+            .insert_with(key, fetch_block, uncompressed_capacity)
             .await
             .map_err(HummockError::file_cache)
     }
@@ -768,7 +761,7 @@ impl SstableWriter for BatchUploadWriter {
                 .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
-            if let Some(filter) = self.sstable_store.cache_refill_filter().as_ref() {
+            if let Some(filter) = self.sstable_store.data_file_cache_refill_filter.as_ref() {
                 filter.insert(self.object_id);
             }
 
