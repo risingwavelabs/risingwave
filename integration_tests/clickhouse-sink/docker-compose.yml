@@ -1,6 +1,18 @@
 ---
 version: "3"
 services:
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:23.3.8.21-alpine
+    container_name: clickhouse-server_1
+    hostname: clickhouse-server_1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+      - "9004:9004"
+    expose:
+      - 9009
+    volumes:
+      - ./clickhouse-sql:/opt/clickhouse/clickhouse-sql
   compactor-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -43,10 +55,12 @@ services:
     command:
       - /bin/sh
       - -c
-      - /datagen --mode delivery --qps 2 kafka --brokers message_queue:29092
+      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
     restart: always
     container_name: datagen
 volumes:
+  compute-node-0:
+    external: false
   etcd-0:
     external: false
   grafana-0:

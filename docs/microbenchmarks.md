@@ -40,3 +40,13 @@ cargo bench json_parser
     ```shell
     cargo flamegraph --bench json_parser -- --bench
     ```
+   
+    Within a benchmark, there are also typically multiple benchmark groups.
+    For instance, within the `json_parser` bench, there's `json_parser`, `debezium_json_parser_(create/read/update/delete)`
+    To filter you can just append a regex. For instance to only bench `json_parser`:
+    ```shell
+    cargo flamegraph --bench json_parser -- --bench ^json_parser
+    ```
+   
+    You can take a look at [Criterion Docs](https://bheisler.github.io/criterion.rs/book/user_guide/command_line_options.html)
+    for more information.

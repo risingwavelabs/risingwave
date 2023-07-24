@@ -959,11 +959,52 @@ impl LogicalJoin {
         }
     }
 
+    fn to_stream_temporal_join_with_index_selection(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<StreamTemporalJoin> {
+        // Index selection for temporal join.
+        let right = self.right();
+        // `should_be_temporal_join()` has already check right input for us.
+        let logical_scan: &LogicalScan = right.as_logical_scan().unwrap();
+
+        // Use primary table.
+        let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
+        // Return directly if this temporal join can match the pk of its right table.
+        if let Ok(temporal_join) = &result_plan && temporal_join.eq_join_predicate().eq_indexes().len() == logical_scan.primary_key().len() {
+            return result_plan;
+        }
+        let indexes = logical_scan.indexes();
+        for index in indexes {
+            // Use index table
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                let index_scan: PlanRef = index_scan.into();
+                let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx) {
+                    match &result_plan {
+                        Err(_) => result_plan = Ok(temporal_join),
+                        Ok(prev_temporal_join) => {
+                            // Prefer to the temporal join with a longer lookup prefix len.
+                            if prev_temporal_join.eq_join_predicate().eq_indexes().len()
+                                < temporal_join.eq_join_predicate().eq_indexes().len()
+                            {
+                                result_plan = Ok(temporal_join)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result_plan
+    }
+
     fn to_stream_temporal_join(
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamTemporalJoin> {
         assert!(predicate.has_eq());
 
         let right = self.right();
@@ -1126,7 +1167,7 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate).into())
+        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate))
     }
 
     fn to_stream_dynamic_filter(
@@ -1305,7 +1346,8 @@ impl ToStream for LogicalJoin {
             }
 
             if self.should_be_temporal_join() {
-                self.to_stream_temporal_join(predicate, ctx)
+                self.to_stream_temporal_join_with_index_selection(predicate, ctx)
+                    .map(|x| x.into())
             } else {
                 self.to_stream_hash_join(predicate, ctx)
             }

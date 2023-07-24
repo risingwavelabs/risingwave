@@ -99,7 +99,7 @@ impl SourceDescBuilder {
         columns
     }
 
-    pub async fn build(self) -> Result<SourceDesc> {
+    pub fn build(self) -> Result<SourceDesc> {
         let format = match self.source_info.get_row_format()? {
             PbRowFormatType::Json => SourceFormat::Json,
             PbRowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -123,17 +123,11 @@ impl SourceDescBuilder {
 
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config =
-            SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
+        let psrser_config = SpecificParserConfig::new(format, &self.source_info, &self.properties)?;
 
         let source = ConnectorSource::new(
             self.properties,
             columns.clone(),
-            // TODO: may reuse the connector client
-            self.connector_params
-                .connector_client
-                .as_ref()
-                .map(|client| client.endpoint().clone()),
             self.connector_message_buffer_size,
             psrser_config,
         )?;
@@ -150,7 +144,7 @@ impl SourceDescBuilder {
         self.metrics.clone()
     }
 
-    pub async fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
+    pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
         let format = match self.source_info.get_row_format()? {
             PbRowFormatType::Csv => SourceFormat::Csv,
             PbRowFormatType::Json => SourceFormat::Json,
@@ -159,13 +153,11 @@ impl SourceDescBuilder {
 
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let parser_config =
-            SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
+        let parser_config = SpecificParserConfig::new(format, &self.source_info, &self.properties)?;
 
         let source = FsConnectorSource::new(
             self.properties.clone(),
             columns.clone(),
-            // TODO: may reuse connector client
             self.connector_params
                 .connector_client
                 .as_ref()

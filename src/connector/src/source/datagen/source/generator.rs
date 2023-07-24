@@ -127,6 +127,7 @@ impl DatagenEventGenerator {
                         }
                     };
                     msgs.push(SourceMessage {
+                        key: None,
                         payload: Some(payload),
                         offset: self.offset.to_string(),
                         split_id: self.split_id.clone(),

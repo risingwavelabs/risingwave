@@ -1050,6 +1050,18 @@ pub enum Statement {
         /// Optional parameters.
         params: CreateFunctionBody,
     },
+    /// CREATE AGGREGATE
+    ///
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
+    CreateAggregate {
+        or_replace: bool,
+        name: ObjectName,
+        args: Vec<OperateFunctionArg>,
+        /// Optional parameters.
+        returns: Option<DataType>,
+        append_only: bool,
+        params: CreateFunctionBody,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1359,6 +1371,29 @@ impl fmt::Display for Statement {
                 }
                 if let Some(return_type) = returns {
                     write!(f, " {}", return_type)?;
+                }
+                write!(f, "{params}")?;
+                Ok(())
+            }
+            Statement::CreateAggregate {
+                or_replace,
+                name,
+                args,
+                returns,
+                append_only,
+                params,
+            } => {
+                write!(
+                    f,
+                    "CREATE {or_replace}AGGREGATE {name}",
+                    or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                )?;
+                write!(f, "({})", display_comma_separated(args))?;
+                if let Some(return_type) = returns {
+                    write!(f, " RETURNS {}", return_type)?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
                 }
                 write!(f, "{params}")?;
                 Ok(())
@@ -1919,10 +1954,11 @@ pub enum FunctionArgExpr {
     /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, Vec<Ident>),
-    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
-    QualifiedWildcard(ObjectName),
-    /// An unqualified `*` or `* with (columns)`
-    WildcardOrWithExcept(Option<Vec<Expr>>),
+    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`, followed by optional
+    /// except syntax
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
+    /// An unqualified `*` or `* except (columns)`
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -1939,11 +1975,25 @@ impl fmt::Display for FunctionArgExpr {
                         .format_with("", |i, f| f(&format_args!(".{i}")))
                 )
             }
-            FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            FunctionArgExpr::WildcardOrWithExcept(w) => match w {
+            FunctionArgExpr::QualifiedWildcard(prefix, except) => match except {
                 Some(exprs) => write!(
                     f,
-                    "EXCEPT ({})",
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+
+            FunctionArgExpr::Wildcard(except) => match except {
+                Some(exprs) => write!(
+                    f,
+                    "* EXCEPT ({})",
                     exprs
                         .iter()
                         .map(|v| v.to_string())
