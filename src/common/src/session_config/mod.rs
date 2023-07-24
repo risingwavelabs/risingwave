@@ -402,7 +402,7 @@ pub struct ConfigMap {
     batch_parallelism: BatchParallelism,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
+    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"9.5.0\"))"))]
     server_version: ServerVersion,
     server_version_num: ServerVersionNum,
 
