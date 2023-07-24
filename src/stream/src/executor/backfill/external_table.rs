@@ -14,16 +14,25 @@
 
 use std::sync::Arc;
 
+use futures::Stream;
+use mysql_async::prelude::*;
+use mysql_async::{ResultSetStream, TextProtocol};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Schema, TableId, TableOption};
 use risingwave_common::row::Row;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::value_encoding::EitherSerde;
+use risingwave_connector::source::cdc::CdcProperties;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::row_serde::ColumnMapping;
+use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use crate::executor::backfill::upstream_table::binlog::UpstreamBinlogOffsetRead;
+use crate::executor::backfill::upstream_table::snapshot::{SnapshotReadArgs, UpstreamSnapshotRead};
+use crate::executor::backfill::upstream_table::{SchemaTableName, UpstreamDbType};
+use crate::executor::StreamExecutorResult;
 
 pub type ExternalStorageTable = ExternalTableInner<EitherSerde>;
 
@@ -32,8 +41,17 @@ pub struct ExternalTableInner<SD: ValueRowSerde> {
     /// Id for this table.
     table_id: TableId,
 
+    /// The normalized name of the table, e.g. `dbname.schema_name.table_name`.
+    table_name: String,
+    schema_name: String,
+
+    table_reader: ExternalTableReaderImpl,
+
+    db_type: UpstreamDbType,
+
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
+    /// TODO(siyuan): the schema of the external table defined in the DDL
     schema: Schema,
 
     /// Used for serializing and deserializing the primary key.
@@ -108,6 +126,21 @@ impl<SD: ValueRowSerde> ExternalTableInner<SD> {
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
+
+    pub fn db_type(&self) -> &UpstreamDbType {
+        &self.db_type
+    }
+
+    pub fn schema_table_name(&self) -> SchemaTableName {
+        SchemaTableName {
+            schema_name: self.schema_name.clone(),
+            table_name: self.table_name.clone(),
+        }
+    }
+
+    pub fn table_reader(&self) -> &ExternalTableReaderImpl {
+        &self.table_reader
+    }
 }
 
 impl UpstreamBinlogOffsetRead for ExternalStorageTable {
@@ -118,5 +151,124 @@ impl UpstreamBinlogOffsetRead for ExternalStorageTable {
         }
 
         todo!()
+    }
+}
+
+// reader for external table used in backfill
+pub trait ExternalTableReader {
+    type SnapshotStream: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+
+    fn get_normalized_table_name(table_name: &SchemaTableName) -> String;
+
+    // todo: Use GAT to return a future
+    fn current_binlog_offset(&self) -> Option<String>;
+
+    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream;
+}
+
+pub enum ExternalTableReaderImpl {
+    MYSQL(MySqlExternalTableReader),
+    POSTGERS(PostgresExternalTableReader),
+}
+
+// todo(siyuan): embeded db client in the reader
+pub struct MySqlExternalTableReader {
+    pool: mysql_async::Pool,
+    client: None,
+}
+
+impl MySqlExternalTableReader {
+    pub async fn new(cdc_props: CdcProperties) -> Self {
+        // todo: create a mysql client for upstream db
+
+        let database_url = "mysql://root:123456@localhost:3306/mydb";
+        let pool = mysql_async::Pool::new(database_url);
+
+        Self { pool, client: None }
+    }
+}
+
+impl ExternalTableReader for MySqlExternalTableReader {
+    type SnapshotStream = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+
+    fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        format!("`{}`", table_name.table_name)
+    }
+
+    fn current_binlog_offset(&self) -> Option<String> {
+        todo!()
+    }
+
+    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream {
+        async move {
+            let sql = format!(
+                "SELECT * FROM {}",
+                Self::get_normalized_table_name(table_name)
+            );
+
+            // let mut conn = self.pool.get_conn().await?;
+            //
+            // let mut result_set = conn.query_iter(sql).await?;
+            todo!("mysql snapshot read")
+        }
+    }
+}
+
+pub struct PostgresExternalTableReader {
+    client: None,
+}
+
+impl ExternalTableReader for PostgresExternalTableReader {
+    type SnapshotStream = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+
+    fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        format!("{}.{}", table_name.schema_name, table_name.table_name)
+    }
+
+    fn current_binlog_offset(&self) -> Option<String> {
+        todo!()
+    }
+
+    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream {
+        todo!()
+    }
+}
+
+impl ExternalTableReader for ExternalTableReaderImpl {
+    type SnapshotStream = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+
+    fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        todo!()
+    }
+
+    fn current_binlog_offset(&self) -> Option<String> {
+        todo!()
+    }
+
+    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream {
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::pin_mut;
+    use mysql_async::prelude::*;
+    use mysql_async::Row;
+    use tokio_stream::StreamExt;
+
+    // unit test for external table reader
+    #[tokio::test]
+    async fn test_mysql_table_reader() {
+        let pool = mysql_async::Pool::new("mysql://root:123456@localhost:8306/mydb");
+
+        let mut conn = pool.get_conn().await.unwrap();
+        let mut result_set = conn.query_iter("SELECT * FROM `t1`").await?;
+        let s = result_set.stream::<Row>().await?.unwrap();
+        pin_mut!(s);
+        while let Some(row) = s.next().await {
+            let row = row?;
+            println!("got {:?}", row);
+        }
     }
 }

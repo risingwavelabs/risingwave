@@ -32,6 +32,7 @@ use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::external_table::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamSnapshotRead, UpstreamTableReader,
 };
@@ -72,7 +73,7 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// unify the two executor to one
 pub struct CdcBackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StorageTable<S>,
+    upstream_table: ExternalStorageTable,
 
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
@@ -98,7 +99,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        upstream_table: StorageTable<S>,
+        upstream_table: ExternalStorageTable,
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
@@ -124,7 +125,7 @@ where
         }
     }
 
-    // #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();

@@ -36,6 +36,7 @@ use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, StateTableInner};
+use crate::executor::backfill::upstream_table::{SchemaTableName, UpstreamDbType};
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -491,4 +492,45 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         table.commit_no_data_expected(epoch);
     }
     Ok(())
+}
+
+pub fn get_normalized_table_name(db_type: &UpstreamDbType, table_name: &SchemaTableName) -> String {
+    match db_type {
+        UpstreamDbType::MYSQL => table_name.table_name.clone(),
+        UpstreamDbType::POSTGRES => {
+            format!("{}.{}", table_name.schema_name, table_name.table_name)
+        }
+        _ => {
+            unreachable!("unsupported db type: {:?}", db_type);
+        }
+    }
+}
+
+// get snapshot read sql for specific database
+pub fn get_snapshot_read_sql(db_type: &UpstreamDbType, table_name: &SchemaTableName) -> String {
+    let table_name = get_normalized_table_name(db_type, table_name);
+    match db_type {
+        UpstreamDbType::MYSQL => format!("SELECT * FROM `{}`", table_name),
+        UpstreamDbType::POSTGRES => format!(
+            "SELECT * FROM \"{}\".\"{}\"",
+            table_name.schema_name, table_name.table_name
+        ),
+        _ => {
+            unreachable!("unsupported db type: {:?}", db_type);
+        }
+    }
+}
+
+pub fn get_upstream_snapshot_stream(
+    db_type: &UpstreamDbType,
+    table_name: &SchemaTableName,
+) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> {
+    const READ_CHUNK_SIZE: u32 = 256;
+    let sql = get_snapshot_read_sql(db_type, table_name);
+
+    // fire sql request to upstream db
+
+    //
+
+    todo!()
 }

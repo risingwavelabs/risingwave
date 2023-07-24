@@ -9,9 +9,11 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
-use crate::executor::backfill::external_table::ExternalStorageTable;
+use crate::executor::backfill::external_table::{ExternalStorageTable, ExternalTableReader};
 use crate::executor::backfill::upstream_table::UpstreamTable;
-use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
+use crate::executor::backfill::utils::{
+    compute_bounds, get_snapshot_read_sql, get_upstream_snapshot_stream, iter_chunks,
+};
 use crate::executor::StreamExecutorResult;
 
 pub trait UpstreamSnapshotRead {
@@ -109,8 +111,14 @@ impl UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable> {
     fn snapshot_read(&self, _args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
         #[try_stream]
         async move {
-            // TODO:
-            yield None;
+            #[for_await]
+            for chunk in self
+                .inner
+                .table_reader()
+                .snapshot_read(&self.inner.schema_table_name())
+            {
+                yield chunk?;
+            }
         }
     }
 }
