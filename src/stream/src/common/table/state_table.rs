@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -26,11 +27,11 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
@@ -56,6 +57,63 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
+
+/// Used for watermark state cleaning.
+/// We store the smallest value in our state table here.
+///
+/// Cases
+/// -----
+/// Uninitialized -> No value in cache, because none inserted yet. No delete range required.
+/// Empty -> No value in cache. We need to issue delete range,
+///          since we don't know the smallest value.
+/// Smallest(value) if `current_watermark` < value -> No delete range required.
+/// Smallest(value) if `current_watermark` >= value -> Delete range (-inf, `current_watermark`].
+///
+/// Updating the Cache
+/// ------------------
+/// If no watermark column, just set watermark state to Empty.
+/// Otherwise if watermark column exists:
+/// (UPDATE)INSERT -> Update lowest value if applicable.
+/// (UPDATE)DELETE -> If removes lowest value, set cache to empty.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum WatermarkCache {
+    Empty,
+    Uninitialized,
+    // We need to store row, in case we encounter `Delete`s.
+    // Then we can remove the OwnedRow.
+    Smallest(OwnedRow),
+}
+
+impl WatermarkCache {
+    /// Handle inserts / updates.
+    fn handle_insert(&mut self, row: impl Row, watermark_col_idx: &Option<usize>) {
+        let Some(idx) = watermark_col_idx else {
+            *self = Self::Empty;
+            return;
+        };
+        let new_value = row.datum_at(*idx);
+        match self {
+            Self::Smallest(current_row) => {
+                let current_value = current_row.datum_at(*idx);
+                if cmp_datum(new_value, current_value.to_datum_ref(), Default::default())
+                    == Ordering::Less
+                {
+                    *self = Self::Smallest(row.into_owned_row());
+                }
+                // Otherwise keep the old value.
+            }
+            Self::Uninitialized => {
+                *self = Self::Smallest(row.into_owned_row());
+            }
+            Self::Empty => {
+                // Empty -> We don't know the smallest value.
+                // So we can't update anything.
+                // We have to do a table scan
+                // if we wish to refresh the cache.
+            }
+        }
+    }
+}
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -118,6 +176,12 @@ pub struct StateTableInner<
     watermark_buffer_strategy: W,
     /// State cleaning watermark. Old states will be cleaned under this watermark when committing.
     state_clean_watermark: Option<ScalarImpl>,
+
+    /// Watermark col idx
+    watermark_col_idx: Option<usize>,
+
+    /// Watermark min-value cache
+    watermark_min_value_cache: WatermarkCache,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -253,6 +317,8 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
+            watermark_min_value_cache: WatermarkCache::Uninitialized,
+            watermark_col_idx: None,
         }
     }
 
@@ -414,6 +480,8 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
+            watermark_col_idx: None,
+            watermark_min_value_cache: WatermarkCache::Uninitialized,
         }
     }
 
@@ -650,6 +718,8 @@ where
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: impl Row) {
+        self.watermark_min_value_cache
+            .handle_insert(&value, &self.watermark_col_idx);
         let pk = (&value).project(self.pk_indices());
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
