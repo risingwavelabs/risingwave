@@ -208,8 +208,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.monotonic_deletes.push(event);
     }
 
-    pub fn has_range_tombstone(&self) -> bool {
-        !self.monotonic_deletes.is_empty()
+    pub fn last_range_tombstone_epoch(&self) -> HummockEpoch {
+        self.monotonic_deletes
+            .last()
+            .map_or(HummockEpoch::MAX, |delete| delete.new_epoch)
     }
 
     /// Add kv pair to sstable.
