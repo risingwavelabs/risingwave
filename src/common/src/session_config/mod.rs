@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 26] = [
+const CONFIG_KEYS: [&str; 28] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -61,6 +61,8 @@ const CONFIG_KEYS: [&str; 26] = [
     "SERVER_VERSION",
     "SERVER_VERSION_NUM",
     "RW_FORCE_SPLIT_DISTINCT_AGG",
+    "CLIENT_MIN_MESSAGES",
+    "CLIENT_ENCODING",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -91,6 +93,8 @@ const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
+const CLIENT_MIN_MESSAGES: usize = 26;
+const CLIENT_ENCODING: usize = 27;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -297,10 +301,17 @@ type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
 type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
+type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
+type ClientEncoding = ConfigString<CLIENT_ENCODING>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
     fn report_status(&mut self, key: &str, new_val: String);
+}
+
+// Report nothing.
+impl ConfigReporter for () {
+    fn report_status(&mut self, _key: &str, _new_val: String) {}
 }
 
 #[derive(Educe)]
@@ -394,6 +405,16 @@ pub struct ConfigMap {
     #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
     server_version: ServerVersion,
     server_version_num: ServerVersionNum,
+
+    /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES>
+    #[educe(Default(
+        expression = "ConfigString::<CLIENT_MIN_MESSAGES>(String::from(\"notice\"))"
+    ))]
+    client_min_messages: ClientMinMessages,
+
+    /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
+    #[educe(Default(expression = "ConfigString::<CLIENT_ENCODING>(String::from(\"UTF8\"))"))]
+    client_encoding: ClientEncoding,
 }
 
 impl ConfigMap {
@@ -467,6 +488,28 @@ impl ConfigMap {
             self.interval_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             self.batch_parallelism = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(ClientMinMessages::entry_name()) {
+            // TODO: validate input and fold to lowercase after #10697 refactor
+            self.client_min_messages = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
+            let enc: ClientEncoding = val.as_slice().try_into()?;
+            if !enc.as_str().eq_ignore_ascii_case("UTF8") {
+                return Err(ErrorCode::InvalidConfigValue {
+                    config_entry: ClientEncoding::entry_name().into(),
+                    config_value: enc.0,
+                }
+                .into());
+            }
+            // No actual assignment because we only support UTF8.
+        } else if key.eq_ignore_ascii_case("bytea_output") {
+            // TODO: We only support hex now.
+            if !val.first().is_some_and(|val| *val == "hex") {
+                return Err(ErrorCode::InvalidConfigValue {
+                    config_entry: "bytea_output".into(),
+                    config_value: val.first().map(ToString::to_string).unwrap_or_default(),
+                }
+                .into());
+            }
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -529,6 +572,13 @@ impl ConfigMap {
             Ok(self.application_name.to_string())
         } else if key.eq_ignore_ascii_case(ForceSplitDistinctAgg::entry_name()) {
             Ok(self.force_split_distinct_agg.to_string())
+        } else if key.eq_ignore_ascii_case(ClientMinMessages::entry_name()) {
+            Ok(self.client_min_messages.to_string())
+        } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
+            Ok(self.client_encoding.to_string())
+        } else if key.eq_ignore_ascii_case("bytea_output") {
+            // TODO: We only support hex now.
+            Ok("hex".to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -661,6 +711,21 @@ impl ConfigMap {
                 setting : self.force_split_distinct_agg.to_string(),
                 description : String::from("Enable split the distinct aggregation.")
             },
+            VariableInfo{
+                name : ClientMinMessages::entry_name().to_lowercase(),
+                setting : self.client_min_messages.to_string(),
+                description : String::from("Sets the message levels that are sent to the client.")
+            },
+            VariableInfo{
+                name : ClientEncoding::entry_name().to_lowercase(),
+                setting : self.client_encoding.to_string(),
+                description : String::from("Sets the client's character set encoding.")
+            },
+            VariableInfo{
+                name: "bytea_output".to_string(),
+                setting: "hex".to_string(),
+                description: "Sets the output format for bytea.".to_string(),
+            }
         ]
     }
 
@@ -767,5 +832,13 @@ impl ConfigMap {
             return Some(NonZeroU64::new(self.batch_parallelism.0).unwrap());
         }
         None
+    }
+
+    pub fn get_client_min_message(&self) -> &str {
+        &self.client_min_messages
+    }
+
+    pub fn get_client_encoding(&self) -> &str {
+        &self.client_encoding
     }
 }

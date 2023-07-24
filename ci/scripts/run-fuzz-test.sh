@@ -30,9 +30,9 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
 
     download_and_prepare_rw "$profile" common
 
-    echo "--- Download artifacts"
-    download-and-decompress-artifact risingwave_simulation .
-    chmod +x ./risingwave_simulation
+    #    echo "--- Download artifacts"
+    #    download-and-decompress-artifact risingwave_simulation .
+    #    chmod +x ./risingwave_simulation
 
     echo "--- Download sqlsmith e2e bin"
     download-and-decompress-artifact sqlsmith-"$profile" target/debug/
