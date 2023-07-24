@@ -36,7 +36,7 @@ impl BatchInsert {
         // TODO: derive from input
         let base = PlanBase::new_batch(
             logical.ctx(),
-            logical.schema().clone(),
+            logical.schema(),
             Distribution::Single,
             Order::any(),
         );

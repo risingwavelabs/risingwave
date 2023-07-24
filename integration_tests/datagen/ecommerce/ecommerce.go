@@ -22,6 +22,14 @@ type orderEvent struct {
 	EventTimestamp string  `json:"event_timestamp"`
 }
 
+func (r *orderEvent) Topic() string {
+	return "order_events"
+}
+
+func (r *orderEvent) Key() string {
+	return fmt.Sprint(r.OrderId)
+}
+
 func (r *orderEvent) ToPostgresSql() string {
 	return fmt.Sprintf(`INSERT INTO %s
 (order_id, item_id, item_price, event_timestamp)
@@ -29,9 +37,9 @@ values ('%d', '%d', %f, '%s')`,
 		"order_events", r.OrderId, r.ItemId, r.ItemPrice, r.EventTimestamp)
 }
 
-func (r *orderEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "order_events", fmt.Sprint(r.OrderId), data
+func (r *orderEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 // Each order/trade will be composed of two events:
@@ -44,6 +52,14 @@ type parcelEvent struct {
 	EventType      string `json:"event_type"`
 }
 
+func (r *parcelEvent) Topic() string {
+	return "parcel_events"
+}
+
+func (r *parcelEvent) Key() string {
+	return fmt.Sprint(r.OrderId)
+}
+
 func (r *parcelEvent) ToPostgresSql() string {
 	return fmt.Sprintf(`INSERT INTO %s
 (order_id, event_timestamp, event_type)
@@ -51,9 +67,9 @@ values ('%d', '%s', '%s')`,
 		"parcel_events", r.OrderId, r.EventTimestamp, r.EventType)
 }
 
-func (r *parcelEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "parcel_events", fmt.Sprint(r.OrderId), data
+func (r *parcelEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type ecommerceGen struct {

@@ -108,6 +108,30 @@ impl Configuration {
             etcd_data_path: None,
         }
     }
+
+    /// Returns the config for backfill test.
+    pub fn for_backfill() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("../../../../src/config/backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 4,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
 }
 
 /// A risingwave cluster.
