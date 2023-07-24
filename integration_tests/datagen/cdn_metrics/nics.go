@@ -29,6 +29,14 @@ type nicsMetric struct {
 	Value       float64 `json:"metric_value"`
 }
 
+func (r *nicsMetric) Topic() string {
+	return "nics_metrics"
+}
+
+func (r *nicsMetric) Key() string {
+	return r.DeviceId
+}
+
 func (r *nicsMetric) ToPostgresSql() string {
 	return fmt.Sprintf(
 		`INSERT INTO %s
@@ -37,9 +45,9 @@ values ('%s', '%s', '%s' '%s', '%s', '%f', '%f')`,
 		"nics_metrics", r.DeviceId, r.MetricName, r.Aggregation, r.NicName, r.ReportTime, r.Bandwidth, r.Value)
 }
 
-func (r *nicsMetric) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "nics_metrics", r.DeviceId, data
+func (r *nicsMetric) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 // Each device has a nics monitor.
