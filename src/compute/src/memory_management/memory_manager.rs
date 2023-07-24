@@ -79,8 +79,8 @@ impl GlobalMemoryManager {
         let mut tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
 
         let mut memory_control_stats = MemoryControlStats {
-            jemalloc_allocated_mib: 0,
-            jemalloc_active_mib: 0,
+            jemalloc_allocated_bytes: 0,
+            jemalloc_active_bytes: 0,
             lru_watermark_step: 0,
             lru_watermark_time_ms: Epoch::physical_now(),
             lru_physical_now_ms: Epoch::physical_now(),
@@ -120,10 +120,10 @@ impl GlobalMemoryManager {
                     self.metrics.lru_runtime_loop_count.inc();
                     self.metrics
                         .jemalloc_allocated_bytes
-                        .set(memory_control_stats.jemalloc_allocated_mib as i64);
+                        .set(memory_control_stats.jemalloc_allocated_bytes as i64);
                     self.metrics
                         .jemalloc_active_bytes
-                        .set(memory_control_stats.jemalloc_active_mib as i64);
+                        .set(memory_control_stats.jemalloc_active_bytes as i64);
                 }
             }
         }

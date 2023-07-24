@@ -14,6 +14,7 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats, prof as jemalloc_prof};
 
 use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
@@ -24,11 +25,15 @@ use super::{MemoryControl, MemoryControlStats};
 /// `JemallocMemoryControl` is a memory control policy that uses jemalloc statistics to control. It
 /// assumes that most memory is used by streaming engine and does memory control over LRU watermark
 /// based on jemalloc statistics.
-#[derive(Debug)]
 pub struct JemallocMemoryControl {
     threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
+
+    jemalloc_epoch_mib: tikv_jemalloc_ctl::epoch_mib,
+    jemalloc_allocated_mib: jemalloc_stats::allocated_mib,
+    jemalloc_active_mib: jemalloc_stats::active_mib,
+    jemalloc_dump_mib: jemalloc_prof::dump_mib,
 }
 
 impl JemallocMemoryControl {
@@ -40,12 +45,55 @@ impl JemallocMemoryControl {
         let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
+
+        let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
+        let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
+        let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
+        let jemalloc_dump_mib = jemalloc_prof::dump::mib().unwrap();
         Self {
             threshold_stable,
             threshold_graceful,
             threshold_aggressive,
+            jemalloc_epoch_mib,
+            jemalloc_allocated_mib,
+            jemalloc_active_mib,
+            jemalloc_dump_mib,
         }
     }
+
+    fn advance_jemalloc_epoch(
+        &self,
+        prev_jemalloc_allocated_bytes: usize,
+        prev_jemalloc_active_bytes: usize,
+    ) -> (usize, usize) {
+        let jemalloc_epoch_mib = self.jemalloc_epoch_mib.clone();
+        if let Err(e) = jemalloc_epoch_mib.advance() {
+            tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
+        }
+    
+        let jemalloc_allocated_bytes = self.jemalloc_allocated_mib.clone();
+        let jemalloc_active_bytes = self.jemalloc_active_mib.clone();
+        (
+            jemalloc_allocated_bytes.read().unwrap_or_else(|e| {
+                tracing::warn!("Jemalloc read allocated failed! {:?}", e);
+                prev_jemalloc_allocated_bytes
+            }),
+            jemalloc_active_bytes.read().unwrap_or_else(|e| {
+                tracing::warn!("Jemalloc read active failed! {:?}", e);
+                prev_jemalloc_active_bytes
+            }),
+        )
+    }
+}
+
+impl std::fmt::Debug for JemallocMemoryControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JemallocMemoryControl")
+            .field("threshold_stable", &self.threshold_stable)
+            .field("threshold_graceful", &self.threshold_graceful)
+            .field("threshold_aggressive", &self.threshold_aggressive)
+            .finish()
+    }   
 }
 
 impl MemoryControl for JemallocMemoryControl {
@@ -57,9 +105,9 @@ impl MemoryControl for JemallocMemoryControl {
         _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
-        let (jemalloc_allocated_mib, jemalloc_active_mib) = advance_jemalloc_epoch(
-            prev_memory_stats.jemalloc_allocated_mib,
-            prev_memory_stats.jemalloc_active_mib,
+        let (jemalloc_allocated_bytes, jemalloc_active_bytes) = self.advance_jemalloc_epoch(
+            prev_memory_stats.jemalloc_allocated_bytes,
+            prev_memory_stats.jemalloc_active_bytes,
         );
 
         // Streaming memory control
@@ -68,7 +116,7 @@ impl MemoryControl for JemallocMemoryControl {
         // on cache eviction. Here we do the calculation based on jemalloc statistics.
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
-            jemalloc_allocated_mib,
+            jemalloc_allocated_bytes,
             self.threshold_stable,
             self.threshold_graceful,
             self.threshold_aggressive,
@@ -79,8 +127,8 @@ impl MemoryControl for JemallocMemoryControl {
         set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
 
         MemoryControlStats {
-            jemalloc_allocated_mib,
-            jemalloc_active_mib,
+            jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
             lru_watermark_step,
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
@@ -88,30 +136,7 @@ impl MemoryControl for JemallocMemoryControl {
     }
 }
 
-fn advance_jemalloc_epoch(
-    prev_jemalloc_allocated_mib: usize,
-    prev_jemalloc_active_mib: usize,
-) -> (usize, usize) {
-    use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
-    let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
-    if let Err(e) = jemalloc_epoch_mib.advance() {
-        tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
-    }
-
-    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
-    let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
-    (
-        jemalloc_allocated_mib.read().unwrap_or_else(|e| {
-            tracing::warn!("Jemalloc read allocated failed! {:?}", e);
-            prev_jemalloc_allocated_mib
-        }),
-        jemalloc_active_mib.read().unwrap_or_else(|e| {
-            tracing::warn!("Jemalloc read active failed! {:?}", e);
-            prev_jemalloc_active_mib
-        }),
-    )
-}
 
 fn calculate_lru_watermark(
     cur_used_memory_bytes: usize,
@@ -123,7 +148,7 @@ fn calculate_lru_watermark(
 ) -> (u64, u64, u64) {
     let mut watermark_time_ms = prev_memory_stats.lru_watermark_time_ms;
     let last_step = prev_memory_stats.lru_watermark_step;
-    let last_used_memory_bytes = prev_memory_stats.jemalloc_allocated_mib;
+    let last_used_memory_bytes = prev_memory_stats.jemalloc_allocated_bytes;
 
     // The watermark calculation works in the following way:
     //

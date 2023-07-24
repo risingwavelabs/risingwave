@@ -16,7 +16,7 @@ pub mod memory_manager;
 
 // Only enable the non-trivial policies on Linux as it relies on statistics from `jemalloc-ctl`
 // which might be inaccurate on other platforms.
-#[cfg(target_os = "linux")]
+// #[cfg(target_os = "linux")]
 pub mod policy;
 
 use std::sync::atomic::AtomicU64;
@@ -50,8 +50,8 @@ pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 /// `MemoryControlStats` contains the state from previous control loop
 #[derive(Default)]
 pub struct MemoryControlStats {
-    pub jemalloc_allocated_mib: usize,
-    pub jemalloc_active_mib: usize,
+    pub jemalloc_allocated_bytes: usize,
+    pub jemalloc_active_bytes: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
     pub lru_physical_now_ms: u64,
@@ -78,11 +78,15 @@ pub fn build_memory_control_policy(total_memory_bytes: usize) -> Result<MemoryCo
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn build_memory_control_policy(_total_memory_bytes: usize) -> Result<MemoryControlRef> {
+pub fn build_memory_control_policy(total_memory_bytes: usize) -> Result<MemoryControlRef> {
     // We disable memory control on operating systems other than Linux now because jemalloc
     // stats do not work well.
-    tracing::warn!("memory control is only enabled on Linux now");
-    Ok(Box::new(DummyPolicy))
+    // tracing::warn!("memory control is only enabled on Linux now");
+    // Ok(Box::new(DummyPolicy))
+
+    use self::policy::JemallocMemoryControl;
+
+    Ok(Box::new(JemallocMemoryControl::new(total_memory_bytes)))
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
