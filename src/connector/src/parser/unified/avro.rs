@@ -17,13 +17,13 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
-use chrono::Datelike;
+use chrono::{Datelike, NaiveTime};
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::Result as RwResult;
-use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl};
+use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
@@ -153,7 +153,13 @@ impl<'a> AvroParseOptions<'a> {
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
             }
-
+            // ---- Time -----
+            (Some(DataType::Time), Value::TimeMillis(ms)) => Time::with_milli(*ms as u32)
+                .map_err(|_| create_error())?
+                .into(),
+            (Some(DataType::Time), Value::TimeMicros(us)) => Time::with_micro(*us as u32)
+                .map_err(|_| create_error())?
+                .into(),
             // ---- Date -----
             (Some(DataType::Date) | None, Value::Date(days)) => {
                 Date::with_days(days + unix_epoch_days())
