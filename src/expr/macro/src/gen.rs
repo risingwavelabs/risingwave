@@ -113,11 +113,12 @@ impl FunctionAttr {
             .args
             .iter()
             .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
-        let ret_type: TokenStream2 = match &self.user_fn.core_return_type {
-            s if s.contains('&') || s.contains("Ref") => {
-                types::ref_type(&self.ret).parse().unwrap()
-            }
-            _ => types::owned_type(&self.ret).parse().unwrap(),
+        let annotation: TokenStream2 = match self.user_fn.core_return_type.as_str() {
+            // add type annotation for functions that return generic types
+            "T" | "T1" | "T2" | "T3" => format!(": Option<{}>", types::owned_type(&self.ret))
+                .parse()
+                .unwrap(),
+            _ => quote! {},
         };
         let ret_array_type = format_ident!("{}", types::array_type(&self.ret));
         let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
@@ -180,9 +181,11 @@ impl FunctionAttr {
                     builder.append_null();
                 }
             }},
+            false if self.user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+                builder.append(#output.as_ref().map(|s| s.as_ref()));
+            },
             false => quote! {
-                // type annotation for generic functions
-                let output: Option<#ret_type> = #output;
+                let output #annotation = #output;
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
         };
@@ -191,9 +194,11 @@ impl FunctionAttr {
                 let mut writer = String::new();
                 #output.map(|_| writer.into())
             }},
+            false if self.user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+                #output.map(|s| s.as_ref().into())
+            },
             false => quote! {{
-                // type annotation for generic functions
-                let output: Option<#ret_type> = #output;
+                let output #annotation = #output;
                 output.map(|s| s.into())
             }},
         };

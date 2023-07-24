@@ -779,6 +779,12 @@ impl From<&String> for ScalarImpl {
     }
 }
 
+impl From<&[u8]> for ScalarImpl {
+    fn from(s: &[u8]) -> Self {
+        Self::Bytea(s.into())
+    }
+}
+
 impl From<JsonbRef<'_>> for ScalarImpl {
     fn from(jsonb: JsonbRef<'_>) -> Self {
         Self::Jsonb(jsonb.to_owned_scalar())
