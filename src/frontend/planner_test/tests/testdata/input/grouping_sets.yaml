@@ -38,3 +38,17 @@
     SELECT brand, size, sum(sales), grouping(size) FROM items_sold GROUP BY brand, size;
   expected_outputs:
     - planner_error
+- name: rollup1
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP(brand, size);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: rollup2
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP((brand, size));
+  expected_outputs:
+    - batch_plan
+    - stream_plan
