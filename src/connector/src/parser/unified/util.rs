@@ -14,7 +14,7 @@
 
 use risingwave_common::error::{ErrorCode, RwError};
 
-use super::{AccessError, ChangeEvent};
+use super::{Access, AccessError, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 
@@ -81,6 +81,31 @@ pub fn apply_row_operation_on_stream_chunk_writer(
 ) -> std::result::Result<WriteGuard, RwError> {
     let op = row_op.op()?;
     apply_row_operation_on_stream_chunk_writer_with_op(row_op, writer, op)
+}
+
+pub fn apply_row_accessor_on_stream_chunk_writer(
+    accessor: impl Access,
+    writer: &mut SourceStreamChunkRowWriter<'_>,
+) -> std::result::Result<WriteGuard, RwError> {
+    writer.insert(|column| {
+        let res = match accessor.access(&[&column.name], Some(&column.data_type)) {
+            Ok(o) => Ok(o),
+            Err(AccessError::Undefined { name, .. }) if !column.is_pk && name == column.name => {
+                // Fill in null value for non-pk column
+                // TODO: figure out a way to fill in not-null default value if user specifies one
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        };
+        tracing::trace!(
+            "inserted {:?} {:?} is_pk:{:?} {:?} ",
+            &column.name,
+            &column.data_type,
+            &column.is_pk,
+            res
+        );
+        Ok(res?)
+    })
 }
 
 impl From<AccessError> for RwError {

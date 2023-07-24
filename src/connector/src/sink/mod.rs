@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod catalog;
+pub mod clickhouse;
 pub mod coordinate;
 pub mod iceberg;
 pub mod kafka;
@@ -23,6 +24,7 @@ pub mod utils;
 
 use std::collections::HashMap;
 
+use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
@@ -38,7 +40,9 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::SinkType;
+use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
@@ -257,6 +261,7 @@ pub enum SinkConfig {
     Kinesis(Box<KinesisSinkConfig>),
     Iceberg(IcebergConfig),
     BlackHole,
+    ClickHouse(Box<ClickHouseConfig>),
 }
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -321,6 +326,9 @@ impl SinkConfig {
             KINESIS_SINK => Ok(SinkConfig::Kinesis(Box::new(
                 KinesisSinkConfig::from_hashmap(properties)?,
             ))),
+            CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
+                ClickHouseConfig::from_hashmap(properties)?,
+            ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
                 properties,
@@ -342,6 +350,7 @@ pub enum SinkImpl {
     Remote(RemoteSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
+    ClickHouse(ClickHouseSink),
     Iceberg(CoordinatedRemoteSink),
 }
 
@@ -353,6 +362,7 @@ impl SinkImpl {
             SinkImpl::Remote(_) => "remote",
             SinkImpl::BlackHole(_) => "blackhole",
             SinkImpl::Kinesis(_) => "kinesis",
+            SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
         }
     }
@@ -369,6 +379,7 @@ macro_rules! dispatch_sink {
             SinkImpl::Remote($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
             SinkImpl::Kinesis($sink) => $body,
+            SinkImpl::ClickHouse($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
         }
     }};
@@ -392,6 +403,12 @@ impl SinkImpl {
             )),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
+            SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
+                *cfg,
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
+            )?),
             SinkConfig::Iceberg(cfg) => {
                 SinkImpl::Iceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
             }
@@ -415,11 +432,19 @@ pub enum SinkError {
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]
     Coordinator(anyhow::Error),
+    #[error("ClickHouse error: {0}")]
+    ClickHouse(String),
 }
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
         SinkError::Remote(anyhow_error!("{}", value))
+    }
+}
+
+impl From<ClickHouseError> for SinkError {
+    fn from(value: ClickHouseError) -> Self {
+        SinkError::ClickHouse(format!("{}", value))
     }
 }
 

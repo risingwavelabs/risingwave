@@ -71,7 +71,7 @@ async fn extract_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::Avro, with_properties, &info)?;
-    let conf = AvroParserConfig::new(parser_config).await?;
+    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -93,7 +93,7 @@ async fn extract_upsert_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::UpsertAvro, with_properties, &info)?;
-    let conf = AvroParserConfig::new(parser_config).await?;
+    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
     let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(
@@ -135,7 +135,7 @@ async fn extract_debezium_avro_table_pk_columns(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, with_properties, &info)?;
-    let conf = DebeziumAvroParserConfig::new(parser_config).await?;
+    let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
 
@@ -149,7 +149,7 @@ async fn extract_debezium_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, with_properties, &info)?;
-    let conf = DebeziumAvroParserConfig::new(parser_config).await?;
+    let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
         .into_iter()
@@ -173,7 +173,7 @@ async fn extract_protobuf_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::Protobuf, &with_properties, &info)?;
-    let conf = ProtobufParserConfig::new(parser_config).await?;
+    let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
 
@@ -583,8 +583,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType
     || {
         convert_args!(hashmap!(
                 KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro, RowFormatType::Bytes],
-                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
-                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
                 GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
                 NEXMARK_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Bytes],
                 DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json, RowFormatType::Bytes],

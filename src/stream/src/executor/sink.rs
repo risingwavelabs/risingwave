@@ -195,7 +195,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.checkpoint)
+                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                         .await?;
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id) {
                         log_writer.update_vnode_bitmap(vnode_bitmap);

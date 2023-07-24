@@ -21,14 +21,22 @@ type tcpMetric struct {
 	Value      float64 `json:"metric_value"`
 }
 
+func (r *tcpMetric) Topic() string {
+	return "tcp_metrics"
+}
+
+func (r *tcpMetric) Key() string {
+	return r.DeviceId
+}
+
 func (r *tcpMetric) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO %s (device_id, report_time, metric_name, metric_value) values ('%s', '%s', '%s', '%f')",
 		"tcp_metrics", r.DeviceId, r.ReportTime, r.MetricName, r.Value)
 }
 
-func (r *tcpMetric) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "tcp_metrics", r.DeviceId, data
+func (r *tcpMetric) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 // Each device has a TCP monitor.

@@ -35,7 +35,6 @@ use std::future::Future;
 use std::iter::repeat;
 use std::sync::Arc;
 
-#[cfg(not(madsim))]
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
@@ -67,7 +66,7 @@ mod tracing;
 pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
-pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 

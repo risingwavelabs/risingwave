@@ -54,7 +54,7 @@ public class JDBCSinkFactory implements SinkFactory {
         String tableName = config.getTableName();
         String schemaName = config.getSchemaName();
         Set<String> jdbcColumns = new HashSet<>();
-        Set<String> jdbcPk = new HashSet<>();
+        Set<String> jdbcPks = new HashSet<>();
         Set<String> jdbcTableNames = new HashSet<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
@@ -71,7 +71,7 @@ public class JDBCSinkFactory implements SinkFactory {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
             while (pkResultSet.next()) {
-                jdbcPk.add(pkResultSet.getString("COLUMN_NAME"));
+                jdbcPks.add(pkResultSet.getString("COLUMN_NAME"));
             }
         } catch (SQLException e) {
             LOG.error("failed to connect to target database. jdbcUrl: {}", jdbcUrl, e);
@@ -98,20 +98,18 @@ public class JDBCSinkFactory implements SinkFactory {
         }
 
         if (sinkType == SinkType.UPSERT) {
-            // For JDBC sink, we enforce the primary key as that of the JDBC table's. The JDBC table
-            // must have primary key.
-            if (jdbcPk.isEmpty()) {
+            // For upsert JDBC sink, the primary key defined on the table must match the one in
+            // config and cannot be empty
+            var pkInWith = new HashSet<>(tableSchema.getPrimaryKeys());
+            if (jdbcPks.isEmpty() || !jdbcPks.equals(pkInWith)) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription(
-                                "JDBC table has no primary key, consider making the sink append-only or defining primary key on the JDBC table")
+                                "JDBC table has no primary key or the primary key doesn't match the 'primary_key' option in the WITH clause")
                         .asRuntimeException();
             }
-            // The user is not allowed to define the primary key for upsert JDBC sink.
-            if (!tableSchema.getPrimaryKeys().isEmpty()) {
+            if (tableSchema.getPrimaryKeys().isEmpty()) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription(
-                                "should not define primary key on upsert JDBC sink, find downstream primary key: "
-                                        + jdbcPk.toString())
+                        .withDescription("Must specify downstream primary key for upsert JDBC sink")
                         .asRuntimeException();
             }
         }

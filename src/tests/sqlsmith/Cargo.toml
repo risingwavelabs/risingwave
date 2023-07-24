@@ -24,6 +24,7 @@ regex = "1"
 risingwave_common = { path = "../../common" }
 risingwave_expr = { path = "../../expr" }
 risingwave_frontend = { path = "../../frontend" }
+risingwave_pb = { path = "../../prost" }
 risingwave_sqlparser = { path = "../../sqlparser" }
 similar = "2.2.1"
 tokio = { version = "0.2", package = "madsim-tokio" }

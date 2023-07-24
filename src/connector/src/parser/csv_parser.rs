@@ -17,11 +17,12 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
-use super::{ByteStreamSourceParser, EncodingProperties, ParserProperties};
+use super::{ByteStreamSourceParser, EncodingProperties};
+use crate::only_parse_payload;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -38,9 +39,8 @@ pub struct CsvParserConfig {
 }
 
 impl CsvParserConfig {
-    pub fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let csv_config =
-            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Csv)?;
+    pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let csv_config = try_match_expand!(encoding_properties, EncodingProperties::Csv)?;
         Ok(Self {
             delimiter: csv_config.delimiter,
             has_header: csv_config.has_header,
@@ -171,10 +171,11 @@ impl ByteStreamSourceParser for CsvParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 

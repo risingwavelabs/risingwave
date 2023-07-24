@@ -22,6 +22,7 @@
 #![feature(lazy_cell)]
 #![feature(drain_filter)]
 
+mod backfill_tests;
 mod batch;
 mod recovery;
 mod scale;

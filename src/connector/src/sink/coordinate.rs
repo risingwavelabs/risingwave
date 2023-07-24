@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use anyhow::anyhow;
-use chrono::Utc;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{
@@ -26,7 +25,7 @@ use risingwave_pb::connector_service::{
     SinkMetadata, SinkWriterToCoordinatorMsg,
 };
 use risingwave_rpc_client::{BidiStreamHandle, SinkCoordinationRpcClient};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::sink::{Result, SinkError, SinkParam, SinkWriter};
 

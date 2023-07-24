@@ -16,9 +16,9 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "36"
-arrow-buffer = "36"
-arrow-schema = "36"
+arrow-array = "44"
+arrow-buffer = "44"
+arrow-schema = "44"
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
@@ -35,7 +35,7 @@ crc32fast = "1"
 easy-ext = "1"
 educe = "0.4"
 either = "1"
-enum-as-inner = "0.5"
+enum-as-inner = "0.6"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -90,7 +90,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 toml = "0.7"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = "0.19"
 tracing-subscriber = "0.3.16"

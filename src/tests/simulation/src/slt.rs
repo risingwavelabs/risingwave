@@ -88,6 +88,7 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // Drop is not retryable in search path test.
     "search_path.slt",
     // Transaction statements are not retryable.
+    "transaction/now.slt",
     "transaction/read_only_multi_conn.slt",
     "transaction/read_only.slt",
     "transaction/tolerance.slt",

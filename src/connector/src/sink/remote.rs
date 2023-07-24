@@ -14,12 +14,10 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::mem::size_of;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::Utc;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
@@ -27,7 +25,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_pb::connector_service::sink_metadata::Metadata;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     JsonPayload, Payload, StreamChunkPayload,
@@ -41,7 +38,7 @@ use risingwave_rpc_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWr
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 #[cfg(test)]
 use tonic::Status;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
