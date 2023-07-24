@@ -37,6 +37,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", branch = "xxh/add_update_and_delete", features = ["time"] }
 csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
@@ -98,7 +99,6 @@ url = "2"
 urlencoding = "2"
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", branch = "xxh/add_update_and_delete", features = ["time"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
