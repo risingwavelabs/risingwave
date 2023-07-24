@@ -52,7 +52,7 @@ async fn build_accessor_builder(
     }
 }
 
-fn check_rw_kafka_key(columns: &Vec<SourceColumnDesc>) -> bool {
+fn check_rw_default_key(columns: &Vec<SourceColumnDesc>) -> bool {
     for col in columns {
         if col.name.starts_with(DEFAULT_KEY_COLUMN_NAME) {
             return true;
@@ -69,8 +69,9 @@ impl UpsertParser {
     ) -> Result<Self> {
         let mut avro_primary_key_column_name = None;
         let key_builder: AccessBuilderImpl;
-        // check whether columns has `_rw_kafka_key`, if so, the key accessor should be bytes
-        if check_rw_kafka_key(&rw_columns) {
+        // check whether columns has `DEFAULT_KEY_COLUMN_NAME`, if so, the key accessor should be
+        // bytes
+        if check_rw_default_key(&rw_columns) {
             key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
                 EncodingProperties::Bytes(BytesProperties {
                     column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
