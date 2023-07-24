@@ -18,7 +18,9 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId};
+use risingwave_common::catalog::{
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
+};
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -52,7 +54,7 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{KAFKA_KEY_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
+use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, WithOptions};
@@ -126,7 +128,7 @@ async fn extract_upsert_avro_table_schema(
             column_desc: ColumnDesc {
                 data_type: DataType::Bytea,
                 column_id: (vec_column_catalog.len() as i32).into(),
-                name: KAFKA_KEY_COLUMN_NAME.to_string(),
+                name: DEFAULT_KEY_COLUMN_NAME.to_string(),
                 field_descs: vec![],
                 type_name: "".to_string(),
                 generated_or_default_column: None,
@@ -134,7 +136,7 @@ async fn extract_upsert_avro_table_schema(
             is_hidden: true,
         };
         vec_column_catalog.push(kafka_key_column);
-        vec![KAFKA_KEY_COLUMN_NAME.into()]
+        vec![DEFAULT_KEY_COLUMN_NAME.into()]
     };
     Ok((vec_column_catalog, pks))
 }

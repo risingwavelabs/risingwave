@@ -37,7 +37,7 @@ use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-pub use logical_source::{KAFKA_KEY_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
+pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;

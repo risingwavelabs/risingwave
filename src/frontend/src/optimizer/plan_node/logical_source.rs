@@ -46,7 +46,6 @@ use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 /// [`DataType::Timestamptz`]. For more details, please refer to
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
-pub const KAFKA_KEY_COLUMN_NAME: &str = "_rw_kafka_key";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

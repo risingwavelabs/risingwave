@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
@@ -53,7 +54,7 @@ async fn build_accessor_builder(
 
 fn check_rw_kafka_key(columns: &Vec<SourceColumnDesc>) -> bool {
     for col in columns {
-        if col.name.starts_with("_rw_kafka_key") {
+        if col.name.starts_with(DEFAULT_KEY_COLUMN_NAME) {
             return true;
         }
     }
@@ -72,7 +73,7 @@ impl UpsertParser {
         if check_rw_kafka_key(&rw_columns) {
             key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
                 EncodingProperties::Bytes(BytesProperties {
-                    column_name: Some("_rw_kafka_key".into()),
+                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
                 }),
             )?);
         } else {
