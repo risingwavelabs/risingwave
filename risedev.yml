@@ -17,10 +17,10 @@ profile:
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
     # Specify a configuration file to override the default settings
-    config-path: foyer.toml
+    # config-path: src/config/example.toml
     steps:
       # If you want to use the local s3 storage, enable the following line
-      - use: minio
+      # - use: minio
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
@@ -34,9 +34,9 @@ profile:
       #   unsafe-no-fsync: true
 
       # If you want to enable metrics or tracing, uncomment the following lines.
-      - use: prometheus  # metrics
-      - use: tempo       # tracing
-      - use: grafana     # visualization
+      # - use: prometheus  # metrics
+      # - use: tempo       # tracing
+      # - use: grafana     # visualization
 
       - use: meta-node
       - use: compute-node
