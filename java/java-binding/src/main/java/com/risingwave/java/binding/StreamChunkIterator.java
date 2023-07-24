@@ -23,6 +23,17 @@ public class StreamChunkIterator implements AutoCloseable {
         this.isClosed = false;
     }
 
+    /**
+     * This method generate the StreamChunkIterator
+     *
+     * @param str A string that represent table format, content and operation. Example:"I I\n + 199
+     *     40"
+     */
+    public StreamChunkIterator(String str) {
+        this.pointer = Binding.streamChunkIteratorFromPretty(str);
+        this.isClosed = false;
+    }
+
     public StreamChunkRow next() {
         long pointer = Binding.streamChunkIteratorNext(this.pointer);
         if (pointer == 0) {
