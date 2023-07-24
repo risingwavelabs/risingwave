@@ -8,7 +8,7 @@ f() {
 ./risedev clean-data
 RUST_LOG="risingwave_stream=trace" ./risedev d full
 
-f queries3.sql </dev/null
+f queries.sql </dev/null
 
 sleep 100
 ./risedev k
