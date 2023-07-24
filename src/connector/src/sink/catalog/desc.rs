@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
 };
+
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
@@ -80,6 +81,8 @@ impl SinkDesc {
             properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
             connection_id,
+            created_at_epoch: None,
+            started_at_epoch: None,
         }
     }
 

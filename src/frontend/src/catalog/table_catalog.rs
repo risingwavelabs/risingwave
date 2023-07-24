@@ -21,6 +21,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
@@ -141,6 +142,10 @@ pub struct TableCatalog {
     /// Optional field specifies the distribution key indices in pk.
     /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
     pub dist_key_in_pk: Vec<usize>,
+
+    pub created_at_epoch: Option<Epoch>,
+
+    pub started_at_epoch: Option<Epoch>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -375,6 +380,7 @@ impl TableCatalog {
             properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
             dml_fragment_id: self.dml_fragment_id,
+
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
             row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
@@ -385,6 +391,8 @@ impl TableCatalog {
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
             cardinality: Some(self.cardinality.to_protobuf()),
+            initialized_at_epoch: self.started_at_epoch.map(|epoch| epoch.0),
+            created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
         }
     }
 
@@ -488,6 +496,8 @@ impl From<PbTable> for TableCatalog {
                 .cardinality
                 .map(|c| Cardinality::from_protobuf(&c))
                 .unwrap_or_else(Cardinality::unknown),
+            created_at_epoch: tb.created_at_epoch.map(Epoch::from),
+            started_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
         }
     }
 }
@@ -562,6 +572,7 @@ mod tests {
             )]),
             fragment_id: 0,
             dml_fragment_id: None,
+            initialized_at_epoch: None,
             value_indices: vec![0],
             definition: "".into(),
             read_prefix_len_hint: 0,
@@ -575,6 +586,7 @@ mod tests {
             handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
             cardinality: None,
+            created_at_epoch: None,
         }
         .into();
 
@@ -626,6 +638,8 @@ mod tests {
                 watermark_columns: FixedBitSet::with_capacity(2),
                 dist_key_in_pk: vec![],
                 cardinality: Cardinality::unknown(),
+                created_at_epoch: None,
+                started_at_epoch: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

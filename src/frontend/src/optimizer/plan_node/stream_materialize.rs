@@ -19,6 +19,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
+
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -219,6 +220,8 @@ impl StreamMaterialize {
             watermark_columns,
             dist_key_in_pk: vec![],
             cardinality,
+            created_at_epoch: None,
+            started_at_epoch: None,
         })
     }
 

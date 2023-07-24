@@ -174,6 +174,8 @@ impl TableCatalogBuilder {
             watermark_columns,
             dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
             cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
+            created_at_epoch: None,
+            started_at_epoch: None,
         }
     }
 
@@ -298,6 +300,7 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
+
 
 use super::generic::{self, GenericPlanRef};
 use super::pretty_config;

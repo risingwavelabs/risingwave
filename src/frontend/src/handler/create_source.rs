@@ -25,6 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+
 use risingwave_connector::parser::{
     AvroParserConfig, DebeziumAvroParserConfig, ParserProperties, ProtobufParserConfig,
 };
@@ -948,6 +949,8 @@ pub async fn handle_create_source(
         watermark_descs,
         definition,
         connection_id,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
         optional_associated_table_id: None,
     };
 
