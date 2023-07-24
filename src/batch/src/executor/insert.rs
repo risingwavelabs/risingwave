@@ -121,6 +121,7 @@ impl InsertExecutor {
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
+        // Return the returning chunk.
         let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
@@ -146,6 +147,9 @@ impl InsertExecutor {
                 .map(|(_, column)| column)
                 .collect_vec();
 
+            // Construct the returning chunk, without the `row_id` column.
+            let returning_chunk = DataChunk::new(columns.clone(), vis.clone());
+
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
@@ -159,10 +163,9 @@ impl InsertExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            let cardinality = stream_chunk.cardinality();
             write_handle.write_chunk(stream_chunk).await?;
 
-            Result::Ok(cardinality)
+            Result::Ok(returning_chunk)
         };
 
         let mut rows_inserted = 0;
@@ -170,16 +173,21 @@ impl InsertExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            if self.returning {
-                yield data_chunk.clone();
-            }
             for chunk in builder.append_chunk(data_chunk) {
-                rows_inserted += write_txn_data(chunk).await?;
+                let chunk = write_txn_data(chunk).await?;
+                rows_inserted += chunk.cardinality();
+                if self.returning {
+                    yield chunk;
+                }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            rows_inserted += write_txn_data(chunk).await?;
+            let chunk = write_txn_data(chunk).await?;
+            rows_inserted += chunk.cardinality();
+            if self.returning {
+                yield chunk;
+            }
         }
 
         write_handle.end().await?;

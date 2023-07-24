@@ -91,8 +91,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             )));
         }
 
-        let parser_config =
-            SpecificParserConfig::new(format, info, &source_node.properties).await?;
+        let parser_config = SpecificParserConfig::new(format, info, &source_node.properties)?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -170,6 +169,7 @@ impl SourceExecutor {
             u32::MAX,
             self.metrics,
             self.source_ctrl_opts.clone(),
+            None,
         ));
         let stream = self
             .connector_source

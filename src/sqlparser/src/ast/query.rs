@@ -307,10 +307,10 @@ pub enum SelectItem {
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
-    /// `alias.*` or even `schema.table.*`
-    QualifiedWildcard(ObjectName),
+    /// `alias.*` or even `schema.table.*` followed by optional except
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*`, or `* except (exprs)`
-    WildcardOrWithExcept(Option<Vec<Expr>>),
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for SelectItem {
@@ -326,13 +326,24 @@ impl fmt::Display for SelectItem {
                     .iter()
                     .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
-            SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            SelectItem::WildcardOrWithExcept(w) => match w {
-                Some(exprs) => write!(
+            SelectItem::QualifiedWildcard(prefix, except) => match except {
+                Some(cols) => write!(
+                    f,
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    cols.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+            SelectItem::Wildcard(except) => match except {
+                Some(cols) => write!(
                     f,
                     "* EXCEPT ({})",
-                    exprs
-                        .iter()
+                    cols.iter()
                         .map(|v| v.to_string())
                         .collect::<Vec<String>>()
                         .as_slice()

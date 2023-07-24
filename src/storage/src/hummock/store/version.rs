@@ -549,7 +549,8 @@ impl HummockVersionReader {
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let mut stats_guard =
             GetLocalMetricsGuard::new(self.state_store_metrics.clone(), read_options.table_id);
-        stats_guard.local_stats.found_key = true;
+        let local_stats = &mut stats_guard.local_stats;
+        local_stats.found_key = true;
 
         // 1. read staging data
         for imm in &imms {
@@ -558,12 +559,14 @@ impl HummockVersionReader {
                 continue;
             }
 
+            local_stats.staging_imm_get_count += 1;
+
             if let Some((data, data_epoch)) = get_from_batch(
                 imm,
                 TableKey(table_key.as_ref()),
                 epoch,
                 &read_options,
-                &mut stats_guard.local_stats,
+                local_stats,
             ) {
                 return Ok(if data_epoch < min_epoch {
                     None
@@ -580,14 +583,14 @@ impl HummockVersionReader {
 
         let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
         for local_sst in &uncommitted_ssts {
-            stats_guard.local_stats.sub_iter_count += 1;
+            local_stats.staging_imm_get_count += 1;
             if let Some((data, data_epoch)) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
                 full_key.to_ref(),
                 &read_options,
                 dist_key_hash,
-                &mut stats_guard.local_stats,
+                local_stats,
             )
             .await?
             {
@@ -617,14 +620,14 @@ impl HummockVersionReader {
                         &single_table_key_range,
                     );
                     for sstable_info in sstable_infos {
-                        stats_guard.local_stats.sub_iter_count += 1;
+                        local_stats.overlapping_get_count += 1;
                         if let Some((data, data_epoch)) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
                             full_key.to_ref(),
                             &read_options,
                             dist_key_hash,
-                            &mut stats_guard.local_stats,
+                            local_stats,
                         )
                         .await?
                         {
@@ -654,14 +657,14 @@ impl HummockVersionReader {
                         continue;
                     }
 
-                    stats_guard.local_stats.sub_iter_count += 1;
+                    local_stats.non_overlapping_get_count += 1;
                     if let Some((data, data_epoch)) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
                         full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
-                        &mut stats_guard.local_stats,
+                        local_stats,
                     )
                     .await?
                     {
