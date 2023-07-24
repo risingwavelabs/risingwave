@@ -83,5 +83,5 @@ public class Binding {
 
     static native void streamChunkIteratorClose(long pointer);
 
-    static native long streamChunkIteratorGenerate(int rowNumber);
+    static native long streamChunkIteratorGenerate(String str);
 }

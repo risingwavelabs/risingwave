@@ -40,6 +40,7 @@ use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_storage::error::StorageError;
@@ -347,10 +348,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkItera
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorGenerate<'a>(
     env: EnvParam<'a>,
-    row_number: usize,
+    str: JString<'_>,
 ) -> Pointer<'static, StreamChunkIterator> {
     execute_and_catch(env, move || {
-        let iter = StreamChunkIterator::new(StreamChunk::generate_example_data(row_number));
+        let iter = StreamChunkIterator::new(StreamChunk::from_pretty(
+            env.get_string(str).expect("cannot get java string").to_str().unwrap(),
+        ));
         Ok(iter.into())
     })
 }
