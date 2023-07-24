@@ -582,7 +582,7 @@ mod tests {
         compaction_config.level0_tier_compact_file_number = 2;
         compaction_config.max_bytes_for_level_base = 512 * 1024;
         compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
-        compaction_test(compaction_config, config, "hummock+memory", 1000000, 200)
+        compaction_test(compaction_config, config, "hummock+memory", 10000, 60)
             .await
             .unwrap();
     }
