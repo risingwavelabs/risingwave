@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures_async_stream::for_await;
 use std::cmp::Ordering;
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row, RowExt};
+use risingwave_common::row::{once, Once, OwnedRow as RowData, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ScalarRefImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
@@ -33,6 +35,7 @@ use risingwave_pb::expr::expr_node::Type::{
 };
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::table::merge_sort::merge_sort;
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
@@ -98,7 +101,7 @@ struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
     lhs_pk_indices: Vec<usize>,
     prev_cleaned_watermark: Option<ScalarImpl>,
-    row: DynamicFilterWatermarkCacheEntry,
+    entry: DynamicFilterWatermarkCacheEntry,
 }
 
 impl DynamicFilterWatermarkCache {
@@ -107,12 +110,12 @@ impl DynamicFilterWatermarkCache {
             watermark_col_idx,
             lhs_pk_indices,
             prev_cleaned_watermark: None,
-            row: DynamicFilterWatermarkCacheEntry::Empty,
+            entry: DynamicFilterWatermarkCacheEntry::Empty,
         }
     }
 
     fn get_cached_value(&self) -> Option<&ScalarImpl> {
-        match &self.row {
+        match &self.entry {
             DynamicFilterWatermarkCacheEntry::Empty => None,
             DynamicFilterWatermarkCacheEntry::Evicted => None,
             DynamicFilterWatermarkCacheEntry::Smallest { value, .. } => Some(&value),
@@ -120,7 +123,7 @@ impl DynamicFilterWatermarkCache {
     }
 
     fn get_cached_pk_and_val(&self) -> Option<(&OwnedRow, &ScalarImpl)> {
-        match &self.row {
+        match &self.entry {
             DynamicFilterWatermarkCacheEntry::Empty => None,
             DynamicFilterWatermarkCacheEntry::Evicted => None,
             DynamicFilterWatermarkCacheEntry::Smallest { pk, value, } => Some((pk, value)),
@@ -161,14 +164,14 @@ impl DynamicFilterWatermarkCache {
     fn process_insert(&mut self, row: impl Row) {
         match (self.get_cached_value(), row.datum_at(self.watermark_col_idx)) {
             (None, Some(inserted_value)) => {
-                self.row = DynamicFilterWatermarkCacheEntry::Smallest {
+                self.entry = DynamicFilterWatermarkCacheEntry::Smallest {
                     pk: (&row).project(&self.lhs_pk_indices).into_owned_row(),
                     value: inserted_value.into_scalar_impl(),
                 }
             }
             (Some(current_value), Some(inserted_value)) => {
                 if inserted_value.default_cmp(&current_value.as_scalar_ref_impl()).is_lt() {
-                    self.row = DynamicFilterWatermarkCacheEntry::Smallest {
+                    self.entry = DynamicFilterWatermarkCacheEntry::Smallest {
                         pk: (&row).project(&self.lhs_pk_indices).into_owned_row(),
                         value: inserted_value.into_scalar_impl(),
                     }
@@ -182,18 +185,40 @@ impl DynamicFilterWatermarkCache {
         if let Some((pk, val)) = self.get_cached_pk_and_val() {
             let del_pk = row.project(&self.lhs_pk_indices);
             if Row::eq(pk, del_pk) {
-                self.row = DynamicFilterWatermarkCacheEntry::Evicted;
+                self.entry = DynamicFilterWatermarkCacheEntry::Evicted;
             }
         }
     }
 
     /// Takes care of state table commit
-    fn process_state_table_commit(&mut self, watermark: &Option<ScalarImpl>) {
-        if let Some(watermark) = watermark {
+    async fn process_state_table_commit<S: StateStore>(&mut self, left_table: &StateTable<S>) -> StreamExecutorResult<()> {
+        let watermark_opt = left_table.get_state_clean_watermark();
+        if let Some(watermark) = watermark_opt {
             self.prev_cleaned_watermark = Some(watermark.clone());
+            if self.entry == DynamicFilterWatermarkCacheEntry::Evicted {
+                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) = (Included(once(Some(watermark.clone()))), Unbounded);
+                let mut streams = vec![];
+                for vnode in left_table.vnodes().iter_vnodes() {
+                    let stream = left_table.iter_key_and_val_with_pk_range(
+                        &range,
+                        vnode,
+                        PrefetchOptions::new_for_exhaust_iter(),
+                    ).await?;
+                    streams.push(Box::pin(stream));
+                }
+                let merged_stream = merge_sort(streams);
+                pin_mut!(merged_stream);
+                if let Some((_pk, row)) = merged_stream.next().await.transpose()? {
+                    self.process_insert(row);
+                }
+            }
         }
+        Ok(())
+
     }
 }
+
+type LhsScanRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -345,7 +370,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         &self,
         curr: &Datum,
         prev: Datum,
-    ) -> ((Bound<ScalarImpl>, Bound<ScalarImpl>), bool, bool) {
+    ) -> (LhsScanRange, bool, bool) {
         debug_assert_ne!(curr, &prev);
         let curr_is_some = curr.is_some();
         match (curr.clone(), prev) {
@@ -609,8 +634,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     }
 
                     self.left_table.commit(barrier.epoch).await?;
-                    watermark_cache.as_mut().map(|ref mut c|
-                        c.process_state_table_commit(self.left_table.get_state_clean_watermark()));
+
+                    // Handle watermark cache.
+                    if let Some(c) = watermark_cache.as_mut() {
+                        c.process_state_table_commit(&self.left_table).await?;
+                    }
 
                     prev_epoch_value = Some(curr);
 
