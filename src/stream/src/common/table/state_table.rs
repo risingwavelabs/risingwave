@@ -61,11 +61,10 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 /// Used for watermark state cleaning.
 /// We store the smallest value in our state table here.
 ///
-/// Cases
-/// -----
-/// Uninitialized -> No value in cache, because none inserted yet. No delete range required.
-/// Empty -> No value in cache. We need to issue delete range,
-///          since we don't know the smallest value.
+/// Watermark cleaning in `seal_current_epoch`
+/// ------------------------------------------
+/// If the cache value is:
+/// Empty -> No minimum value, no need to issue Delete range.
 /// Smallest(value) if `current_watermark` < value -> No delete range required.
 /// Smallest(value) if `current_watermark` >= value -> Delete range (-inf, `current_watermark`].
 ///
@@ -81,7 +80,7 @@ enum WatermarkCache {
     Uninitialized,
     // We need to store row, in case we encounter `Delete`s.
     // Then we can remove the OwnedRow.
-    Smallest(OwnedRow),
+    Smallest{pk: OwnedRow, value: ScalarImpl},
 }
 
 impl WatermarkCache {
@@ -106,6 +105,7 @@ impl WatermarkCache {
                 *self = Self::Smallest(row.into_owned_row());
             }
             Self::Empty => {
+                // If we delete the smallest value, we need to do table scan to find it back.
                 // Empty -> We don't know the smallest value.
                 // So we can't update anything.
                 // We have to do a table scan
