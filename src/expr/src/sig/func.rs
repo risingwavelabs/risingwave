@@ -132,6 +132,10 @@ mod tests {
                 // validate the FUNC_SIG_MAP is consistent
                 assert_eq!(func, &sig.func);
                 assert_eq!(num_args, &sig.inputs_type.len());
+                // exclude deprecated functions
+                if sig.deprecated {
+                    continue;
+                }
 
                 new_map
                     .entry(*func)
@@ -175,9 +179,6 @@ mod tests {
         // handle them specially without relying on FuncSigMap.
         let expected = expect_test::expect![[r#"
             {
-                ToTimestamp1: [
-                    "to_timestamp1(varchar, varchar) -> timestamptz/timestamp",
-                ],
                 Cast: [
                     "cast(boolean) -> int32/varchar",
                     "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",
@@ -197,12 +198,6 @@ mod tests {
                 ],
                 ArrayAccess: [
                     "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
-                ],
-                ArrayLength: [
-                    "array_length(list) -> int64/int32",
-                ],
-                Cardinality: [
-                    "cardinality(list) -> int64/int32",
                 ],
             }
         "#]];
