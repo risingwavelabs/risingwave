@@ -2738,7 +2738,16 @@ async fn write_exclusive_cluster_id(
 
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    let metadata = object_store.list(&cluster_id_dir).await?;
+    let metadata = match object_store.list(&cluster_id_dir).await {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            return Err(ObjectError::internal(
+                "Fail to access remote object storage, 
+            please check if your Access Key and Secret Key are configured correctly. ",
+            )
+            .into())
+        }
+    };
 
     if metadata.is_empty() {
         object_store
@@ -2748,7 +2757,7 @@ async fn write_exclusive_cluster_id(
     } else {
         let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
         Err(ObjectError::internal(format!(
-            "data directory is already used by another cluster with id {:?}",
+            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `data_directory/cluster_id/0.data`.",
             String::from_utf8(cluster_id.to_vec()).unwrap()
         ))
         .into())
