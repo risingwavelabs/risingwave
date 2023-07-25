@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
@@ -86,24 +85,12 @@ impl AwsAuthProps {
         }
     }
 
-    async fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
-        if self.access_key.is_some() && self.secret_key.is_some() {
-            Ok(SharedCredentialsProvider::new(
-                aws_credential_types::Credentials::from_keys(
-                    self.access_key.as_ref().unwrap(),
-                    self.secret_key.as_ref().unwrap(),
-                    self.session_token.clone(),
-                ),
-            ))
-        } else {
-            let region = self.build_region().await?;
-            let mut chain = DefaultCredentialsChain::builder().region(region);
-
-            if let Some(profile_name) = self.profile.as_ref() {
-                chain = chain.profile_name(profile_name)
-            }
-            Ok(SharedCredentialsProvider::new(chain.build().await))
-        }
+    fn build_credential_provider(&self) -> SharedCredentialsProvider {
+        SharedCredentialsProvider::new(aws_credential_types::Credentials::from_keys(
+            self.access_key.as_ref().unwrap_or(&"".into()),
+            self.secret_key.as_ref().unwrap_or(&"".into()),
+            self.session_token.clone(),
+        ))
     }
 
     async fn with_role_provider(
@@ -127,7 +114,7 @@ impl AwsAuthProps {
     pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
         let region = self.build_region().await?;
         let credentials_provider = self
-            .with_role_provider(self.build_credential_provider().await?)
+            .with_role_provider(self.build_credential_provider())
             .await?;
         let config_loader = aws_config::from_env()
             .region(region)
