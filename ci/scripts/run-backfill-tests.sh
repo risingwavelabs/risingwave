@@ -75,7 +75,8 @@ echo "TOTAL_UPSTREAM_ROWS: $TOTAL_UPSTREAM_COUNT"
 
 echo "--- Recording total counts"
 
-TOTAL_ACTUAL_ROWS=$(run_sql 'SELECT COUNT(*) FROM mv1;' | grep "[0-9]+" | grep -v "(")
+RESULTS=$(run_sql 'SELECT COUNT(*) FROM mv1;')
+TOTAL_ACTUAL_ROWS=$(echo "$RESULTS" | grep -E "[0-9]+" | grep -v "(")
 echo "TOTAL_ACTUAL_ROWS: $TOTAL_ACTUAL_ROWS"
 TOTAL_EXPECTED_ROWS=$((TOTAL_UPSTREAM_COUNT + TOTAL_SNAPSHOT_COUNT))
 echo "TOTAL_EXPECTED_ROWS: $TOTAL_EXPECTED_ROWS"
