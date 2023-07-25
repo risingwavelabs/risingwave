@@ -54,7 +54,11 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(ExprImpl),
+    /// Table function or scalar function.
+    TableFunction {
+        expr: ExprImpl,
+        with_ordinality: bool,
+    },
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
 }
@@ -67,7 +71,9 @@ impl RewriteExprsRecursive for Relation {
             Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
-            Relation::TableFunction(inner) => *inner = rewriter.rewrite_expr(inner.take()),
+            Relation::TableFunction { expr: inner, .. } => {
+                *inner = rewriter.rewrite_expr(inner.take())
+            }
             _ => {}
         }
     }
@@ -433,9 +439,12 @@ impl Binder {
                 alias,
                 for_system_time_as_of_proctime,
             } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
-            TableFactor::TableFunction { name, alias, args } => {
-                self.bind_table_function(name, alias, args)
-            }
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => self.bind_table_function(name, alias, args, with_ordinality),
             TableFactor::Derived {
                 lateral,
                 subquery,

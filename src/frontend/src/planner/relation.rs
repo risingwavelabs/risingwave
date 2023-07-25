@@ -43,7 +43,10 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(tf) => self.plan_table_function(tf),
+            Relation::TableFunction {
+                expr: tf,
+                with_ordinality,
+            } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
         }
@@ -116,7 +119,11 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_table_function(&mut self, table_function: ExprImpl) -> Result<PlanRef> {
+    pub(super) fn plan_table_function(
+        &mut self,
+        table_function: ExprImpl,
+        with_ordinality: bool,
+    ) -> Result<PlanRef> {
         // TODO: maybe we can unify LogicalTableFunction with LogicalValues
         match table_function {
             ExprImpl::TableFunction(tf) => Ok(LogicalTableFunction::new(*tf, self.ctx()).into()),

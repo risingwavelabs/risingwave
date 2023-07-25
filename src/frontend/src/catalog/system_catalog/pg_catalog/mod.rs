@@ -194,6 +194,11 @@ impl SysCatalogReaderImpl {
         Ok(vec![])
     }
 
+    pub(super) fn read_aggregate_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
     pub(super) fn read_am_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])

@@ -42,6 +42,7 @@ impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
     pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
         let schema = if let DataType::Struct(s) = table_function.return_type() {
+            // If the function returns a struct, it will be flattened into multiple columns.
             Schema::from(&s)
         } else {
             Schema {

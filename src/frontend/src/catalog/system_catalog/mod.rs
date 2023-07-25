@@ -262,6 +262,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_COLLATION, vec![0], read_collation_info },
     { PG_CATALOG, PG_AM, vec![0], read_am_info },
     { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
+    // { PG_CATALOG, PG_AGGREGATE, vec![0], read_aggregate_info },
     { PG_CATALOG, PG_VIEWS, vec![0, 1], read_views_info },
     { PG_CATALOG, PG_ATTRIBUTE, vec![0, 4], read_pg_attribute },
     { PG_CATALOG, PG_DATABASE, vec![0], read_database_info },

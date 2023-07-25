@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
+use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, ObjectName, TableAlias};
 
@@ -34,15 +35,28 @@ impl Binder {
     ///
     /// Besides [`TableFunction`] expr, it can also be other things like window table functions, or
     /// scalar functions.
+    ///
+    /// `with_ordinality` is only supported for the `TableFunction` case now.
     pub(super) fn bind_table_function(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
         args: Vec<FunctionArg>,
+        with_ordinality: bool,
     ) -> Result<Relation> {
         let func_name = &name.0[0].real_value();
         // internal/system table functions
         {
+            if with_ordinality {
+                return Err(ErrorCode::NotImplemented(
+                    format!(
+                        "WITH ORDINALITY for internal/system table function {}",
+                        func_name
+                    ),
+                    None.into(),
+                )
+                .into());
+            }
             if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                 return self.bind_internal_table(args, alias);
             }
@@ -61,12 +75,25 @@ impl Binder {
         }
         // window table functions (tumble/hop)
         if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
+            if with_ordinality {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "WITH ORDINALITY for window table function {}",
+                    func_name
+                ))
+                .into());
+            }
             return Ok(Relation::WindowTableFunction(Box::new(
                 self.bind_window_table_function(alias, kind, args)?,
             )));
         }
         // watermark
         if is_watermark_func(func_name) {
+            if with_ordinality {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "WITH ORDINALITY for watermark".to_string(),
+                )
+                .into());
+            }
             return Ok(Relation::Watermark(Box::new(
                 self.bind_watermark(alias, args)?,
             )));
@@ -86,8 +113,7 @@ impl Binder {
         self.context.clause = clause;
 
         let columns = if let DataType::Struct(s) = func.return_type() {
-            // If the table function returns a struct, it's fields can be accessed just
-            // like a table's columns.
+            // If the table function returns a struct, it will be flattened into multiple columns.
             let schema = Schema::from(&s);
             schema.fields.into_iter().map(|f| (false, f)).collect_vec()
         } else {
@@ -112,6 +138,9 @@ impl Binder {
 
         self.bind_table_to_context(columns, func_name.clone(), alias)?;
 
-        Ok(Relation::TableFunction(func))
+        Ok(Relation::TableFunction {
+            expr: func,
+            with_ordinality,
+        })
     }
 }
