@@ -2501,8 +2501,6 @@ where
                                                 }
                                             };
                                         }
-                                    } else {
-                                        tracing::debug!("Fail auto_pick_type group");
                                     }
 
                                     // ack to compactor

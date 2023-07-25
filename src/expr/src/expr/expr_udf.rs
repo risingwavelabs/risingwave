@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-use arrow_schema::{Field, Schema, SchemaRef};
+use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use await_tree::InstrumentAwait;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
@@ -127,7 +127,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
                         true,
                     ))
                 })
-                .try_collect()?,
+                .try_collect::<Fields>()?,
         ));
         // connect to UDF service
         let client = get_or_create_client(&udf.link)?;

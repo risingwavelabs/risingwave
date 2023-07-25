@@ -1047,7 +1047,7 @@
     LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), sum(t.y) filter((flag = 1:Int64))] }
     └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
       └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
-        └─LogicalScan { table: t, columns: [t.x, t.y] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - name: remove unnecessary distinct for max and min
