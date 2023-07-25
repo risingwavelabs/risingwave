@@ -25,12 +25,12 @@ use tinyvec::ArrayVec;
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
+use crate::for_all_type_pairs;
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
 use crate::types::{DataType, Datum, ScalarImpl};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
-use crate::{for_all_scalar_variants, for_all_type_pairs};
 
 /// The storage where the hash key resides in memory.
 pub trait KeyStorage: 'static {
@@ -375,6 +375,14 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     }
 }
 
+fn exact_size_of_scalar_in_array<'a, A, S>(_: &A) -> Option<usize>
+where
+    A: Array<RefItem<'a> = S>,
+    S: HashKeySer<'a>,
+{
+    S::exact_size()
+}
+
 #[easy_ext::ext]
 impl DataChunk {
     fn estimate_hash_key_sizes(&self, column_indices: &[usize]) -> Vec<usize> {
@@ -382,34 +390,18 @@ impl DataChunk {
         let mut exact_size = 0;
 
         for &i in column_indices {
-            let col = &self.columns()[i];
-
-            macro_rules! work {
-                ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                    use crate::types::*;
-
-                    match &**col {
-                        $(
-                            ArrayImpl::$variant_name(_) => {
-                                match <<$scalar as Scalar>::ScalarRefType<'_> as HashKeySer>::exact_size() {
-                                    Some(size) => exact_size += size,
-                                    None => estimated_column_indices.push(i),
-                                }
-                            }
-                        )*
-                    }
-                };
-            }
-
-            for_all_scalar_variants! { work }
+            dispatch_all_variants!(&*self.columns()[i], ArrayImpl, col, {
+                match exact_size_of_scalar_in_array(col) {
+                    Some(size) => exact_size += size,
+                    None => estimated_column_indices.push(i),
+                }
+            })
         }
 
         let mut sizes = vec![exact_size; self.capacity()];
 
         for i in estimated_column_indices {
-            let col = &self.columns()[i];
-
-            dispatch_all_variants!(&**col, ArrayImpl, col, {
+            dispatch_all_variants!(&*self.columns()[i], ArrayImpl, col, {
                 for ((datum, visible), size) in col
                     .iter()
                     .zip_eq_fast(self.vis().iter())
