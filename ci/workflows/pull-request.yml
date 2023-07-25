@@ -383,7 +383,7 @@ steps:
       - "build"
     plugins:
       - docker-compose#v4.9.0:
-          run: ci-flamegraph-env
+          run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -397,7 +397,7 @@ steps:
       - "build"
     plugins:
       - docker-compose#v4.9.0:
-          run: ci-flamegraph-env
+          run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
@@ -408,7 +408,7 @@ steps:
       - "build"
     plugins:
       - docker-compose#v4.9.0:
-          run: ci-flamegraph-env
+          run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -420,7 +420,7 @@ steps:
       - "build"
     plugins:
       - docker-compose#v4.9.0:
-          run: ci-flamegraph-env
+          run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
