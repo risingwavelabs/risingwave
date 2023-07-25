@@ -68,11 +68,11 @@ pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
 mod over_window_to_agg_and_join_rule;
 pub use over_window_to_agg_and_join_rule::*;
-mod over_window_split_by_window_rule;
-pub use over_window_split_by_window_rule::*;
-mod over_agg_to_topn_rule;
+mod over_window_split_rule;
+pub use over_window_split_rule::*;
+mod over_window_to_topn_rule;
 pub use join_commute_rule::*;
-pub use over_agg_to_topn_rule::*;
+pub use over_window_to_topn_rule::*;
 mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
@@ -149,7 +149,7 @@ macro_rules! for_all_rules {
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
-            , { OverWindowSplitByWindowRule }
+            , { OverWindowSplitRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }

@@ -167,7 +167,7 @@ fn mark_chunk_inner(
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
         let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos.project(pk_in_output_indices);
+        let rhs = current_pos;
         let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
         match order {
             Ordering::Less | Ordering::Equal => true,
@@ -204,7 +204,6 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 /// Gets progress per vnode, so we know which to backfill.
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    state_len: usize,
 ) -> StreamExecutorResult<Vec<(VirtualNode, BackfillProgressPerVnode)>> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
@@ -220,10 +219,9 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         .iter_vnodes()
         .zip_eq_debug(states_for_vnode_keys)
     {
-        let backfill_datum_pos = state_len - 2;
         let backfill_progress = match state_for_vnode_key {
             Some(row) => {
-                let vnode_is_finished = row.datum_at(backfill_datum_pos).unwrap();
+                let vnode_is_finished = row.last().unwrap();
                 if vnode_is_finished.into_bool() {
                     BackfillProgressPerVnode::Completed
                 } else {
@@ -240,7 +238,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
 /// All vnodes should be persisted with status finished.
 pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    state_len: usize,
 ) -> StreamExecutorResult<bool> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes_scalar();
@@ -249,11 +246,8 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
         let key: &[Datum] = &[Some(vnode.into())];
         let row = state_table.get_row(key).await?;
 
-        // original_backfill_datum_pos = (state_len - 1)
-        // value indices are set, so we can -1 for the pk (a single vnode).
-        let backfill_datum_pos = state_len - 2;
         let vnode_is_finished = if let Some(row) = row
-            && let Some(vnode_is_finished) = row.datum_at(backfill_datum_pos)
+            && let Some(vnode_is_finished) = row.last()
         {
             vnode_is_finished.into_bool()
         } else {

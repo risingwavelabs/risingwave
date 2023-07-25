@@ -741,6 +741,8 @@ mod tests {
             let compactor_manager =
                 Arc::new(CompactorManager::with_meta(env.clone()).await.unwrap());
 
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
             let hummock_manager = HummockManager::new(
                 env.clone(),
                 cluster_manager.clone(),
@@ -748,6 +750,7 @@ mod tests {
                 meta_metrics.clone(),
                 compactor_manager.clone(),
                 catalog_manager.clone(),
+                tx,
             )
             .await?;
 
@@ -759,7 +762,7 @@ mod tests {
 
             let source_manager = Arc::new(
                 SourceManager::new(
-                    None,
+                    env.clone(),
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),

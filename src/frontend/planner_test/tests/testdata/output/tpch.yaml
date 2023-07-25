@@ -147,7 +147,7 @@
     └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), $expr3, $expr4, $expr5, count] }
       └─StreamTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0, group_key: [10] }
+          └─StreamGroupTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0, group_key: [$expr6] }
             └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal) as $expr3, (sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal) as $expr4, (sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal) as $expr5, count, Vnode(lineitem.l_returnflag, lineitem.l_linestatus) as $expr6] }
               └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
                 └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
@@ -163,7 +163,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0, group_key: [10] } { state table: 1 }
+    StreamGroupTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0, group_key: [$expr6] } { state table: 1 }
     └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal) as $expr3, (sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal) as $expr4, (sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal) as $expr5, count, Vnode(lineitem.l_returnflag, lineitem.l_linestatus) as $expr6] }
         └── StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0, 1]) from 2
@@ -321,7 +321,7 @@
     └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)] }
       └─StreamTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0, group_key: [15] }
+          └─StreamGroupTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost), Vnode(supplier.s_suppkey) as $expr1] }
               └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)] }
                 ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
@@ -380,7 +380,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0, group_key: [15] } { state table: 1 }
+    StreamGroupTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0, group_key: [$expr1] } { state table: 1 }
     └── StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost), Vnode(supplier.s_suppkey) as $expr1] }
         └── StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)] } { left table: 2, right table: 4, left degree table: 3, right degree table: 5 }
             ├── StreamExchange Hash([1]) from 2
@@ -662,7 +662,7 @@
     └─StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority] }
       └─StreamTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [4] }
+          └─StreamGroupTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [$expr2] }
             └─StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) as $expr2] }
               └─StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [sum($expr1), count] }
                 └─StreamExchange { dist: HashShard(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) }
@@ -690,7 +690,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [4] } { state table: 1 }
+    StreamGroupTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [$expr2] } { state table: 1 }
     └── StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) as $expr2] }
         └── StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [sum($expr1), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0, 1, 2]) from 2
@@ -830,7 +830,7 @@
     └─StreamProject { exprs: [orders.o_orderpriority, count] }
       └─StreamTopN { order: [orders.o_orderpriority ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [orders.o_orderpriority ASC], limit: 1, offset: 0, group_key: [2] }
+          └─StreamGroupTopN { order: [orders.o_orderpriority ASC], limit: 1, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [orders.o_orderpriority, count, Vnode(orders.o_orderpriority) as $expr1] }
               └─StreamHashAgg { group_key: [orders.o_orderpriority], aggs: [count] }
                 └─StreamExchange { dist: HashShard(orders.o_orderpriority) }
@@ -852,7 +852,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [orders.o_orderpriority ASC], limit: 1, offset: 0, group_key: [2] } { state table: 1 }
+    StreamGroupTopN { order: [orders.o_orderpriority ASC], limit: 1, offset: 0, group_key: [$expr1] } { state table: 1 }
     └── StreamProject { exprs: [orders.o_orderpriority, count, Vnode(orders.o_orderpriority) as $expr1] }
         └── StreamHashAgg { group_key: [orders.o_orderpriority], aggs: [count] }
             ├── result table: 2
@@ -997,7 +997,7 @@
     └─StreamProject { exprs: [nation.n_name, sum($expr1)] }
       └─StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [2] }
+          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [$expr2] }
             └─StreamProject { exprs: [nation.n_name, sum($expr1), Vnode(nation.n_name) as $expr2] }
               └─StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
                 └─StreamExchange { dist: HashShard(nation.n_name) }
@@ -1037,7 +1037,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [2] } { state table: 1 }
+    StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [$expr2] } { state table: 1 }
     └── StreamProject { exprs: [nation.n_name, sum($expr1), Vnode(nation.n_name) as $expr2] }
         └── StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
             ├── result table: 2
@@ -1347,7 +1347,7 @@
     └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2)] }
       └─StreamTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0, group_key: [4] }
+          └─StreamGroupTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0, group_key: [$expr3] }
             └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, nation.n_name, $expr1) as $expr3] }
               └─StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count] }
                 └─StreamExchange { dist: HashShard(nation.n_name, nation.n_name, $expr1) }
@@ -1384,7 +1384,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0, group_key: [4] } { state table: 1 }
+    StreamGroupTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0, group_key: [$expr3] } { state table: 1 }
     └── StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, nation.n_name, $expr1) as $expr3] }
         └── StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count] }
             ├── result table: 2
@@ -1635,7 +1635,7 @@
     └─StreamProject { exprs: [$expr1, $expr4] }
       └─StreamTopN { order: [$expr1 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [2] }
+          └─StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [$expr5] }
             └─StreamProject { exprs: [$expr1, (sum($expr2) / sum($expr3)) as $expr4, Vnode($expr1) as $expr5] }
               └─StreamHashAgg { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
                 └─StreamExchange { dist: HashShard($expr1) }
@@ -1683,7 +1683,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [2] } { state table: 1 }
+    StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [$expr5] } { state table: 1 }
     └── StreamProject { exprs: [$expr1, (sum($expr2) / sum($expr3)) as $expr4, Vnode($expr1) as $expr5] }
         └── StreamHashAgg { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
             ├── result table: 2
@@ -1949,7 +1949,7 @@
     └─StreamProject { exprs: [nation.n_name, $expr1, sum($expr2)] }
       └─StreamTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [3] }
+          └─StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [$expr3] }
             └─StreamProject { exprs: [nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, $expr1) as $expr3] }
               └─StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] }
                 └─StreamExchange { dist: HashShard(nation.n_name, $expr1) }
@@ -1987,7 +1987,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [3] } { state table: 1 }
+    StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [$expr3] } { state table: 1 }
     └── StreamProject { exprs: [nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, $expr1) as $expr3] }
         └── StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] }
             ├── result table: 2
@@ -2205,7 +2205,7 @@
     └─StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
       └─StreamTopN { order: [sum($expr1) DESC], limit: 20, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 20, offset: 0, group_key: [8] }
+          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 20, offset: 0, group_key: [$expr2] }
             └─StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as $expr2] }
               └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count] }
                 └─StreamProject { exprs: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, (lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)) as $expr1, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey] }
@@ -2235,7 +2235,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC], limit: 20, offset: 0, group_key: [8] } { state table: 1 }
+    StreamGroupTopN { order: [sum($expr1) DESC], limit: 20, offset: 0, group_key: [$expr2] } { state table: 1 }
     └── StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as $expr2] }
         └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamProject { exprs: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, (lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)) as $expr1, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey] }
@@ -2427,7 +2427,7 @@
     └─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
       └─StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [2] }
+          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [$expr4] }
             └─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1), Vnode(partsupp.ps_partkey) as $expr4] }
               └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
                 ├─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
@@ -2473,7 +2473,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [2] } { state table: 1 }
+    StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [$expr4] } { state table: 1 }
     └── StreamProject { exprs: [partsupp.ps_partkey, sum($expr1), Vnode(partsupp.ps_partkey) as $expr4] }
         └── StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
             ├── left table: 2
@@ -2645,7 +2645,7 @@
     └─StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
       └─StreamTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0, group_key: [3] }
+          └─StreamGroupTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0, group_key: [$expr3] }
             └─StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2), Vnode(lineitem.l_shipmode) as $expr3] }
               └─StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count] }
                 └─StreamExchange { dist: HashShard(lineitem.l_shipmode) }
@@ -2666,7 +2666,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0, group_key: [3] } { state table: 1 }
+    StreamGroupTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0, group_key: [$expr3] } { state table: 1 }
     └── StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2), Vnode(lineitem.l_shipmode) as $expr3] }
         └── StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count] }
             ├── result table: 2
@@ -2774,7 +2774,7 @@
     └─StreamProject { exprs: [count(orders.o_orderkey), count] }
       └─StreamTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [2] }
+          └─StreamGroupTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [count(orders.o_orderkey), count, Vnode(count(orders.o_orderkey)) as $expr1] }
               └─StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
                 └─StreamExchange { dist: HashShard(count(orders.o_orderkey)) }
@@ -2796,7 +2796,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [2] }
+    StreamGroupTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0, group_key: [$expr1] }
     ├── state table: 1
     └── StreamProject { exprs: [count(orders.o_orderkey), count, Vnode(count(orders.o_orderkey)) as $expr1] }
         └── StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
@@ -3076,7 +3076,7 @@
     └─StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
       └─StreamTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0, group_key: [6] }
+          └─StreamGroupTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0, group_key: [$expr3] }
             └─StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey, Vnode(sum($expr1)) as $expr3] }
               └─StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
                 ├─StreamExchange { dist: HashShard(sum($expr1)) }
@@ -3112,7 +3112,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0, group_key: [6] } { state table: 1 }
+    StreamGroupTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0, group_key: [$expr3] } { state table: 1 }
     └── StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey, Vnode(sum($expr1)) as $expr3] }
         └── StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
             ├── left table: 2
@@ -3275,7 +3275,7 @@
     └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
       └─StreamTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [4] }
+          └─StreamGroupTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey), Vnode(part.p_brand, part.p_type, part.p_size) as $expr1] }
               └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey), count] }
                 └─StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
@@ -3301,7 +3301,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [4] }
+    StreamGroupTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0, group_key: [$expr1] }
     ├── state table: 1
     └── StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey), Vnode(part.p_brand, part.p_type, part.p_size) as $expr1] }
         └── StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey), count] }
@@ -3705,7 +3705,7 @@
     └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
       └─StreamTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [6] }
+          └─StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey) as $expr1] }
               └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count] }
                 └─StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: all }
@@ -3733,7 +3733,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [6] } { state table: 1 }
+    StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [$expr1] } { state table: 1 }
     └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey) as $expr1] }
         └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: all } { left table: 3, right table: 5, left degree table: 4, right degree table: 6 }
@@ -4035,7 +4035,7 @@
     └─StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
       └─StreamTopN { order: [supplier.s_name ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [supplier.s_name ASC], limit: 1, offset: 0, group_key: [5] }
+          └─StreamGroupTopN { order: [supplier.s_name ASC], limit: 1, offset: 0, group_key: [$expr3] }
             └─StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, Vnode(supplier.s_suppkey) as $expr3] }
               └─StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
                 ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
@@ -4074,7 +4074,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [supplier.s_name ASC], limit: 1, offset: 0, group_key: [5] } { state table: 1 }
+    StreamGroupTopN { order: [supplier.s_name ASC], limit: 1, offset: 0, group_key: [$expr3] } { state table: 1 }
     └── StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, Vnode(supplier.s_suppkey) as $expr3] }
         └── StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
             ├── left table: 2
@@ -4312,7 +4312,7 @@
     └─StreamProject { exprs: [supplier.s_name, count] }
       └─StreamTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0, group_key: [2] }
+          └─StreamGroupTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [supplier.s_name, count, Vnode(supplier.s_name) as $expr1] }
               └─StreamHashAgg { group_key: [supplier.s_name], aggs: [count] }
                 └─StreamExchange { dist: HashShard(supplier.s_name) }
@@ -4353,7 +4353,8 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0, group_key: [2] } { state table: 1 }
+    StreamGroupTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0, group_key: [$expr1] }
+    ├── state table: 1
     └── StreamProject { exprs: [supplier.s_name, count, Vnode(supplier.s_name) as $expr1] }
         └── StreamHashAgg { group_key: [supplier.s_name], aggs: [count] }
             ├── result table: 2
@@ -4599,7 +4600,7 @@
     └─StreamProject { exprs: [$expr2, count, sum(customer.c_acctbal)] }
       └─StreamTopN { order: [$expr2 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [$expr2 ASC], limit: 1, offset: 0, group_key: [3] }
+          └─StreamGroupTopN { order: [$expr2 ASC], limit: 1, offset: 0, group_key: [$expr3] }
             └─StreamProject { exprs: [$expr2, count, sum(customer.c_acctbal), Vnode($expr2) as $expr3] }
               └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_acctbal)] }
                 └─StreamExchange { dist: HashShard($expr2) }

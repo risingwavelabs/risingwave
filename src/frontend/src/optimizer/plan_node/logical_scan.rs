@@ -225,10 +225,12 @@ impl LogicalScan {
             return (self.core.clone(), Condition::true_cond(), None);
         }
 
-        let mut mapping =
-            ColIndexMapping::new(self.required_col_idx().iter().map(|i| Some(*i)).collect())
-                .inverse()
-                .expect("must be invertible");
+        let mut mapping = ColIndexMapping::with_target_size(
+            self.required_col_idx().iter().map(|i| Some(*i)).collect(),
+            self.table_desc().columns.len(),
+        )
+        .inverse()
+        .expect("must be invertible");
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let scan_without_predicate = generic::Scan::new(
@@ -387,8 +389,9 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
+            self.table_desc().columns.len(),
         ));
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))

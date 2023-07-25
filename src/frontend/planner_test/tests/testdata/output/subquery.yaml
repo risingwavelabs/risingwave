@@ -177,7 +177,9 @@
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalAgg { aggs: [] }
-        │ └─LogicalScan { table: t1, columns: [] }
+        │ └─LogicalAgg { group_key: [1:Int32], aggs: [] }
+        │   └─LogicalProject { exprs: [1:Int32] }
+        │     └─LogicalScan { table: t1, columns: [] }
         └─LogicalScan { table: t2, columns: [] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [count(1:Int32)] }
@@ -185,7 +187,10 @@
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
         ├─BatchSimpleAgg { aggs: [] }
         │ └─BatchExchange { order: [], dist: Single }
-        │   └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        │   └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+        │     └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+        │       └─BatchProject { exprs: [1:Int32] }
+        │         └─BatchScan { table: t1, columns: [], distribution: SomeShard }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
@@ -316,8 +321,7 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
       ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
-      └─LogicalAgg { aggs: [] }
-        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);

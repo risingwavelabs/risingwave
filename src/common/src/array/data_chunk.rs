@@ -1051,7 +1051,7 @@ mod tests {
     #[test]
     fn test_chunk_estimated_size() {
         assert_eq!(
-            120,
+            96,
             DataChunk::from_pretty(
                 "I I I
                  1 5 2
@@ -1061,7 +1061,7 @@ mod tests {
             .estimated_heap_size()
         );
         assert_eq!(
-            80,
+            64,
             DataChunk::from_pretty(
                 "I I
                  1 2
