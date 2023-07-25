@@ -124,29 +124,31 @@ impl SourceSchema {
 
         let row_options = match self {
             SourceSchema::Protobuf(schema) => {
-                vec![
-                    SqlOption {
+                let mut options = vec![SqlOption {
+                    name: ObjectName(vec![Ident {
+                        value: "message".into(),
+                        quote_style: None,
+                    }]),
+                    value: Value::SingleQuotedString(schema.message_name.0),
+                }];
+                if schema.use_schema_registry {
+                    options.push(SqlOption {
                         name: ObjectName(vec![Ident {
-                            value: "message".into(),
+                            value: "schema.registry".into(),
                             quote_style: None,
                         }]),
-                        value: Value::SingleQuotedString(schema.message_name.0),
-                    },
-                    SqlOption {
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    });
+                } else {
+                    options.push(SqlOption {
                         name: ObjectName(vec![Ident {
                             value: "schema.location".into(),
                             quote_style: None,
                         }]),
                         value: Value::SingleQuotedString(schema.row_schema_location.0),
-                    },
-                    SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "schema.registry".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::Boolean(schema.use_schema_registry),
-                    },
-                ]
+                    })
+                }
+                options
             }
             SourceSchema::Avro(schema) | SourceSchema::UpsertAvro(schema) => {
                 vec![
