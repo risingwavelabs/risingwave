@@ -2757,8 +2757,8 @@ async fn write_exclusive_cluster_id(
     } else {
         let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
         Err(ObjectError::internal(format!(
-            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `data_directory/cluster_id/0.data`.",
-            String::from_utf8(cluster_id.to_vec()).unwrap()
+            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `{:?}`.",
+            String::from_utf8(cluster_id.to_vec()).unwrap(), cluster_id_full_path,
         ))
         .into())
     }
