@@ -104,6 +104,112 @@ pub enum SourceSchema {
     Bytes,
 }
 
+impl SourceSchema {
+    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+        let (format, row_encode) = match self {
+            SourceSchema::Protobuf(_) => (Format::Plain, Encode::Protobuf),
+            SourceSchema::Json => (Format::Plain, Encode::Json),
+            SourceSchema::DebeziumJson => (Format::Debezium, Encode::Json),
+            SourceSchema::DebeziumMongoJson => (Format::DebeziumMongo, Encode::Json),
+            SourceSchema::UpsertJson => (Format::Upsert, Encode::Json),
+            SourceSchema::Avro(_) => (Format::Plain, Encode::Avro),
+            SourceSchema::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
+            SourceSchema::Maxwell => (Format::Maxwell, Encode::Json),
+            SourceSchema::CanalJson => (Format::Canal, Encode::Json),
+            SourceSchema::Csv(_) => (Format::Plain, Encode::Csv),
+            SourceSchema::DebeziumAvro(_) => (Format::Debezium, Encode::Avro),
+            SourceSchema::Bytes => (Format::Plain, Encode::Bytes),
+            SourceSchema::Native => (Format::Native, Encode::Native),
+        };
+
+        let row_options = match self {
+            SourceSchema::Protobuf(schema) => {
+                vec![
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "message".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.message_name.0),
+                    },
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.location".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    },
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.registry".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::Boolean(schema.use_schema_registry),
+                    },
+                ]
+            }
+            SourceSchema::Avro(schema) | SourceSchema::UpsertAvro(schema) => {
+                vec![
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.location".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    },
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.registry".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::Boolean(schema.use_schema_registry),
+                    },
+                ]
+            }
+            SourceSchema::DebeziumAvro(schema) => {
+                vec![SqlOption {
+                    name: ObjectName(vec![Ident {
+                        value: "schema.location".into(),
+                        quote_style: None,
+                    }]),
+                    value: Value::SingleQuotedString(schema.row_schema_location.0),
+                }]
+            }
+            SourceSchema::Csv(schema) => {
+                vec![
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "delimiter".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(
+                            String::from_utf8_lossy(&[schema.delimiter]).into(),
+                        ),
+                    },
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "without_header".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(if schema.has_header {
+                            "false".into()
+                        } else {
+                            "true".into()
+                        }),
+                    },
+                ]
+            }
+            _ => vec![],
+        };
+
+        SourceSchemaV2 {
+            format,
+            row_encode,
+            row_options,
+        }
+    }
+}
+
 impl fmt::Display for SourceSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -386,6 +492,13 @@ impl CompatibleSourceSchema {
             }
         }
     }
+
+    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+        match self {
+            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
+            CompatibleSourceSchema::V2(inner) => inner,
+        }
+    }
 }
 
 impl From<SourceSchemaV2> for CompatibleSourceSchema {
@@ -462,6 +575,21 @@ pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
 }
 
 impl SourceSchemaV2 {
+    pub fn gen_options(&self) -> Result<BTreeMap<String, String>, ParserError> {
+        self.row_options
+            .iter()
+            .cloned()
+            .map(|x| match x.value {
+                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
+                Value::Number(n) => Ok((x.name.real_value(), n)),
+                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
+                _ => Err(ParserError::ParserError(
+                    "`row format options` only support single quoted string value".to_owned(),
+                )),
+            })
+            .try_collect()
+    }
+
     /// just a temporal compatibility layer will be removed soon(so the implementation is a little
     /// dirty)
     #[allow(deprecated)]
