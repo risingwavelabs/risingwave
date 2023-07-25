@@ -17,6 +17,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_async::{ResultSetStream, TextProtocol};
 use risingwave_common::array::StreamChunk;
@@ -159,7 +160,11 @@ pub trait ExternalTableReader {
 
     fn current_binlog_offset(&self) -> Option<String>;
 
-    fn snapshot_read(&self, table_name: SchemaTableName) -> Self::SnapshotStream<'_>;
+    fn snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        primary_keys: Vec<String>,
+    ) -> Self::SnapshotStream<'_>;
 }
 
 #[derive(Debug)]
@@ -174,12 +179,10 @@ pub struct MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(cdc_props: CdcProperties) -> Self {
+    pub async fn new(_cdc_props: CdcProperties) -> Self {
         // todo: create a mysql client for upstream db
-
         let database_url = "mysql://root:123456@localhost:3306/mydb";
         let pool = mysql_async::Pool::new(database_url);
-
         Self { pool }
     }
 }
@@ -195,12 +198,18 @@ impl ExternalTableReader for MySqlExternalTableReader {
         todo!()
     }
 
-    fn snapshot_read(&self, table_name: SchemaTableName) -> Self::SnapshotStream<'_> {
+    fn snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        primary_keys: Vec<String>,
+    ) -> Self::SnapshotStream<'_> {
         #[try_stream]
         async move {
+            let order_key = primary_keys.into_iter().join(",");
             let sql = format!(
-                "SELECT * FROM {}",
-                Self::get_normalized_table_name(&table_name)
+                "SELECT * FROM {} ORDER BY {}",
+                Self::get_normalized_table_name(&table_name),
+                order_key
             );
             let mut conn = self.pool.get_conn().await?;
             let mut result_set = conn.query_iter(sql).await?;
@@ -219,6 +228,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
                     // }
                     // let row_data = RowData::new(row_data);
                     // let chunk = StreamChunk::Data(row_data);
+
                     yield None;
                 }
             }
@@ -237,34 +247,87 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         unimplemented!("current binlog offset")
     }
 
-    fn snapshot_read(&self, table_name: SchemaTableName) -> Self::SnapshotStream<'_> {
+    fn snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        primary_keys: Vec<String>,
+    ) -> Self::SnapshotStream<'_> {
         #[try_stream]
         async move {
-            panic!("not implemented");
-            yield None;
+            let stream = match self {
+                ExternalTableReaderImpl::MYSQL(mysql) => {
+                    mysql.snapshot_read(table_name, primary_keys)
+                }
+                _ => {
+                    unreachable!("unsupported external table reader")
+                }
+            };
+
+            pin_mut!(stream);
+            #[for_await]
+            for chunk in stream {
+                let chunk = chunk?;
+                yield chunk;
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use futures::pin_mut;
+    use futures::{pin_mut, Stream};
+    use futures_async_stream::stream;
     use mysql_async::prelude::*;
     use mysql_async::Row;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use tokio_stream::StreamExt;
+
+    use crate::executor::backfill::utils::iter_chunks;
+    use crate::executor::StreamExecutorError;
 
     // unit test for external table reader
     #[tokio::test]
     async fn test_mysql_table_reader() {
         let pool = mysql_async::Pool::new("mysql://root:123456@localhost:8306/mydb");
 
+        let t1schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+        ]);
+
         let mut conn = pool.get_conn().await.unwrap();
-        let mut result_set = conn.query_iter("SELECT * FROM `t1`").await?;
-        let s = result_set.stream::<Row>().await?.unwrap();
-        pin_mut!(s);
-        while let Some(row) = s.next().await {
-            let row = row?;
-            println!("got {:?}", row);
+        let mut result_set = conn.query_iter("SELECT * FROM `t1`").await.unwrap();
+        let s = result_set.stream::<Row>().await.unwrap().unwrap();
+        let row_stream = s.map(|row| {
+            // convert mysql row into OwnedRow
+            let mut mysql_row = row.unwrap();
+            let mut datums = vec![];
+
+            let mysql_columns = mysql_row.columns_ref();
+            for i in 0..mysql_row.len() {
+                let rw_field = &t1schema.fields[i];
+                let datum = match rw_field.data_type {
+                    DataType::Int32 => {
+                        let value = mysql_row.take::<i32, _>(i);
+                        value.map(|v| ScalarImpl::from(v))
+                    }
+                    _ => None,
+                };
+                datums.push(datum);
+            }
+            Ok(OwnedRow::new(datums))
+        });
+
+        let chunk_stream = iter_chunks::<_, StreamExecutorError>(row_stream, &t1schema, 4);
+        pin_mut!(chunk_stream);
+        while let Some(chunk) = chunk_stream.next().await {
+            if let Ok(chk) = chunk && chk.is_some() {
+                let data = chk.unwrap();
+                println!("chunk {:?}", data.data_chunk());
+            }
         }
     }
 }

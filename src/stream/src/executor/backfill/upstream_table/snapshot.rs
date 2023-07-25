@@ -115,7 +115,7 @@ impl UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable> {
             for chunk in self
                 .inner
                 .table_reader()
-                .snapshot_read(self.inner.schema_table_name())
+                .snapshot_read(self.inner.schema_table_name(), vec![])
             {
                 yield chunk?;
             }
