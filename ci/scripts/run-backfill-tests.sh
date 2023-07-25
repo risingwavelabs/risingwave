@@ -54,25 +54,29 @@ echo "--- Creating Materialized View in Background"
 run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
 echo "--- Creating upstream updates concurrently"
-for i in $(seq 1 "$UPSTREAM_COUNT")
-do
-  run_insert_with_count > COUNT_"$i" &
-done
+if [[ "$UPSTREAM_COUNT" -gt 0 ]]; then
+  for i in $(seq 1 "$UPSTREAM_COUNT")
+  do
+    run_insert_with_count > COUNT_"$i" &
+  done
+fi
 
 wait
 
 echo "--- Running SELECT sanity check"
 run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
-echo "--- Recording upstream count"
 TOTAL_UPSTREAM_COUNT=0
-for i in $(seq 1 "$UPSTREAM_COUNT")
-do
-  COUNT=$(cat COUNT_"$i")
-  TOTAL_UPSTREAM_COUNT=$((TOTAL_UPSTREAM_COUNT + COUNT))
-  rm COUNT_"$i"
-done
+if [[ "$UPSTREAM_COUNT" -gt 0 ]]; then
+  echo "--- Recording upstream count"
+  for i in $(seq 1 "$UPSTREAM_COUNT")
+  do
+    COUNT=$(cat COUNT_"$i")
+    TOTAL_UPSTREAM_COUNT=$((TOTAL_UPSTREAM_COUNT + COUNT))
+    rm COUNT_"$i"
+  done
 echo "TOTAL_UPSTREAM_ROWS: $TOTAL_UPSTREAM_COUNT"
+fi
 
 echo "--- Recording total counts"
 
