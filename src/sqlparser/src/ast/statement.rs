@@ -712,8 +712,8 @@ pub struct CsvInfo {
 
 fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
     match chars {
-        "," => Ok(b','),       // comma
-        r#"\\t"# => Ok(b'\t'), // tab
+        "," => Ok(b','),    // comma
+        "\\t" => Ok(b'\t'), // tab
         other => Err(ParserError::ParserError(format!(
             "The delimiter should be one of ',', '\\t', but got {:?}",
             other
