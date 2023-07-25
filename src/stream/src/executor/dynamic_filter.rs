@@ -23,7 +23,9 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, Once, OwnedRow as RowData, OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{
+    DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ToDatumRef, ToOwnedDatum,
+};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -31,8 +33,8 @@ use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::StateStore;
 use risingwave_storage::table::merge_sort::merge_sort;
+use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
@@ -69,9 +71,10 @@ enum DynamicFilterWatermarkCacheEntry {
 ///    We can set `unused_clean_hint` to None.
 /// 2. Else watermark => lowest value
 ///    Need to issue delete range.
-///    We can just issue delete range for (lowest_value, watermark].
+///    We can just issue delete range for (`lowest_value`, watermark].
 ///    Set `unused_clean_hint` to `watermark`.
-///    TODO(kwannoel): Optimization: If we move this to state table, we can set the delete range lower bound.
+///    TODO(kwannoel): Optimization: If we move this to state table, we can set the delete range
+/// lower bound.
 ///
 /// Updates to LHS:
 /// 1. INSERT
@@ -93,7 +96,7 @@ enum DynamicFilterWatermarkCacheEntry {
 ///
 /// Updates to state table:
 /// 1. State table commit
-///    Update prev_cleaned_watermark.
+///    Update `prev_cleaned_watermark`.
 struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
     lhs_pk_indices: Vec<usize>,
@@ -115,7 +118,7 @@ impl DynamicFilterWatermarkCache {
         match &self.entry {
             DynamicFilterWatermarkCacheEntry::Empty => None,
             DynamicFilterWatermarkCacheEntry::Evicted => None,
-            DynamicFilterWatermarkCacheEntry::Smallest { value, .. } => Some(&value),
+            DynamicFilterWatermarkCacheEntry::Smallest { value, .. } => Some(value),
         }
     }
 
@@ -123,18 +126,23 @@ impl DynamicFilterWatermarkCache {
         match &self.entry {
             DynamicFilterWatermarkCacheEntry::Empty => None,
             DynamicFilterWatermarkCacheEntry::Evicted => None,
-            DynamicFilterWatermarkCacheEntry::Smallest { pk, value, } => Some((pk, value)),
+            DynamicFilterWatermarkCacheEntry::Smallest { pk, value } => Some((pk, value)),
         }
     }
-    fn process_rhs_watermark(&mut self, watermark: Watermark, unused_clean_hint: &mut Option<Watermark>) -> StreamExecutorResult<()> {
+
+    fn process_rhs_watermark(
+        &mut self,
+        watermark: Watermark,
+        unused_clean_hint: &mut Option<Watermark>,
+    ) -> StreamExecutorResult<()> {
         match self.get_cached_value() {
             None => {
                 *unused_clean_hint = None;
                 Ok(())
-            },
+            }
             Some(lowest_value) => {
                 let watermark_value = &watermark.val;
-                if let Some(ordering) = watermark_value.default_partial_cmp(&lowest_value) {
+                if let Some(ordering) = watermark_value.default_partial_cmp(lowest_value) {
                     if ordering.is_lt() {
                         *unused_clean_hint = None;
                     } else {
@@ -142,7 +150,11 @@ impl DynamicFilterWatermarkCache {
                     }
                     Ok(())
                 } else {
-                    bail!("Watermark value {:#?} is not comparable to lowest value {:#?}", watermark_value, lowest_value);
+                    bail!(
+                        "Watermark value {:#?} is not comparable to lowest value {:#?}",
+                        watermark_value,
+                        lowest_value
+                    );
                 }
             }
         }
@@ -152,14 +164,21 @@ impl DynamicFilterWatermarkCache {
     fn process_lhs_chunk(&mut self, chunk: &StreamChunk) {
         for (op, row) in chunk.rows() {
             match op {
-                Op::Insert | Op::UpdateInsert => { self.process_insert(row); }
-                Op::Delete | Op::UpdateDelete => { self.process_delete(row); }
+                Op::Insert | Op::UpdateInsert => {
+                    self.process_insert(row);
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    self.process_delete(row);
+                }
             }
         }
     }
 
     fn process_insert(&mut self, row: impl Row) {
-        match (self.get_cached_value(), row.datum_at(self.watermark_col_idx)) {
+        match (
+            self.get_cached_value(),
+            row.datum_at(self.watermark_col_idx),
+        ) {
             (None, Some(inserted_value)) => {
                 self.entry = DynamicFilterWatermarkCacheEntry::Smallest {
                     pk: (&row).project(&self.lhs_pk_indices).into_owned_row(),
@@ -167,7 +186,10 @@ impl DynamicFilterWatermarkCache {
                 }
             }
             (Some(current_value), Some(inserted_value)) => {
-                if inserted_value.default_cmp(&current_value.as_scalar_ref_impl()).is_lt() {
+                if inserted_value
+                    .default_cmp(&current_value.as_scalar_ref_impl())
+                    .is_lt()
+                {
                     self.entry = DynamicFilterWatermarkCacheEntry::Smallest {
                         pk: (&row).project(&self.lhs_pk_indices).into_owned_row(),
                         value: inserted_value.into_scalar_impl(),
@@ -191,21 +213,27 @@ impl DynamicFilterWatermarkCache {
     /// Trade-off the cost if we have Delete-heavy workload.
     /// Instead of issuing delete range on every barrier,
     /// we will do table scan instead, which seems more acceptable.
-    async fn process_state_table_commit<S: StateStore>(&mut self, left_table: &StateTable<S>) -> StreamExecutorResult<()> {
+    async fn process_state_table_commit<S: StateStore>(
+        &mut self,
+        left_table: &StateTable<S>,
+    ) -> StreamExecutorResult<()> {
         let watermark_opt = left_table.get_state_clean_watermark();
         if let Some(watermark) = watermark_opt {
             self.prev_cleaned_watermark = Some(watermark.clone());
             if self.entry == DynamicFilterWatermarkCacheEntry::Evicted {
-                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) = (Included(once(Some(watermark.clone()))), Unbounded);
+                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
+                    (Included(once(Some(watermark.clone()))), Unbounded);
                 let mut streams = vec![];
                 for vnode in left_table.vnodes().iter_vnodes() {
-                    // TODO(kwannoel): Is it possible to have a state_table interface to read the 1st value
-                    // per vnode? Since that's all we need.
-                    let stream = left_table.iter_key_and_val_with_pk_range(
-                        &range,
-                        vnode,
-                        PrefetchOptions::new_for_exhaust_iter(),
-                    ).await?;
+                    // TODO(kwannoel): Is it possible to have a state_table interface to read the
+                    // 1st value per vnode? Since that's all we need.
+                    let stream = left_table
+                        .iter_key_and_val_with_pk_range(
+                            &range,
+                            vnode,
+                            PrefetchOptions::new_for_exhaust_iter(),
+                        )
+                        .await?;
                     streams.push(Box::pin(stream));
                 }
                 let merged_stream = merge_sort(streams);
@@ -216,7 +244,6 @@ impl DynamicFilterWatermarkCache {
             }
         }
         Ok(())
-
     }
 }
 
@@ -258,7 +285,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             ctx,
             source_l: Some(source_l),
             source_r: Some(source_r),
-            key_l: key_l.clone(),
+            key_l,
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
@@ -368,11 +395,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     /// Returns the required range, whether the latest value is in lower bound (rather than upper)
     /// and whether to insert or delete the range.
-    fn get_range(
-        &self,
-        curr: &Datum,
-        prev: Datum,
-    ) -> (LhsScanRange, bool, bool) {
+    fn get_range(&self, curr: &Datum, prev: Datum) -> (LhsScanRange, bool, bool) {
         debug_assert_ne!(curr, &prev);
         let curr_is_some = curr.is_some();
         match (curr.clone(), prev) {
@@ -491,7 +514,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut watermark_cache = if watermark_can_clean_state {
-            Some(DynamicFilterWatermarkCache::new(self.key_l, self.left_table.pk_indices().to_vec()))
+            Some(DynamicFilterWatermarkCache::new(
+                self.key_l,
+                self.left_table.pk_indices().to_vec(),
+            ))
         } else {
             None
         };
@@ -518,7 +544,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     if new_visibility.count_ones() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
-                        watermark_cache.as_mut().map(|c| c.process_lhs_chunk(&new_chunk));
+                        if let Some(c) = watermark_cache.as_mut() {
+                            c.process_lhs_chunk(&new_chunk)
+                        }
                         yield Message::Chunk(new_chunk)
                     }
                 }
@@ -556,7 +584,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Do nothing.
                 }
                 AlignedMessage::WatermarkRight(watermark) => {
-                    watermark_cache.as_mut().map(|c| c.process_rhs_watermark(watermark, &mut unused_clean_hint));
+                    watermark_cache
+                        .as_mut()
+                        .map(|c| c.process_rhs_watermark(watermark, &mut unused_clean_hint));
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
