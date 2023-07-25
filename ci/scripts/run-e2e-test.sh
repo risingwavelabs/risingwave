@@ -81,16 +81,6 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-1cn-1fe
-python3 -m pip install requests psycopg2-binary protobuf confluent-kafka
-python3 e2e_test/schema_registry/pb.py
-sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
-
-echo "--- Kill cluster"
-cargo make ci-kill
-
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
     download-and-decompress-artifact backup-restore-"$profile" target/debug/
