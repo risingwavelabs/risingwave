@@ -307,7 +307,9 @@ pub trait HashKeySer<'a>: ScalarRef<'a> {
 
     /// Returns the estimated serialized size for this scalar.
     fn estimated_size(self) -> usize {
-        Self::exact_size().expect("not exact size")
+        Self::exact_size().unwrap_or(1) // use a default size of 1 if not known
+                                        // this should never happen in practice as we always
+                                        // implement one of these two methods
     }
 }
 
