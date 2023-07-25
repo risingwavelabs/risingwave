@@ -33,6 +33,51 @@ pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
 pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 
+/// Properties for the rdkafka library. Leave a field as `None` to use the default value.
+/// These properties are not intended to be exposed to users in the majority of cases.
+///
+/// See also https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
+#[derive(Clone, Debug, Deserialize)]
+pub struct RdKafkaProperties {
+    /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
+    /// consumer queue.
+    #[serde(rename = "properties.queued.min.messages")]
+    pub queued_min_messages: Option<usize>,
+
+    #[serde(rename = "properties.queued.max.messages.kbytes")]
+    pub queued_max_messages_kbytes: Option<usize>,
+
+    /// Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
+    /// messages.
+    #[serde(rename = "properties.fetch.wait.max.ms")]
+    pub fetch_wait_max_ms: Option<usize>,
+
+    /// How long to postpone the next fetch request for a topic+partition in case the current fetch
+    /// queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been
+    /// exceeded. This property may need to be decreased if the queue thresholds are set low
+    /// and the application is experiencing long (~1s) delays between messages. Low values may
+    /// increase CPU utilization.
+    #[serde(rename = "properties.fetch.queue.backoff.ms")]
+    pub fetch_queue_backoff_ms: Option<usize>,
+
+    /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
+    /// batches by the consumer and if the first message batch in the first non-empty partition of
+    /// the Fetch request is larger than this value, then the message batch will still be returned
+    /// to ensure the consumer can make progress. The maximum message batch size accepted by the
+    /// broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
+    /// topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
+    /// `message.max.bytes` (consumer config).
+    #[serde(rename = "properties.fetch.max.bytes")]
+    pub fetch_max_bytes: Option<usize>,
+
+    /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
+    /// memory exhaustion in case of protocol hickups. This value must be at least
+    /// `fetch.max.bytes` + 512 to allow for protocol overhead; the value is adjusted automatically
+    /// unless the configuration property is explicitly set.
+    #[serde(rename = "properties.receive.message.max.bytes")]
+    pub receive_message_max_bytes: Option<usize>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
@@ -73,9 +118,35 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub common: KafkaCommon,
+
+    #[serde(flatten)]
+    pub rdkafka_properties: RdKafkaProperties,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
     Duration::from_secs(5)
 }
 const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
+
+impl RdKafkaProperties {
+    pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = &self.queued_min_messages {
+            c.set("queued.min.messages", v.to_string());
+        }
+        if let Some(v) = &self.queued_max_messages_kbytes {
+            c.set("queued.max.messages.kbytes", v.to_string());
+        }
+        if let Some(v) = &self.fetch_wait_max_ms {
+            c.set("fetch.wait.max.ms", v.to_string());
+        }
+        if let Some(v) = &self.fetch_queue_backoff_ms {
+            c.set("fetch.queue.backoff.ms", v.to_string());
+        }
+        if let Some(v) = &self.fetch_max_bytes {
+            c.set("fetch.max.bytes", v.to_string());
+        }
+        if let Some(v) = &self.receive_message_max_bytes {
+            c.set("receive.message.max.bytes", v.to_string());
+        }
+    }
+}

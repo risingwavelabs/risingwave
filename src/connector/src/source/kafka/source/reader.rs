@@ -72,6 +72,8 @@ impl SplitReader for KafkaSplitReader {
 
         properties.common.set_security_properties(&mut config);
 
+        properties.rdkafka_properties.set_client(&mut config);
+
         if config.get("group.id").is_none() {
             config.set(
                 "group.id",
