@@ -14,10 +14,11 @@
 
 use std::sync::LazyLock;
 
+use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_tablespace` stores information about the available tablespaces.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-tablespace.html`]
@@ -32,3 +33,9 @@ pub const PG_TABLESPACE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
 ];
 
 pub static PG_TABLESPACE_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
+
+impl SysCatalogReaderImpl {
+    pub fn read_tablespace_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_TABLESPACE_DATA_ROWS.clone())
+    }
+}
