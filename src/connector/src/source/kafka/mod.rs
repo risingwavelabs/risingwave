@@ -36,7 +36,7 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 /// Properties for the rdkafka library. Leave a field as `None` to use the default value.
 /// These properties are not intended to be exposed to users in the majority of cases.
 ///
-/// See also https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
+/// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 #[derive(Clone, Debug, Deserialize)]
 pub struct RdKafkaProperties {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
