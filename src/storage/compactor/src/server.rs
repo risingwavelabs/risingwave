@@ -62,7 +62,7 @@ pub async fn compactor_serve(
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
     type CompactorMemoryCollector = HummockMemoryCollector;
 
-    let config = load_config(&opts.config_path, Some(opts.override_config));
+    let config = load_config(&opts.config_path, Some(&opts.override_config));
     info!("Starting compactor node",);
     info!("> config: {:?}", config);
     info!(

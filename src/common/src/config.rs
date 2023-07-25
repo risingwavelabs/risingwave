@@ -37,7 +37,7 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
-pub const NO_OVERRIDE: Option<NoOverride> = None;
+pub const NO_OVERRIDE: Option<&'static NoOverride> = None;
 
 /// Unrecognized fields in a config section. Generic over the config section type to provide better
 /// error messages.
@@ -92,7 +92,8 @@ impl<T> Serialize for Unrecognized<T> {
     }
 }
 
-pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
+// TODO: remove `Option`
+pub fn load_config(path: &str, cli_override: Option<&impl OverrideConfig>) -> RwConfig
 where
 {
     let mut config = if path.is_empty() {
@@ -110,7 +111,7 @@ where
 }
 
 pub trait OverrideConfig {
-    fn r#override(self, config: &mut RwConfig);
+    fn r#override(&self, config: &mut RwConfig);
 }
 
 /// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
@@ -118,7 +119,7 @@ pub trait OverrideConfig {
 pub struct NoOverride {}
 
 impl OverrideConfig for NoOverride {
-    fn r#override(self, _config: &mut RwConfig) {}
+    fn r#override(&self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a

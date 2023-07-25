@@ -141,10 +141,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(
-        &meta_opts.config_path,
-        Some(meta_opts.override_opts.clone()),
-    );
+    let config = load_config(&meta_opts.config_path, Some(&meta_opts.override_opts));
     // We set a large checkpoint frequency to prevent the embedded meta node
     // to commit new epochs to avoid bumping the hummock version during version log replay.
     assert_eq!(

@@ -139,32 +139,32 @@ pub struct OverrideConfigOpts {
 
     /// The interval of periodic barrier.
     #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
-    #[override_opts(path = system.barrier_interval_ms, optional_in_config)]
+    #[override_opts(path = system.barrier_interval_ms)]
     barrier_interval_ms: Option<u32>,
 
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    #[override_opts(path = system.sstable_size_mb, optional_in_config)]
+    #[override_opts(path = system.sstable_size_mb)]
     sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
     #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    #[override_opts(path = system.block_size_kb, optional_in_config)]
+    #[override_opts(path = system.block_size_kb)]
     block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    #[override_opts(path = system.bloom_false_positive, optional_in_config)]
+    #[override_opts(path = system.bloom_false_positive)]
     bloom_false_positive: Option<f64>,
 
     /// State store url
     #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = system.state_store, optional_in_config)]
+    #[override_opts(path = system.state_store)]
     state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
-    #[override_opts(path = system.data_directory, optional_in_config)]
+    #[override_opts(path = system.data_directory)]
     data_directory: Option<String>,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
@@ -174,12 +174,12 @@ pub struct OverrideConfigOpts {
 
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
-    #[override_opts(path = system.backup_storage_url, optional_in_config)]
+    #[override_opts(path = system.backup_storage_url)]
     backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
-    #[override_opts(path = system.backup_storage_directory, optional_in_config)]
+    #[override_opts(path = system.backup_storage_directory)]
     backup_storage_directory: Option<String>,
 
     #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
@@ -209,7 +209,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         info!("Starting meta node");
         info!("> options: {:?}", opts);
-        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        let config = load_config(&opts.config_path, Some(&opts.override_opts));
         info!("> config: {:?}", config);
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
         let listen_addr = opts.listen_addr.parse().unwrap();
