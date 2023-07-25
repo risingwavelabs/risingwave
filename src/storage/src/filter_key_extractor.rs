@@ -502,6 +502,7 @@ mod tests {
             version: None,
             watermark_indices: vec![],
             dist_key_in_pk: vec![],
+            cardinality: None,
         }
     }
 
