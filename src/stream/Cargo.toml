@@ -35,7 +35,7 @@ lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
 multimap = "0.8"
-mysql_async = "0.32.2"
+mysql_async = { version = "0.31", default-features = false, features = ["minimal"]}
 num-traits = "0.2"
 parking_lot = "0.12"
 pin-project = "1"

@@ -200,6 +200,12 @@ impl From<PbFieldNotFound> for StreamExecutorError {
     }
 }
 
+impl From<mysql_async::Error> for StreamExecutorError {
+    fn from(e: mysql_async::Error) -> Self {
+        Self::connector_error(e)
+    }
+}
+
 pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 
 #[cfg(test)]

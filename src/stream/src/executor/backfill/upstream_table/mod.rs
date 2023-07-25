@@ -1,22 +1,21 @@
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
-use crate::executor::backfill::external_table::ExternalStorageTable;
+use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 
 pub mod binlog;
+pub mod external;
 pub mod snapshot;
 
 pub trait UpstreamTable {
     fn identity(&self) -> &str;
-
-    fn upstream_db_type(&self) -> UpstreamDbType;
 }
 
-pub enum UpstreamDbType {
-    MYSQL,
-    POSTGRES,
-    RISINGWAVE,
-}
+// pub enum UpstreamDbType {
+//     MYSQL,
+//     POSTGRES,
+//     RISINGWAVE,
+// }
 
 #[derive(Debug, Clone)]
 pub struct SchemaTableName {
@@ -28,18 +27,10 @@ impl<S: StateStore> UpstreamTable for StorageTable<S> {
     fn identity(&self) -> &str {
         "StorageTable"
     }
-
-    fn upstream_db_type(&self) -> UpstreamDbType {
-        UpstreamDbType::RISINGWAVE
-    }
 }
 
 impl UpstreamTable for ExternalStorageTable {
     fn identity(&self) -> &str {
         "ExternalStorageTable"
-    }
-
-    fn upstream_db_type(&self) -> &UpstreamDbType {
-        self.db_type()
     }
 }

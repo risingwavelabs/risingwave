@@ -14,7 +14,9 @@
 
 use std::sync::Arc;
 
-use futures::Stream;
+use anyhow::anyhow;
+use futures::{pin_mut, Stream, StreamExt};
+use futures_async_stream::try_stream;
 use mysql_async::prelude::*;
 use mysql_async::{ResultSetStream, TextProtocol};
 use risingwave_common::array::StreamChunk;
@@ -31,12 +33,11 @@ use risingwave_storage::StateStore;
 
 use crate::executor::backfill::upstream_table::binlog::UpstreamBinlogOffsetRead;
 use crate::executor::backfill::upstream_table::snapshot::{SnapshotReadArgs, UpstreamSnapshotRead};
-use crate::executor::backfill::upstream_table::{SchemaTableName, UpstreamDbType};
+use crate::executor::backfill::upstream_table::SchemaTableName;
 use crate::executor::StreamExecutorResult;
 
 pub type ExternalStorageTable = ExternalTableInner<EitherSerde>;
 
-#[derive(Clone)]
 pub struct ExternalTableInner<SD: ValueRowSerde> {
     /// Id for this table.
     table_id: TableId,
@@ -47,8 +48,7 @@ pub struct ExternalTableInner<SD: ValueRowSerde> {
 
     table_reader: ExternalTableReaderImpl,
 
-    db_type: UpstreamDbType,
-
+    // db_type: UpstreamDbType,
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
     /// TODO(siyuan): the schema of the external table defined in the DDL
@@ -127,10 +127,6 @@ impl<SD: ValueRowSerde> ExternalTableInner<SD> {
         self.table_id
     }
 
-    pub fn db_type(&self) -> &UpstreamDbType {
-        &self.db_type
-    }
-
     pub fn schema_table_name(&self) -> SchemaTableName {
         SchemaTableName {
             schema_name: self.schema_name.clone(),
@@ -154,27 +150,27 @@ impl UpstreamBinlogOffsetRead for ExternalStorageTable {
     }
 }
 
-// reader for external table used in backfill
 pub trait ExternalTableReader {
-    type SnapshotStream: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+    type SnapshotStream<'a>: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + 'a
+    where
+        Self: 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String;
 
-    // todo: Use GAT to return a future
     fn current_binlog_offset(&self) -> Option<String>;
 
-    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream;
+    fn snapshot_read(&self, table_name: SchemaTableName) -> Self::SnapshotStream<'_>;
 }
 
+#[derive(Debug)]
 pub enum ExternalTableReaderImpl {
     MYSQL(MySqlExternalTableReader),
-    POSTGERS(PostgresExternalTableReader),
 }
 
 // todo(siyuan): embeded db client in the reader
+#[derive(Debug)]
 pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,
-    client: None,
 }
 
 impl MySqlExternalTableReader {
@@ -184,12 +180,12 @@ impl MySqlExternalTableReader {
         let database_url = "mysql://root:123456@localhost:3306/mydb";
         let pool = mysql_async::Pool::new(database_url);
 
-        Self { pool, client: None }
+        Self { pool }
     }
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    type SnapshotStream = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+    type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
@@ -199,54 +195,54 @@ impl ExternalTableReader for MySqlExternalTableReader {
         todo!()
     }
 
-    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream {
+    fn snapshot_read(&self, table_name: SchemaTableName) -> Self::SnapshotStream<'_> {
+        #[try_stream]
         async move {
             let sql = format!(
                 "SELECT * FROM {}",
-                Self::get_normalized_table_name(table_name)
+                Self::get_normalized_table_name(&table_name)
             );
-
-            // let mut conn = self.pool.get_conn().await?;
-            //
-            // let mut result_set = conn.query_iter(sql).await?;
-            todo!("mysql snapshot read")
+            let mut conn = self.pool.get_conn().await?;
+            let mut result_set = conn.query_iter(sql).await?;
+            let row_stream = result_set.stream::<mysql_async::Row>().await?;
+            if let Some(stream) = row_stream {
+                let row_stream = stream;
+                pin_mut!(row_stream);
+                #[for_await]
+                for row in row_stream {
+                    let _row = row?;
+                    // TODO: collect row into stream chunk
+                    // let mut row_data = Vec::new();
+                    // for i in 0..row.len() {
+                    //     let cell = row.get(i);
+                    //     row_data.push(cell);
+                    // }
+                    // let row_data = RowData::new(row_data);
+                    // let chunk = StreamChunk::Data(row_data);
+                    yield None;
+                }
+            }
         }
     }
 }
 
-pub struct PostgresExternalTableReader {
-    client: None,
-}
-
-impl ExternalTableReader for PostgresExternalTableReader {
-    type SnapshotStream = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
-
-    fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
-        format!("{}.{}", table_name.schema_name, table_name.table_name)
-    }
-
-    fn current_binlog_offset(&self) -> Option<String> {
-        todo!()
-    }
-
-    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream {
-        todo!()
-    }
-}
-
 impl ExternalTableReader for ExternalTableReaderImpl {
-    type SnapshotStream = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send;
+    type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
-        todo!()
+        unimplemented!("get normalized table name")
     }
 
     fn current_binlog_offset(&self) -> Option<String> {
-        todo!()
+        unimplemented!("current binlog offset")
     }
 
-    fn snapshot_read(&self, table_name: &SchemaTableName) -> Self::SnapshotStream {
-        todo!()
+    fn snapshot_read(&self, table_name: SchemaTableName) -> Self::SnapshotStream<'_> {
+        #[try_stream]
+        async move {
+            panic!("not implemented");
+            yield None;
+        }
     }
 }
 

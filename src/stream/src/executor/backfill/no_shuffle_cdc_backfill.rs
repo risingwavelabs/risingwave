@@ -32,7 +32,7 @@ use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
-use crate::executor::backfill::external_table::ExternalStorageTable;
+use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamSnapshotRead, UpstreamTableReader,
 };
