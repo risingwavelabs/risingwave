@@ -56,7 +56,7 @@ use crate::ExprError;
 /// ----
 /// 1
 ///
-/// query error type unknown
+/// query error Cannot implicitly cast
 /// select array_length(null);
 /// ```
 #[function("array_length(list) -> int32")]

@@ -56,7 +56,7 @@ use crate::ExprError;
 /// ----
 /// 1
 ///
-/// query error type unknown
+/// query error Cannot implicitly cast
 /// select cardinality(null);
 /// ```
 #[function("cardinality(list) -> int32")]
