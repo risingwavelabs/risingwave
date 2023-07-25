@@ -375,6 +375,8 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     }
 }
 
+/// Helper function to extract the scalar type from an array and returns its
+/// `HashKeySer::exact_size`.
 fn exact_size_of_scalar_in_array<'a, A, S>(_: &A) -> Option<usize>
 where
     A: Array<RefItem<'a> = S>,

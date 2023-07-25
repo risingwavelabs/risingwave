@@ -276,6 +276,12 @@ impl BuildHasher for PrecomputedBuildHasher {
 
 /// Extension of scalars to be serialized into hash keys.
 ///
+/// The `exact_size` and `estimated_size` methods are used to estimate the size of the serialized
+/// hash key, so that we can pre-allocate the buffer for it.
+/// - override `exact_size` if the serialized size is known for this scalar type;
+/// - override `estimated_size` if the serialized size varies for different values of this scalar
+///   type, but we can estimate it.
+///
 /// NOTE: The hash key encoding algorithm needs to respect the implementation of `Hash` and `Eq` on
 /// scalar types, which is exactly the same behavior of the data types under `GROUP BY` or
 /// `PARTITION BY` in PostgreSQL. For example, `Decimal(1.0)` vs `Decimal(1.00)`, or `Interval(24
@@ -291,12 +297,15 @@ impl BuildHasher for PrecomputedBuildHasher {
 /// be delegated to other encoding algorithms, we can use macros of
 /// `impl_memcmp_encoding_hash_key_serde!` and `impl_value_encoding_hash_key_serde!` here.
 pub trait HashKeySer<'a>: ScalarRef<'a> {
+    /// Serialize the scalar into the given buffer.
     fn serialize_into(self, buf: impl BufMut);
 
+    /// Returns `Some` if the serialized size is known for this scalar type.
     fn exact_size() -> Option<usize> {
         None
     }
 
+    /// Returns the estimated serialized size for this scalar.
     fn estimated_size(self) -> usize {
         Self::exact_size().expect("not exact size")
     }
