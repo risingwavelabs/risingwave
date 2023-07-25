@@ -26,7 +26,28 @@ message WatermarkDesc {
   expr.ExprNode expr = 2;
 }
 
+// https://github.com/tokio-rs/prost/issues/80
+enum FormatType {
+  FORMAT_TYPE_NATIVE = 0;
+  FORMAT_TYPE_DEBEZIUM = 1;
+  FORMAT_TYPE_DEBEZIUMMONGO = 2;
+  FORMAT_TYPE_MAXWELL = 3;
+  FORMAT_TYPE_CANAL = 4;
+  FORMAT_TYPE_UPSERT = 5;
+  FORMAT_TYPE_PLAIN = 6;
+}
+
+enum EncodeType {
+  ENCODE_TYPE_NATIVE = 0;
+  ENCODE_TYPE_AVRO = 1;
+  ENCODE_TYPE_CSV = 2;
+  ENCODE_TYPE_PROTOBUF = 3;
+  ENCODE_TYPE_JSON = 4;
+  ENCODE_TYPE_BYTES = 5;
+}
+
 message StreamSourceInfo {
+  // deprecated
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
   bool use_schema_registry = 3;
@@ -34,6 +55,8 @@ message StreamSourceInfo {
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
   string upsert_avro_primary_key = 7;
+  FormatType format = 8;
+  EncodeType row_encode = 9;
 }
 
 message Source {
