@@ -85,7 +85,7 @@ pub struct JsonParseOptions {
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
     pub boolean_handing: BooleanHandling,
-    pub varchar_handing: VarcharHandling::OnlyPrimaryTypes,
+    pub varchar_handing: VarcharHandling,
     pub ignoring_keycase: bool,
 }
 
@@ -352,8 +352,7 @@ impl JsonParseOptions {
             (Some(DataType::Varchar) | None, ValueType::String) => value.as_str().unwrap().into(),
             (
                 Some(DataType::Varchar),
-                ValueType::Null
-                | ValueType::Bool
+                ValueType::Bool
                 | ValueType::I64
                 | ValueType::I128
                 | ValueType::U64
@@ -364,8 +363,7 @@ impl JsonParseOptions {
             }
             (
                 Some(DataType::Varchar),
-                ValueType::Null
-                | ValueType::Bool
+                ValueType::Bool
                 | ValueType::I64
                 | ValueType::I128
                 | ValueType::U64
