@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, Row};
+use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
@@ -42,6 +42,40 @@ use super::{
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
+
+/// Used for watermark state cleaning.
+/// We store the smallest value in our state table here.
+///
+/// Cases
+/// -----
+/// Uninitialized -> No value in cache, because none inserted yet. No delete range required.
+/// Empty -> No value in cache. We need to issue delete range,
+///          since we don't know the smallest value.
+/// Smallest(value) if `current_watermark` < value -> No delete range required.
+/// Smallest(value) if `current_watermark` >= value -> Delete range (-inf, `current_watermark`].
+///
+/// Updating the Cache
+/// ------------------
+/// If no watermark column, just set watermark state to Empty.
+/// Otherwise if watermark column exists:
+/// (UPDATE)INSERT -> Update lowest value if applicable.
+/// (UPDATE)DELETE -> If removes lowest value, set cache to empty.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum DynamicFilterWatermarkCacheEntry {
+    Empty,
+    Uninitialized,
+    // We need to store row, in case we encounter `Delete`s.
+    // Then we can remove the OwnedRow.
+    Smallest(OwnedRow),
+}
+
+// Watermark Filter Cache
+// Used to avoid issuing delete range requests for state clean-up by watermark.
+// TODO: Refactor this file into `dynamic-filter/mod.rs`, `dynamic-filter/cache.rs`.
+struct DynamicFilterWatermarkCache {
+    watermark_col: usize,
+    row: DynamicFilterWatermarkCacheEntry,
+}
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
