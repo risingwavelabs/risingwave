@@ -1,6 +1,7 @@
-# This aims to throttle snapshot reads.
 [streaming.developer]
-# stream_chunk_size = 1
+# Having a larger size tests the case where backfill chunk does not finish processing
+# before barrier comes.
+# In that case we want to flush existing data still.
 stream_chunk_size = 10000000000
 
 [system]
