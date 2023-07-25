@@ -25,12 +25,12 @@ use tinyvec::ArrayVec;
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
-use crate::for_all_type_pairs;
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
 use crate::types::{DataType, Datum, ScalarImpl};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
+use crate::{for_all_scalar_variants, for_all_type_pairs};
 
 /// The storage where the hash key resides in memory.
 pub trait KeyStorage: 'static {
@@ -305,9 +305,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         let mut serializers = {
             let buffers = if S::Buffer::alloc() {
                 // Pre-estimate the key size to avoid reallocation as much as possible.
-                // FIXME(bugen): hash key encoding is not value encoding, the implementation needs
-                // to be revisited and updated.
-                let estimated_key_sizes = data_chunk.compute_key_sizes_by_columns(column_indices);
+                let estimated_key_sizes = data_chunk.estimate_hash_key_sizes(column_indices);
 
                 Either::Left(
                     estimated_key_sizes
@@ -374,6 +372,57 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
 
     fn null_bitmap(&self) -> &Self::Bitmap {
         &self.null_bitmap
+    }
+}
+
+#[easy_ext::ext]
+impl DataChunk {
+    fn estimate_hash_key_sizes(&self, column_indices: &[usize]) -> Vec<usize> {
+        let mut estimated_column_indices = Vec::new();
+        let mut exact_size = 0;
+
+        for &i in column_indices {
+            let col = &self.columns()[i];
+
+            macro_rules! work {
+                ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                    use crate::types::*;
+
+                    match &**col {
+                        $(
+                            ArrayImpl::$variant_name(_) => {
+                                match <<$scalar as Scalar>::ScalarRefType<'_> as HashKeySer>::exact_size() {
+                                    Some(size) => exact_size += size,
+                                    None => estimated_column_indices.push(i),
+                                }
+                            }
+                        )*
+                    }
+                };
+            }
+
+            for_all_scalar_variants! { work }
+        }
+
+        let mut sizes = vec![exact_size; self.capacity()];
+
+        for i in estimated_column_indices {
+            let col = &self.columns()[i];
+
+            dispatch_all_variants!(&**col, ArrayImpl, col, {
+                for ((datum, visible), size) in col
+                    .iter()
+                    .zip_eq_fast(self.vis().iter())
+                    .zip_eq_fast(&mut sizes)
+                {
+                    if visible && let Some(scalar) = datum {
+                        *size += HashKeySer::estimated_size(scalar);
+                    }
+                }
+            })
+        }
+
+        sizes
     }
 }
 
