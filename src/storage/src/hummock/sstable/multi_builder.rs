@@ -184,18 +184,16 @@ where
                         || (self.is_target_level_l0_or_lbase && vnode_changed);
                 }
             }
-            if need_seal_current {
-                if let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
-                    last_range_tombstone_epoch = event.new_epoch;
-                    if event.event_key.left_user_key.as_ref().eq(&full_key.user_key) {
-                        // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
-                        need_seal_current = false;
-                    } else {
-                        builder.add_monotonic_delete(MonotonicDeleteEvent {
-                            event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
-                            new_epoch: HummockEpoch::MAX,
-                        });
-                    }
+            if need_seal_current && let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
+                last_range_tombstone_epoch = event.new_epoch;
+                if event.event_key.left_user_key.as_ref().eq(&full_key.user_key) {
+                    // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
+                    need_seal_current = false;
+                } else {
+                    builder.add_monotonic_delete(MonotonicDeleteEvent {
+                        event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                        new_epoch: HummockEpoch::MAX,
+                    });
                 }
             }
         }
