@@ -18,7 +18,7 @@ import com.risingwave.connector.JsonDeserializer;
 import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
+import com.risingwave.proto.ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
 import junit.framework.TestCase;
 
@@ -33,8 +33,8 @@ public class DeserializerTest extends TestCase {
                                         .setLine("{\"id\": 1, \"name\": \"John\"}")
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch =
-                ConnectorServiceProto.SinkStreamRequest.WriteBatch.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch =
+                ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.newBuilder()
                         .setJsonPayload(jsonPayload)
                         .build();
         SinkRow outcome = deserializer.deserialize(writeBatch).next();

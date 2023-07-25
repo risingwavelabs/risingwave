@@ -172,7 +172,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 13
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
@@ -202,6 +202,16 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
+
+  - label: "backfill integration test (deterministic simulation)"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh backfill_tests::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
 
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"

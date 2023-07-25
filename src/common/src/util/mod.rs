@@ -40,13 +40,12 @@ pub mod runtime;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
-pub mod stream_cancel;
 pub mod stream_graph_visitor;
 pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
 
-pub use future_utils::select_all;
+pub use future_utils::{pending_on_none, select_all};
 #[macro_use]
 pub mod match_util;
 

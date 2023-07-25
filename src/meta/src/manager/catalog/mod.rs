@@ -62,36 +62,12 @@ pub type FunctionId = u32;
 pub type UserId = u32;
 pub type ConnectionId = u32;
 
-/// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
-/// meta store.
-/// * $`manager`: metadata manager, which should contains an env field to access meta store.
-/// * $`val_txn`: transactions to commit.
-macro_rules! commit_meta {
-    ($manager:expr, $($val_txn:expr),*) => {
-        {
-            async {
-                let mut trx = Transaction::default();
-                // Apply the change in `ValTransaction` to trx
-                $(
-                    $val_txn.apply_to_txn(&mut trx)?;
-                )*
-                // Commit to meta store
-                $manager.env.meta_store().txn(trx).await?;
-                // Upon successful commit, commit the change to in-mem meta
-                $(
-                    $val_txn.commit();
-                )*
-                MetaResult::Ok(())
-            }.await
-        }
-    };
-}
-
 /// `commit_meta_with_trx` is similar to `commit_meta`, but it accepts an external trx (transaction)
 /// and commits it.
 macro_rules! commit_meta_with_trx {
     ($manager:expr, $trx:ident, $($val_txn:expr),*) => {
         {
+            use tracing::Instrument;
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(
@@ -104,7 +80,25 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.commit();
                 )*
                 MetaResult::Ok(())
-            }.await
+            }
+            .instrument(tracing::info_span!(
+                "meta_store_commit",
+                manager = std::any::type_name_of_val(&*$manager)
+            ))
+            .await
+        }
+    };
+}
+
+/// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
+/// meta store.
+/// * $`manager`: metadata manager, which should contains an env field to access meta store.
+/// * $`val_txn`: transactions to commit.
+macro_rules! commit_meta {
+    ($manager:expr, $($val_txn:expr),*) => {
+        {
+            let mut trx = Transaction::default();
+            $crate::manager::commit_meta_with_trx!($manager, trx, $($val_txn),*)
         }
     };
 }

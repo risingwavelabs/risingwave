@@ -230,8 +230,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Exists(Box::new(subquery))
     }
 
+    /// Generate ORDER BY expressions by choosing from available bound columns.
     pub(crate) fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
-        if self.bound_columns.is_empty() || !self.is_distinct_allowed {
+        if self.bound_columns.is_empty() {
             return vec![];
         }
         let mut order_by = vec![];
@@ -239,8 +240,46 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
                 expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
-                asc: Some(self.rng.gen_bool(0.5)),
-                nulls_first: None,
+                asc: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
+                nulls_first: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
+            })
+        }
+        order_by
+    }
+
+    /// Generate ORDER BY expressions by choosing from given expressions.
+    pub(crate) fn gen_order_by_within(&mut self, exprs: &[Expr]) -> Vec<OrderByExpr> {
+        let exprs = exprs
+            .iter()
+            .filter(|e| matches!(e, Expr::Identifier(_) | Expr::Value(_)))
+            .cloned()
+            .collect::<Vec<_>>();
+        if exprs.is_empty() {
+            return vec![];
+        }
+        let mut order_by = vec![];
+        while self.flip_coin() {
+            let expr = exprs.choose(&mut self.rng).unwrap();
+            order_by.push(OrderByExpr {
+                expr: expr.clone(),
+                asc: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
+                nulls_first: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
             })
         }
         order_by

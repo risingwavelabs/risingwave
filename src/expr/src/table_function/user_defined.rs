@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use arrow_schema::{Field, Schema, SchemaRef};
+use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use futures_util::stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -51,7 +51,7 @@ impl UserDefinedTableFunction {
     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
-            let val = c.eval_checked(input).await?.as_ref().into();
+            let val = c.eval_checked(input).await?.as_ref().try_into()?;
             columns.push(val);
         }
 
@@ -81,8 +81,16 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let arg_schema = Arc::new(Schema::new(
         udtf.arg_types
             .iter()
-            .map(|t| Field::new("", DataType::from(t).into(), true))
-            .collect(),
+            .map::<Result<_>, _>(|t| {
+                Ok(Field::new(
+                    "",
+                    DataType::from(t)
+                        .try_into()
+                        .map_err(risingwave_udf::Error::Unsupported)?,
+                    true,
+                ))
+            })
+            .try_collect::<_, Fields, _>()?,
     ));
     // connect to UDF service
     let client = crate::expr::expr_udf::get_or_create_client(&udtf.link)?;

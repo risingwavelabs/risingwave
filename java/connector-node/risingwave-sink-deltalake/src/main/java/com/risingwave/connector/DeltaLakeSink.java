@@ -17,8 +17,8 @@ package com.risingwave.connector;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
@@ -36,7 +36,7 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 
-public class DeltaLakeSink extends SinkBase {
+public class DeltaLakeSink extends SinkWriterBase {
     private static final CompressionCodecName codecName = CompressionCodecName.SNAPPY;
     private final String uuid = UUID.randomUUID().toString();
     private final Configuration conf;

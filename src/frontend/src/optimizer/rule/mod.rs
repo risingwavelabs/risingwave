@@ -68,11 +68,11 @@ pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
 mod over_window_to_agg_and_join_rule;
 pub use over_window_to_agg_and_join_rule::*;
-mod over_window_split_by_window_rule;
-pub use over_window_split_by_window_rule::*;
-mod over_agg_to_topn_rule;
+mod over_window_split_rule;
+pub use over_window_split_rule::*;
+mod over_window_to_topn_rule;
 pub use join_commute_rule::*;
-pub use over_agg_to_topn_rule::*;
+pub use over_window_to_topn_rule::*;
 mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
@@ -119,6 +119,10 @@ mod apply_union_transpose_rule;
 pub use apply_union_transpose_rule::*;
 mod apply_dedup_transpose_rule;
 pub use apply_dedup_transpose_rule::*;
+mod project_join_separate_rule;
+pub use project_join_separate_rule::*;
+mod grouping_sets_to_expand_rule;
+pub use grouping_sets_to_expand_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -145,7 +149,7 @@ macro_rules! for_all_rules {
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
-            , { OverWindowSplitByWindowRule }
+            , { OverWindowSplitRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
@@ -169,6 +173,8 @@ macro_rules! for_all_rules {
             , { ExceptMergeRule }
             , { ApplyUnionTransposeRule }
             , { ApplyDedupTransposeRule }
+            , { ProjectJoinSeparateRule }
+            , { GroupingSetsToExpandRule }
         }
     };
 }

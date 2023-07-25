@@ -30,7 +30,7 @@ def do_test(config, N, n, prefix):
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) ROW FORMAT CSV (delimiter = ',', without_header = true);''')
+    ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);''')
 
     cur.execute(f'''CREATE TABLE s3_test_csv_with_headers( 
         a int,
@@ -44,7 +44,7 @@ def do_test(config, N, n, prefix):
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) ROW FORMAT CSV (delimiter = ',');''')
+    ) FORMAT PLAIN ENCODE CSV (delimiter = ',');''')
 
     total_row = int(N * n)
     sleep(60)

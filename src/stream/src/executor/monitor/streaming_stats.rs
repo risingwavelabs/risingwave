@@ -58,6 +58,7 @@ pub struct StreamingMetrics {
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
     pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
+    pub join_matched_join_keys: HistogramVec,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -90,6 +91,10 @@ pub struct StreamingMetrics {
     // Backfill
     pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+
+    // Arrangement Backfill
+    pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -372,6 +377,19 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_matched_join_keys_opts = histogram_opts!(
+            "stream_join_matched_join_keys",
+            "The number of keys matched in the opposite side",
+            exponential_buckets(16.0, 2.0, 28).unwrap() // max 2^31
+        );
+
+        let join_matched_join_keys = register_histogram_vec_with_registry!(
+            join_matched_join_keys_opts,
+            &["actor_id", "table_id"],
+            registry
+        )
+        .unwrap();
+
         let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
             "Aggregation executor lookup miss duration",
@@ -549,6 +567,23 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let arrangement_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_arrangement_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the arrangement_backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let arrangement_backfill_upstream_output_row_count =
+            register_int_counter_vec_with_registry!(
+                "stream_arrangement_backfill_upstream_output_row_count",
+                "Total number of rows that have been output from the arrangement_backfill upstream",
+                &["table_id", "actor_id"],
+                registry
+            )
+            .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -685,6 +720,7 @@ impl StreamingMetrics {
             join_cached_entries,
             join_cached_rows,
             join_cached_estimated_size,
+            join_matched_join_keys,
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_keys,
@@ -707,6 +743,8 @@ impl StreamingMetrics {
             temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
+            arrangement_backfill_snapshot_read_row_count,
+            arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

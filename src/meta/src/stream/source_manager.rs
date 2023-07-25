@@ -23,12 +23,13 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
-    ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitEnumeratorImpl,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::table_schema::Column;
-use risingwave_pb::connector_service::TableSchema;
+use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -36,7 +37,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, SourceId};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -47,13 +48,14 @@ pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>
 
 pub struct SourceManager<S: MetaStore> {
     pub(crate) paused: Mutex<()>,
+    env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
     core: Mutex<SourceManagerCore<S>>,
-    connector_rpc_endpoint: Option<String>,
     metrics: Arc<MetaMetrics>,
 }
 
 const MAX_FAIL_CNT: u32 = 10;
+const DEFAULT_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -69,12 +71,23 @@ struct ConnectorSourceWorker {
     period: Duration,
     metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
+    connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
 }
 
 impl ConnectorSourceWorker {
     async fn refresh(&mut self) -> MetaResult<()> {
-        let enumerator = SplitEnumeratorImpl::create(self.connector_properties.clone()).await?;
+        let enumerator = SplitEnumeratorImpl::create(
+            self.connector_properties.clone(),
+            Arc::new(SourceEnumeratorContext {
+                metrics: self.metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo {
+                    source_id: self.source_id,
+                },
+                connector_client: self.connector_client.clone(),
+            }),
+        )
+        .await?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
@@ -82,18 +95,27 @@ impl ConnectorSourceWorker {
     }
 
     pub async fn create(
-        connector_rpc_endpoint: &Option<String>,
+        connector_client: Option<ConnectorClient>,
         source: &Source,
         period: Duration,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        // init cdc properties
-        if let Some(endpoint) = connector_rpc_endpoint {
+        if properties.is_cdc_connector() {
             let table_schema = Self::extract_source_schema(source);
-            properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
+            properties.init_cdc_properties(Some(table_schema));
         }
-        let enumerator = SplitEnumeratorImpl::create(properties.clone()).await?;
+        let enumerator = SplitEnumeratorImpl::create(
+            properties.clone(),
+            Arc::new(SourceEnumeratorContext {
+                metrics: metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo {
+                    source_id: source.id,
+                },
+                connector_client: connector_client.clone(),
+            }),
+        )
+        .await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id: source.id,
@@ -103,6 +125,7 @@ impl ConnectorSourceWorker {
             period,
             metrics,
             connector_properties: properties,
+            connector_client,
             fail_cnt: 0,
         })
     }
@@ -160,7 +183,7 @@ impl ConnectorSourceWorker {
         Ok(())
     }
 
-    fn extract_source_schema(source: &Source) -> TableSchema {
+    fn extract_source_schema(source: &Source) -> PbTableSchema {
         let pk_indices = source
             .pk_column_ids
             .iter()
@@ -173,15 +196,12 @@ impl ConnectorSourceWorker {
             })
             .collect_vec();
 
-        TableSchema {
+        PbTableSchema {
             columns: source
                 .columns
                 .iter()
                 .flat_map(|col| &col.column_desc)
-                .map(|col| Column {
-                    name: col.name.clone(),
-                    data_type: col.column_type.clone(),
-                })
+                .cloned()
                 .collect(),
             pk_indices,
         }
@@ -469,7 +489,7 @@ where
 
     for (actor_id, mut splits) in actor_splits {
         if opts.enable_scale_in {
-            splits.drain_filter(|split| dropped_splits.contains(&split.id()));
+            splits.retain(|split| !dropped_splits.contains(&split.id()));
         }
 
         heap.push(ActorSplitsAssignment { actor_id, splits })
@@ -496,7 +516,7 @@ where
     const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        connector_rpc_endpoint: Option<String>,
+        env: MetaSrvEnv<S>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
@@ -505,10 +525,9 @@ where
         let mut managed_sources = HashMap::new();
         {
             let sources = catalog_manager.list_sources().await;
-
             for source in sources {
                 Self::create_source_worker(
-                    &connector_rpc_endpoint,
+                    env.connector_client(),
                     &source,
                     &mut managed_sources,
                     false,
@@ -533,10 +552,10 @@ where
         ));
 
         Ok(Self {
+            env,
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
-            connector_rpc_endpoint,
             metrics,
         })
     }
@@ -674,7 +693,7 @@ where
             tracing::warn!("source {} already registered", source.get_id());
         } else {
             Self::create_source_worker(
-                &self.connector_rpc_endpoint,
+                self.env.connector_client(),
                 source,
                 &mut core.managed_sources,
                 true,
@@ -686,14 +705,14 @@ where
     }
 
     async fn create_source_worker(
-        connector_rpc_endpoint: &Option<String>,
+        connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         force_tick: bool,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(
-            connector_rpc_endpoint,
+            connector_client,
             source,
             Duration::from_secs(10),
             metrics,
@@ -706,7 +725,18 @@ where
         // failure.
         if force_tick {
             // if fail to fetch meta info, will refuse to create source
-            worker.tick().await?;
+
+            // todo: make the timeout configurable, longer than `properties.sync.call.timeout` in
+            // kafka
+            tokio::time::timeout(DEFAULT_TICK_TIMEOUT, worker.tick())
+                .await
+                .map_err(|_e| {
+                    anyhow!(
+                        "failed to fetch meta info for source {}, error: timeout {}",
+                        source.id,
+                        DEFAULT_TICK_TIMEOUT.as_secs()
+                    )
+                })??;
         }
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();

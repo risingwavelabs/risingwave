@@ -34,6 +34,7 @@ pub mod pg_operator;
 pub mod pg_proc;
 pub mod pg_roles;
 pub mod pg_settings;
+mod pg_shadow;
 pub mod pg_shdescription;
 pub mod pg_stat_activity;
 pub mod pg_tables;
@@ -65,6 +66,7 @@ pub use pg_operator::*;
 pub use pg_proc::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
+pub use pg_shadow::*;
 pub use pg_shdescription::*;
 pub use pg_stat_activity::*;
 pub use pg_tables::*;
@@ -74,7 +76,7 @@ pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -84,6 +86,7 @@ use serde_json::json;
 use super::SysCatalogReaderImpl;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::get_acl_items;
+use crate::user::user_authentication::encrypted_raw_password;
 
 impl SysCatalogReaderImpl {
     pub(super) fn read_types(&self) -> Result<Vec<OwnedRow>> {
@@ -140,19 +143,45 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
-        let catalog = self.catalog_reader.read_guard();
-        let table_stats = catalog.table_stats();
-        let mut rows = vec![];
-        for (id, stats) in &table_stats.table_stats {
-            rows.push(OwnedRow::new(vec![
-                Some(ScalarImpl::Int32(*id as i32)),
-                Some(ScalarImpl::Int64(stats.total_key_count)),
-                Some(ScalarImpl::Int64(stats.total_key_size)),
-                Some(ScalarImpl::Int64(stats.total_value_size)),
-            ]));
+    pub(super) fn read_user_info_shadow(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.user_info_reader.read_guard();
+        // Since this catalog contains passwords, it must not be publicly readable.
+        match reader.get_user_by_name(&self.auth_context.user_name) {
+            None => {
+                return Err(ErrorCode::CatalogError(
+                    format!("user {} not found", self.auth_context.user_name).into(),
+                )
+                .into());
+            }
+            Some(user) => {
+                if !user.is_super {
+                    return Err(ErrorCode::PermissionDenied(
+                        "permission denied for table pg_shadow".to_string(),
+                    )
+                    .into());
+                }
+            }
         }
-        Ok(rows)
+
+        let users = reader.get_all_users();
+        Ok(users
+            .iter()
+            .map(|user| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8(user.name.clone().into())),
+                    Some(ScalarImpl::Int32(user.id as i32)),
+                    Some(ScalarImpl::Bool(user.can_create_db)),
+                    Some(ScalarImpl::Bool(user.is_super)),
+                    Some(ScalarImpl::Bool(false)),
+                    Some(ScalarImpl::Bool(false)),
+                    user.auth_info
+                        .as_ref()
+                        .map(|info| ScalarImpl::Utf8(encrypted_raw_password(info).into())),
+                    None,
+                    None,
+                ])
+            })
+            .collect_vec())
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>

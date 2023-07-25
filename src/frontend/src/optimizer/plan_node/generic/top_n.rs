@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
@@ -127,18 +127,22 @@ impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(5);
         let input_schema = self.input.schema();
-        let order_d = Pretty::display(&OrderDisplay {
+        let order_d = OrderDisplay {
             order: &self.order,
             input_schema,
-        });
-        vec.push(("order", order_d));
+        };
+        vec.push(("order", order_d.distill()));
         vec.push(("limit", Pretty::debug(&self.limit_attr.limit())));
         vec.push(("offset", Pretty::debug(&self.offset)));
         if self.limit_attr.with_ties() {
             vec.push(("with_ties", Pretty::debug(&true)));
         }
         if !self.group_key.is_empty() {
-            vec.push(("group_key", Pretty::debug(&self.group_key)));
+            let f = |i| Pretty::display(&FieldDisplay(&self.input.schema()[i]));
+            vec.push((
+                "group_key",
+                Pretty::Array(self.group_key.iter().copied().map(f).collect()),
+            ));
         }
         childless_record(name, vec)
     }

@@ -340,6 +340,19 @@ impl Cluster {
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
+        self.reschedule_helper(plan, false).await
+    }
+
+    /// Same as reschedule, but resolve the no_shuffle upstream
+    pub async fn reschedule_resolve_no_shuffle(&mut self, plan: impl Into<String>) -> Result<()> {
+        self.reschedule_helper(plan, true).await
+    }
+
+    async fn reschedule_helper(
+        &mut self,
+        plan: impl Into<String>,
+        resolve_no_shuffle_upstream: bool,
+    ) -> Result<()> {
         let plan = plan.into();
 
         let revision = self
@@ -356,15 +369,22 @@ impl Cluster {
 
         self.ctl
             .spawn(async move {
-                let opts = risingwave_ctl::CliOpts::parse_from([
+                let revision = format!("{}", revision);
+                let mut v = vec![
                     "ctl",
                     "meta",
                     "reschedule",
                     "--plan",
                     plan.as_ref(),
                     "--revision",
-                    &format!("{}", revision),
-                ]);
+                    &revision,
+                ];
+
+                if resolve_no_shuffle_upstream {
+                    v.push("--resolve-no-shuffle");
+                }
+
+                let opts = risingwave_ctl::CliOpts::parse_from(v);
                 risingwave_ctl::start(opts).await
             })
             .await??;

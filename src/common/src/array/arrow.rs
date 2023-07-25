@@ -16,7 +16,8 @@
 
 use std::fmt::Write;
 
-use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
+use arrow_array::Array as ArrowArray;
+use arrow_schema::{Field, Schema, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
@@ -26,15 +27,29 @@ use crate::util::iter_util::ZipEqDebug;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
 
-impl From<&DataChunk> for arrow_array::RecordBatch {
-    fn from(chunk: &DataChunk) -> Self {
-        arrow_array::RecordBatch::try_from_iter(
-            chunk
-                .columns()
-                .iter()
-                .map(|column| ("", column.as_ref().into())),
-        )
-        .unwrap()
+impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
+    type Error = ArrayError;
+
+    fn try_from(chunk: &DataChunk) -> Result<Self, Self::Error> {
+        let columns: Vec<_> = chunk
+            .columns()
+            .iter()
+            .map(|column| column.as_ref().try_into())
+            .try_collect::<_, _, Self::Error>()?;
+
+        let fields: Vec<_> = columns
+            .iter()
+            .map(|array: &Arc<dyn ArrowArray>| {
+                let nullable = array.null_count() > 0;
+                let data_type = array.data_type().clone();
+                Field::new("", data_type, nullable)
+            })
+            .collect();
+
+        let schema = Arc::new(Schema::new(fields));
+
+        arrow_array::RecordBatch::try_new(schema, columns)
+            .map_err(|err| ArrayError::ToArrow(err.to_string()))
     }
 }
 
@@ -55,10 +70,11 @@ impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
 macro_rules! converts_generic {
     ($({ $ArrowType:ty, $ArrowPattern:pat, $ArrayImplPattern:path }),*) => {
         // RisingWave array -> Arrow array
-        impl From<&ArrayImpl> for arrow_array::ArrayRef {
-            fn from(array: &ArrayImpl) -> Self {
+        impl TryFrom<&ArrayImpl> for arrow_array::ArrayRef {
+            type Error = ArrayError;
+            fn try_from(array: &ArrayImpl) -> Result<Self, Self::Error> {
                 match array {
-                    $($ArrayImplPattern(a) => Arc::new(<$ArrowType>::from(a)),)*
+                    $($ArrayImplPattern(a) => Ok(Arc::new(<$ArrowType>::try_from(a)?)),)*
                     _ => todo!("unsupported array"),
                 }
             }
@@ -95,7 +111,8 @@ converts_generic! {
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
     { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
-    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, _), ArrayImpl::Timestamp },
+    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, None), ArrayImpl::Timestamp },
+    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, Some(_)), ArrayImpl::Timestamptz },
     { arrow_array::Time64MicrosecondArray, Time64(Microsecond), ArrayImpl::Time },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
@@ -122,19 +139,20 @@ impl From<&arrow_schema::DataType> for DataType {
             Date32 => Self::Date,
             Time64(Microsecond) => Self::Time,
             Timestamp(Microsecond, None) => Self::Timestamp,
+            Timestamp(Microsecond, Some(_)) => Self::Timestamptz,
             Interval(MonthDayNano) => Self::Interval,
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
             LargeUtf8 => Self::Jsonb,
-            Struct(field) => Self::Struct(field.as_slice().into()),
+            Struct(fields) => Self::Struct(fields.into()),
             List(field) => Self::List(Box::new(field.data_type().into())),
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
 }
 
-impl From<&[arrow_schema::Field]> for StructType {
-    fn from(fields: &[arrow_schema::Field]) -> Self {
+impl From<&arrow_schema::Fields> for StructType {
+    fn from(fields: &arrow_schema::Fields) -> Self {
         Self::new(
             fields
                 .iter()
@@ -150,41 +168,51 @@ impl From<arrow_schema::DataType> for DataType {
     }
 }
 
-impl From<&DataType> for arrow_schema::DataType {
-    fn from(value: &DataType) -> Self {
+impl TryFrom<&DataType> for arrow_schema::DataType {
+    type Error = String;
+
+    fn try_from(value: &DataType) -> Result<Self, Self::Error> {
         match value {
-            DataType::Boolean => Self::Boolean,
-            DataType::Int16 => Self::Int16,
-            DataType::Int32 => Self::Int32,
-            DataType::Int64 => Self::Int64,
-            DataType::Int256 => Self::Decimal256(DECIMAL256_MAX_PRECISION, 0),
-            DataType::Float32 => Self::Float32,
-            DataType::Float64 => Self::Float64,
-            DataType::Date => Self::Date32,
-            DataType::Timestamp => Self::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
-            DataType::Time => Self::Time64(arrow_schema::TimeUnit::Microsecond),
-            DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::MonthDayNano),
-            DataType::Varchar => Self::Utf8,
-            DataType::Jsonb => Self::LargeUtf8,
-            DataType::Bytea => Self::Binary,
-            DataType::Decimal => Self::Decimal128(38, 0), // arrow precision can not be 0
-            DataType::Struct(struct_type) => Self::Struct(
+            DataType::Boolean => Ok(Self::Boolean),
+            DataType::Int16 => Ok(Self::Int16),
+            DataType::Int32 => Ok(Self::Int32),
+            DataType::Int64 => Ok(Self::Int64),
+            DataType::Int256 => Ok(Self::Decimal256(DECIMAL256_MAX_PRECISION, 0)),
+            DataType::Float32 => Ok(Self::Float32),
+            DataType::Float64 => Ok(Self::Float64),
+            DataType::Date => Ok(Self::Date32),
+            DataType::Timestamp => Ok(Self::Timestamp(arrow_schema::TimeUnit::Microsecond, None)),
+            DataType::Timestamptz => Ok(Self::Timestamp(
+                arrow_schema::TimeUnit::Microsecond,
+                Some("UTC".into()),
+            )),
+            DataType::Time => Ok(Self::Time64(arrow_schema::TimeUnit::Microsecond)),
+            DataType::Interval => Ok(Self::Interval(arrow_schema::IntervalUnit::MonthDayNano)),
+            DataType::Varchar => Ok(Self::Utf8),
+            DataType::Jsonb => Ok(Self::LargeUtf8),
+            DataType::Bytea => Ok(Self::Binary),
+            DataType::Decimal => Ok(Self::Decimal128(38, 0)), // arrow precision can not be 0
+            DataType::Struct(struct_type) => Ok(Self::Struct(
                 struct_type
                     .iter()
-                    .map(|(name, ty)| Field::new(name, ty.into(), true))
-                    .collect(),
-            ),
-            DataType::List(datatype) => {
-                Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
-            }
-            _ => todo!("Unsupported arrow data type: {value:?}"),
+                    .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
+                    .try_collect::<_, _, String>()?,
+            )),
+            DataType::List(datatype) => Ok(Self::List(Arc::new(Field::new(
+                "item",
+                datatype.as_ref().try_into()?,
+                true,
+            )))),
+            DataType::Serial => Err("Serial type is not supported to convert to arrow".to_string()),
         }
     }
 }
 
-impl From<DataType> for arrow_schema::DataType {
-    fn from(value: DataType) -> Self {
-        (&value).into()
+impl TryFrom<DataType> for arrow_schema::DataType {
+    type Error = String;
+
+    fn try_from(value: DataType) -> Result<Self, Self::Error> {
+        (&value).try_into()
     }
 }
 
@@ -252,6 +280,7 @@ converts!(Utf8Array, arrow_array::StringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
 converts!(TimestampArray, arrow_array::TimestampMicrosecondArray, @map);
+converts!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
 /// Converts RisingWave value from and into Arrow value.
@@ -337,6 +366,18 @@ impl FromIntoArrow for Timestamp {
             .signed_duration_since(NaiveDateTime::default())
             .num_microseconds()
             .unwrap()
+    }
+}
+
+impl FromIntoArrow for Timestamptz {
+    type ArrowType = i64;
+
+    fn from_arrow(value: Self::ArrowType) -> Self {
+        Timestamptz::from_micros(value)
+    }
+
+    fn into_arrow(self) -> Self::ArrowType {
+        self.timestamp_micros()
     }
 }
 
@@ -563,6 +604,12 @@ impl From<&ListArray> for arrow_array::ListArray {
                 TimestampMicrosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
+            ArrayImpl::Timestamptz(a) => build(
+                array,
+                a,
+                TimestampMicrosecondBuilder::with_capacity(a.len()),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
             ArrayImpl::Time(a) => build(
                 array,
                 a,
@@ -600,14 +647,21 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
     }
 }
 
-impl From<&StructArray> for arrow_array::StructArray {
-    fn from(array: &StructArray) -> Self {
-        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> = array
+impl TryFrom<&StructArray> for arrow_array::StructArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
+        let struct_data_vector: Vec<(arrow_schema::FieldRef, arrow_array::ArrayRef)> = array
             .fields()
             .zip_eq_debug(array.data_type().as_struct().iter())
-            .map(|(arr, (name, ty))| (Field::new(name, ty.into(), true), arr.as_ref().into()))
-            .collect();
-        arrow_array::StructArray::from(struct_data_vector)
+            .map(|(arr, (name, ty))| {
+                Ok((
+                    Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),
+                    arr.as_ref().try_into()?,
+                ))
+            })
+            .try_collect::<_, _, ArrayError>()?;
+        Ok(arrow_array::StructArray::from(struct_data_vector))
     }
 }
 
@@ -620,7 +674,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
             panic!("nested field types cannot be determined.");
         };
         Ok(StructArray::new(
-            fields.as_slice().into(),
+            fields.into(),
             array
                 .columns()
                 .iter()
@@ -766,7 +820,10 @@ mod tests {
 
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
-        assert_eq!(arrow_array::StructArray::from(&test_arr).len(), 0);
+        assert_eq!(
+            arrow_array::StructArray::try_from(&test_arr).unwrap().len(),
+            0
+        );
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::from(vec![]);
@@ -802,7 +859,7 @@ mod tests {
                 BoolArray::from_iter([Some(false), Some(false), Some(true), None]).into_ref(),
                 I32Array::from_iter([Some(42), Some(28), Some(19), None]).into_ref(),
             ],
-            [true, true, true, false].into_iter().collect(),
+            [true, true, true, true].into_iter().collect(),
         );
         assert_eq!(
             expected_risingwave_struct_array,

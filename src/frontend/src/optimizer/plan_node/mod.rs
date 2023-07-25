@@ -605,6 +605,7 @@ mod batch_insert;
 mod batch_limit;
 mod batch_lookup_join;
 mod batch_nested_loop_join;
+mod batch_over_window;
 mod batch_project;
 mod batch_project_set;
 mod batch_seq_scan;
@@ -688,6 +689,7 @@ pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
+pub use batch_over_window::BatchOverWindow;
 pub use batch_project::BatchProject;
 pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
@@ -746,7 +748,7 @@ pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
-pub use stream_sort::StreamSort;
+pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_table_scan::StreamTableScan;
@@ -827,6 +829,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Union }
             , { Batch, GroupTopN }
             , { Batch, Source }
+            , { Batch, OverWindow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -855,7 +858,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
         }
     };
@@ -924,6 +927,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Union }
             , { Batch, GroupTopN }
             , { Batch, Source }
+            , { Batch, OverWindow }
         }
     };
 }
@@ -961,7 +965,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
         }
     };

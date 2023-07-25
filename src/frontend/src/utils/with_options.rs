@@ -20,8 +20,8 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
-    Value,
+    CompatibleSourceSchema, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    SqlOption, Statement, Value,
 };
 
 use crate::catalog::connection_catalog::resolve_private_link_connection;
@@ -174,19 +174,11 @@ impl TryFrom<&Statement> for WithOptions {
             // Explain: forward to the inner statement.
             Statement::Explain { statement, .. } => Self::try_from(statement.as_ref()),
 
-            // Table & View
-            Statement::CreateTable { with_options, .. }
-            | Statement::CreateView { with_options, .. } => Self::try_from(with_options.as_slice()),
+            // View
+            Statement::CreateView { with_options, .. } => Self::try_from(with_options.as_slice()),
 
-            // Source & Sink
-            Statement::CreateSource {
-                stmt:
-                    CreateSourceStatement {
-                        with_properties, ..
-                    },
-                ..
-            }
-            | Statement::CreateSink {
+            // Sink
+            Statement::CreateSink {
                 stmt:
                     CreateSinkStatement {
                         with_properties, ..
@@ -198,6 +190,32 @@ impl TryFrom<&Statement> for WithOptions {
                         with_properties, ..
                     },
             } => Self::try_from(with_properties.0.as_slice()),
+            Statement::CreateSource {
+                stmt:
+                    CreateSourceStatement {
+                        with_properties,
+                        source_schema,
+                        ..
+                    },
+                ..
+            } => {
+                let mut options = with_properties.0.clone();
+                if let CompatibleSourceSchema::V2(source_schema) = source_schema {
+                    options.extend_from_slice(source_schema.row_options());
+                }
+                Self::try_from(options.as_slice())
+            }
+            Statement::CreateTable {
+                with_options,
+                source_schema,
+                ..
+            } => {
+                let mut options = with_options.clone();
+                if let Some(CompatibleSourceSchema::V2(source_schema)) = source_schema {
+                    options.extend_from_slice(source_schema.row_options());
+                }
+                Self::try_from(options.as_slice())
+            }
 
             _ => Ok(Default::default()),
         }

@@ -23,7 +23,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
-use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, Dispatcher, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
@@ -217,9 +217,16 @@ pub struct CommandContext<S: MetaStore> {
 
     pub command: Command,
 
-    pub checkpoint: bool,
+    pub kind: BarrierKind,
 
     source_manager: SourceManagerRef<S>,
+
+    /// The tracing span of this command.
+    ///
+    /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
+    /// barrier, including the process of waiting for the barrier to be sent, flowing through the
+    /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
+    pub span: tracing::Span,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -231,8 +238,9 @@ impl<S: MetaStore> CommandContext<S> {
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
         command: Command,
-        checkpoint: bool,
+        kind: BarrierKind,
         source_manager: SourceManagerRef<S>,
+        span: tracing::Span,
     ) -> Self {
         Self {
             fragment_manager,
@@ -241,8 +249,9 @@ impl<S: MetaStore> CommandContext<S> {
             prev_epoch,
             curr_epoch,
             command,
-            checkpoint,
+            kind,
             source_manager,
+            span,
         }
     }
 }

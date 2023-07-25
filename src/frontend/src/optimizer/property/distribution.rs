@@ -285,11 +285,8 @@ impl RequiredDist {
         for i in key {
             cols.insert(*i);
         }
-        if cols.count_ones(..) == 0 {
-            Self::Any
-        } else {
-            Self::ShardByKey(cols)
-        }
+        assert!(!cols.is_clear());
+        Self::ShardByKey(cols)
     }
 
     pub fn hash_shard(key: &[usize]) -> Self {
@@ -302,6 +299,7 @@ impl RequiredDist {
         plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
+        let plan = required_order.enforce_if_not_satisfies(plan)?;
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {

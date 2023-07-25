@@ -19,6 +19,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
+use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -46,10 +47,7 @@ use crate::mem_table::{merge_stream, KeyOp, MemTable};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{
-    define_local_state_store_associated_type, define_state_store_read_associated_type,
-    StateStoreIter,
-};
+use crate::StateStoreIter;
 
 pub struct LocalHummockStorage {
     mem_table: MemTable,
@@ -87,6 +85,10 @@ pub struct LocalHummockStorage {
     stats: Arc<HummockStateStoreMetrics>,
 
     write_limiter: WriteLimiterRef,
+
+    mem_table_size: IntGauge,
+
+    mem_table_item_count: IntGauge,
 }
 
 impl LocalHummockStorage {
@@ -163,9 +165,12 @@ impl LocalHummockStorage {
 impl StateStoreRead for LocalHummockStorage {
     type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
-    define_state_store_read_associated_type!();
-
-    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(
+        &self,
+        key: Bytes,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
         assert!(epoch <= self.epoch());
         self.get_inner(TableKey(key), epoch, read_options)
     }
@@ -175,7 +180,7 @@ impl StateStoreRead for LocalHummockStorage {
         key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         assert!(epoch <= self.epoch());
         self.iter_inner(map_table_key_range(key_range), epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
@@ -183,37 +188,35 @@ impl StateStoreRead for LocalHummockStorage {
 }
 
 impl LocalStateStore for LocalHummockStorage {
-    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
-    type GetFuture<'a> = impl GetFutureTrait<'a>;
-    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
-
-    define_local_state_store_associated_type!();
 
     fn may_exist(
         &self,
         key_range: IterKeyRange,
         read_options: ReadOptions,
-    ) -> Self::MayExistFuture<'_> {
+    ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
         self.may_exist_inner(key_range, read_options)
     }
 
-    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
-        async move {
-            match self.mem_table.buffer.get(&key) {
-                None => {
-                    self.get_inner(TableKey(key), self.epoch(), read_options)
-                        .await
-                }
-                Some(op) => match op {
-                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
-                    KeyOp::Delete(_) => Ok(None),
-                },
+    async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        match self.mem_table.buffer.get(&key) {
+            None => {
+                self.get_inner(TableKey(key), self.epoch(), read_options)
+                    .await
             }
+            Some(op) => match op {
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
+                KeyOp::Delete(_) => Ok(None),
+            },
         }
     }
 
-    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
+    #[allow(clippy::manual_async_fn)]
+    fn iter(
+        &self,
+        key_range: IterKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         async move {
             let stream = self
                 .iter_inner(
@@ -235,85 +238,100 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
         match old_val {
-            None => self.mem_table.insert(key, new_val)?,
-            Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
+            None => {
+                self.mem_table.insert(key, new_val)?;
+            }
+            Some(old_val) => {
+                self.mem_table.update(key, old_val, new_val)?;
+            }
         };
+        self.mem_table_size
+            .set(self.mem_table.kv_size.size() as i64);
+        self.mem_table_item_count
+            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
-        Ok(self.mem_table.delete(key, old_val)?)
+        self.mem_table.delete(key, old_val)?;
+        self.mem_table_size
+            .set(self.mem_table.kv_size.size() as i64);
+        self.mem_table_item_count
+            .set(self.mem_table.buffer.len() as i64);
+        Ok(())
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
-        async move {
-            debug_assert!(delete_ranges
-                .iter()
-                .map(|(key, _)| key)
-                .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
-            let buffer = self.mem_table.drain().into_parts();
-            let mut kv_pairs = Vec::with_capacity(buffer.len());
-            for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter())
-            {
-                match key_op {
-                    // Currently, some executors do not strictly comply with these semantics. As
-                    // a workaround you may call disable the check by initializing the
-                    // state store with `is_consistent_op=false`.
-                    KeyOp::Insert(value) => {
-                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            do_insert_sanity_check(
-                                key.clone(),
-                                value.clone(),
-                                self,
-                                self.epoch(),
-                                self.table_id,
-                                self.table_option,
-                            )
-                            .await?;
-                        }
-                        kv_pairs.push((key, StorageValue::new_put(value)));
+    async fn flush(
+        &mut self,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) -> StorageResult<usize> {
+        self.mem_table_size.set(0);
+        self.mem_table_item_count.set(0);
+        debug_assert!(delete_ranges
+            .iter()
+            .map(|(key, _)| key)
+            .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
+        let buffer = self.mem_table.drain().into_parts();
+        let mut kv_pairs = Vec::with_capacity(buffer.len());
+        for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter()) {
+            match key_op {
+                // Currently, some executors do not strictly comply with these semantics. As
+                // a workaround you may call disable the check by initializing the
+                // state store with `is_consistent_op=false`.
+                KeyOp::Insert(value) => {
+                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        do_insert_sanity_check(
+                            key.clone(),
+                            value.clone(),
+                            self,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
-                    KeyOp::Delete(old_value) => {
-                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            do_delete_sanity_check(
-                                key.clone(),
-                                old_value,
-                                self,
-                                self.epoch(),
-                                self.table_id,
-                                self.table_option,
-                            )
-                            .await?;
-                        }
-                        kv_pairs.push((key, StorageValue::new_delete()));
+                    kv_pairs.push((key, StorageValue::new_put(value)));
+                }
+                KeyOp::Delete(old_value) => {
+                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        do_delete_sanity_check(
+                            key.clone(),
+                            old_value,
+                            self,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
-                    KeyOp::Update((old_value, new_value)) => {
-                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            do_update_sanity_check(
-                                key.clone(),
-                                old_value,
-                                new_value.clone(),
-                                self,
-                                self.epoch(),
-                                self.table_id,
-                                self.table_option,
-                            )
-                            .await?;
-                        }
-                        kv_pairs.push((key, StorageValue::new_put(new_value)));
+                    kv_pairs.push((key, StorageValue::new_delete()));
+                }
+                KeyOp::Update((old_value, new_value)) => {
+                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        do_update_sanity_check(
+                            key.clone(),
+                            old_value,
+                            new_value.clone(),
+                            self,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
+                    kv_pairs.push((key, StorageValue::new_put(new_value)));
                 }
             }
-            self.flush_inner(
-                kv_pairs,
-                delete_ranges,
-                WriteOptions {
-                    epoch: self.epoch(),
-                    table_id: self.table_id,
-                },
-            )
-            .await
         }
+        self.flush_inner(
+            kv_pairs,
+            delete_ranges,
+            WriteOptions {
+                epoch: self.epoch(),
+                table_id: self.table_id,
+            },
+        )
+        .await
     }
 
     fn epoch(&self) -> u64 {
@@ -441,6 +459,14 @@ impl LocalHummockStorage {
         option: NewLocalOptions,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
+        let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
+            &option.table_id.to_string(),
+            &instance_guard.instance_id.to_string(),
+        ]);
+        let mem_table_item_count = stats.mem_table_item_count.with_label_values(&[
+            &option.table_id.to_string(),
+            &instance_guard.instance_id.to_string(),
+        ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
             epoch: None,
@@ -455,6 +481,8 @@ impl LocalHummockStorage {
             hummock_version_reader,
             stats,
             write_limiter,
+            mem_table_size,
+            mem_table_item_count,
         }
     }
 
@@ -493,19 +521,15 @@ pub struct HummockStorageIterator {
 impl StateStoreIter for HummockStorageIterator {
     type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
+    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+        let iter = &mut self.inner;
 
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async {
-            let iter = &mut self.inner;
-
-            if iter.is_valid() {
-                let kv = (iter.key().clone(), iter.value().clone());
-                iter.next().await?;
-                Ok(Some(kv))
-            } else {
-                Ok(None)
-            }
+        if iter.is_valid() {
+            let kv = (iter.key().clone(), iter.value().clone());
+            iter.next().await?;
+            Ok(Some(kv))
+        } else {
+            Ok(None)
         }
     }
 }

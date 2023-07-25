@@ -26,6 +26,7 @@ use prometheus::{
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
+use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -103,6 +104,8 @@ pub struct MetaMetrics {
     pub full_gc_selected_object_count: Histogram,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
+    /// Hummock version stats
+    pub materialized_view_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
     pub stale_object_count: IntGauge,
     /// Total size of objects that is no longer referenced by versions.
@@ -146,12 +149,16 @@ pub struct MetaMetrics {
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: IntGaugeVec,
+    pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
+    /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
+    /// id.
+    pub mv_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -186,7 +193,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
             "barrier send latency",
-            exponential_buckets(0.001, 2.0, 19).unwrap() // max 262s
+            exponential_buckets(0.1, 1.5, 19).unwrap() // max 148s
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -338,6 +345,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let materialized_view_stats = register_int_gauge_vec_with_registry!(
+            "storage_materialized_view_stats",
+            "per materialized view stats in current hummock version",
+            &["table_id", "metric"],
+            registry
+        )
+        .unwrap();
+
         let stale_object_count = register_int_gauge_with_registry!(
             "storage_stale_object_count",
             "total number of objects that is no longer referenced by versions.",
@@ -471,6 +486,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::new(registry.clone()));
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -483,7 +499,15 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["table_id", "actor_id", "table_name"],
+            &["materialized_view_id", "table_id", "actor_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
+        let mv_info = register_int_gauge_vec_with_registry!(
+            "materialized_info",
+            "Mapping from materialized view id to (table id, table name)",
+            &["id", "table_id", "table_name"],
             registry
         )
         .unwrap();
@@ -565,6 +589,7 @@ impl MetaMetrics {
             level_file_size,
             version_size,
             version_stats,
+            materialized_view_stats,
             stale_object_count,
             stale_object_size,
             old_version_object_count,
@@ -592,8 +617,10 @@ impl MetaMetrics {
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            source_enumerator_metrics,
             actor_info,
             table_info,
+            mv_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -700,6 +727,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 })
                 .collect();
             for table_fragments in fragments {
+                let mv_id_str = table_fragments.table_id().to_string();
                 for (fragment_id, fragment) in table_fragments.fragments {
                     let fragment_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
@@ -730,7 +758,16 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                 let table_id_str = table.id.to_string();
                                 meta_metrics
                                     .table_info
-                                    .with_label_values(&[&table_id_str, &actor_id_str, &table.name])
+                                    .with_label_values(&[
+                                        &mv_id_str,
+                                        &table_id_str,
+                                        &actor_id_str,
+                                        &table.name,
+                                    ])
+                                    .set(1);
+                                meta_metrics
+                                    .mv_info
+                                    .with_label_values(&[&mv_id_str, &table_id_str, &table.name])
                                     .set(1);
                             });
                         }

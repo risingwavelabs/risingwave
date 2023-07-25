@@ -24,7 +24,7 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
 use crate::array::ArrayResult;
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
@@ -71,11 +71,7 @@ macro_rules! impl_chrono_wrapper {
             }
         }
 
-        impl EstimateSize for $variant_name {
-            fn estimated_heap_size(&self) -> usize {
-                0
-            }
-        }
+        impl ZeroHeapSize for $variant_name {}
     };
 }
 
@@ -208,6 +204,13 @@ impl Date {
         ))
     }
 
+    pub fn get_nums_days_unix_epoch(&self) -> i32 {
+        self.0
+            .checked_sub_days(Days::new(UNIX_EPOCH_DAYS as u64))
+            .unwrap()
+            .num_days_from_ce()
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
@@ -300,6 +303,10 @@ impl Timestamp {
         output
             .write(&(self.0.timestamp_micros()).to_be_bytes())
             .map_err(Into::into)
+    }
+
+    pub fn get_timestamp_nanos(&self) -> i64 {
+        self.0.timestamp_nanos()
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {

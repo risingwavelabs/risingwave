@@ -42,6 +42,7 @@ use crate::expr::{
     AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
     InputRef, OrderBy,
 };
+use crate::utils::group_by::GroupBy;
 use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
@@ -51,7 +52,7 @@ pub struct BoundSelect {
     pub aliases: Vec<Option<String>>,
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
-    pub group_by: Vec<ExprImpl>,
+    pub group_by: GroupBy,
     pub having: Option<ExprImpl>,
     schema: Schema,
 }
@@ -73,10 +74,34 @@ impl RewriteExprsRecursive for BoundSelect {
         self.where_clause =
             std::mem::take(&mut self.where_clause).map(|expr| rewriter.rewrite_expr(expr));
 
-        let new_group_by = std::mem::take(&mut self.group_by)
-            .into_iter()
-            .map(|expr| rewriter.rewrite_expr(expr))
-            .collect::<Vec<_>>();
+        let new_group_by = match &mut self.group_by {
+            GroupBy::GroupKey(group_key) => GroupBy::GroupKey(
+                std::mem::take(group_key)
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect::<Vec<_>>(),
+            ),
+            GroupBy::GroupingSets(grouping_sets) => GroupBy::GroupingSets(
+                std::mem::take(grouping_sets)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            GroupBy::Rollup(rollup) => GroupBy::Rollup(
+                std::mem::take(rollup)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        };
         self.group_by = new_group_by;
 
         self.having = std::mem::take(&mut self.having).map(|expr| rewriter.rewrite_expr(expr));
@@ -190,11 +215,22 @@ impl Binder {
         // Bind GROUP BY clause.
         let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
         self.context.clause = Some(Clause::GroupBy);
-        let group_by = select
-            .group_by
-            .into_iter()
-            .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
-            .try_collect()?;
+
+        // Only support one grouping item in group by clause
+        let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
+            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
+        } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
+            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
+        } else {
+            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_))) {
+                return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
+            }
+            GroupBy::GroupKey(select
+                .group_by
+                .into_iter()
+                .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
+                .try_collect()?)
+        };
         self.context.clause = None;
 
         // Bind HAVING clause.
@@ -251,15 +287,16 @@ impl Binder {
                     select_list.push(expr);
                     aliases.push(Some(alias.real_value()));
                 }
-                SelectItem::QualifiedWildcard(obj_name) => {
+                SelectItem::QualifiedWildcard(obj_name, except) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
+                    let except_indices = self.generate_except_indices(except)?;
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[*begin..*end]
                             .iter()
-                            .filter(|c| !c.is_hidden),
+                            .filter(|c| !c.is_hidden && !except_indices.contains(&c.index)),
                     );
                     select_list.extend(exprs);
                     aliases.extend(names);
@@ -269,7 +306,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::WildcardOrWithExcept(w) => {
+                SelectItem::Wildcard(except) => {
                     if self.context.range_of.is_empty() {
                         return Err(ErrorCode::BindError(
                             "SELECT * with no tables specified is not valid".into(),
@@ -284,25 +321,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
 
-                    let mut except_indices: HashSet<usize> = HashSet::new();
-                    if let Some(exprs) = w {
-                        for expr in exprs {
-                            let bound = self.bind_expr(expr)?;
-                            if let ExprImpl::InputRef(inner) = bound {
-                                if !except_indices.insert(inner.index) {
-                                    return Err(ErrorCode::BindError(
-                                        "Duplicate entry in except list".into(),
-                                    )
-                                    .into());
-                                }
-                            } else {
-                                return Err(ErrorCode::BindError(
-                                    "Need column name in except list".into(),
-                                )
-                                .into());
-                            }
-                        }
-                    }
+                    let except_indices = self.generate_except_indices(except)?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -393,6 +412,58 @@ impl Binder {
         }
     }
 
+    fn bind_grouping_items_expr_in_select(
+        &mut self,
+        grouping_items: Vec<Vec<Expr>>,
+        name_to_index: &HashMap<String, usize>,
+        select_items: &[ExprImpl],
+    ) -> Result<Vec<Vec<ExprImpl>>> {
+        let mut result = vec![];
+        for set in grouping_items {
+            let mut set_exprs = vec![];
+            for expr in set {
+                let name = match &expr {
+                    Expr::Identifier(ident) => Some(ident.real_value()),
+                    _ => None,
+                };
+                let expr_impl = match self.bind_expr(expr) {
+                    Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
+                        Some(ScalarImpl::Int32(idx)) => idx
+                            .saturating_sub(1)
+                            .try_into()
+                            .ok()
+                            .and_then(|i: usize| select_items.get(i).cloned())
+                            .ok_or_else(|| {
+                                ErrorCode::BindError(format!(
+                                    "GROUP BY position {idx} is not in select list"
+                                ))
+                                .into()
+                            }),
+                        _ => Err(
+                            ErrorCode::BindError("non-integer constant in GROUP BY".into()).into(),
+                        ),
+                    },
+                    Ok(e) => Ok(e),
+                    Err(e) => match name {
+                        None => Err(e),
+                        Some(name) => match name_to_index.get(&name) {
+                            None => Err(e),
+                            Some(&usize::MAX) => Err(ErrorCode::BindError(format!(
+                                "GROUP BY \"{name}\" is ambiguous"
+                            ))
+                            .into()),
+                            Some(out_idx) => Ok(select_items[*out_idx].clone()),
+                        },
+                    },
+                };
+
+                set_exprs.push(expr_impl?);
+            }
+            result.push(set_exprs);
+        }
+        Ok(result)
+    }
+
     pub fn bind_returning_list(
         &mut self,
         returning_items: Vec<SelectItem>,
@@ -464,7 +535,7 @@ impl Binder {
             aliases: vec![None],
             from,
             where_clause,
-            group_by: vec![],
+            group_by: GroupBy::GroupKey(vec![]),
             having: None,
             schema,
         })
@@ -551,7 +622,7 @@ impl Binder {
             aliases: vec![None],
             from: Some(indexes_with_stats),
             where_clause,
-            group_by: vec![],
+            group_by: GroupBy::GroupKey(vec![]),
             having: None,
             schema: result_schema,
         })
@@ -607,7 +678,7 @@ impl Binder {
             aliases: vec![None],
             from,
             where_clause,
-            group_by: vec![],
+            group_by: GroupBy::GroupKey(vec![]),
             having: None,
             schema: result_schema,
         })
@@ -698,6 +769,32 @@ impl Binder {
                 BoundDistinct::DistinctOn(bound_exprs)
             }
         })
+    }
+
+    fn generate_except_indices(&mut self, except: Option<Vec<Expr>>) -> Result<HashSet<usize>> {
+        let mut except_indices: HashSet<usize> = HashSet::new();
+        if let Some(exprs) = except {
+            for expr in exprs {
+                let bound = self.bind_expr(expr)?;
+                match bound {
+                    ExprImpl::InputRef(inner) => {
+                        if !except_indices.insert(inner.index) {
+                            return Err(ErrorCode::BindError(
+                                "Duplicate entry in except list".into(),
+                            )
+                            .into());
+                        }
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "Only support column name in except list".into(),
+                        )
+                        .into())
+                    }
+                }
+            }
+        }
+        Ok(except_indices)
     }
 }
 

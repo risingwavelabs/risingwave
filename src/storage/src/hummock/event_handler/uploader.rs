@@ -24,6 +24,7 @@ use std::task::{ready, Context, Poll};
 use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
+use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
@@ -418,7 +419,7 @@ impl SealedData {
         let mut imms_by_epoch: BTreeMap<HummockEpoch, Vec<ImmutableMemtable>> = BTreeMap::new();
         self.imms_by_table_shard.drain().for_each(|(_, imms)| {
             for imm in imms {
-                debug_assert!(imm.max_epoch() == imm.min_epoch());
+                debug_assert_eq!(imm.max_epoch(), imm.min_epoch());
                 imms_by_epoch.entry(imm.max_epoch()).or_default().push(imm);
             }
         });
@@ -710,7 +711,7 @@ impl HummockUploader {
             let mut imm_size = 0;
             imms_to_merge.iter().for_each(|imm| {
                 // ensure imms are sealed
-                assert!(imm.max_epoch() <= sealed_epoch);
+                assert_le!(imm.max_epoch(), sealed_epoch);
                 kv_count += imm.kv_count();
                 imm_size += imm.size();
             });
@@ -811,9 +812,9 @@ impl HummockUploader {
     }
 
     pub(crate) fn update_pinned_version(&mut self, pinned_version: PinnedVersion) {
-        assert!(
-            pinned_version.max_committed_epoch()
-                >= self.context.pinned_version.max_committed_epoch()
+        assert_ge!(
+            pinned_version.max_committed_epoch(),
+            self.context.pinned_version.max_committed_epoch()
         );
         let max_committed_epoch = pinned_version.max_committed_epoch();
         self.context.pinned_version = pinned_version;
@@ -823,12 +824,12 @@ impl HummockUploader {
             self.max_synced_epoch = max_committed_epoch;
             if let Some(syncing_data) = self.syncing_data.back() {
                 // there must not be any syncing data below MCE
-                assert!(
+                assert_gt!(
                     *syncing_data
                         .epochs
                         .last()
-                        .expect("epoch should not be empty")
-                        > max_committed_epoch
+                        .expect("epoch should not be empty"),
+                    max_committed_epoch
                 );
             }
         }
@@ -836,14 +837,14 @@ impl HummockUploader {
             self.max_syncing_epoch = max_committed_epoch;
             // there must not be any sealed data below MCE
             if let Some(&epoch) = self.sealed_data.epochs.back() {
-                assert!(epoch > max_committed_epoch);
+                assert_gt!(epoch, max_committed_epoch);
             }
         }
         if self.max_sealed_epoch < max_committed_epoch {
             self.max_sealed_epoch = max_committed_epoch;
             // there must not be any unsealed data below MCE
             if let Some((&epoch, _)) = self.unsealed_data.first_key_value() {
-                assert!(epoch > max_committed_epoch);
+                assert_gt!(epoch, max_committed_epoch);
             }
         }
     }

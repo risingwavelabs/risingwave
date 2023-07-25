@@ -140,20 +140,20 @@ public class ConnectorNodeMetrics {
         activeSourceConnections.remove(sourceType, ip);
     }
 
-    public static void incActiveSinkConnections(String connectorType, String ip) {
-        activeSinkConnections.labels(connectorType, ip).inc();
+    public static void incActiveSinkConnections(String connectorName, String ip) {
+        activeSinkConnections.labels(connectorName, ip).inc();
     }
 
-    public static void decActiveSinkConnections(String connectorType, String ip) {
-        activeSinkConnections.remove(connectorType, ip);
+    public static void decActiveSinkConnections(String connectorName, String ip) {
+        activeSinkConnections.remove(connectorName, ip);
     }
 
     public static void incSourceRowsReceived(String sourceType, String sourceId, double amt) {
         sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
     }
 
-    public static void incSinkRowsReceived(String connectorType, String sinkId, double amt) {
-        sinkRowsReceived.labels(connectorType, sinkId).inc(amt);
+    public static void incSinkRowsReceived(String connectorName, String sinkId, double amt) {
+        sinkRowsReceived.labels(connectorName, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {

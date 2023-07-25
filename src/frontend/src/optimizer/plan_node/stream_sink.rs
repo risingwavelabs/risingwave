@@ -18,8 +18,12 @@ use std::io::{Error, ErrorKind};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::constants::log_store::{
+    EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, SEQ_ID_COLUMN_INDEX,
+};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -30,12 +34,14 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::{childless_record, Distill, IndicesDisplay};
+use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
+use crate::{TableCatalog, WithOptions};
+
+const DOWNSTREAM_PK_KEY: &str = "primary_key";
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -71,30 +77,10 @@ impl StreamSink {
         definition: String,
         properties: WithOptions,
     ) -> Result<Self> {
-        let required_dist = match input.distribution() {
-            Distribution::Single => RequiredDist::single(),
-            _ => {
-                match properties.get("connector") {
-                    Some(s) if s == "iceberg" || s == "deltalake" => {
-                        // iceberg with multiple parallelism will fail easily with concurrent commit
-                        // on metadata
-                        // TODO: reset iceberg sink to have multiple parallelism
-                        info!("setting iceberg sink parallelism to singleton");
-                        RequiredDist::single()
-                    }
-                    _ => {
-                        assert_matches!(user_distributed_by, RequiredDist::Any);
-                        RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
-                    }
-                }
-            }
-        };
-
-        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-
-        let sink = Self::derive_sink_desc(
-            input.clone(),
+        let (input, sink) = Self::derive_sink_desc(
+            input,
+            user_distributed_by,
             name,
             user_order_by,
             columns,
@@ -107,21 +93,53 @@ impl StreamSink {
 
     fn derive_sink_desc(
         input: PlanRef,
+        user_distributed_by: RequiredDist,
         name: String,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
         properties: WithOptions,
-    ) -> Result<SinkDesc> {
-        const DOWNSTREAM_PK_KEY: &str = "primary_key";
-
-        let distribution_key = input.distribution().dist_column_indices().to_vec();
+    ) -> Result<(PlanRef, SinkDesc)> {
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
-        let (pk, _) = derive_pk(input, user_order_by, &columns);
-
+        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let downstream_pk = Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
 
-        Ok(SinkDesc {
+        let required_dist = match input.distribution() {
+            Distribution::Single => RequiredDist::single(),
+            _ => {
+                match properties.get("connector") {
+                    Some(s) if s == "iceberg" || s == "deltalake" => {
+                        // iceberg with multiple parallelism will fail easily with concurrent commit
+                        // on metadata
+                        // TODO: reset iceberg sink to have multiple parallelism
+                        info!("setting iceberg sink parallelism to singleton");
+                        RequiredDist::single()
+                    }
+                    Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
+                        if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
+                            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                                ErrorKind::InvalidInput,
+                                format!(
+                                    "Primary key must be defined for upsert JDBC sink. Please specify the \"{key}='pk1,pk2,...'\" in WITH options.",
+                                    key = DOWNSTREAM_PK_KEY
+                                ),
+                            )))
+                                .into());
+                        }
+                        // for upsert jdbc sink we align distribution to downstream to avoid
+                        // lock contentions
+                        RequiredDist::hash_shard(downstream_pk.as_slice())
+                    }
+                    _ => {
+                        assert_matches!(user_distributed_by, RequiredDist::Any);
+                        RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                    }
+                }
+            }
+        };
+        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
+        let distribution_key = input.distribution().dist_column_indices().to_vec();
+        let sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
             definition,
@@ -131,7 +149,8 @@ impl StreamSink {
             distribution_key,
             properties: properties.into_inner(),
             sink_type,
-        })
+        };
+        Ok((input, sink_desc))
     }
 
     fn derive_sink_type(input_append_only: bool, properties: &WithOptions) -> Result<SinkType> {
@@ -241,6 +260,44 @@ impl StreamSink {
             }
         }
     }
+
+    /// The table schema is: | epoch | seq id | row op | sink columns |
+    /// Pk is: | epoch | seq id |
+    fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
+        let mut table_catalog_builder =
+            TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
+
+        let mut value_indices = Vec::with_capacity(
+            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),
+        );
+
+        for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+            let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+            value_indices.push(indice);
+        }
+
+        // The table's pk is composed of `epoch` and `seq_id`.
+        table_catalog_builder.add_order_column(EPOCH_COLUMN_INDEX, OrderType::ascending());
+        table_catalog_builder
+            .add_order_column(SEQ_ID_COLUMN_INDEX, OrderType::ascending_nulls_last());
+        let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+        let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);
+
+        value_indices.extend(payload_indices);
+        table_catalog_builder.set_value_indices(value_indices);
+
+        // Modify distribution key indices based on the pre-defined columns.
+        let dist_key = self
+            .input
+            .distribution()
+            .dist_column_indices()
+            .iter()
+            .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+            .collect_vec();
+
+        table_catalog_builder.build(dist_key, read_prefix_len_hint)
+    }
 }
 
 impl PlanTreeNodeUnary for StreamSink {
@@ -282,20 +339,26 @@ impl Distill for StreamSink {
                     .iter()
                     .map(|k| k.column_index)
                     .collect_vec(),
-                input_schema: &self.base.schema,
+                schema: &self.base.schema,
             };
-            vec.push(("pk", Pretty::display(&pk)));
+            vec.push(("pk", pk.distill()));
         }
         childless_record("StreamSink", vec)
     }
 }
 
 impl StreamNode for StreamSink {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        // We need to create a table for sink with a kv log store.
+        let table = self
+            .infer_kv_log_store_table_catalog()
+            .with_id(state.gen_table_id_wrapped());
 
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
+            table: Some(table.to_internal_table_prost()),
         })
     }
 }

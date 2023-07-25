@@ -123,7 +123,7 @@ pub async fn handle_create_as(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_table(source, table, graph).await?;
 
     // Generate insert
