@@ -596,16 +596,6 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
-        ExprType::ArrayLength => {
-            ensure_arity!("array_length", 1 <= | inputs | <= 2);
-            inputs[0].ensure_array_type()?;
-
-            if let Some(arg1) = inputs.get_mut(1) {
-                arg1.cast_implicit_mut(DataType::Int32)?;
-            }
-
-            Ok(Some(DataType::Int32))
-        }
         ExprType::StringToArray => {
             ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
 
@@ -614,12 +604,6 @@ fn infer_type_for_special(
             }
 
             Ok(Some(DataType::List(Box::new(DataType::Varchar))))
-        }
-        ExprType::Cardinality => {
-            ensure_arity!("cardinality", | inputs | == 1);
-            inputs[0].ensure_array_type()?;
-
-            Ok(Some(DataType::Int32))
         }
         ExprType::TrimArray => {
             ensure_arity!("trim_array", | inputs | == 2);
