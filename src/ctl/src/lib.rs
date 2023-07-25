@@ -177,7 +177,7 @@ enum HummockCommands {
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
 
-        #[clap(short, long = "sst_ids")]
+        #[clap(short, long = "sst-ids")]
         sst_ids: Vec<u64>,
     },
     /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
