@@ -116,7 +116,7 @@ impl JsonParseOptions {
         time_handling: TimeHandling::Micro,
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
-            string_parsing: false,
+            string_parsing: true,
         },
         boolean_handing: BooleanHandling::Strict,
         ignoring_keycase: true,
