@@ -2,15 +2,7 @@ package com.risingwave.java.binding;
 
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Measurement;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.*;
 
 @Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.MILLISECONDS)
 @Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS)
@@ -19,7 +11,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(org.openjdk.jmh.annotations.Scope.Benchmark)
 public class ArrayListBenchmark {
-    @Param({"1000", "10000", "100000"})
+    @Param({"100", "1000", "10000"})
     static int loopTime;
 
     ArrayList<ArrayList<Object>> data = new ArrayList<>();
@@ -53,7 +45,7 @@ public class ArrayListBenchmark {
         return rowData;
     }
 
-    public double processRowData(ArrayList<Object> rowData) {
+    public void getValue(ArrayList<Object> rowData) {
         short value1 = (short) rowData.get(0);
         int value2 = (int) rowData.get(1);
         long value3 = (long) rowData.get(2);
@@ -64,7 +56,6 @@ public class ArrayListBenchmark {
         // String value8 = (String) rowData.get(7);
         // int value9 = (int) rowData.get(8);
         Integer mayNull = (Integer) rowData.get(9);
-        return value1 + value2 + value3 + value4 + value5;
     }
 
     @Setup
@@ -76,9 +67,8 @@ public class ArrayListBenchmark {
 
     @Benchmark
     public void arrayListTest() {
-        // Call your function here
         for (int i = 0; i < loopTime; i++) {
-            processRowData(data.get(i));
+            getValue(data.get(i));
         }
     }
 }
