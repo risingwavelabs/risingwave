@@ -172,7 +172,7 @@ impl SourceSchema {
             SourceSchema::DebeziumAvro(schema) => {
                 vec![SqlOption {
                     name: ObjectName(vec![Ident {
-                        value: "schema.location".into(),
+                        value: "schema.registry".into(),
                         quote_style: None,
                     }]),
                     value: Value::SingleQuotedString(schema.row_schema_location.0),
