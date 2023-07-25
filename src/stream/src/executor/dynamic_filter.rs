@@ -60,19 +60,21 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 /// Otherwise if watermark column exists:
 /// (UPDATE)INSERT -> Update lowest value if applicable.
 /// (UPDATE)DELETE -> If removes lowest value, set cache to empty.
+///
+/// FIXME(kwannoel): Are `NULL` considered min or max for watermark?
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum DynamicFilterWatermarkCacheEntry {
     Empty,
     Uninitialized,
-    // We need to store row, in case we encounter `Delete`s.
-    // Then we can remove the OwnedRow.
-    Smallest(OwnedRow),
+    // We need to store pk, in case we encounter `Delete`s.
+    // Then we can remove the Entry.
+    Smallest { pk: OwnedRow, value: Datum },
 }
 
 // Watermark Filter Cache
 // Used to avoid issuing delete range requests for state clean-up by watermark.
 // It tracks the lowest value in the LHS table.
-// Cases:
+// On state table commit
 // 1. watermark <= lowest value
 //    We don't need to issue delete range,
 //    because are no values lower than lowest value.
@@ -88,7 +90,6 @@ enum DynamicFilterWatermarkCacheEntry {
 // 4. Watermark has cleaned state.
 struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
-    row_pk: Vec<usize>,
     row: DynamicFilterWatermarkCacheEntry,
 }
 
