@@ -493,7 +493,11 @@ impl ConfigMap {
             self.client_min_messages = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
             let enc: ClientEncoding = val.as_slice().try_into()?;
-            if !enc.as_str().eq_ignore_ascii_case("UTF8") {
+            // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
+            let clean = enc
+                .as_str()
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "");
+            if !clean.eq_ignore_ascii_case("UTF8") {
                 return Err(ErrorCode::InvalidConfigValue {
                     config_entry: ClientEncoding::entry_name().into(),
                     config_value: enc.0,
