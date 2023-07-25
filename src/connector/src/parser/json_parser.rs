@@ -333,8 +333,8 @@ mod tests {
                     ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
                 ],
             ),
-            ColumnDesc::new_atomic(DataType::Varchar, "I64CastToVarchar", 10.into()),
-            ColumnDesc::new_atomic(DataType::Int64, "VarcharCastToI64", 10.into()),
+            ColumnDesc::new_atomic(DataType::Varchar, "I64CastToVarchar", 10),
+            ColumnDesc::new_atomic(DataType::Int64, "VarcharCastToI64", 11),
         ]
         .iter()
         .map(SourceColumnDesc::from)
