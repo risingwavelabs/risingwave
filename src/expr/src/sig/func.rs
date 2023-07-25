@@ -16,7 +16,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use risingwave_common::types::{DataType, DataTypeName};
@@ -53,6 +52,7 @@ impl FuncSigMap {
     }
 
     /// Returns a function signature with the same type, argument types and return type.
+    /// Deprecated functions are included.
     pub fn get(&self, ty: PbType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
         let v = self.0.get(&(ty, args.len()))?;
         v.iter()
@@ -60,8 +60,12 @@ impl FuncSigMap {
     }
 
     /// Returns all function signatures with the same type and number of arguments.
-    pub fn get_with_arg_nums(&self, ty: PbType, nargs: usize) -> &[FuncSign] {
-        self.0.get(&(ty, nargs)).map_or(&[], Deref::deref)
+    /// Deprecated functions are excluded.
+    pub fn get_with_arg_nums(&self, ty: PbType, nargs: usize) -> Vec<&FuncSign> {
+        match self.0.get(&(ty, nargs)) {
+            Some(v) => v.iter().filter(|d| !d.deprecated).collect(),
+            None => vec![],
+        }
     }
 }
 

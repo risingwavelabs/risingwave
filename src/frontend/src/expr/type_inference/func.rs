@@ -660,16 +660,14 @@ fn infer_type_name<'a>(
             (Some(_), Some(_)) => Err(()),
         };
         if let Ok(Some(t)) = t {
-            let exact = candidates
-                .iter()
-                .find(|sig| sig.inputs_type == [t, t] && !sig.deprecated);
+            let exact = candidates.iter().find(|sig| sig.inputs_type == [t, t]);
             if let Some(sig) = exact {
                 return Ok(sig);
             }
         }
     }
 
-    let mut candidates = top_matches(candidates, inputs);
+    let mut candidates = top_matches(&candidates, inputs);
 
     if candidates.is_empty() {
         return Err(ErrorCode::NotImplemented(
@@ -692,7 +690,7 @@ fn infer_type_name<'a>(
 
     match &candidates[..] {
         [] => unreachable!(),
-        [sig] => Ok(sig),
+        [sig] => Ok(*sig),
         _ => Err(ErrorCode::BindError(format!(
             "function {:?}{:?} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
             func_type,
@@ -749,7 +747,7 @@ fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool 
 /// [rule 4c src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1062-L1104
 /// [rule 4d src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1106-L1153
 fn top_matches<'a>(
-    candidates: &'a [FuncSign],
+    candidates: &[&'a FuncSign],
     inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
@@ -757,9 +755,6 @@ fn top_matches<'a>(
     let mut best_candidates = Vec::new();
 
     for sig in candidates {
-        if sig.deprecated {
-            continue;
-        }
         let mut n_exact = 0;
         let mut n_preferred = 0;
         let mut castable = true;
@@ -784,7 +779,7 @@ fn top_matches<'a>(
             best_candidates.clear();
         }
         if n_exact == best_exact && n_preferred == best_preferred {
-            best_candidates.push(sig);
+            best_candidates.push(*sig);
         }
     }
     best_candidates
