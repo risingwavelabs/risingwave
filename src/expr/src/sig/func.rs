@@ -72,6 +72,9 @@ pub struct FuncSign {
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
     pub build: fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>,
+    /// Whether the function is deprecated and should not be used in the frontend.
+    /// For backward compatibility, it is still available in the backend.
+    pub deprecated: bool,
 }
 
 impl fmt::Debug for FuncSign {
@@ -81,6 +84,7 @@ impl fmt::Debug for FuncSign {
             inputs_type: self.inputs_type,
             ret_type: self.ret_type,
             set_returning: false,
+            deprecated: self.deprecated,
         }
         .fmt(f)
     }
@@ -167,6 +171,9 @@ mod tests {
         // handle them specially without relying on FuncSigMap.
         let expected = expect_test::expect![[r#"
             {
+                ToTimestamp1: [
+                    "to_timestamp1(varchar, varchar) -> timestamptz/timestamp",
+                ],
                 Cast: [
                     "cast(boolean) -> int32/varchar",
                     "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",

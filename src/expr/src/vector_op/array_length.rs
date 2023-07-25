@@ -60,7 +60,7 @@ use crate::ExprError;
 /// select array_length(null);
 /// ```
 #[function("array_length(list) -> int32")]
-#[function("array_length(list) -> int64")] // for compatibility with plans from old version
+#[function("array_length(list) -> int64", deprecated)]
 fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
     array
         .len()

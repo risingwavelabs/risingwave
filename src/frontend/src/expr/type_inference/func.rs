@@ -676,7 +676,9 @@ fn infer_type_name<'a>(
             (Some(_), Some(_)) => Err(()),
         };
         if let Ok(Some(t)) = t {
-            let exact = candidates.iter().find(|sig| sig.inputs_type == [t, t]);
+            let exact = candidates
+                .iter()
+                .find(|sig| sig.inputs_type == [t, t] && !sig.deprecated);
             if let Some(sig) = exact {
                 return Ok(sig);
             }
@@ -771,6 +773,9 @@ fn top_matches<'a>(
     let mut best_candidates = Vec::new();
 
     for sig in candidates {
+        if sig.deprecated {
+            continue;
+        }
         let mut n_exact = 0;
         let mut n_preferred = 0;
         let mut castable = true;
@@ -1226,6 +1231,7 @@ mod tests {
                     inputs_type: formals,
                     ret_type: DUMMY_RET,
                     build: |_, _| unreachable!(),
+                    deprecated: false,
                 });
             }
             let result = infer_type_name(&sig_map, DUMMY_FUNC, inputs);
