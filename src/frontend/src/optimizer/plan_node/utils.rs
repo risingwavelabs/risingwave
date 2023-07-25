@@ -301,6 +301,5 @@ macro_rules! plan_node_name {
 }
 pub(crate) use plan_node_name;
 
-
 use super::generic::{self, GenericPlanRef};
 use super::pretty_config;

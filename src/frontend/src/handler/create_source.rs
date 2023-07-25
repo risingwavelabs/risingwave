@@ -25,7 +25,6 @@ use risingwave_common::catalog::{
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-
 use risingwave_connector::parser::{
     AvroParserConfig, DebeziumAvroParserConfig, ParserProperties, ProtobufParserConfig,
 };

@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
 };
-
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::PbSinkDesc;
 

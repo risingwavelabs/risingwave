@@ -23,7 +23,6 @@ use risingwave_common::catalog::{
     USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result, RwError};
-
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
