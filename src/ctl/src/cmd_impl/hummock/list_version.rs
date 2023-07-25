@@ -17,12 +17,35 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
 
-pub async fn list_version(context: &CtlContext, verbose: bool) -> anyhow::Result<()> {
+pub async fn list_version(
+    context: &CtlContext,
+    verbose: bool,
+    verbose_key_range: bool,
+) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let version = meta_client.get_current_version().await?;
+    let mut version = meta_client.get_current_version().await?;
 
-    if verbose {
+    if verbose && verbose_key_range {
         println!("{:#?}", version);
+    } else if verbose {
+        version.levels.iter_mut().for_each(|(_cg_id, levels)| {
+            // l0
+            if levels.l0.is_some() {
+                let l0 = levels.l0.as_mut().unwrap();
+                for sub_level in &mut l0.sub_levels {
+                    for t in &mut sub_level.table_infos {
+                        t.key_range = None;
+                    }
+                }
+            }
+
+            // l1 ~ lmax
+            for level in &mut levels.levels {
+                for t in &mut level.table_infos {
+                    t.key_range = None;
+                }
+            }
+        });
     } else {
         println!(
             "Version {} max_committed_epoch {}",
