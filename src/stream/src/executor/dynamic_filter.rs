@@ -71,23 +71,27 @@ enum DynamicFilterWatermarkCacheEntry {
     Smallest { pk: OwnedRow, value: Datum },
 }
 
-// Watermark Filter Cache
-// Used to avoid issuing delete range requests for state clean-up by watermark.
-// It tracks the lowest value in the LHS table.
-// On state table commit
-// 1. watermark <= lowest value
-//    We don't need to issue delete range,
-//    because are no values lower than lowest value.
-//    Therefore, no values before watermark, and no values to clean.
-// 2. watermark > lowest value
-//    Need to issue delete range.
-//    We can just issue delete range for (lowest_value, watermark].
-//
-// Updates:
-// 1. INSERT
-// 2. DELETE
-// 3. UPDATE
-// 4. Watermark has cleaned state.
+/// Watermark Filter Cache
+/// Used to avoid issuing delete range requests for state clean-up by watermark.
+/// It tracks the lowest value in the LHS table.
+///
+/// On receiving new watermark.:
+/// 1. If watermark <= lowest value
+///    We don't need to issue delete range,
+///    because are no values lower than lowest value.
+///    Therefore, no values before watermark, and no values to clean.
+///    We can set `unused_clean_hint` to None.
+/// 2. Else watermark > lowest value
+///    Need to issue delete range.
+///    We can just issue delete range for (lowest_value, watermark].
+///    Set `unused_clean_hint` to `watermark`.
+///    TODO(kwannoel): Optimization: If we move this to state table, we can set the delete range lower bound.
+///
+/// Updates:
+/// 1. INSERT
+/// 2. DELETE
+/// 3. UPDATE
+/// 4. Watermark has cleaned state.
 struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
     row: DynamicFilterWatermarkCacheEntry,
