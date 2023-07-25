@@ -93,14 +93,16 @@ enum DynamicFilterWatermarkCacheEntry {
 ///    Update prev_cleaned_watermark.
 struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
+    lhs_pk_indices: Vec<usize>,
     prev_cleaned_watermark: Option<ScalarImpl>,
     row: DynamicFilterWatermarkCacheEntry,
 }
 
 impl DynamicFilterWatermarkCache {
-    fn new(watermark_col_idx: usize) -> Self {
+    fn new(watermark_col_idx: usize, lhs_pk_indices: Vec<usize>) -> Self {
         Self {
             watermark_col_idx,
+            lhs_pk_indices,
             prev_cleaned_watermark: None,
             row: DynamicFilterWatermarkCacheEntry::Empty,
         }
@@ -138,11 +140,26 @@ impl DynamicFilterWatermarkCache {
 
     /// Takes care of LHS chunk
     fn process_lhs_chunk(&mut self, chunk: &StreamChunk) {
+        for (op, row) in chunk.rows() {
+            match op {
+                Op::Insert | Op::UpdateInsert => { self.process_insert(row); }
+                Op::Delete | Op::UpdateDelete => { self.process_delete(row); }
+            }
+        }
+    }
+
+    fn process_insert(&mut self, row: impl Row) {
+        todo!()
+    }
+
+    // TODO: Highlight table scan to reviewers.
+    fn process_delete(&mut self, row: impl Row) {
+        todo!()
     }
 
     /// Takes care of state table commit
     fn process_state_table_commit(&mut self, watermark: &Option<ScalarImpl>) {
-
+        todo!()
     }
 }
 
@@ -415,7 +432,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut watermark_cache = if watermark_can_clean_state {
-            Some(DynamicFilterWatermarkCache::new(self.key_l))
+            Some(DynamicFilterWatermarkCache::new(self.key_l, self.left_table.pk_indices().to_vec()))
         } else {
             None
         };
