@@ -60,7 +60,7 @@ pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Debug, Clone, Parser, OverrideConfig)]
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
@@ -126,13 +126,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    pub override_opts: OverrideConfigOpts,
-}
-
-/// Command-line arguments for compute-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
@@ -209,7 +202,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         info!("Starting meta node");
         info!("> options: {:?}", opts);
-        let config = load_config(&opts.config_path, Some(&opts.override_opts));
+        let config = load_config(&opts.config_path, &opts);
         info!("> config: {:?}", config);
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
         let listen_addr = opts.listen_addr.parse().unwrap();

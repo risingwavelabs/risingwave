@@ -174,7 +174,7 @@ impl FrontendEnv {
     }
 
     pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
-        let config = load_config(&opts.config_path, Some(&opts.override_opts));
+        let config = load_config(&opts.config_path, &opts);
         info!("Starting frontend node");
         info!("> config: {:?}", config);
         info!(

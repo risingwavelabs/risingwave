@@ -36,8 +36,6 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-/// For non-user-facing components where the CLI arguments do not override the config file.
-pub const NO_OVERRIDE: Option<&'static NoOverride> = None;
 
 /// Unrecognized fields in a config section. Generic over the config section type to provide better
 /// error messages.
@@ -93,7 +91,7 @@ impl<T> Serialize for Unrecognized<T> {
 }
 
 // TODO: remove `Option`
-pub fn load_config(path: &str, cli_override: Option<&impl OverrideConfig>) -> RwConfig
+pub fn load_config(path: &str, cli_override: impl OverrideConfig) -> RwConfig
 where
 {
     let mut config = if path.is_empty() {
@@ -104,9 +102,7 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
-    if let Some(cli_override) = cli_override {
-        cli_override.r#override(&mut config);
-    }
+    cli_override.r#override(&mut config);
     config
 }
 
@@ -114,9 +110,15 @@ pub trait OverrideConfig {
     fn r#override(&self, config: &mut RwConfig);
 }
 
-/// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
+impl<'a, T: OverrideConfig> OverrideConfig for &'a T {
+    fn r#override(&self, config: &mut RwConfig) {
+        T::r#override(self, config)
+    }
+}
+
+/// For non-user-facing components where the CLI arguments do not override the config file.
 #[derive(Clone, Copy)]
-pub struct NoOverride {}
+pub struct NoOverride;
 
 impl OverrideConfig for NoOverride {
     fn r#override(&self, _config: &mut RwConfig) {}
