@@ -46,6 +46,8 @@ pub async fn list_version(
                 }
             }
         });
+
+        println!("{:#?}", version);
     } else {
         println!(
             "Version {} max_committed_epoch {}",

@@ -140,7 +140,7 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
 
-        #[clap(short, long = "verbose_key_range", default_value_t = false)]
+        #[clap(long = "verbose_key_range", default_value_t = false)]
         verbose_key_range: bool,
     },
 
