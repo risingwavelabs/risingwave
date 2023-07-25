@@ -24,6 +24,7 @@ use std::str::{FromStr, Utf8Error};
 
 use bytes::{Buf, BufMut, Bytes};
 use chrono::{Datelike, Timelike};
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use paste::paste;
@@ -117,7 +118,17 @@ macro_rules! for_all_type_pairs {
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 // but without data fields.
 #[derive(
-    Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
+    Debug,
+    Display,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    EnumDiscriminants,
+    EnumAsInner,
+    FromStr,
 )]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
@@ -402,21 +413,6 @@ impl DataType {
 
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
         Self::Struct(StructType::from_parts(field_names, fields))
-    }
-
-    pub fn as_struct(&self) -> &StructType {
-        match self {
-            DataType::Struct(t) => t,
-            _ => panic!("expect struct type"),
-        }
-    }
-
-    /// Returns the inner type of list.
-    pub fn as_list_of(&self) -> &Self {
-        match self {
-            DataType::List(t) => t,
-            _ => panic!("expect list type"),
-        }
     }
 
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful

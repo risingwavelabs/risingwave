@@ -572,7 +572,7 @@ impl FunctionAttr {
             vec![quote! { self.return_type.clone() }]
         } else {
             (0..return_types.len())
-                .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
+                .map(|i| quote! { self.return_type.as_struct().unwrap().types().nth(#i).unwrap().clone() })
                 .collect()
         };
         let build_value_array = if return_types.len() == 1 {
@@ -581,7 +581,7 @@ impl FunctionAttr {
             quote! {
                 let bitmap = value_arrays[0].null_bitmap().clone();
                 let value_array = StructArray::new(
-                    self.return_type.as_struct().clone(),
+                    self.return_type.as_struct().unwrap().clone(),
                     value_arrays.to_vec(),
                     bitmap,
                 ).into_ref();
