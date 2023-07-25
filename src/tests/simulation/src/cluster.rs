@@ -116,8 +116,10 @@ impl Configuration {
         let config_path = {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");
-            file.write_all(include_bytes!("../../../../src/config/backfill-update.toml"))
-                .expect("failed to write config file");
+            file.write_all(include_bytes!(
+                "../../../../src/config/backfill-update.toml"
+            ))
+            .expect("failed to write config file");
             file.into_temp_path()
         };
 
