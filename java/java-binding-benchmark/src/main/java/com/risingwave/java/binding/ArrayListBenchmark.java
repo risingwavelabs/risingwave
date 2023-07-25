@@ -1,3 +1,19 @@
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.risingwave.java.binding;
 
 import java.util.ArrayList;
@@ -8,7 +24,7 @@ import org.openjdk.jmh.annotations.*;
 @Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(org.openjdk.jmh.annotations.Scope.Benchmark)
 public class ArrayListBenchmark {
     @Param({"100", "1000", "10000"})
@@ -23,13 +39,6 @@ public class ArrayListBenchmark {
         float v4 = (float) index;
         double v5 = (double) index;
         boolean v6 = index % 3 == 0;
-        String v7 =
-                "'"
-                        + new String(new char[(index % 10) + 1])
-                                .replace("\0", String.valueOf(index))
-                        + "'";
-        String v8 = "to_timestamp(" + index + ")";
-        int v9 = index;
         Integer mayNull = null;
         ArrayList<Object> rowData = new ArrayList<>();
         rowData.add(v1);
@@ -38,9 +47,6 @@ public class ArrayListBenchmark {
         rowData.add(v4);
         rowData.add(v5);
         rowData.add(v6);
-        rowData.add(v7);
-        rowData.add(v8);
-        rowData.add(v9);
         rowData.add(mayNull);
         return rowData;
     }
@@ -52,10 +58,7 @@ public class ArrayListBenchmark {
         float value4 = (float) rowData.get(3);
         double value5 = (double) rowData.get(4);
         boolean value6 = (boolean) rowData.get(5);
-        // String value7 = (String) rowData.get(6);
-        // String value8 = (String) rowData.get(7);
-        // int value9 = (int) rowData.get(8);
-        Integer mayNull = (Integer) rowData.get(9);
+        Integer mayNull = (Integer) rowData.get(6);
     }
 
     @Setup
