@@ -309,6 +309,11 @@ pub trait ConfigReporter {
     fn report_status(&mut self, key: &str, new_val: String);
 }
 
+// Report nothing.
+impl ConfigReporter for () {
+    fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
+
 #[derive(Educe)]
 #[educe(Default)]
 pub struct ConfigMap {
@@ -397,7 +402,7 @@ pub struct ConfigMap {
     batch_parallelism: BatchParallelism,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
+    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"9.5.0\"))"))]
     server_version: ServerVersion,
     server_version_num: ServerVersionNum,
 
@@ -496,6 +501,15 @@ impl ConfigMap {
                 .into());
             }
             // No actual assignment because we only support UTF8.
+        } else if key.eq_ignore_ascii_case("bytea_output") {
+            // TODO: We only support hex now.
+            if !val.first().is_some_and(|val| *val == "hex") {
+                return Err(ErrorCode::InvalidConfigValue {
+                    config_entry: "bytea_output".into(),
+                    config_value: val.first().map(ToString::to_string).unwrap_or_default(),
+                }
+                .into());
+            }
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -562,6 +576,9 @@ impl ConfigMap {
             Ok(self.client_min_messages.to_string())
         } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
             Ok(self.client_encoding.to_string())
+        } else if key.eq_ignore_ascii_case("bytea_output") {
+            // TODO: We only support hex now.
+            Ok("hex".to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -704,6 +721,11 @@ impl ConfigMap {
                 setting : self.client_encoding.to_string(),
                 description : String::from("Sets the client's character set encoding.")
             },
+            VariableInfo{
+                name: "bytea_output".to_string(),
+                setting: "hex".to_string(),
+                description: "Sets the output format for bytea.".to_string(),
+            }
         ]
     }
 
