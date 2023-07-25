@@ -185,12 +185,17 @@ where
                 }
             }
             if need_seal_current {
-                last_range_tombstone_epoch = builder.last_range_tombstone_epoch();
-                if last_range_tombstone_epoch != HummockEpoch::MAX {
-                    builder.add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
-                        new_epoch: HummockEpoch::MAX,
-                    });
+                if let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
+                    last_range_tombstone_epoch = event.new_epoch;
+                    if event.event_key.left_user_key.as_ref().eq(&full_key.user_key) {
+                        // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
+                        need_seal_current = false;
+                    } else {
+                        builder.add_monotonic_delete(MonotonicDeleteEvent {
+                            event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                            new_epoch: HummockEpoch::MAX,
+                        });
+                    }
                 }
             }
         }
@@ -400,8 +405,10 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::key::PointRange;
 
     use super::*;
@@ -664,5 +671,123 @@ mod tests {
 
         let results = builder.finish().await.unwrap();
         assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_delete_range_cut_sst() {
+        let block_size = 256;
+        let table_capacity = 2 * block_size;
+        let opts = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+        };
+        let table_id = TableId::new(1);
+        let mut builder = CapacitySplitTableBuilder::new(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(CompactorMetrics::unused()),
+            None,
+            false,
+            false,
+            0,
+        );
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"aaaa".to_vec()),
+                    false,
+                ),
+                new_epoch: 10,
+            })
+            .await
+            .unwrap();
+        let v = vec![5u8; 200];
+        let epoch = 12;
+        builder
+            .add_full_key(
+                FullKey::from_user_key(UserKey::for_test(table_id, b"bbbb"), epoch),
+                HummockValue::put(v.as_slice()),
+                true,
+            )
+            .await
+            .unwrap();
+        builder
+            .add_full_key(
+                FullKey::from_user_key(UserKey::for_test(table_id, b"cccc"), epoch),
+                HummockValue::put(v.as_slice()),
+                true,
+            )
+            .await
+            .unwrap();
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"eeee".to_vec()),
+                    false,
+                ),
+                new_epoch: 11,
+            })
+            .await
+            .unwrap();
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"ffff".to_vec()),
+                    false,
+                ),
+                new_epoch: 10,
+            })
+            .await
+            .unwrap();
+        builder
+            .add_full_key(
+                FullKey::from_user_key(UserKey::for_test(table_id, b"ffff"), epoch),
+                HummockValue::put(v.as_slice()),
+                true,
+            )
+            .await
+            .unwrap();
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"gggg".to_vec()),
+                    false,
+                ),
+                new_epoch: HummockEpoch::MAX,
+            })
+            .await
+            .unwrap();
+        let ret = builder.finish().await.unwrap();
+        assert_eq!(ret.len(), 2);
+        assert_eq!(ret[0].sst_info.sst_info.range_tombstone_count, 2);
+        let ssts = ret
+            .iter()
+            .map(|output| output.sst_info.sst_info.clone())
+            .collect_vec();
+        assert!(can_concat(&ssts));
+
+        let key_range = ssts[0].key_range.as_ref().unwrap();
+        let expected_left =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"aaaa"), HummockEpoch::MAX)
+                .encode();
+        let expected_right =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), HummockEpoch::MAX)
+                .encode();
+        assert_eq!(key_range.left, expected_left);
+        assert_eq!(key_range.right, expected_right);
+        assert!(key_range.right_exclusive);
+
+        let key_range = ssts[1].key_range.as_ref().unwrap();
+        let expected_left =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), HummockEpoch::MAX)
+                .encode();
+        let expected_right =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"gggg"), HummockEpoch::MAX)
+                .encode();
+        assert_eq!(key_range.left, expected_left);
+        assert_eq!(key_range.right, expected_right);
+        assert!(key_range.right_exclusive);
     }
 }

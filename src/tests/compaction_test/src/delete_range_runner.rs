@@ -89,7 +89,15 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     let config = load_config(&opts.config_path, NO_OVERRIDE);
     let compaction_config = CompactionConfigBuilder::new().build();
-    compaction_test(compaction_config, config, &opts.state_store, 1000000, 800).await
+    compaction_test(
+        compaction_config,
+        config,
+        &opts.state_store,
+        1000000,
+        800,
+        1,
+    )
+    .await
 }
 
 async fn compaction_test(
@@ -98,6 +106,7 @@ async fn compaction_test(
     state_store_type: &str,
     test_range: u64,
     test_count: u64,
+    test_delete_ratio: u32,
 ) -> anyhow::Result<()> {
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env_with_config(8080, compaction_config.clone()).await;
@@ -225,9 +234,15 @@ async fn compaction_test(
         sstable_object_id_manager,
         compactor_metrics,
     );
-    run_compare_result(&store, meta_client.clone(), test_range, test_count)
-        .await
-        .unwrap();
+    run_compare_result(
+        &store,
+        meta_client.clone(),
+        test_range,
+        test_count,
+        test_delete_ratio,
+    )
+    .await
+    .unwrap();
     let version = store.get_pinned_version().version();
     let remote_version = meta_client.get_current_version().await.unwrap();
     println!(
@@ -257,11 +272,12 @@ async fn run_compare_result(
     meta_client: Arc<MockHummockMetaClient>,
     test_range: u64,
     test_count: u64,
+    test_delete_ratio: u32,
 ) -> Result<(), String> {
     let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 1;
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
-    const RANGE_BASE: u64 = 400;
+    const RANGE_BASE: u64 = 4000;
     let range_mod = test_range / RANGE_BASE;
 
     let seed = SystemTime::now()
@@ -276,7 +292,7 @@ async fn run_compare_result(
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
-            if op == 0 {
+            if op < test_delete_ratio {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
                 overlap_ranges.push((key_number, end_key, epoch, idx));
                 let start_key = format!("\0\0{:010}", key_number);
@@ -287,7 +303,7 @@ async fn run_compare_result(
                 delete_range
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
-            } else if op < 5 {
+            } else if op < test_delete_ratio + 5 {
                 let key = format!("\0\0{:010}", key_number);
                 let a = normal.get(key.as_bytes()).await;
                 let b = delete_range.get(key.as_bytes()).await;
@@ -299,7 +315,7 @@ async fn run_compare_result(
                     b.map(|raw| String::from_utf8(raw.to_vec()).unwrap()),
                     epoch,
                 );
-            } else if op < 10 {
+            } else if op < test_delete_ratio + 10 {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
                 let start_key = format!("\0\0{:010}", key_number);
                 let end_key = format!("\0\0{:010}", end_key);
@@ -582,7 +598,17 @@ mod tests {
         compaction_config.level0_tier_compact_file_number = 2;
         compaction_config.max_bytes_for_level_base = 512 * 1024;
         compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
-        compaction_test(compaction_config, config, "hummock+memory", 10000, 60)
+        compaction_test(
+            compaction_config.clone(),
+            config.clone(),
+            "hummock+memory",
+            1000000,
+            120,
+            10,
+        )
+        .await
+        .unwrap();
+        compaction_test(compaction_config, config, "hummock+memory", 100000, 60, 1)
             .await
             .unwrap();
     }

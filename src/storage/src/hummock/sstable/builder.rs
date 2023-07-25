@@ -214,6 +214,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .map_or(HummockEpoch::MAX, |delete| delete.new_epoch)
     }
 
+    pub fn last_range_tombstone(&self) -> Option<&MonotonicDeleteEvent> {
+        self.monotonic_deletes.last()
+    }
+
     /// Add kv pair to sstable.
     pub async fn add_for_test(
         &mut self,
