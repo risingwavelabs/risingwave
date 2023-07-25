@@ -59,24 +59,24 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 /// If no watermark column, just set watermark state to Empty.
 /// Otherwise if watermark column exists:
 /// (UPDATE)INSERT -> Update lowest value if applicable.
-/// (UPDATE)DELETE -> If removes lowest value, set cache to empty.
-///
-/// FIXME(kwannoel): Are `NULL` considered min or max for watermark?
+/// (UPDATE)DELETE -> If removes lowest value, immediately do table scan, so we can find new lowest value.
+/// If NULL values received: Just ignore. They are unused for watermark.
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum DynamicFilterWatermarkCacheEntry {
     Empty,
     Uninitialized,
     // We need to store pk, in case we encounter `Delete`s.
     // Then we can remove the Entry.
-    Smallest { pk: OwnedRow, value: Datum },
+    Smallest { pk: OwnedRow, value: ScalarImpl },
 }
 
 /// Watermark Filter Cache
 /// Used to avoid issuing delete range requests for state clean-up by watermark.
 /// It tracks the lowest value in the LHS table.
 ///
-/// On receiving new watermark.:
-/// 1. If watermark <= lowest value
+/// On receiving new watermark:
+/// TODO(kwannoel): Is it greater or equal? Or less than or equal?
+/// 1. If watermark < lowest value
 ///    We don't need to issue delete range,
 ///    because are no values lower than lowest value.
 ///    Therefore, no values before watermark, and no values to clean.
@@ -87,13 +87,22 @@ enum DynamicFilterWatermarkCacheEntry {
 ///    Set `unused_clean_hint` to `watermark`.
 ///    TODO(kwannoel): Optimization: If we move this to state table, we can set the delete range lower bound.
 ///
-/// Updates:
+/// Updates to LHS:
 /// 1. INSERT
+///    A. Cache empty. Just update watermark.
+///    B. Cache not empty. Update lowest value if applicable.
 /// 2. DELETE
+///    A. Matches lowest value pk. Remove lowest value. Do table scan to find new lowest value.
+///    B. Does not match. Do nothing.
 /// 3. UPDATE
-/// 4. Watermark has cleaned state.
+///    A. Do delete then insert.
+///
+/// Updates to state table:
+/// 1. State table commit
+///    Update prev_cleaned_watermark.
 struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
+    prev_cleaned_watermark: Option<ScalarImpl>,
     row: DynamicFilterWatermarkCacheEntry,
 }
 
@@ -101,6 +110,7 @@ impl DynamicFilterWatermarkCache {
     fn new(watermark_col_idx: usize) -> Self {
         Self {
             watermark_col_idx,
+            prev_cleaned_watermark: None,
             row: DynamicFilterWatermarkCacheEntry::Uninitialized,
         }
     }
