@@ -62,7 +62,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, date_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamSort { sort_column_index: 3 }
+    └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, $expr1, _row_id], output_watermarks: [$expr1] }
         └─StreamFilter { predicate: (event_type = 2:Int32) }
           └─StreamRowIdGen { row_id_index: 5 }
@@ -479,7 +479,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start, window_start#1], pk_columns: [auction, window_start, window_start#1], pk_conflict: NoCheck, watermark_columns: [window_start(hidden)] }
-    └─StreamSort { sort_column_index: 2 }
+    └─StreamEowcSort { sort_column: window_start }
       └─StreamProject { exprs: [$expr2, count, window_start, window_start], output_watermarks: [window_start, window_start] }
         └─StreamFilter { predicate: (count >= max(count)) }
           └─StreamHashJoin [window, append_only] { type: Inner, predicate: window_start = window_start, output_watermarks: [window_start, window_start], output: all }
@@ -544,7 +544,7 @@
       └─StreamOverWindow { window_functions: [sum($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard($expr4) }
           └─StreamProject { exprs: [$expr4, $expr6, $expr1, $expr2], output_watermarks: [$expr1] }
-            └─StreamGroupTopN [append_only] { order: [$expr6 ASC], limit: 1, offset: 0, group_key: [0, 1], output_watermarks: [$expr1] }
+            └─StreamGroupTopN [append_only] { order: [$expr6 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr4], output_watermarks: [$expr1] }
               └─StreamExchange { dist: HashShard($expr2, $expr4) }
                 └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr5 AND ($expr1 >= $expr1) AND ($expr1 <= $expr3), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr4, $expr6, $expr1, _row_id, _row_id] }
                   ├─StreamExchange { dist: HashShard($expr2) }
@@ -577,7 +577,7 @@
 
     Fragment 1
     StreamProject { exprs: [$expr4, $expr6, $expr1, $expr2], output_watermarks: [$expr1] }
-    └── StreamGroupTopN [append_only] { order: [$expr6 ASC], limit: 1, offset: 0, group_key: [0, 1], output_watermarks: [$expr1] } { state table: 1 }
+    └── StreamGroupTopN [append_only] { order: [$expr6 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr4], output_watermarks: [$expr1] } { state table: 1 }
         └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -629,10 +629,10 @@
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr4, (sum / count::Decimal) as $expr7, $expr2] }
       └─StreamEowcOverWindow { window_functions: [sum($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
-        └─StreamSort { sort_column_index: 2 }
+        └─StreamEowcSort { sort_column: $expr1 }
           └─StreamExchange { dist: HashShard($expr4) }
             └─StreamProject { exprs: [$expr4, $expr6, $expr1, $expr2], output_watermarks: [$expr1] }
-              └─StreamGroupTopN [append_only] { order: [$expr6 ASC], limit: 1, offset: 0, group_key: [0, 1], output_watermarks: [$expr1] }
+              └─StreamGroupTopN [append_only] { order: [$expr6 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr4], output_watermarks: [$expr1] }
                 └─StreamExchange { dist: HashShard($expr2, $expr4) }
                   └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr5 AND ($expr1 >= $expr1) AND ($expr1 <= $expr3), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr4, $expr6, $expr1, _row_id, _row_id] }
                     ├─StreamExchange { dist: HashShard($expr2) }
@@ -767,7 +767,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr5(hidden)], stream_key: [_row_id, $expr5, price], pk_columns: [_row_id, $expr5, price], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamSort { sort_column_index: 3 }
+    └─StreamEowcSort { sort_column: $expr1 }
       └─StreamHashJoin [interval, append_only] { type: Inner, predicate: $expr4 = max($expr4) AND ($expr1 >= $expr6) AND ($expr1 <= $expr5), conditions_to_clean_left_state_table: ($expr1 >= $expr6), conditions_to_clean_right_state_table: ($expr1 <= $expr5), output_watermarks: [$expr1, $expr5], output: [$expr2, $expr4, $expr3, $expr1, _row_id, $expr5] }
         ├─StreamExchange { dist: HashShard($expr4) }
         │ └─StreamShare { id: 6 }
@@ -918,7 +918,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr5(hidden), $expr6(hidden), $expr7(hidden), $expr8(hidden)], stream_key: [id, name, starttime, $expr5, $expr6, $expr7, $expr8], pk_columns: [id, name, starttime, $expr5, $expr6, $expr7, $expr8], pk_conflict: NoCheck, watermark_columns: [starttime] }
-    └─StreamSort { sort_column_index: 2 }
+    └─StreamEowcSort { sort_column: $expr4 }
       └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr4 = $expr7 AND $expr5 = $expr8 AND $expr2 = $expr6, output_watermarks: [$expr4, $expr5, $expr7, $expr8], output: all }
         ├─StreamExchange { dist: HashShard($expr2, $expr4, $expr5) }
         │ └─StreamAppendOnlyDedup { dedup_cols: [$expr2, $expr3, $expr4, $expr5] }
@@ -974,7 +974,7 @@
                     └─LogicalFilter { predicate: (event_type = 2:Int32) }
                       └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: (Unbounded, Unbounded) }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [$expr11 DESC, date_time ASC], limit: 1, offset: 0, group_key: [0] }
+    LogicalTopN { order: [$expr11 DESC, date_time ASC], limit: 1, offset: 0, group_key: [$expr1] }
     └─LogicalJoin { type: Inner, on: ($expr1 = $expr9) AND (date_time >= date_time) AND (date_time <= $expr6), output: all }
       ├─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8] }
       │ └─LogicalFilter { predicate: (event_type = 1:Int32) }
@@ -984,7 +984,7 @@
           └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [$expr13 DESC, $expr10 ASC], limit: 1, offset: 0, group_key: [0] }
+    └─BatchGroupTopN { order: [$expr13 DESC, $expr10 ASC], limit: 1, offset: 0, group_key: [$expr2] }
       └─BatchHashJoin { type: Inner, predicate: $expr2 = $expr11 AND ($expr10 >= $expr1) AND ($expr10 <= $expr7), output: all }
         ├─BatchExchange { order: [], dist: HashShard($expr2) }
         │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9] }
@@ -998,7 +998,7 @@
                 └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id(hidden), _row_id#1(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck, watermark_columns: [bid_date_time] }
-    └─StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [0], output_watermarks: [$expr1] }
+    └─StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [$expr2], output_watermarks: [$expr1] }
       └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr10 AND ($expr1 >= $expr1) AND ($expr1 <= $expr7), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1, _row_id, _row_id] }
         ├─StreamExchange { dist: HashShard($expr2) }
         │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id], output_watermarks: [$expr1] }
@@ -1023,7 +1023,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id(hidden), _row_id#1(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck, watermark_columns: [bid_date_time] } { materialized table: 4294967294 }
-    └── StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [0], output_watermarks: [$expr1] } { state table: 0 }
+    └── StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [$expr2], output_watermarks: [$expr1] } { state table: 0 }
         └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr10 AND ($expr1 >= $expr1) AND ($expr1 <= $expr7), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1, _row_id, _row_id] }
             ├── left table: 1
             ├── right table: 3
@@ -1068,8 +1068,8 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id(hidden), _row_id#1(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck, watermark_columns: [bid_date_time] }
-    └─StreamSort { sort_column_index: 12 }
-      └─StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [0], output_watermarks: [$expr1] }
+    └─StreamEowcSort { sort_column: $expr1 }
+      └─StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [$expr2], output_watermarks: [$expr1] }
         └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr10 AND ($expr1 >= $expr1) AND ($expr1 <= $expr7), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1, _row_id, _row_id] }
           ├─StreamExchange { dist: HashShard($expr2) }
           │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id], output_watermarks: [$expr1] }
@@ -1128,7 +1128,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, date_time, date, time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamSort { sort_column_index: 3 }
+    └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1, ToChar($expr1, 'YYYY-MM-DD':Varchar) as $expr5, ToChar($expr1, 'HH:MI':Varchar) as $expr6, _row_id], output_watermarks: [$expr1] }
         └─StreamFilter { predicate: (event_type = 2:Int32) }
           └─StreamRowIdGen { row_id_index: 5 }
@@ -1241,7 +1241,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamSort { sort_column_index: 4 }
+    └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5, $expr1, Field(bid, 6:Int32) as $expr6, _row_id], output_watermarks: [$expr1] }
         └─StreamFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
           └─StreamRowIdGen { row_id_index: 5 }
@@ -1497,7 +1497,7 @@
                   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [1, 0] }
+    └─BatchGroupTopN { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [$expr3, $expr2] }
       └─BatchExchange { order: [], dist: HashShard($expr3, $expr2) }
         └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
           └─BatchFilter { predicate: (event_type = 2:Int32) }
@@ -1505,7 +1505,7 @@
               └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [1, 0], output_watermarks: [$expr1] }
+    └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [$expr3, $expr2], output_watermarks: [$expr1] }
       └─StreamExchange { dist: HashShard($expr3, $expr2) }
         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
           └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1517,7 +1517,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck, watermark_columns: [date_time] }
     ├── materialized table: 4294967294
-    └── StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [1, 0], output_watermarks: [$expr1] } { state table: 0 }
+    └── StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [$expr3, $expr2], output_watermarks: [$expr1] } { state table: 0 }
         └── StreamExchange Hash([1, 0]) from 1
 
     Fragment 1
@@ -1538,8 +1538,8 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamSort { sort_column_index: 5 }
-      └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [1, 0], output_watermarks: [$expr1] }
+    └─StreamEowcSort { sort_column: $expr1 }
+      └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [$expr3, $expr2], output_watermarks: [$expr1] }
         └─StreamExchange { dist: HashShard($expr3, $expr2) }
           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
             └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1567,7 +1567,7 @@
                   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
+    └─BatchGroupTopN { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr3, $expr2] }
       └─BatchExchange { order: [], dist: HashShard($expr3, $expr2) }
         └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
           └─BatchFilter { predicate: (event_type = 2:Int32) }
@@ -1576,7 +1576,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
     └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [1, 0], output_watermarks: [$expr1] }
+      └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr3, $expr2], output_watermarks: [$expr1] }
         └─StreamExchange { dist: HashShard($expr3, $expr2) }
           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
             └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1591,7 +1591,7 @@
     └── StreamExchange Hash([7]) from 1
 
     Fragment 1
-    StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [1, 0], output_watermarks: [$expr1] } { state table: 0 }
+    StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr3, $expr2], output_watermarks: [$expr1] } { state table: 0 }
     └── StreamExchange Hash([1, 0]) from 2
 
     Fragment 2
@@ -1613,8 +1613,8 @@
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
     └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamSort { sort_column_index: 5 }
-        └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [1, 0], output_watermarks: [$expr1] }
+      └─StreamEowcSort { sort_column: $expr1 }
+        └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr3, $expr2], output_watermarks: [$expr1] }
           └─StreamExchange { dist: HashShard($expr3, $expr2) }
             └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
               └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1643,7 +1643,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
-        └─BatchGroupTopN { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [0] }
+        └─BatchGroupTopN { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [$expr2] }
           └─BatchExchange { order: [], dist: HashShard($expr2) }
             └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
               └─BatchFilter { predicate: (event_type = 2:Int32) }
@@ -1652,7 +1652,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─StreamGroupTopN [append_only] { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [0], output_watermarks: [$expr1] }
+      └─StreamGroupTopN [append_only] { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [$expr2], output_watermarks: [$expr1] }
         └─StreamExchange { dist: HashShard($expr2) }
           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
             └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1665,7 +1665,7 @@
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] } { state table: 0 }
-        └── StreamGroupTopN [append_only] { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [0], output_watermarks: [$expr1] } { state table: 1 }
+        └── StreamGroupTopN [append_only] { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [$expr2], output_watermarks: [$expr1] } { state table: 1 }
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -2385,7 +2385,7 @@
     └─StreamProject { exprs: [$expr2, $expr3, count($expr4)] }
       └─StreamTopN { order: [count($expr4) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [3] }
+          └─StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [$expr5] }
             └─StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as $expr5] }
               └─StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] }
                 └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }
@@ -2418,7 +2418,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [3] } { state table: 1 }
+    StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [$expr5] } { state table: 1 }
     └── StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as $expr5] }
         └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }

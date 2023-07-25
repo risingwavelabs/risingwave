@@ -15,7 +15,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [sum, t2.k(hidden)], stream_key: [t2.k], pk_columns: [t2.k], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, t2.k] }
-      └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [1] }
+      └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [t2.k] }
         └─StreamExchange { dist: HashShard(t2.k) }
           └─StreamProject { exprs: [(t2.k + t2.v) as $expr1, t2.k, t2._row_id] }
             └─StreamTableScan { table: t2, columns: [t2.k, t2.v, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
