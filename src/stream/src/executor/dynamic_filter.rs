@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ScalarRefImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -41,26 +42,8 @@ use super::{
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
-use crate::executor::expect_first_barrier_from_aligned_stream;
+use crate::executor::{expect_first_barrier_from_aligned_stream, StreamExecutorResult, Watermark};
 
-/// Used for watermark state cleaning.
-/// We store the smallest value in our state table here.
-///
-/// Cases
-/// -----
-/// Uninitialized -> No value in cache, because none inserted yet. No delete range required.
-/// Empty -> No value in cache. We need to issue delete range,
-///          since we don't know the smallest value.
-/// Smallest(value) if `current_watermark` < value -> No delete range required.
-/// Smallest(value) if `current_watermark` >= value -> Delete range (-inf, `current_watermark`].
-///
-/// Updating the Cache
-/// ------------------
-/// If no watermark column, just set watermark state to Empty.
-/// Otherwise if watermark column exists:
-/// (UPDATE)INSERT -> Update lowest value if applicable.
-/// (UPDATE)DELETE -> If removes lowest value, immediately do table scan, so we can find new lowest value.
-/// If NULL values received: Just ignore. They are unused for watermark.
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum DynamicFilterWatermarkCacheEntry {
     Empty,
@@ -74,14 +57,17 @@ enum DynamicFilterWatermarkCacheEntry {
 /// Used to avoid issuing delete range requests for state clean-up by watermark.
 /// It tracks the lowest value in the LHS table.
 ///
-/// On receiving new watermark:
-/// TODO(kwannoel): Is it greater or equal? Or less than or equal?
+/// On receiving new LHS watermark:
+/// Nothing.
+///
+/// On receiving new RHS watermark:
+/// 1. If empty, unused clean hint -> None.
 /// 1. If watermark < lowest value
 ///    We don't need to issue delete range,
 ///    because are no values lower than lowest value.
 ///    Therefore, no values before watermark, and no values to clean.
 ///    We can set `unused_clean_hint` to None.
-/// 2. Else watermark > lowest value
+/// 2. Else watermark => lowest value
 ///    Need to issue delete range.
 ///    We can just issue delete range for (lowest_value, watermark].
 ///    Set `unused_clean_hint` to `watermark`.
@@ -96,6 +82,11 @@ enum DynamicFilterWatermarkCacheEntry {
 ///    B. Does not match. Do nothing.
 /// 3. UPDATE
 ///    A. Do delete then insert.
+/// 4. BARRIER
+///    State table commit. See below.
+///
+/// Updates to RHS:
+/// Nothing.
 ///
 /// Updates to state table:
 /// 1. State table commit
@@ -111,8 +102,47 @@ impl DynamicFilterWatermarkCache {
         Self {
             watermark_col_idx,
             prev_cleaned_watermark: None,
-            row: DynamicFilterWatermarkCacheEntry::Uninitialized,
+            row: DynamicFilterWatermarkCacheEntry::Empty,
         }
+    }
+
+    fn get_cached_value(&self) -> Option<&ScalarImpl> {
+        match &self.row {
+            DynamicFilterWatermarkCacheEntry::Empty => None,
+            DynamicFilterWatermarkCacheEntry::Uninitialized => None,
+            DynamicFilterWatermarkCacheEntry::Smallest { value, .. } => Some(&value),
+        }
+    }
+
+    fn process_rhs_watermark(&mut self, watermark: Watermark, unused_clean_hint: &mut Option<Watermark>) -> StreamExecutorResult<()> {
+        match self.get_cached_value() {
+            None => {
+                *unused_clean_hint = None;
+                Ok(())
+            },
+            Some(lowest_value) => {
+                let watermark_value = &watermark.val;
+                if let Some(ordering) = watermark_value.default_partial_cmp(&lowest_value) {
+                    if ordering.is_lt() {
+                        *unused_clean_hint = None;
+                    } else {
+                        *unused_clean_hint = Some(watermark);
+                    }
+                    Ok(())
+                } else {
+                    bail!("Watermark value {:#?} is not comparable to lowest value {:#?}", watermark_value, lowest_value);
+                }
+            }
+        }
+    }
+
+    /// Takes care of LHS chunk
+    fn process_lhs_chunk(&mut self, chunk: &StreamChunk) {
+    }
+
+    /// Takes care of state table commit
+    fn process_state_table_commit(&mut self, watermark: &Option<ScalarImpl>) {
+
     }
 }
 
@@ -152,7 +182,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             ctx,
             source_l: Some(source_l),
             source_r: Some(source_r),
-            key_l,
+            key_l: key_l.clone(),
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
@@ -384,6 +414,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         );
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
+        let mut watermark_cache = if watermark_can_clean_state {
+            Some(DynamicFilterWatermarkCache::new(self.key_l))
+        } else {
+            None
+        };
         let mut unused_clean_hint = None;
 
         #[for_await]
@@ -407,6 +442,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     if new_visibility.count_ones() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
+                        watermark_cache.as_mut().map(|mut c| c.process_lhs_chunk(&new_chunk));
                         yield Message::Chunk(new_chunk)
                     }
                 }
@@ -444,9 +480,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Do nothing.
                 }
                 AlignedMessage::WatermarkRight(watermark) => {
-                    if watermark_can_clean_state {
-                        unused_clean_hint = Some(watermark);
-                    }
+                    watermark_cache.as_mut().map(|mut c| c.process_rhs_watermark(watermark, &mut unused_clean_hint));
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
@@ -495,11 +529,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    if let Some(mut watermark) = unused_clean_hint.take() {
+                    if let Some(ref mut watermark) = unused_clean_hint {
                         self.left_table
                             .update_watermark(watermark.val.clone(), false);
                         watermark.col_idx = self.key_l;
-                        yield Message::Watermark(watermark);
+                        yield Message::Watermark(watermark.clone());
                     };
 
                     // Update the committed value on RHS if it has changed.
@@ -526,6 +560,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     }
 
                     self.left_table.commit(barrier.epoch).await?;
+                    watermark_cache.as_mut().map(|ref mut c|
+                        c.process_state_table_commit(self.left_table.get_state_clean_watermark()));
 
                     prev_epoch_value = Some(curr);
 

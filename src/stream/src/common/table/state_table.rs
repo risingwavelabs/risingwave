@@ -765,6 +765,10 @@ where
         }
     }
 
+    pub fn get_state_clean_watermark(&self) -> &Option<ScalarImpl> {
+        &self.state_clean_watermark
+    }
+
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         trace!(
