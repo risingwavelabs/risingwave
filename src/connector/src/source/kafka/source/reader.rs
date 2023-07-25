@@ -73,8 +73,6 @@ impl SplitReader for KafkaSplitReader {
         properties.common.set_security_properties(&mut config);
 
         // rdkafka fetching config
-        config.set("fetch.max.bytes", "10485760"); // default: 52428800 (50 MB)
-        config.set("queued.min.messages", "2048"); // default: 100000
         properties.rdkafka_properties.set_client(&mut config);
 
         if config.get("group.id").is_none() {
