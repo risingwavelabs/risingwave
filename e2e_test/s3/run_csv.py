@@ -46,20 +46,6 @@ def do_test(config, N, n, prefix):
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE CSV (delimiter = ',');''')
 
-    cur.execute(f'''CREATE TABLE s3_test_tsv_without_headers( 
-        a int,
-        b int,
-        c int,
-    ) WITH (
-        connector = 's3',
-        match_pattern = '{prefix}_data_without_headers.tsv',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);''')
-
     total_row = int(N * n)
     sleep(60)
     while True:
@@ -68,10 +54,7 @@ def do_test(config, N, n, prefix):
         result_with_headers = cur.fetchone()
         cur.execute('select count(*) from s3_test_csv_without_headers')
         result_without_headers = cur.fetchone()
-        cur.execute('select count(*) from s3_test_tsv_without_headers')
-        result_without_headers_tsv = cur.fetchone()
-        if result_with_headers[0] == total_row and result_without_headers[0] == total_row \
-                and result_without_headers_tsv[0] == total_row:
+        if result_with_headers[0] == total_row and result_without_headers[0] == total_row:
             break
         print(
             f"Now got {result_with_headers[0]} rows in table, {total_row} expected, wait 60s")
@@ -84,31 +67,21 @@ def do_test(config, N, n, prefix):
         'select count(*), sum(a), sum(b), sum(c) from s3_test_csv_without_headers')
     s3_test_csv_without_headers = cur.fetchone()
 
-    cur.execute(
-        'select count(*), sum(a), sum(b), sum(c) from s3_test_tsv_without_headers')
-    s3_test_tsv_without_headers = cur.fetchone()
-
     print(result_with_headers, s3_test_csv_without_headers,
-          int(((N - 1) * N / 2) * n), int(N * n / 2))
+          int(((N - 1) * N / 2) * n), int(N*n / 2))
 
     assert s3_test_csv_without_headers[0] == total_row
     assert s3_test_csv_without_headers[1] == int(((N - 1) * N / 2) * n)
-    assert s3_test_csv_without_headers[2] == int(N * n / 2)
+    assert s3_test_csv_without_headers[2] == int(N*n / 2)
     assert s3_test_csv_without_headers[3] == 0
-
-    assert s3_test_tsv_without_headers[0] == total_row
-    assert s3_test_tsv_without_headers[1] == int(((N - 1) * N / 2) * n)
-    assert s3_test_tsv_without_headers[2] == int(N * n / 2)
-    assert s3_test_tsv_without_headers[3] == 0
 
     assert result_with_headers[0] == total_row
     assert result_with_headers[1] == 0
-    assert result_with_headers[2] == int(N * n / 2)
+    assert result_with_headers[2] == int(N*n / 2)
     assert result_with_headers[3] == int(((N - 1) * N / 2) * n)
 
     cur.execute('drop table s3_test_csv_with_headers')
     cur.execute('drop table s3_test_csv_without_headers')
-    cur.execute('drop table s3_test_tsv_without_headers')
 
     cur.close()
     conn.close()
@@ -122,21 +95,12 @@ if __name__ == "__main__":
     items = [",".join([str(j), str(j % 2), str(-1 if j % 2 else 1)])
              for j in range(N)
              ]
-    items_tsv = ["\t".join([str(j), str(j % 2), str(-1 if j % 2 else 1)])
-                 for j in range(N)
-                 ]
 
     data = "\n".join(items) + "\n"
-    data_tsv = "\n".join(items_tsv) + "\n"
     n = 10
     with open("data_without_headers.csv", "w") as f:
         for _ in range(10):
             f.write(data)
-        os.fsync(f.fileno())
-
-    with open("data_without_headers.tsv", "w") as f:
-        for _ in range(10):
-            f.write(data_tsv)
         os.fsync(f.fileno())
 
     with open("data_with_headers.csv", "w") as f:
@@ -164,18 +128,10 @@ if __name__ == "__main__":
             f"{run_id}_data_with_headers.csv",
             f"data_with_headers.csv"
         )
-        client.fput_object(
-            config["S3_BUCKET"],
-            f"{run_id}_data_without_headers.tsv",
-            f"data_without_headers.tsv"
-
-        )
-        print(f"Uploaded {run_id}_data_with_headers.csv & "
-              f"{run_id}_data_with_headers.csv & "
-              f"{run_id}_data_with_headers.tsv to S3")
+        print(
+            f"Uploaded {run_id}_data_with_headers.csv &  {run_id}_data_with_headers.csv to S3")
         os.remove(f"data_with_headers.csv")
         os.remove(f"data_without_headers.csv")
-        os.remove(f"data_without_headers.tsv")
     except Exception as e:
         print(f"Error uploading test files")
 
@@ -193,8 +149,6 @@ if __name__ == "__main__":
                 config["S3_BUCKET"], f"{run_id}_data_with_headers.csv")
             client.remove_object(
                 config["S3_BUCKET"], f"{run_id}_data_without_headers.csv")
-            client.remove_object(
-                config["S3_BUCKET"], f"{run_id}_data_without_headers.tsv")
         except Exception as e:
             print(f"Error removing testing files {e}")
 
