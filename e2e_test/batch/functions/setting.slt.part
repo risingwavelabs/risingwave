@@ -9,16 +9,21 @@ SELECT CAST(current_setting('server_version_num') AS INT) / 100 AS version;
 905
 
 query T
-SELECT current_setting('rw_implicit_flush');
+SELECT current_setting('client_min_messages');
 ----
-false
+notice
 
 query T
-SELECT set_config('rw_implicit_flush', 'true', false);
+SELECT set_config('client_min_messages', 'warning', false);
 ----
-true
+warning
 
 query T
-SELECT current_setting('rw_implicit_flush');
+SELECT current_setting('client_min_messages');
 ----
-true
+warning
+
+query T
+SELECT set_config('client_min_messages', 'notice', false);
+----
+notice
