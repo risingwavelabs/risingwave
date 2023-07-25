@@ -71,10 +71,28 @@ enum DynamicFilterWatermarkCacheEntry {
 
 // Watermark Filter Cache
 // Used to avoid issuing delete range requests for state clean-up by watermark.
+// It tracks the lowest value in the LHS table.
+// Cases:
+// 1. watermark <= lowest value
+//    We don't need to issue delete range,
+//    because are no values lower than lowest value.
+//    Therefore, no values before watermark, and no values to clean.
+// 2. watermark > lowest value
+//    Need to issue delete range.
+//    We can just issue delete range for (lowest_value, watermark].
 // TODO: Refactor this file into `dynamic-filter/mod.rs`, `dynamic-filter/cache.rs`.
 struct DynamicFilterWatermarkCache {
-    watermark_col: usize,
+    watermark_col_idx: usize,
     row: DynamicFilterWatermarkCacheEntry,
+}
+
+impl DynamicFilterWatermarkCache {
+    fn new(watermark_col_idx: usize) -> Self {
+        Self {
+            watermark_col_idx,
+            row: DynamicFilterWatermarkCacheEntry::Uninitialized,
+        }
+    }
 }
 
 pub struct DynamicFilterExecutor<S: StateStore> {
