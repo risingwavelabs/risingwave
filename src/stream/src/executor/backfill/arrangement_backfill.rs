@@ -128,7 +128,7 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        let progress_per_vnode = get_progress_per_vnode(&self.state_table, state_len).await?;
+        let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
         let is_completely_finished = progress_per_vnode
             .iter()

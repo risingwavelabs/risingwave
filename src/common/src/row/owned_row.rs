@@ -89,6 +89,10 @@ impl OwnedRow {
             .collect();
         Self::new(datums)
     }
+
+    pub fn last(&self) -> DatumRef<'_> {
+        self.0[self.len() - 1].to_datum_ref()
+    }
 }
 
 impl EstimateSize for OwnedRow {
