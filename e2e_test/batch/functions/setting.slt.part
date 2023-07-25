@@ -6,7 +6,7 @@ SELECT current_setting('server_version');
 query I
 SELECT CAST(current_setting('server_version_num') AS INT) / 100 AS version;
 ----
-803
+905
 
 query T
 SELECT current_setting('rw_implicit_flush');
