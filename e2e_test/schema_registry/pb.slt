@@ -1,4 +1,4 @@
-# Before running this test:
+# Before running this test, seed data into kafka:
 #   python3 e2e_test/schema_registry/pb.py
 
 # Create a table.
