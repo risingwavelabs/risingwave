@@ -47,9 +47,7 @@ impl StreamingJob {
             }
         }
     }
-}
 
-impl StreamingJob {
     pub(crate) fn mark_initialized(&mut self) {
         let initialized_at_epoch = Some(Epoch::now().0);
         match self {
