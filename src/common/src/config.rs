@@ -90,7 +90,6 @@ impl<T> Serialize for Unrecognized<T> {
     }
 }
 
-// TODO: remove `Option`
 pub fn load_config(path: &str, cli_override: impl OverrideConfig) -> RwConfig
 where
 {
