@@ -29,6 +29,7 @@ use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
 use crate::expr::ExprImpl;
+use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -93,6 +94,9 @@ pub struct TableCatalog {
     /// The append-only attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
     /// on this to derive an append-only stream plan.
     pub append_only: bool,
+
+    /// The cardinality of the table.
+    pub cardinality: Cardinality,
 
     /// Owner of the table.
     pub owner: UserId,
@@ -380,6 +384,7 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
+            cardinality: Some(self.cardinality.to_protobuf()),
         }
     }
 
@@ -479,6 +484,10 @@ impl From<PbTable> for TableCatalog {
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
             dist_key_in_pk: tb.dist_key_in_pk.iter().map(|x| *x as _).collect(),
+            cardinality: tb
+                .cardinality
+                .map(|c| Cardinality::from_protobuf(&c))
+                .unwrap_or_else(Cardinality::unknown),
         }
     }
 }
@@ -565,6 +574,7 @@ mod tests {
             watermark_indices: vec![],
             handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
+            cardinality: None,
         }
         .into();
 
@@ -615,6 +625,7 @@ mod tests {
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
                 dist_key_in_pk: vec![],
+                cardinality: Cardinality::unknown(),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
