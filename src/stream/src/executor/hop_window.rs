@@ -151,7 +151,7 @@ impl HopWindowExecutor {
                         let window_start_col = if out_window_start_col_idx.is_some() {
                             Some(
                                 self.window_start_exprs[i]
-                                    .eval_infallible(&data_chunk, |err| {
+                                    .eval_infallible_by_ignore(&data_chunk, |err| {
                                         ctx.on_compute_error(err, &info.identity)
                                     })
                                     .await,
@@ -162,7 +162,7 @@ impl HopWindowExecutor {
                         let window_end_col = if out_window_end_col_idx.is_some() {
                             Some(
                                 self.window_end_exprs[i]
-                                    .eval_infallible(&data_chunk, |err| {
+                                    .eval_infallible_by_ignore(&data_chunk, |err| {
                                         ctx.on_compute_error(err, &info.identity)
                                     })
                                     .await,

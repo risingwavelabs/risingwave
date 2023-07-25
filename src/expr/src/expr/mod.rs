@@ -181,6 +181,50 @@ impl dyn Expression {
             None
         })
     }
+
+    pub async fn eval_infallible_by_ignore(
+        &self,
+        input: &DataChunk,
+        on_err: impl Fn(ExprError),
+    ) -> ArrayRef {
+        const_assert!(!STRICT_MODE);
+
+        if let Ok(array) = self.eval(input).await {
+            return array;
+        }
+
+        // When eval failed, recompute in row-based execution ignore each failed row.
+        let mut array_builder = self.return_type().create_array_builder(input.cardinality());
+        for row in input.rows_with_holes() {
+            if let Some(row) = row {
+                if let Some(datum) = self
+                    .eval_row_infallible_by_ignore(&row.into_owned_row(), &on_err)
+                    .await
+                {
+                    array_builder.append(&datum);
+                }
+            } else {
+                array_builder.append_null();
+            }
+        }
+        Arc::new(array_builder.finish())
+    }
+
+    pub async fn eval_row_infallible_by_ignore(
+        &self,
+        input: &OwnedRow,
+        on_err: impl Fn(ExprError),
+    ) -> Option<Datum> {
+        const_assert!(!STRICT_MODE);
+
+        self.eval_row(input).await.map_or_else(
+            |err| {
+                on_err(err);
+                None
+            },
+            Some,
+        )
+    }
 }
 
 /// An owned dynamically typed [`Expression`].
