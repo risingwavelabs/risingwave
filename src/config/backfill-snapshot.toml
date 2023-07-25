@@ -5,4 +5,4 @@
 stream_chunk_size = 10000000000
 
 [system]
-barrier_interval_ms = 10
+barrier_interval_ms = 1

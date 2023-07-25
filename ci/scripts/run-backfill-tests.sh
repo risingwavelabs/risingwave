@@ -44,6 +44,7 @@ TOTAL_SNAPSHOT_COUNT=1
 for i in $(seq 1 "$SNAPSHOT_COUNT")
 do
   COUNT=$(run_insert_with_count)
+  echo "INSERTED: $COUNT rows"
   TOTAL_SNAPSHOT_COUNT=$((TOTAL_SNAPSHOT_COUNT + COUNT))
   flush
 done

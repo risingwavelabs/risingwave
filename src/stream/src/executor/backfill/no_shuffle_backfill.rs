@@ -272,6 +272,7 @@ where
                                 Message::Barrier(barrier) => {
                                     tracing::trace!(
                                         actor = self.actor_id,
+                                        barrier = ?barrier,
                                         "backfill upstream barrier"
                                     );
                                     // If it is a barrier, switch snapshot and consume
