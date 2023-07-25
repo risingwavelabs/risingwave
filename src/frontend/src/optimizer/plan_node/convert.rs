@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use paste::paste;
+use risingwave_common::catalog::FieldDisplay;
 
 use super::*;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -74,11 +75,14 @@ pub fn stream_enforce_eowc_requirement(
             )
             .into())
         } else {
-            if n_watermark_cols > 1 {
-                ctx.warn_to_user("There are multiple watermark columns in the query, currently only the first one will be used.");
-            }
             let watermark_col_idx = watermark_cols.ones().next().unwrap();
-            Ok(StreamSort::new(plan, watermark_col_idx).into())
+            if n_watermark_cols > 1 {
+                ctx.warn_to_user(format!(
+                    "There are multiple watermark columns in the query, the first one `{}` is used.",
+                    FieldDisplay(&plan.schema()[watermark_col_idx])
+                ));
+            }
+            Ok(StreamEowcSort::new(plan, watermark_col_idx).into())
         }
     } else if !emit_on_window_close && plan.emit_on_window_close() {
         Err(ErrorCode::InternalError(

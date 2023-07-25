@@ -19,7 +19,9 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId};
+use risingwave_common::catalog::{
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
+};
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -96,35 +98,48 @@ async fn extract_upsert_avro_table_schema(
     let parser_config = ParserProperties::new(SourceFormat::UpsertAvro, with_properties, &info)?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
-
-    let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(
-            format!("Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection. {:?}", e)
-        )))?;
-    let pks = vec_pk_desc
+    let mut vec_column_catalog = vec_column_desc
+        .clone()
         .into_iter()
-        .map(|desc| {
-            vec_column_desc
-                .iter()
-                .find(|x| x.name == desc.name)
-                .ok_or_else(|| {
-                    RwError::from(ErrorCode::InternalError(format!(
-                        "Can not found primary key column {} in value schema",
-                        desc.name
-                    )))
-                })
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
+            is_hidden: false,
         })
-        .map_ok(|desc| desc.name.clone())
-        .collect::<Result<Vec<_>>>()?;
-    Ok((
-        vec_column_desc
+        .collect_vec();
+
+    // For upsert avro, if we can't extract pk from schema, use message key as primary key
+    let pks = if let Ok(pk_desc) = conf.extract_pks() {
+        pk_desc
             .into_iter()
-            .map(|col| ColumnCatalog {
-                column_desc: col.into(),
-                is_hidden: false,
+            .map(|desc| {
+                vec_column_desc
+                    .iter()
+                    .find(|x| x.name == desc.name)
+                    .ok_or_else(|| {
+                        RwError::from(ErrorCode::InternalError(format!(
+                            "Can not found primary key column {} in value schema",
+                            desc.name
+                        )))
+                    })
             })
-            .collect_vec(),
-        pks,
-    ))
+            .map_ok(|desc| desc.name.clone())
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        let kafka_key_column = ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type: DataType::Bytea,
+                column_id: (vec_column_catalog.len() as i32).into(),
+                name: DEFAULT_KEY_COLUMN_NAME.to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
+                generated_or_default_column: None,
+            },
+            is_hidden: true,
+        };
+        vec_column_catalog.push(kafka_key_column);
+        vec![DEFAULT_KEY_COLUMN_NAME.into()]
+    };
+    Ok((vec_column_catalog, pks))
 }
 
 async fn extract_debezium_avro_table_pk_columns(

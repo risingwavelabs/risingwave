@@ -748,7 +748,7 @@ pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
-pub use stream_sort::StreamSort;
+pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_table_scan::StreamTableScan;
@@ -858,7 +858,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
         }
     };
@@ -965,7 +965,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
         }
     };
