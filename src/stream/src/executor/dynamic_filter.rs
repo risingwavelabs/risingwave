@@ -23,7 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row};
+use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ScalarRefImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
@@ -47,7 +47,7 @@ use crate::executor::{expect_first_barrier_from_aligned_stream, StreamExecutorRe
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum DynamicFilterWatermarkCacheEntry {
     Empty,
-    Uninitialized,
+    Evicted,
     // We need to store pk, in case we encounter `Delete`s.
     // Then we can remove the Entry.
     Smallest { pk: OwnedRow, value: ScalarImpl },
@@ -75,10 +75,13 @@ enum DynamicFilterWatermarkCacheEntry {
 ///
 /// Updates to LHS:
 /// 1. INSERT
-///    A. Cache empty. Just update watermark.
+///    A. Cache empty. Update cached value.
 ///    B. Cache not empty. Update lowest value if applicable.
 /// 2. DELETE
-///    A. Matches lowest value pk. Remove lowest value. Do table scan to find new lowest value.
+///    A. Matches lowest value pk. Remove lowest value. Mark cache as Evicted.
+///       Later on Barrier we will refresh the cache with table scan.
+///       Since on barrier we will clean up all values before watermark,
+///       We have less rows to scan.
 ///    B. Does not match. Do nothing.
 /// 3. UPDATE
 ///    A. Do delete then insert.
@@ -111,11 +114,18 @@ impl DynamicFilterWatermarkCache {
     fn get_cached_value(&self) -> Option<&ScalarImpl> {
         match &self.row {
             DynamicFilterWatermarkCacheEntry::Empty => None,
-            DynamicFilterWatermarkCacheEntry::Uninitialized => None,
+            DynamicFilterWatermarkCacheEntry::Evicted => None,
             DynamicFilterWatermarkCacheEntry::Smallest { value, .. } => Some(&value),
         }
     }
 
+    fn get_cached_pk_and_val(&self) -> Option<(&OwnedRow, &ScalarImpl)> {
+        match &self.row {
+            DynamicFilterWatermarkCacheEntry::Empty => None,
+            DynamicFilterWatermarkCacheEntry::Evicted => None,
+            DynamicFilterWatermarkCacheEntry::Smallest { pk, value, } => Some((pk, value)),
+        }
+    }
     fn process_rhs_watermark(&mut self, watermark: Watermark, unused_clean_hint: &mut Option<Watermark>) -> StreamExecutorResult<()> {
         match self.get_cached_value() {
             None => {
@@ -149,17 +159,39 @@ impl DynamicFilterWatermarkCache {
     }
 
     fn process_insert(&mut self, row: impl Row) {
-        todo!()
+        match (self.get_cached_value(), row.datum_at(self.watermark_col_idx)) {
+            (None, Some(inserted_value)) => {
+                self.row = DynamicFilterWatermarkCacheEntry::Smallest {
+                    pk: (&row).project(&self.lhs_pk_indices).into_owned_row(),
+                    value: inserted_value.into_scalar_impl(),
+                }
+            }
+            (Some(current_value), Some(inserted_value)) => {
+                if inserted_value.default_cmp(&current_value.as_scalar_ref_impl()).is_lt() {
+                    self.row = DynamicFilterWatermarkCacheEntry::Smallest {
+                        pk: (&row).project(&self.lhs_pk_indices).into_owned_row(),
+                        value: inserted_value.into_scalar_impl(),
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
-    // TODO: Highlight table scan to reviewers.
     fn process_delete(&mut self, row: impl Row) {
-        todo!()
+        if let Some((pk, val)) = self.get_cached_pk_and_val() {
+            let del_pk = row.project(&self.lhs_pk_indices);
+            if Row::eq(pk, del_pk) {
+                self.row = DynamicFilterWatermarkCacheEntry::Evicted;
+            }
+        }
     }
 
     /// Takes care of state table commit
     fn process_state_table_commit(&mut self, watermark: &Option<ScalarImpl>) {
-        todo!()
+        if let Some(watermark) = watermark {
+            self.prev_cleaned_watermark = Some(watermark.clone());
+        }
     }
 }
 
