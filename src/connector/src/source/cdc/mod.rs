@@ -20,6 +20,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 pub use enumerator::*;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::connector_service::{SourceType, TableSchema};
 use serde::Deserialize;
 pub use source::*;
@@ -37,12 +38,24 @@ pub struct CdcProperties {
     pub props: HashMap<String, String>,
 
     /// Schema of the source specified by users
-    pub table_schema: Option<TableSchema>,
+    pub table_schema: TableSchema,
 }
 
 impl CdcProperties {
     pub fn get_source_type_pb(&self) -> anyhow::Result<SourceType> {
         SourceType::from_str_name(&self.source_type.to_ascii_uppercase())
             .ok_or_else(|| anyhow!("unknown source type: {}", self.source_type))
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self
+                .table_schema
+                .columns
+                .iter()
+                .map(ColumnDesc::from)
+                .map(Field::from)
+                .collect(),
+        }
     }
 }

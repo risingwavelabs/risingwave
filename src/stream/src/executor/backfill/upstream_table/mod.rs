@@ -17,12 +17,6 @@ pub trait UpstreamTable {
 //     RISINGWAVE,
 // }
 
-#[derive(Debug, Clone)]
-pub struct SchemaTableName {
-    pub schema_name: String,
-    pub table_name: String,
-}
-
 impl<S: StateStore> UpstreamTable for StorageTable<S> {
     fn identity(&self) -> &str {
         "StorageTable"

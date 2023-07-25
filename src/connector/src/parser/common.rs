@@ -14,6 +14,11 @@
 
 use std::borrow::Cow;
 
+use chrono::NaiveDate;
+use mysql_async::Row as MysqlRow;
+use risingwave_common::catalog::Schema;
+use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl};
+use rust_decimal::Decimal as RustDecimal;
 use simd_json::{BorrowedValue, ValueAccess};
 
 pub(crate) fn json_object_smart_get_value<'a, 'b>(
@@ -31,4 +36,109 @@ pub(crate) fn json_object_smart_get_value<'a, 'b>(
         }
     }
     None
+}
+
+pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Datum> {
+    let mut datums = vec![];
+    for i in 0..mysql_row.len() {
+        let rw_field = &schema.fields[i];
+        let datum = {
+            match rw_field.data_type {
+                DataType::Boolean => {
+                    let v = mysql_row.take::<bool, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Int16 => {
+                    let v = mysql_row.take::<i16, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Int32 => {
+                    let v = mysql_row.take::<i32, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Int64 => {
+                    let v = mysql_row.take::<i64, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Float32 => {
+                    let v = mysql_row.take::<f32, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Float64 => {
+                    let v = mysql_row.take::<f64, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Decimal => {
+                    let v = mysql_row.take::<RustDecimal, _>(i);
+                    v.map(|v| ScalarImpl::from(Decimal::from(v)))
+                }
+                DataType::Varchar => {
+                    let v = mysql_row.take::<String, _>(i);
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Date => {
+                    let v = mysql_row.take::<NaiveDate, _>(i);
+                    v.map(|v| ScalarImpl::from(Date::from(v)))
+                }
+                _ => None,
+            }
+        };
+        datums.push(datum);
+    }
+    datums
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use futures::{pin_mut, Stream};
+    use futures_async_stream::stream;
+    use mysql_async::prelude::*;
+    use mysql_async::Row;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, Decimal, ScalarImpl};
+    use tokio_stream::StreamExt;
+
+    // unit test for external table reader
+    #[tokio::test]
+    async fn test_mysql_table_reader() {
+        let pool = mysql_async::Pool::new("mysql://root:123456@localhost:8306/mydb");
+
+        let t1schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+        ]);
+
+        let mut conn = pool.get_conn().await.unwrap();
+        let mut result_set = conn.query_iter("SELECT * FROM `t1`").await.unwrap();
+        let s = result_set.stream::<Row>().await.unwrap().unwrap();
+        let row_stream = s.map(|row| {
+            // convert mysql row into OwnedRow
+            let mut mysql_row = row.unwrap();
+            let mut datums = vec![];
+
+            let mysql_columns = mysql_row.columns_ref();
+            for i in 0..mysql_row.len() {
+                let rw_field = &t1schema.fields[i];
+                let datum = match rw_field.data_type {
+                    DataType::Int32 => {
+                        let value = mysql_row.take::<i32, _>(i);
+                        value.map(|v| ScalarImpl::from(v))
+                    }
+                    _ => None,
+                };
+                datums.push(datum);
+            }
+            Ok::<_, anyhow::Error>(Some(OwnedRow::new(datums)))
+        });
+        pin_mut!(row_stream);
+        while let Some(row) = row_stream.next().await {
+            if let Ok(ro) = row && ro.is_some() {
+                println!("OwnedRow {:?}", ro);
+            }
+        }
+    }
 }

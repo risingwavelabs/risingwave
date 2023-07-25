@@ -309,7 +309,7 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn init_cdc_properties(&mut self, table_schema: Option<PbTableSchema>) {
+    pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
         match self {
             ConnectorProperties::MySqlCdc(c)
             | ConnectorProperties::PostgresCdc(c)

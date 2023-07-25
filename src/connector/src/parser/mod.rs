@@ -34,6 +34,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
+pub use self::common::mysql_row_to_datums;
 pub use self::csv_parser::CsvParserConfig;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;

@@ -963,6 +963,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f40afb3abbf90895dda3ddbc6d8734d24215130a22d646067690f5e318f81bc"
 
 [[package]]
+name = "bigdecimal"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6773ddc0eafc0e509fb60e48dff7f450f8e674a0686ae8605e8d9901bd5eefa"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2461,6 +2472,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
+name = "frunk"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11a351b59e12f97b4176ee78497dff72e4276fb1ceb13e19056aca7fa0206287"
+dependencies = [
+ "frunk_core",
+ "frunk_derives",
+ "frunk_proc_macros",
+]
+
+[[package]]
+name = "frunk_core"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af2469fab0bd07e64ccf0ad57a1438f63160c69b2e57f04a439653d68eb558d6"
+
+[[package]]
+name = "frunk_derives"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0fa992f1656e1707946bbba340ad244f0814009ef8c0118eb7b658395f19a2e"
+dependencies = [
+ "frunk_proc_macro_helpers",
+ "quote",
+ "syn 2.0.26",
+]
+
+[[package]]
+name = "frunk_proc_macro_helpers"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35b54add839292b743aeda6ebedbd8b11e93404f902c56223e51b9ec18a13d2c"
+dependencies = [
+ "frunk_core",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.26",
+]
+
+[[package]]
+name = "frunk_proc_macros"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71b85a1d4a9a6b300b41c05e8e13ef2feca03e0334127f29eca9506a7fe13a93"
+dependencies = [
+ "frunk_core",
+ "frunk_proc_macro_helpers",
+ "quote",
+ "syn 2.0.26",
+]
+
+[[package]]
 name = "fs-err"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3935,6 +3998,7 @@ dependencies = [
  "lru 0.8.1",
  "mio",
  "mysql_common",
+ "native-tls",
  "once_cell",
  "pem",
  "percent-encoding",
@@ -3945,6 +4009,7 @@ dependencies = [
  "socket2 0.4.9",
  "thiserror",
  "tokio",
+ "tokio-native-tls",
  "tokio-util",
  "twox-hash",
  "url",
@@ -3957,21 +4022,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9006c95034ccf7b903d955f210469119f6c3477fc9c9e7a7845ce38a3e665c2a"
 dependencies = [
  "base64 0.13.1",
+ "bigdecimal",
  "bindgen",
  "bitflags 1.3.2",
  "bitvec",
  "byteorder",
  "bytes",
  "cc",
+ "chrono",
  "cmake",
  "crc32fast",
  "flate2",
+ "frunk",
  "lazy_static",
  "lexical",
  "num-bigint",
  "num-traits",
  "rand",
  "regex",
+ "rust_decimal",
  "saturating",
  "serde",
  "serde_json",
@@ -3980,6 +4049,8 @@ dependencies = [
  "smallvec",
  "subprocess",
  "thiserror",
+ "time 0.3.21",
+ "uuid",
 ]
 
 [[package]]
@@ -6183,6 +6254,8 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "moka",
+ "mysql_async",
+ "mysql_common",
  "nexmark",
  "num-bigint",
  "parking_lot 0.12.1",
@@ -6898,7 +6971,6 @@ dependencies = [
  "maplit",
  "memcomparable",
  "multimap",
- "mysql_async",
  "num-traits",
  "parking_lot 0.12.1",
  "pin-project",

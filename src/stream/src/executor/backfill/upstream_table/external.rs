@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use chrono::NaiveDate;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -23,9 +24,11 @@ use mysql_async::{ResultSetStream, TextProtocol};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Schema, TableId, TableOption};
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::value_encoding::EitherSerde;
+use risingwave_connector::parser::mysql_row_to_datums;
 use risingwave_connector::source::cdc::CdcProperties;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::row_serde::ColumnMapping;
@@ -33,9 +36,10 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use crate::executor::backfill::upstream_table::binlog::UpstreamBinlogOffsetRead;
-use crate::executor::backfill::upstream_table::snapshot::{SnapshotReadArgs, UpstreamSnapshotRead};
+use crate::executor::backfill::upstream_table::snapshot::SnapshotReadArgs;
 use crate::executor::backfill::upstream_table::SchemaTableName;
-use crate::executor::StreamExecutorResult;
+use crate::executor::backfill::utils::iter_chunks;
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 pub type ExternalStorageTable = ExternalTableInner<EitherSerde>;
 
@@ -176,14 +180,17 @@ pub enum ExternalTableReaderImpl {
 #[derive(Debug)]
 pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,
+    rw_schema: Schema,
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(_cdc_props: CdcProperties) -> Self {
-        // todo: create a mysql client for upstream db
+    pub async fn new(cdc_props: CdcProperties) -> Self {
         let database_url = "mysql://root:123456@localhost:3306/mydb";
         let pool = mysql_async::Pool::new(database_url);
-        Self { pool }
+        Self {
+            pool,
+            rw_schema: cdc_props.schema(),
+        }
     }
 }
 
@@ -213,25 +220,15 @@ impl ExternalTableReader for MySqlExternalTableReader {
             );
             let mut conn = self.pool.get_conn().await?;
             let mut result_set = conn.query_iter(sql).await?;
-            let row_stream = result_set.stream::<mysql_async::Row>().await?;
-            if let Some(stream) = row_stream {
-                let row_stream = stream;
-                pin_mut!(row_stream);
-                #[for_await]
-                for row in row_stream {
-                    let _row = row?;
-                    // TODO: collect row into stream chunk
-                    // let mut row_data = Vec::new();
-                    // for i in 0..row.len() {
-                    //     let cell = row.get(i);
-                    //     row_data.push(cell);
-                    // }
-                    // let row_data = RowData::new(row_data);
-                    // let chunk = StreamChunk::Data(row_data);
+            let rs_stream = result_set.stream::<mysql_async::Row>().await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut mysql_row = row?;
+                let datums = mysql_row_to_datums(&mysql_row, &self.rw_schema);
+                Ok(OwnedRow::new(datums))
+            });
 
-                    yield None;
-                }
-            }
+            let chunk_stream = iter_chunks::<_, StreamExecutorError>(row_stream, &t1schema, 4);
         }
     }
 }
@@ -268,65 +265,6 @@ impl ExternalTableReader for ExternalTableReaderImpl {
             for chunk in stream {
                 let chunk = chunk?;
                 yield chunk;
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::{pin_mut, Stream};
-    use futures_async_stream::stream;
-    use mysql_async::prelude::*;
-    use mysql_async::Row;
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use tokio_stream::StreamExt;
-
-    use crate::executor::backfill::utils::iter_chunks;
-    use crate::executor::StreamExecutorError;
-
-    // unit test for external table reader
-    #[tokio::test]
-    async fn test_mysql_table_reader() {
-        let pool = mysql_async::Pool::new("mysql://root:123456@localhost:8306/mydb");
-
-        let t1schema = Schema::new(vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v2"),
-        ]);
-
-        let mut conn = pool.get_conn().await.unwrap();
-        let mut result_set = conn.query_iter("SELECT * FROM `t1`").await.unwrap();
-        let s = result_set.stream::<Row>().await.unwrap().unwrap();
-        let row_stream = s.map(|row| {
-            // convert mysql row into OwnedRow
-            let mut mysql_row = row.unwrap();
-            let mut datums = vec![];
-
-            let mysql_columns = mysql_row.columns_ref();
-            for i in 0..mysql_row.len() {
-                let rw_field = &t1schema.fields[i];
-                let datum = match rw_field.data_type {
-                    DataType::Int32 => {
-                        let value = mysql_row.take::<i32, _>(i);
-                        value.map(|v| ScalarImpl::from(v))
-                    }
-                    _ => None,
-                };
-                datums.push(datum);
-            }
-            Ok(OwnedRow::new(datums))
-        });
-
-        let chunk_stream = iter_chunks::<_, StreamExecutorError>(row_stream, &t1schema, 4);
-        pin_mut!(chunk_stream);
-        while let Some(chunk) = chunk_stream.next().await {
-            if let Ok(chk) = chunk && chk.is_some() {
-                let data = chk.unwrap();
-                println!("chunk {:?}", data.data_chunk());
             }
         }
     }

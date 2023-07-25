@@ -28,6 +28,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(async_fn_in_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 use std::time::Duration;
 
