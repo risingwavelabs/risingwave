@@ -326,7 +326,7 @@ steps:
     timeout_in_minutes: 5
 
   - label: "Backfill snapshot tests"
-    command: "SNAPSHOT_COUNT=18 UPSTREAM_COUNT=1 RISEDEV_PROFILE=ci-backfill-snapshot ci/scripts/backfill-test.sh -p ci-release"
+    command: "SNAPSHOT_COUNT=20 UPSTREAM_COUNT=1 RISEDEV_PROFILE=ci-backfill-snapshot ci/scripts/backfill-test.sh -p ci-release"
     depends_on:
       - "build"
     plugins:
