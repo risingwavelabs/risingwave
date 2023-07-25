@@ -16,7 +16,7 @@ async-trait = "0.1"
 aws-sdk-s3 = { version = "0.2", package = "madsim-aws-sdk-s3" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
-etcd-client = { version = "0.2.23", package = "madsim-etcd-client" }
+etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.10"
@@ -40,7 +40,7 @@ risingwave_sqlparser = { path = "../../sqlparser" }
 risingwave_sqlsmith = { path = "../sqlsmith" }
 serde = "1.0.152"
 serde_derive = "1.0.152"
-serde_json = "1.0.91"
+serde_json = "1.0.103"
 sqllogictest = "0.15.0"
 tempfile = "3"
 tokio = { version = "0.2.19", package = "madsim-tokio" }

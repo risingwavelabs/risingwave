@@ -26,7 +26,7 @@ crepe = "0.1"
 easy-ext = "1"
 either = "1"
 enum-as-inner = "0.6"
-etcd-client = { version = "0.2", package = "madsim-etcd-client" }
+etcd-client = { workspace = true }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -68,7 +68,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"

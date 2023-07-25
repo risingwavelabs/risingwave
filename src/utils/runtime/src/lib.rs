@@ -251,7 +251,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
             Deployment::Cloud => fmt_layer.json().boxed(),
-            Deployment::Other => fmt_layer.pretty().boxed(),
+            Deployment::Other => fmt_layer.boxed(),
         };
 
         layers.push(

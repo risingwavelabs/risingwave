@@ -13,17 +13,17 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use risingwave_common::types::Timestamp;
-use risingwave_expr_macro::function;
+use either::Either;
+use risingwave_common::types::{DataType, Timestamp, Timestamptz};
+use risingwave_expr_macro::{build_function, function};
 
+use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::ChronoPattern;
-use crate::Result;
+use crate::expr::BoxedExpression;
+use crate::{ExprError, Result};
 
-#[function(
-    "to_timestamp1(varchar, varchar) -> timestamp",
-    prebuild = "ChronoPattern::from_datum($1)?"
-)]
-fn to_timestamp1(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
+#[inline(always)]
+fn to_timestamp_common(s: &str, tmpl: &ChronoPattern) -> Result<Either<Timestamp, Timestamptz>> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_dependent().iter())?;
 
@@ -64,7 +64,68 @@ fn to_timestamp1(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
 
     // Seconds and nanoseconds can be omitted, so we don't need to assign default value for them.
 
-    // FIXME: We should return `TimestampTz` here.
-    parsed.offset.get_or_insert(0);
-    Ok(Timestamp(parsed.to_datetime()?.naive_utc()))
+    // The parsed result may or may not contain an offset.
+    Ok(match parsed.offset {
+        None => Either::Left(parsed.to_naive_datetime_with_offset(0)?.into()),
+        Some(_) => Either::Right(parsed.to_datetime()?.into()),
+    })
+}
+
+#[function(
+    "to_timestamp1(varchar, varchar) -> timestamp",
+    prebuild = "ChronoPattern::from_datum($1)?"
+)]
+pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
+    match to_timestamp_common(s, tmpl)? {
+        Either::Left(ts) => Ok(ts),
+        // If the parsed result is a physical instant, return its reading in UTC.
+        // This decision was arbitrary and we are just being backward compatible here.
+        Either::Right(tsz) => timestamptz_at_time_zone(tsz, "UTC"),
+    }
+}
+
+#[function(
+    "to_timestamp1(varchar, varchar, varchar) -> timestamptz",
+    prebuild = "ChronoPattern::from_datum($1)?"
+)]
+pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
+    Ok(match to_timestamp_common(s, tmpl)? {
+        Either::Right(tsz) => tsz,
+        // If the parsed result lacks offset info, interpret it in the implicit session time zone.
+        Either::Left(ts) => timestamp_at_time_zone(ts, timezone)?,
+    })
+}
+
+// Only to register this signature to function signature map.
+#[build_function("to_timestamp1(varchar, varchar) -> timestamptz")]
+fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    Err(ExprError::UnsupportedFunction(
+        "to_timestamp should have been rewritten to include timezone".into(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_timestamp_legacy() {
+        // This legacy expr can no longer be build by frontend, so we test its backward compatible
+        // behavior in unit tests rather than e2e slt.
+        for (input, format, expected) in [
+            (
+                "2020-02-03 12:34:56",
+                "yyyy-mm-dd hh24:mi:ss",
+                "2020-02-03 12:34:56",
+            ),
+            (
+                "2020-02-03 12:34:56+03:00",
+                "yyyy-mm-dd hh24:mi:ss tzh:tzm",
+                "2020-02-03 09:34:56",
+            ),
+        ] {
+            let actual = to_timestamp_legacy(input, &ChronoPattern::compile(format)).unwrap();
+            assert_eq!(actual.to_string(), expected);
+        }
+    }
 }

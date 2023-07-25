@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use arrow_schema::{Field, Schema, SchemaRef};
+use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use futures_util::stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -90,7 +90,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                     true,
                 ))
             })
-            .try_collect()?,
+            .try_collect::<_, Fields, _>()?,
     ));
     // connect to UDF service
     let client = crate::expr::expr_udf::get_or_create_client(&udtf.link)?;

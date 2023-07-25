@@ -28,6 +28,14 @@ type userBehavior struct {
 	ParentTargetId   string `json:"parent_target_id"`
 }
 
+func (r *userBehavior) Topic() string {
+	return "user_behaviors"
+}
+
+func (r *userBehavior) Key() string {
+	return r.UserId
+}
+
 func (r *userBehavior) ToPostgresSql() string {
 	return fmt.Sprintf(`INSERT INTO %s
 (user_id, target_id, target_type, event_timestamp, behavior_type, parent_target_type, parent_target_id)
@@ -35,9 +43,9 @@ values ('%s', '%s', '%s', '%s', '%s', '%s', '%s')`,
 		"user_behaviors", r.UserId, r.TargetId, r.TargetType, r.EventTimestamp, r.BehaviorType, r.ParentTargetType, r.ParentTargetId)
 }
 
-func (r *userBehavior) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "user_behaviors", r.UserId, data
+func (r *userBehavior) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type targetType string
