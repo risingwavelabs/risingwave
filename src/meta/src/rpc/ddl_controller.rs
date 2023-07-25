@@ -210,7 +210,7 @@ where
     }
 
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
-        // set the started_at_epoch to the current epoch.
+        // set the initialized_at_epoch to the current epoch.
         source.initialized_at_epoch = Some(Epoch::now().0);
 
         self.catalog_manager

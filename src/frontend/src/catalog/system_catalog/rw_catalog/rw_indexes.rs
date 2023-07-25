@@ -47,7 +47,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(index.index_table.owner as i32)),
                         Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),
                         Some(ScalarImpl::Utf8("".into())),
-                        index.started_at_epoch.map(|e| e.as_scalar()),
+                        index.initialized_at_epoch.map(|e| e.as_scalar()),
                         index.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })

@@ -149,7 +149,7 @@ pub struct SinkCatalog {
 
     pub created_at_epoch: Option<Epoch>,
 
-    pub started_at_epoch: Option<Epoch>,
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 impl SinkCatalog {
@@ -181,7 +181,7 @@ impl SinkCatalog {
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
             connection_id: self.connection_id.map(|id| id.into()),
-            initialized_at_epoch: self.started_at_epoch.map(|e| e.0),
+            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
         }
     }
@@ -256,7 +256,7 @@ impl From<PbSink> for SinkCatalog {
             sink_type: SinkType::from_proto(sink_type),
             connection_id: pb.connection_id.map(ConnectionId),
             created_at_epoch: pb.created_at_epoch.map(Epoch::from),
-            started_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
+            initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
         }
     }
 }

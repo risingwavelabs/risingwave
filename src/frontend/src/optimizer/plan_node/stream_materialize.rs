@@ -220,7 +220,7 @@ impl StreamMaterialize {
             dist_key_in_pk: vec![],
             cardinality,
             created_at_epoch: None,
-            started_at_epoch: None,
+            initialized_at_epoch: None,
         })
     }
 

@@ -60,7 +60,7 @@ impl SysCatalogReaderImpl {
                             )
                             .into(),
                         )),
-                        table.started_at_epoch.map(|e| e.as_scalar()),
+                        table.initialized_at_epoch.map(|e| e.as_scalar()),
                         table.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })

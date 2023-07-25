@@ -81,7 +81,7 @@ impl SinkDesc {
             sink_type: self.sink_type,
             connection_id,
             created_at_epoch: None,
-            started_at_epoch: None,
+            initialized_at_epoch: None,
         }
     }
 

@@ -145,7 +145,7 @@ pub struct TableCatalog {
 
     pub created_at_epoch: Option<Epoch>,
 
-    pub started_at_epoch: Option<Epoch>,
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -391,7 +391,7 @@ impl TableCatalog {
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
             cardinality: Some(self.cardinality.to_protobuf()),
-            initialized_at_epoch: self.started_at_epoch.map(|epoch| epoch.0),
+            initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
         }
     }
@@ -497,7 +497,7 @@ impl From<PbTable> for TableCatalog {
                 .map(|c| Cardinality::from_protobuf(&c))
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
-            started_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
+            initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
         }
     }
 }
@@ -639,7 +639,7 @@ mod tests {
                 dist_key_in_pk: vec![],
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
-                started_at_epoch: None,
+                initialized_at_epoch: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

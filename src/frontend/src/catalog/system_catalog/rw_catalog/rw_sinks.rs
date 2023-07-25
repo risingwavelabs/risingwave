@@ -73,7 +73,7 @@ impl SysCatalogReaderImpl {
                             get_acl_items(&Object::SinkId(sink.id.sink_id), &users, username_map)
                                 .into(),
                         ),
-                        sink.started_at_epoch.map(|e| e.as_scalar()),
+                        sink.initialized_at_epoch.map(|e| e.as_scalar()),
                         sink.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })

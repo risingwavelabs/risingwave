@@ -84,7 +84,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
-                        t.started_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
@@ -105,7 +105,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
-                        t.started_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
@@ -126,7 +126,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
-                        t.started_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
@@ -147,7 +147,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
-                        t.started_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
