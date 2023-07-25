@@ -31,6 +31,8 @@ pub const RW_TABLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "owner"),
     (DataType::Varchar, "definition"),
     (DataType::Varchar, "acl"),
+    (DataType::Timestamptz, "initialized_at"),
+    (DataType::Timestamptz, "created_at"),
 ];
 
 impl SysCatalogReaderImpl {
@@ -58,6 +60,8 @@ impl SysCatalogReaderImpl {
                             )
                             .into(),
                         )),
+                        table.initialized_at_epoch.map(|e| e.as_scalar()),
+                        table.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })
             })

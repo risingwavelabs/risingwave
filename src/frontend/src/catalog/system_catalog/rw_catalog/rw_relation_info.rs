@@ -31,6 +31,8 @@ pub const RW_RELATION_INFO_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "relationtimezone"), /* The timezone used to interpret ambiguous
                                               * dates/timestamps as tstz */
     (DataType::Varchar, "fragments"), // fragments is json encoded fragment infos.
+    (DataType::Timestamptz, "initialized_at"),
+    (DataType::Timestamptz, "created_at"),
 ];
 
 impl SysCatalogReaderImpl {
@@ -82,6 +84,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
+                        t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
             });
@@ -101,6 +105,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
+                        t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
             });
@@ -120,6 +126,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
+                        t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
             });
@@ -139,6 +147,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
+                        t.initialized_at_epoch.map(|e| e.as_scalar()),
+                        t.created_at_epoch.map(|e| e.as_scalar()),
                     ]));
                 }
             });
@@ -154,6 +164,8 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Int32(t.id as i32)),
                     Some(ScalarImpl::Utf8("".into())),
                     None,
+                    t.initialized_at_epoch.map(|e| e.as_scalar()),
+                    t.created_at_epoch.map(|e| e.as_scalar()),
                 ]));
             });
         }
