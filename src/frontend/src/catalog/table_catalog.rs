@@ -380,7 +380,6 @@ impl TableCatalog {
             properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
             dml_fragment_id: self.dml_fragment_id,
-
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
             row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
