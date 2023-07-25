@@ -104,6 +104,7 @@ macro_rules! commit_meta {
 }
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
@@ -761,7 +762,7 @@ where
     pub async fn finish_create_table_procedure(
         &self,
         internal_tables: Vec<Table>,
-        table: &Table,
+        table: Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1413,7 +1414,7 @@ where
 
     pub async fn finish_create_source_procedure(
         &self,
-        source: &Source,
+        mut source: Source,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1425,6 +1426,8 @@ where
             "source must be in creating procedure"
         );
         database_core.in_progress_creation_tracker.remove(&key);
+
+        source.created_at_epoch = Some(Epoch::now().0);
         sources.insert(source.id, source.clone());
 
         commit_meta!(self, sources)?;
@@ -1527,8 +1530,8 @@ where
 
     pub async fn finish_create_table_procedure_with_source(
         &self,
-        source: &Source,
-        mview: &Table,
+        source: Source,
+        mview: Table,
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
@@ -1864,8 +1867,8 @@ where
     pub async fn finish_create_index_procedure(
         &self,
         internal_tables: Vec<Table>,
-        index: &Index,
-        table: &Table,
+        index: Index,
+        table: Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1885,6 +1888,7 @@ where
             .remove(&table.id);
 
         indexes.insert(index.id, index.clone());
+
         tables.insert(table.id, table.clone());
         for table in &internal_tables {
             tables.insert(table.id, table.clone());
@@ -1948,7 +1952,7 @@ where
     pub async fn finish_create_sink_procedure(
         &self,
         internal_tables: Vec<Table>,
-        sink: &Sink,
+        sink: Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;

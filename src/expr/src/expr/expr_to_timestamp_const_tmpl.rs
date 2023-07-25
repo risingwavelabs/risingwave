@@ -121,6 +121,7 @@ fn build_to_timestamp_expr(
 }
 
 /// Support building the variant returning timestamp without time zone for backward compatibility.
+#[build_function("to_timestamp1(varchar, varchar) -> timestamp", deprecated)]
 pub fn build_to_timestamp_expr_legacy(
     return_type: DataType,
     children: Vec<BoxedExpression>,
