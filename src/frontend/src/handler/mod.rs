@@ -246,16 +246,9 @@ pub async fn handle(
                 .await;
             }
             // TODO(st1page): refacor it
-            let mut notice = Default::default();
-            let source_schema = source_schema
-                .map(|source_schema| -> Result<SourceSchema> {
-                    let (source_schema, _, n) = source_schema
-                        .into_source_schema()
-                        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
-                    notice = n;
-                    Ok(source_schema)
-                })
-                .transpose()?;
+            let notice = Default::default();
+            let source_schema =
+                source_schema.map(|source_schema| source_schema.into_source_schema_v2());
 
             create_table::handle_create_table(
                 handler_args,

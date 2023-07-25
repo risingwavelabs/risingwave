@@ -35,6 +35,8 @@ pub const PG_ATTRIBUTE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int16, "attnum"),
     (DataType::Boolean, "attnotnull"),
     (DataType::Boolean, "attisdropped"),
+    (DataType::Varchar, "attidentity"),
+    (DataType::Varchar, "attgenerated"),
     (DataType::Int32, "atttypmod"),
 ];
 
@@ -55,6 +57,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int16(index as i16 + 1)),
                             Some(ScalarImpl::Bool(false)),
                             Some(ScalarImpl::Bool(false)),
+                            Some(ScalarImpl::Utf8("".into())),
+                            Some(ScalarImpl::Utf8("".into())),
                             // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
                             // The value will generally be -1 for types that do not need
                             // `atttypmod`.
@@ -80,6 +84,8 @@ impl SysCatalogReaderImpl {
                                     Some(ScalarImpl::Int16(index as i16 + 1)),
                                     Some(ScalarImpl::Bool(false)),
                                     Some(ScalarImpl::Bool(false)),
+                                    Some(ScalarImpl::Utf8("".into())),
+                                    Some(ScalarImpl::Utf8("".into())),
                                     // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
                                     // The value will generally be -1 for types that do not need
                                     // `atttypmod`.
