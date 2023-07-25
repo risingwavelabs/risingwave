@@ -467,7 +467,7 @@ dependencies = [
  "fastrand",
  "http",
  "hyper",
- "time 0.3.21",
+ "time 0.3.23",
  "tokio",
  "tower",
  "tracing",
@@ -664,7 +664,7 @@ dependencies = [
  "percent-encoding",
  "regex",
  "sha2",
- "time 0.3.21",
+ "time 0.3.23",
  "tracing",
 ]
 
@@ -805,7 +805,7 @@ dependencies = [
  "itoa",
  "num-integer",
  "ryu",
- "time 0.3.21",
+ "time 0.3.23",
 ]
 
 [[package]]
@@ -1369,7 +1369,7 @@ dependencies = [
  "serde",
  "static_assertions",
  "thiserror",
- "time 0.3.21",
+ "time 0.3.23",
  "tokio",
  "url",
 ]
@@ -2133,7 +2133,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "thiserror",
- "time 0.3.21",
+ "time 0.3.23",
 ]
 
 [[package]]
@@ -2666,7 +2666,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "time 0.3.21",
+ "time 0.3.23",
  "tokio",
  "tracing",
  "urlencoding",
@@ -5014,7 +5014,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "time 0.3.21",
+ "time 0.3.23",
  "url",
 ]
 
@@ -6441,7 +6441,7 @@ dependencies = [
  "pprof",
  "prometheus",
  "risingwave_common",
- "time 0.3.21",
+ "time 0.3.23",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -6914,9 +6914,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.12"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f3208ce4d8448b3f3e7d168a73f5e0c43a61e32930de3bceeccedb388b6bf06"
+checksum = "7ffc183a10b4478d04cbbbfc96d0873219d962dd5accaff2ffbd4ceb7df837f4"
 
 [[package]]
 name = "rusty-fork"
@@ -7195,7 +7195,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with_macros 2.3.3",
- "time 0.3.21",
+ "time 0.3.23",
 ]
 
 [[package]]
@@ -7389,7 +7389,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "thiserror",
- "time 0.3.21",
+ "time 0.3.23",
 ]
 
 [[package]]
@@ -7456,9 +7456,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
+checksum = "62bb4feee49fdd9f707ef802e22365a35de4b7b299de4763d44bfea899442ff9"
 dependencies = [
  "serde",
 ]
@@ -7723,15 +7723,16 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.5.0"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9fbec84f381d5795b08656e4912bec604d162bff9291d6189a78f4c8ab87998"
+checksum = "31c0432476357e58790aaa47a8efb0c5138f137343f3b5f23bd36a27e3b0a6d6"
 dependencies = [
+ "autocfg",
  "cfg-if",
  "fastrand",
  "redox_syscall 0.3.5",
  "rustix 0.37.19",
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -7843,9 +7844,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.21"
+version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f3403384eaacbca9923fa06940178ac13e4edb725486d70e8e15881d0c836cc"
+checksum = "59e399c068f43a5d116fedaf73b203fa4f9c519f17e2b34f63221d3792f81446"
 dependencies = [
  "itoa",
  "libc",
@@ -7863,9 +7864,9 @@ checksum = "7300fbefb4dadc1af235a9cef3737cea692a9d97e1b9cbcd4ebdae6f8868e6fb"
 
 [[package]]
 name = "time-macros"
-version = "0.2.9"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "372950940a5f07bf38dbe211d7283c9e6d7327df53794992d293e534c733d09b"
+checksum = "96ba15a897f3c86766b757e5ac7221554c6750054d74d5b28844fce5fb36a6c4"
 dependencies = [
  "time-core",
 ]
@@ -8330,7 +8331,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "time 0.3.21",
+ "time 0.3.23",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -8530,13 +8531,13 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vergen"
-version = "8.2.1"
+version = "8.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b3c89c2c7e50f33e4d35527e5bf9c11d6d132226dbbd1753f0fbe9f19ef88c6"
+checksum = "bbc5ad0d9d26b2c49a5ab7da76c3e79d3ee37e7821799f8223fcb8f2f391a2e7"
 dependencies = [
  "anyhow",
  "rustversion",
- "time 0.3.21",
+ "time 0.3.23",
 ]
 
 [[package]]
@@ -9026,7 +9027,7 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.26",
- "time 0.3.21",
+ "time 0.3.23",
  "tinyvec",
  "tokio",
  "tokio-postgres",

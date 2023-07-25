@@ -299,7 +299,7 @@ type IntervalStyle = ConfigString<INTERVAL_STYLE>;
 type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
 type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
-type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
+type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 90_500>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
 type ClientEncoding = ConfigString<CLIENT_ENCODING>;
@@ -493,7 +493,11 @@ impl ConfigMap {
             self.client_min_messages = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ClientEncoding::entry_name()) {
             let enc: ClientEncoding = val.as_slice().try_into()?;
-            if !enc.as_str().eq_ignore_ascii_case("UTF8") {
+            // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
+            let clean = enc
+                .as_str()
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "");
+            if !clean.eq_ignore_ascii_case("UTF8") {
                 return Err(ErrorCode::InvalidConfigValue {
                     config_entry: ClientEncoding::entry_name().into(),
                     config_value: enc.0,
