@@ -732,7 +732,7 @@ pub fn validate_compatibility(
                 let (_, use_schema_registry) = get_schema_location(&mut options)?;
                 use_schema_registry
             }
-            (Format::Debezium, Encode::Json) => true,
+            (Format::Debezium, Encode::Avro) => true,
             (_, _) => false,
         };
         if res {
