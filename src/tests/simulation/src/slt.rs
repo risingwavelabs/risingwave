@@ -87,7 +87,6 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "tpch_upstream.slt",
     // Drop is not retryable in search path test.
     "search_path.slt",
-    "setting.slt.part",
     // Transaction statements are not retryable.
     "transaction/now.slt",
     "transaction/read_only_multi_conn.slt",
