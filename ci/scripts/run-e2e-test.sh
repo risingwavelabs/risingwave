@@ -84,7 +84,7 @@ cargo make ci-kill
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
-python3 -m pip install psycopg2-binary, protobuf, confluent-kafka
+python3 -m pip install psycopg2-binary protobuf confluent-kafka
 python3 e2e_test/schema_registry/pb.py
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
 
