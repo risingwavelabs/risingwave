@@ -80,9 +80,15 @@ enum DynamicFilterWatermarkCacheEntry {
 // 2. watermark > lowest value
 //    Need to issue delete range.
 //    We can just issue delete range for (lowest_value, watermark].
-// TODO: Refactor this file into `dynamic-filter/mod.rs`, `dynamic-filter/cache.rs`.
+//
+// Updates:
+// 1. INSERT
+// 2. DELETE
+// 3. UPDATE
+// 4. Watermark has cleaned state.
 struct DynamicFilterWatermarkCache {
     watermark_col_idx: usize,
+    row_pk: Vec<usize>,
     row: DynamicFilterWatermarkCacheEntry,
 }
 
