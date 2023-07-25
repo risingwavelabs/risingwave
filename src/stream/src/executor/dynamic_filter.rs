@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures_async_stream::for_await;
-use std::cmp::Ordering;
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, ArrayRef, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, Once, OwnedRow as RowData, OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ScalarRefImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultPartialOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -182,7 +179,7 @@ impl DynamicFilterWatermarkCache {
     }
 
     fn process_delete(&mut self, row: impl Row) {
-        if let Some((pk, val)) = self.get_cached_pk_and_val() {
+        if let Some((pk, _val)) = self.get_cached_pk_and_val() {
             let del_pk = row.project(&self.lhs_pk_indices);
             if Row::eq(pk, del_pk) {
                 self.entry = DynamicFilterWatermarkCacheEntry::Evicted;
@@ -191,6 +188,9 @@ impl DynamicFilterWatermarkCache {
     }
 
     /// Takes care of state table commit
+    /// Trade-off the cost if we have Delete-heavy workload.
+    /// Instead of issuing delete range on every barrier,
+    /// we will do table scan instead, which seems more acceptable.
     async fn process_state_table_commit<S: StateStore>(&mut self, left_table: &StateTable<S>) -> StreamExecutorResult<()> {
         let watermark_opt = left_table.get_state_clean_watermark();
         if let Some(watermark) = watermark_opt {
@@ -199,6 +199,8 @@ impl DynamicFilterWatermarkCache {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) = (Included(once(Some(watermark.clone()))), Unbounded);
                 let mut streams = vec![];
                 for vnode in left_table.vnodes().iter_vnodes() {
+                    // TODO(kwannoel): Is it possible to have a state_table interface to read the 1st value
+                    // per vnode? Since that's all we need.
                     let stream = left_table.iter_key_and_val_with_pk_range(
                         &range,
                         vnode,
@@ -516,7 +518,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     if new_visibility.count_ones() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
-                        watermark_cache.as_mut().map(|mut c| c.process_lhs_chunk(&new_chunk));
+                        watermark_cache.as_mut().map(|c| c.process_lhs_chunk(&new_chunk));
                         yield Message::Chunk(new_chunk)
                     }
                 }
@@ -554,7 +556,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Do nothing.
                 }
                 AlignedMessage::WatermarkRight(watermark) => {
-                    watermark_cache.as_mut().map(|mut c| c.process_rhs_watermark(watermark, &mut unused_clean_hint));
+                    watermark_cache.as_mut().map(|c| c.process_rhs_watermark(watermark, &mut unused_clean_hint));
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
