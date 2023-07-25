@@ -313,8 +313,20 @@ steps:
     timeout_in_minutes: 40
     soft_fail: true
 
-  - label: "Backfill tests"
-    command: "ci/scripts/backfill-test.sh -p ci-release"
+  - label: "Backfill update tests"
+    command: "SNAPSHOT_COUNT=12 UPSTREAM_COUNT=5 RISEDEV_PROFILE=ci-backfill-update ci/scripts/backfill-test.sh -p ci-release"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+
+  - label: "Backfill snapshot tests"
+    command: "SNAPSHOT_COUNT=18 UPSTREAM_COUNT=1 RISEDEV_PROFILE=ci-backfill-snapshot ci/scripts/backfill-test.sh -p ci-release"
     depends_on:
       - "build"
     plugins:

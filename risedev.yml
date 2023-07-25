@@ -741,8 +741,10 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-backfill:
-    config-path: "src/config/backfill.toml"
+  # Profile to test backfill.
+  # Tests processing of upstream updates.
+  ci-backfill-update:
+    config-path: "src/config/backfill-update.toml"
     steps:
       - use: minio
       - use: etcd
@@ -751,6 +753,8 @@ profile:
       - use: frontend
       - use: compactor
 
+  # Profile to test backfill.
+  # Tests processing of upstream snapshot.
   ci-backfill-snapshot:
     config-path: "src/config/backfill-snapshot.toml"
     steps:
