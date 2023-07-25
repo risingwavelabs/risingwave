@@ -157,7 +157,7 @@ impl<'a> AvroParseOptions<'a> {
             (Some(DataType::Time), Value::TimeMillis(ms)) => Time::with_milli(*ms as u32)
                 .map_err(|_| create_error())?
                 .into(),
-            (Some(DataType::Time), Value::TimeMicros(us)) => Time::with_micro(*us as u32)
+            (Some(DataType::Time), Value::TimeMicros(us)) => Time::with_micro(*us as u64)
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Date -----
