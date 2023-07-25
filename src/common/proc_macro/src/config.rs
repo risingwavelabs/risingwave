@@ -20,11 +20,16 @@ use syn::DeriveInput;
 
 #[derive(FromAttributes)]
 pub struct OverrideOpts {
+    /// The path to the field to override.
     pub path: syn::Expr,
 
+    /// Whether to override the field only if it is absent in the config.
+    ///
+    /// This requires the field to be an `Option`.
     pub if_absent: Option<()>,
 }
 
+// TODO(bugen): the implementation is not robust but it works for now.
 fn type_is_option(ty: &syn::Type) -> bool {
     if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
         if let Some(segment) = path.segments.last() {
@@ -48,13 +53,16 @@ pub fn produce_override_config(input: DeriveInput) -> TokenStream {
         let field_type_is_option = type_is_option(&field.ty);
         let field_ident = field.ident;
 
+        // Allow multiple `override_opts` attributes on a field.
         for attr in &field.attrs {
             let attributes = OverrideOpts::try_from_attributes(std::slice::from_ref(attr))
                 .expect_or_abort("Failed to parse attribute");
             let Some(OverrideOpts { path, if_absent }) = attributes else {
+                // Ignore attributes that are not `override_opts`.
                 continue;
             };
 
+            // Use `into` to support `Option` target fields.
             let mut override_stmt = if field_type_is_option {
                 quote! {
                     if let Some(v) = self.#field_ident.clone() {
@@ -82,8 +90,8 @@ pub fn produce_override_config(input: DeriveInput) -> TokenStream {
     let struct_ident = input.ident;
 
     quote! {
-        impl risingwave_common::config::OverrideConfig for #struct_ident {
-            fn r#override(&self, config: &mut risingwave_common::config::RwConfig) {
+        impl ::risingwave_common::config::OverrideConfig for #struct_ident {
+            fn r#override(&self, config: &mut ::risingwave_common::config::RwConfig) {
                 #(#override_stmts)*
             }
         }
