@@ -110,7 +110,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()>;
 
     async fn drop_view(&self, view_id: u32) -> Result<()>;
 
@@ -269,8 +269,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let version = self.meta_client.drop_materialized_view(table_id).await?;
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_materialized_view(table_id, cascade)
+            .await?;
         self.wait_version(version).await
     }
 

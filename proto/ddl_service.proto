@@ -99,6 +99,7 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
+  bool cascade = 2;
 }
 
 message DropMaterializedViewResponse {

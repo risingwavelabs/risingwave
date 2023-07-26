@@ -337,9 +337,14 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
+    pub async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;

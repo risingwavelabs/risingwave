@@ -37,7 +37,7 @@ use crate::manager::{
     IdCategoryType, MetaSrvEnv, StreamingJob,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
+use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -288,11 +288,16 @@ where
 
         let request = request.into_inner();
         let table_id = request.table_id;
+        let drop_mode = if request.cascade {
+            DropMode::Cascade
+        } else {
+            DropMode::Restrict
+        };
 
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::MaterializedView(table_id),
+                StreamingJobId::MaterializedView(table_id, drop_mode),
             ))
             .await?;
 

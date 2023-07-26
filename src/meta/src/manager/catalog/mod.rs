@@ -62,6 +62,14 @@ pub type FunctionId = u32;
 pub type UserId = u32;
 pub type ConnectionId = u32;
 
+pub enum RelationIdEnum {
+    Table(TableId),
+    Index(IndexId),
+    View(ViewId),
+    Sink(SinkId),
+    Source(SourceId),
+}
+
 /// `commit_meta_with_trx` is similar to `commit_meta`, but it accepts an external trx (transaction)
 /// and commits it.
 macro_rules! commit_meta_with_trx {
@@ -112,6 +120,7 @@ use crate::manager::catalog::utils::{
     alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
     refcnt_inc_connection, ReplaceTableExprRewriter,
 };
+use crate::rpc::ddl_controller::DropMode;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
@@ -985,6 +994,607 @@ where
         } else {
             bail!("table doesn't exist");
         }
+    }
+
+    pub async fn drop_table_cascade(
+        &self,
+        table_id: TableId,
+        fragment_manager: FragmentManagerRef<S>,
+        drop_mode: DropMode,
+    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let mut deque = VecDeque::new();
+
+        // `all_table_ids` are materialized view ids;
+        let mut all_table_ids = vec![];
+        let mut all_internal_table_ids = vec![];
+        let mut all_index_ids = vec![];
+        let mut all_index_table_ids = vec![];
+        let mut all_index_internal_table_ids = vec![];
+
+        let table = tables.get(&table_id).cloned();
+        if let Some(table) = table {
+            deque.push_back(table);
+        } else {
+            bail!("table doesn't exist");
+        }
+
+        while let Some(table) = deque.pop_front() {
+            let table_id: TableId = table.id;
+            if !all_index_table_ids.contains(&table_id) {
+                all_table_ids.push(table_id);
+                let table_fragments = fragment_manager
+                    .select_table_fragments_by_table_id(&table_id.into())
+                    .await?;
+
+                all_internal_table_ids.extend(table_fragments.internal_table_ids());
+            }
+
+            let (index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
+                .tree_ref()
+                .iter()
+                .filter(|(_, index)| index.primary_table_id == table_id)
+                .map(|(index_id, index)| (*index_id, index.index_table_id))
+                .unzip();
+
+            all_index_ids.extend(index_ids.iter().cloned());
+            all_index_table_ids.extend(index_table_ids.iter().cloned());
+
+            for index_table_id in &index_table_ids {
+                let internal_table_ids = match fragment_manager
+                    .select_table_fragments_by_table_id(&(index_table_id.into()))
+                    .await
+                    .map(|fragments| fragments.internal_table_ids())
+                {
+                    Ok(v) => v,
+                    // Handle backwards compat with no state persistence.
+                    Err(_) => vec![],
+                };
+
+                // 1 should be used by table scan.
+                if internal_table_ids.len() == 1 {
+                    all_index_internal_table_ids.push(internal_table_ids[0]);
+                } else {
+                    // backwards compatibility with indexes
+                    // without backfill state persisted.
+                    assert_eq!(internal_table_ids.len(), 0);
+                }
+            }
+
+            let index_tables = index_table_ids
+                .iter()
+                .map(|index_table_id| tables.get(index_table_id).cloned().unwrap())
+                .collect_vec();
+
+            for index_table in &index_tables {
+                if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
+                    // Other relations depend on it.
+                    match drop_mode {
+                        DropMode::Restrict => {
+                            return Err(MetaError::permission_denied(format!(
+                                "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                index_table.name, ref_count
+                            )));
+                        }
+                        DropMode::Cascade => {
+                            let other_tables = tables
+                                .tree_ref()
+                                .iter()
+                                .filter_map(|(_, x)| {
+                                    if x.dependent_relations.contains(&index_table.id) {
+                                        Some(x)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .cloned()
+                                .collect_vec();
+
+                            for t in other_tables {
+                                deque.push_back(t);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
+                if ref_count > index_ids.len() {
+                    // Other relations depend on it.
+                    match drop_mode {
+                        DropMode::Restrict => {
+                            return Err(MetaError::permission_denied(format!(
+                                "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                table.name, ref_count
+                            )));
+                        }
+                        DropMode::Cascade => {
+                            let other_tables = tables
+                                .tree_ref()
+                                .iter()
+                                .filter_map(|(_, x)| {
+                                    if x.dependent_relations.contains(&table.id) {
+                                        Some(x)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .cloned()
+                                .collect_vec();
+
+                            for t in other_tables {
+                                deque.push_back(t);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let tables_removed = all_table_ids
+            .iter()
+            .map(|table_id| tables.remove(*table_id).unwrap())
+            .collect_vec();
+
+        let indexes_removed = all_index_ids
+            .iter()
+            .map(|index_id| indexes.remove(*index_id).unwrap())
+            .collect_vec();
+
+        let index_tables = all_index_table_ids
+            .iter()
+            .map(|index_table_id| tables.remove(*index_table_id).unwrap())
+            .collect_vec();
+
+        let index_internal_tables = all_index_internal_table_ids
+            .iter()
+            .map(|index_internal_table_id| {
+                tables
+                    .remove(*index_internal_table_id)
+                    .expect("internal index table should exist")
+            })
+            .collect_vec();
+
+        let internal_tables = all_internal_table_ids
+            .iter()
+            .map(|internal_table_id| {
+                tables
+                    .remove(*internal_table_id)
+                    .expect("internal table should exist")
+            })
+            .collect_vec();
+
+        let users_need_update = {
+            let table_to_drop_ids = all_index_table_ids
+                .iter()
+                .chain(&all_index_internal_table_ids)
+                .chain(&all_internal_table_ids)
+                .chain(&all_table_ids)
+                .collect_vec();
+
+            Self::update_user_privileges(
+                &mut users,
+                &table_to_drop_ids
+                    .into_iter()
+                    .map(|table_id| Object::TableId(*table_id))
+                    .collect_vec(),
+            )
+        };
+
+        commit_meta!(self, tables, indexes, users)?;
+
+        indexes_removed.iter().for_each(|index| {
+            // index table and index.
+            user_core.decrease_ref_count(index.owner, 2);
+        });
+        tables_removed.iter().for_each(|table| {
+            user_core.decrease_ref(table.owner);
+        });
+
+        for index_table in &index_tables {
+            for dependent_relation_id in &index_table.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
+            }
+        }
+
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
+                .await;
+        }
+
+        for table in &tables_removed {
+            for dependent_relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
+            }
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Delete,
+                Info::RelationGroup(RelationGroup {
+                    relations: indexes_removed
+                        .into_iter()
+                        .map(|index| Relation {
+                            relation_info: RelationInfo::Index(index).into(),
+                        })
+                        .chain(
+                            internal_tables
+                                .into_iter()
+                                .chain(index_tables.into_iter())
+                                .chain(index_internal_tables.into_iter())
+                                .map(|internal_table| Relation {
+                                    relation_info: RelationInfo::Table(internal_table).into(),
+                                }),
+                        )
+                        .chain(tables_removed.into_iter().map(|table| Relation {
+                            relation_info: RelationInfo::Table(table).into(),
+                        }))
+                        .collect_vec(),
+                }),
+            )
+            .await;
+
+        let catalog_deleted_ids = all_index_table_ids
+            .into_iter()
+            .chain(all_table_ids)
+            .map(|id| id.into())
+            .collect_vec();
+
+        Ok((version, catalog_deleted_ids))
+    }
+
+    pub async fn drop_relation(
+        &self,
+        relation: RelationIdEnum,
+        fragment_manager: FragmentManagerRef<S>,
+        drop_mode: DropMode,
+    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let mut deque = VecDeque::new();
+
+        // `all_table_ids` are materialized view ids, table ids and index table ids.
+        let mut all_table_ids = vec![];
+        let mut all_internal_table_ids = vec![];
+        let mut all_index_ids = vec![];
+        // let mut all_index_table_ids = vec![];
+        // let mut all_index_internal_table_ids = vec![];
+
+        // let mut all_sink_ids = vec![];
+        // let mut all_source_ids = vec![];
+        // let mut all_view_ids = vec![];
+
+        let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
+            let tables_depend_on = tables
+                .tree_ref()
+                .iter()
+                .filter_map(|(_, table)| {
+                    if table.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::Table(table.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+
+            let sinks_depend_on = sinks
+                .tree_ref()
+                .iter()
+                .filter_map(|(_, sink)| {
+                    if sink.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::Sink(sink.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+
+            let views_depend_on = views
+                .tree_ref()
+                .iter()
+                .filter_map(|(_, view)| {
+                    if view.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::View(view.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+
+            // We don't need to output indexes because they are handled by tables.
+            tables_depend_on
+                .into_iter()
+                .chain(sinks_depend_on)
+                .chain(views_depend_on)
+                .collect()
+        };
+
+        match relation {
+            RelationIdEnum::Table(table_id) => {
+                let table = tables.get(&table_id).cloned();
+                if let Some(table) = table {
+                    deque.push_back(RelationInfo::Table(table));
+                } else {
+                    bail!("table doesn't exist");
+                }
+            }
+            RelationIdEnum::Index(index_id) => {
+                let index = indexes.get(&index_id).cloned();
+                if let Some(index) = index {
+                    deque.push_back(RelationInfo::Index(index));
+                } else {
+                    bail!("index doesn't exist");
+                }
+            }
+            RelationIdEnum::Sink(sink_id) => {
+                let sink = sinks.get(&sink_id).cloned();
+                if let Some(sink) = sink {
+                    deque.push_back(RelationInfo::Sink(sink));
+                } else {
+                    bail!("sink doesn't exist");
+                }
+            }
+            RelationIdEnum::View(view_id) => {
+                let view = views.get(&view_id).cloned();
+                if let Some(view) = view {
+                    deque.push_back(RelationInfo::View(view));
+                } else {
+                    bail!("source doesn't exist");
+                }
+            }
+            RelationIdEnum::Source(source_id) => {
+                let source = sources.get(&source_id).cloned();
+                if let Some(source) = source {
+                    deque.push_back(RelationInfo::Source(source));
+                } else {
+                    bail!("view doesn't exist");
+                }
+            }
+        }
+
+        while let Some(relation_info) = deque.pop_front() {
+            match relation_info {
+                RelationInfo::Table(table) => {
+                    let table_id: TableId = table.id;
+                    all_table_ids.push(table_id);
+                    let table_fragments = fragment_manager
+                        .select_table_fragments_by_table_id(&table_id.into())
+                        .await?;
+
+                    all_internal_table_ids.extend(table_fragments.internal_table_ids());
+
+                    let (index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
+                        .tree_ref()
+                        .iter()
+                        .filter(|(_, index)| index.primary_table_id == table_id)
+                        .map(|(index_id, index)| (*index_id, index.index_table_id))
+                        .unzip();
+
+                    all_index_ids.extend(index_ids.iter().cloned());
+                    all_table_ids.extend(index_table_ids.iter().cloned());
+
+                    for index_table_id in &index_table_ids {
+                        let internal_table_ids = match fragment_manager
+                            .select_table_fragments_by_table_id(&(index_table_id.into()))
+                            .await
+                            .map(|fragments| fragments.internal_table_ids())
+                        {
+                            Ok(v) => v,
+                            // Handle backwards compat with no state persistence.
+                            Err(_) => vec![],
+                        };
+
+                        // 1 should be used by table scan.
+                        if internal_table_ids.len() == 1 {
+                            all_internal_table_ids.push(internal_table_ids[0]);
+                        } else {
+                            // backwards compatibility with indexes
+                            // without backfill state persisted.
+                            assert_eq!(internal_table_ids.len(), 0);
+                        }
+                    }
+
+                    let index_tables = index_table_ids
+                        .iter()
+                        .map(|index_table_id| tables.get(index_table_id).cloned().unwrap())
+                        .collect_vec();
+
+                    for index_table in &index_tables {
+                        if let Some(ref_count) =
+                            database_core.relation_ref_count.get(&index_table.id)
+                        {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                        index_table.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                        relations_depend_on(index_table.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ref_count) =
+                        database_core.relation_ref_count.get(&table_id).cloned()
+                    {
+                        if ref_count > index_ids.len() {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                        table.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in relations_depend_on(table.id as RelationId)
+                                    {
+                                        // Filter relation belongs to index_table_ids.
+                                        if let RelationInfo::Table(t) = &relation_info && !index_table_ids.contains(&t.id) {
+                                            deque.push_back(relation_info);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                RelationInfo::Index(index) => {
+                    all_index_ids.push(index.id);
+                    all_table_ids.push(index.index_table_id);
+
+                    let internal_table_ids = match fragment_manager
+                        .select_table_fragments_by_table_id(&(index.index_table_id.into()))
+                        .await
+                        .map(|fragments| fragments.internal_table_ids())
+                    {
+                        Ok(v) => v,
+                        // Handle backwards compat with no state persistence.
+                        Err(_) => vec![],
+                    };
+
+                    // 1 should be used by table scan.
+                    if internal_table_ids.len() == 1 {
+                        all_internal_table_ids.push(internal_table_ids[0]);
+                    } else {
+                        // backwards compatibility with indexes
+                        // without backfill state persisted.
+                        assert_eq!(internal_table_ids.len(), 0);
+                    }
+
+                    if let Some(ref_count) = database_core
+                        .relation_ref_count
+                        .get(&index.index_table_id)
+                        .cloned()
+                    {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete index `{}` because {} other relation(s) depend on it",
+                                        index.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                        relations_depend_on(index.index_table_id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                RelationInfo::View(view) => todo!(),
+                RelationInfo::Sink(sink) => todo!(),
+                RelationInfo::Source(source) => todo!(),
+            }
+        }
+
+        let tables_removed = all_table_ids
+            .iter()
+            .map(|table_id| tables.remove(*table_id).unwrap())
+            .collect_vec();
+
+        let indexes_removed = all_index_ids
+            .iter()
+            .map(|index_id| indexes.remove(*index_id).unwrap())
+            .collect_vec();
+
+        let internal_tables = all_internal_table_ids
+            .iter()
+            .map(|internal_table_id| {
+                tables
+                    .remove(*internal_table_id)
+                    .expect("internal table should exist")
+            })
+            .collect_vec();
+
+        let users_need_update = {
+            // TODO: add sources, sinks and views
+            let table_to_drop_ids = all_table_ids
+                .iter()
+                .chain(&all_internal_table_ids)
+                .collect_vec();
+
+            Self::update_user_privileges(
+                &mut users,
+                &table_to_drop_ids
+                    .into_iter()
+                    .map(|table_id| Object::TableId(*table_id))
+                    .collect_vec(),
+            )
+        };
+
+        commit_meta!(self, tables, indexes, users)?;
+
+        indexes_removed.iter().for_each(|index| {
+            user_core.decrease_ref(index.owner);
+        });
+
+        // `tables_removed` contains both index table and mv.
+        tables_removed.iter().for_each(|table| {
+            user_core.decrease_ref(table.owner);
+        });
+
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
+                .await;
+        }
+
+        for table in &tables_removed {
+            for dependent_relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
+            }
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Delete,
+                Info::RelationGroup(RelationGroup {
+                    relations: indexes_removed
+                        .into_iter()
+                        .map(|index| Relation {
+                            relation_info: RelationInfo::Index(index).into(),
+                        })
+                        .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                            relation_info: RelationInfo::Table(internal_table).into(),
+                        }))
+                        .chain(tables_removed.into_iter().map(|table| Relation {
+                            relation_info: RelationInfo::Table(table).into(),
+                        }))
+                        .collect_vec(),
+                }),
+            )
+            .await;
+
+        let catalog_deleted_ids = all_table_ids.into_iter().map(|id| id.into()).collect_vec();
+
+        Ok((version, catalog_deleted_ids))
     }
 
     pub async fn get_index_table(&self, index_id: IndexId) -> MetaResult<TableId> {

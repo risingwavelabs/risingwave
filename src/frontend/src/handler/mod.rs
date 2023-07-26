@@ -297,17 +297,27 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
+            let mut cascade = false;
             if let AstOption::Some(DropMode::Cascade) = drop_mode {
-                return Err(
-                    ErrorCode::NotImplemented("DROP CASCADE".to_string(), None.into()).into(),
-                );
+                match object_type {
+                    ObjectType::MaterializedView => {
+                        cascade = true;
+                    }
+                    _ => {
+                        return Err(ErrorCode::NotImplemented(
+                            "DROP CASCADE".to_string(),
+                            None.into(),
+                        )
+                        .into());
+                    }
+                };
             };
             match object_type {
                 ObjectType::Table => {
                     drop_table::handle_drop_table(handler_args, object_name, if_exists).await
                 }
                 ObjectType::MaterializedView => {
-                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
+                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Index => {
                     drop_index::handle_drop_index(handler_args, object_name, if_exists).await

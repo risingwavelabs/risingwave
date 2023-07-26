@@ -29,11 +29,7 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId,
-    StreamingClusterInfo, StreamingJob, TableId, ViewId,
-};
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory, IndexId, MetaSrvEnv, NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId};
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::storage::MetaStore;
@@ -44,8 +40,13 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
+pub enum DropMode {
+    Restrict,
+    Cascade,
+}
+
 pub enum StreamingJobId {
-    MaterializedView(TableId),
+    MaterializedView(TableId, DropMode),
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
@@ -54,7 +55,7 @@ pub enum StreamingJobId {
 impl StreamingJobId {
     fn id(&self) -> TableId {
         match self {
-            StreamingJobId::MaterializedView(id)
+            StreamingJobId::MaterializedView(id, _)
             | StreamingJobId::Sink(id)
             | StreamingJobId::Table(_, id)
             | StreamingJobId::Index(id) => *id,
@@ -332,9 +333,9 @@ where
             .await?;
         let internal_table_ids = table_fragments.internal_table_ids();
         let (version, streaming_job_ids) = match job_id {
-            StreamingJobId::MaterializedView(table_id) => {
+            StreamingJobId::MaterializedView(table_id, drop_mode) => {
                 self.catalog_manager
-                    .drop_table(table_id, internal_table_ids, self.fragment_manager.clone())
+                    .drop_relation(RelationIdEnum::Table(table_id), self.fragment_manager.clone(), drop_mode)
                     .await?
             }
             StreamingJobId::Sink(sink_id) => {
@@ -621,7 +622,7 @@ where
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
-                .drop_table(table_id, internal_table_ids, fragment_manager)
+                .drop_relation(RelationIdEnum::Table(table_id), fragment_manager, DropMode::Restrict)
                 .await
         }
     }

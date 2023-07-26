@@ -340,7 +340,8 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_view(&self, table_id: TableId, _cascade: bool) -> Result<()> {
+        // TODO: handle cascade
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         let indexes =
             self.catalog

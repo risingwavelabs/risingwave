@@ -576,11 +576,9 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::{
-        CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
-        StreamingClusterInfo,
-    };
+    use crate::manager::{CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv, RelationIdEnum, StreamingClusterInfo};
     use crate::model::{ActorId, FragmentId};
+    use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
@@ -864,7 +862,11 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![], self.fragment_manager.clone())
+                    .drop_relation(
+                        RelationIdEnum::Table(table_id.table_id),
+                        self.fragment_manager.clone(),
+                        DropMode::Restrict,
+                    )
                     .await?;
             }
             self.global_stream_manager
