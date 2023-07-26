@@ -339,11 +339,10 @@ where
                     .await?
             }
             StreamingJobId::Sink(sink_id) => {
-                let version = self
+                self
                     .catalog_manager
-                    .drop_sink(sink_id, internal_table_ids)
-                    .await?;
-                (version, vec![sink_id.into()])
+                    .drop_relation(RelationIdEnum::Sink(sink_id), self.fragment_manager.clone(), DropMode::Restrict)
+                    .await?
             }
             StreamingJobId::Table(source_id, table_id) => {
                 self.drop_table_inner(
