@@ -83,6 +83,7 @@ enum JoinType {
 
 // https://github.com/tokio-rs/prost/issues/80
 enum FormatType {
+  FORMAT_TYPE_UNSPECIFIED = 0;
   FORMAT_TYPE_NATIVE = 1;
   FORMAT_TYPE_DEBEZIUM = 2;
   FORMAT_TYPE_DEBEZIUM_MONGO = 3;
@@ -93,6 +94,7 @@ enum FormatType {
 }
 
 enum EncodeType {
+  ENCODE_TYPE_UNSPECIFIED = 0;
   ENCODE_TYPE_NATIVE = 1;
   ENCODE_TYPE_AVRO = 2;
   ENCODE_TYPE_CSV = 3;
