@@ -277,7 +277,7 @@ impl EqGroups {
                 }
             };
         }
-        for_all_variants! { gen_match_detect_inner }
+        for_all_array_variants! { gen_match_detect_inner }
     }
 
     fn detect_inner<T>(array: &T) -> EqGroups

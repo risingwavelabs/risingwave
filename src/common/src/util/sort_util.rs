@@ -25,6 +25,7 @@ use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::estimate_size::EstimateSize;
+use crate::for_all_array_variants;
 use crate::row::Row;
 use crate::types::{DefaultOrdered, ToDatumRef};
 
@@ -456,7 +457,7 @@ pub fn compare_rows_in_chunk(
                 }?
             }
         }
-        let res = for_all_variants! { gen_match };
+        let res = for_all_array_variants! { gen_match };
         if res != Ordering::Equal {
             return Ok(res);
         }

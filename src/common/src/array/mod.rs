@@ -67,6 +67,7 @@ pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
+use crate::for_all_array_variants;
 use crate::types::*;
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
@@ -319,58 +320,6 @@ impl<A: Array> CompactableArray for A {
     }
 }
 
-/// `for_all_variants` includes all variants of our array types. If you added a new array
-/// type inside the project, be sure to add a variant here.
-///
-/// It is used to simplify the boilerplate code of repeating all array types, while each type
-/// has exactly the same code.
-///
-/// To use it, you need to provide a macro, whose input is `{ enum variant name, function suffix
-/// name, array type, builder type }` tuples. Refer to the following implementations as examples.
-#[macro_export]
-macro_rules! for_all_variants {
-    ($macro:ident $(, $x:tt)*) => {
-        $macro! {
-            $($x, )*
-            { Int16, int16, I16Array, I16ArrayBuilder },
-            { Int32, int32, I32Array, I32ArrayBuilder },
-            { Int64, int64, I64Array, I64ArrayBuilder },
-            { Int256, int256, Int256Array, Int256ArrayBuilder },
-            { Float32, float32, F32Array, F32ArrayBuilder },
-            { Float64, float64, F64Array, F64ArrayBuilder },
-            { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
-            { Bool, bool, BoolArray, BoolArrayBuilder },
-            { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
-            { Interval, interval, IntervalArray, IntervalArrayBuilder },
-            { Date, date, DateArray, DateArrayBuilder },
-            { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
-            { Timestamptz, timestamptz, TimestamptzArray, TimestamptzArrayBuilder },
-            { Time, time, TimeArray, TimeArrayBuilder },
-            { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
-            { Serial, serial, SerialArray, SerialArrayBuilder },
-            { Struct, struct, StructArray, StructArrayBuilder },
-            { List, list, ListArray, ListArrayBuilder },
-            { Bytea, bytea, BytesArray, BytesArrayBuilder}
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! do_dispatch {
-    ($impl:expr, $type:ident, $inner:ident, $body:tt, $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $impl {
-            $( $type::$variant_name($inner) => $body, )*
-        }
-    };
-}
-
-#[macro_export(local_inner_macros)]
-macro_rules! dispatch_all_variants {
-    ($impl:expr, $type:ident, $scalar:ident, $body:tt) => {{
-        for_all_variants! { do_dispatch, $impl, $type, $scalar, $body }
-    }};
-}
-
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {
     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -382,7 +331,7 @@ macro_rules! array_impl_enum {
     };
 }
 
-for_all_variants! { array_impl_enum }
+for_all_array_variants! { array_impl_enum }
 
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
@@ -486,7 +435,7 @@ macro_rules! impl_convert {
     };
 }
 
-for_all_variants! { impl_convert }
+for_all_array_variants! { impl_convert }
 
 /// Define `ArrayImplBuilder` with macro.
 macro_rules! array_builder_impl_enum {
@@ -499,7 +448,7 @@ macro_rules! array_builder_impl_enum {
     };
 }
 
-for_all_variants! { array_builder_impl_enum }
+for_all_array_variants! { array_builder_impl_enum }
 
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
 macro_rules! impl_array_builder {
@@ -581,7 +530,7 @@ macro_rules! impl_array_builder {
     }
 }
 
-for_all_variants! { impl_array_builder }
+for_all_array_variants! { impl_array_builder }
 
 /// Implements all `Array` functions with `for_all_variant`.
 macro_rules! impl_array {
@@ -702,7 +651,7 @@ macro_rules! impl_array {
     }
 }
 
-for_all_variants! { impl_array }
+for_all_array_variants! { impl_array }
 
 macro_rules! impl_array_estimate_size {
     ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -716,7 +665,7 @@ macro_rules! impl_array_estimate_size {
     }
 }
 
-for_all_variants! { impl_array_estimate_size }
+for_all_array_variants! { impl_array_estimate_size }
 
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {

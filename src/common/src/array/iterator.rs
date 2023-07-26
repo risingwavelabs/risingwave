@@ -56,7 +56,7 @@ mod tests {
 
     use super::*;
     use crate::array::{ArrayBuilder, ArrayImpl};
-    use crate::for_all_variants;
+    use crate::for_all_array_variants;
 
     macro_rules! test_trusted_len {
         ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -92,5 +92,5 @@ mod tests {
         };
     }
 
-    for_all_variants! { test_trusted_len }
+    for_all_array_variants! { test_trusted_len }
 }
