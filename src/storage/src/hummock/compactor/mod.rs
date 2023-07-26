@@ -280,14 +280,17 @@ impl Compactor {
             }
         };
 
-        let task_memory_capacity_with_parallelism =
-            estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+        let (capacity, total_file_size, total_file_size_uncompressed) =
+            estimate_task_memory_capacity(context.clone(), &compact_task);
+        let task_memory_capacity_with_parallelism = capacity * parallelism;
 
         tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
                 compact_task.task_id,
                 need_quota,
                 total_file_count,
+                total_file_size,
+                total_file_size_uncompressed,
                 total_key_count,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
