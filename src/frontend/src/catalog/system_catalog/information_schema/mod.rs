@@ -51,6 +51,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(index as i32 + 1)),
                             // TODO: refactor when we support "NOT NULL".
                             Some(ScalarImpl::Utf8("YES".into())),
+                            None,
+                            Some(ScalarImpl::Utf8("pg_catalog".into())),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                             Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
                         ])
@@ -78,6 +80,8 @@ impl SysCatalogReaderImpl {
                                     Some(ScalarImpl::Int32(index as i32 + 1)),
                                     // TODO: refactor when we support "NOT NULL".
                                     Some(ScalarImpl::Utf8("YES".into())),
+                                    None,
+                                    Some(ScalarImpl::Utf8("pg_catalog".into())),
                                     Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                                     Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
                                 ])
