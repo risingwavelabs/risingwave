@@ -1134,6 +1134,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: u64,
         table_id: u32,
         level: u32,
+        sst_ids: Vec<u64>,
     ) -> Result<()> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
@@ -1142,6 +1143,7 @@ impl HummockMetaClient for MetaClient {
             // if table_id not exist, manual_compaction will include all the sst
             // without check internal_table_id
             level,
+            sst_ids,
             ..Default::default()
         };
 

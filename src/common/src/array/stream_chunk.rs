@@ -26,7 +26,6 @@ use crate::field_generator::VarcharProperty;
 use crate::row::Row;
 use crate::types::{DataType, DefaultOrdered, ToText};
 use crate::util::iter_util::ZipEqDebug;
-
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`

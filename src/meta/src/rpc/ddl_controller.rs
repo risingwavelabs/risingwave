@@ -18,6 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
     connection, Connection, Database, Function, Schema, Source, Table, View,
@@ -220,7 +221,10 @@ where
         self.catalog_manager.drop_schema(schema_id).await
     }
 
-    async fn create_source(&self, source: Source) -> MetaResult<NotificationVersion> {
+    async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
+        // set the initialized_at_epoch to the current epoch.
+        source.initialized_at_epoch = Some(Epoch::now().0);
+
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await?;
@@ -233,7 +237,7 @@ where
         }
 
         self.catalog_manager
-            .finish_create_source_procedure(&source)
+            .finish_create_source_procedure(source)
             .await
     }
 
@@ -329,6 +333,9 @@ where
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
+        // Update the corresponding 'initiated_at' field.
+        stream_job.mark_initialized();
+
         let mut internal_tables = vec![];
         let result = try {
             let (ctx, table_fragments) = self
@@ -355,7 +362,7 @@ where
         };
 
         match result {
-            Ok(_) => self.finish_stream_job(&stream_job, internal_tables).await,
+            Ok(_) => self.finish_stream_job(stream_job, internal_tables).await,
             Err(err) => {
                 self.cancel_stream_job(&stream_job, internal_tables).await;
                 Err(err)
@@ -592,11 +599,15 @@ where
     /// `finish_stream_job` finishes a stream job and clean some states.
     async fn finish_stream_job(
         &self,
-        stream_job: &StreamingJob,
+        mut stream_job: StreamingJob,
         internal_tables: Vec<Table>,
     ) -> MetaResult<u64> {
         // 1. finish procedure.
         let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+
+        // Update the corresponding 'created_at' field.
+        stream_job.mark_created();
+
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);

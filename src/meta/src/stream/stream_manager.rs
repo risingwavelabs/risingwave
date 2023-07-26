@@ -859,7 +859,7 @@ mod tests {
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
-                .finish_create_table_procedure(vec![], &table)
+                .finish_create_table_procedure(vec![], table)
                 .await?;
             Ok(())
         }

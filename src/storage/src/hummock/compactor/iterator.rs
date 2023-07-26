@@ -222,6 +222,8 @@ impl Drop for SstableStreamIterator {
 /// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
 /// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
+    /// **CAUTION:** `key_range` is used for optimization. It doesn't guarantee value returned by
+    /// the iterator is in this range.
     key_range: KeyRange,
 
     /// The iterator of the current table.

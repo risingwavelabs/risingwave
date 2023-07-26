@@ -36,7 +36,7 @@ use risingwave_frontend::{
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
 use risingwave_sqlparser::ast::{
-    AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, SourceSchema, Statement,
+    AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -417,16 +417,8 @@ impl TestCase {
                     ..
                 } => {
                     // TODO(st1page): refacor it
-                    let mut notice = Default::default();
-                    let source_schema = source_schema
-                        .map(|source_schema| -> Result<SourceSchema> {
-                            let (source_schema, _, n) = source_schema
-                                .into_source_schema()
-                                .map_err(|e| anyhow!(e.inner_msg()))?;
-                            notice = n;
-                            Ok(source_schema)
-                        })
-                        .transpose()?;
+                    let notice = Default::default();
+                    let source_schema = source_schema.map(|schema| schema.into_source_schema_v2());
 
                     create_table::handle_create_table(
                         handler_args,

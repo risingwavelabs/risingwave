@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// Stores information about relation access methods.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
@@ -25,3 +27,9 @@ pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "amhandler"),
     (DataType::Varchar, "amtype"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_am_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}

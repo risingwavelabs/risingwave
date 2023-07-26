@@ -441,6 +441,13 @@ MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**
 
 Deterministic test is included in CI as well. See [CI script](../ci/scripts/deterministic-e2e-test.sh) for details.
 
+### Deterministic Simulation Integration tests
+
+To run these tests:
+```shell
+./risedev sit-test
+```
+
 ## Miscellaneous checks
 
 For shell code, please run:
