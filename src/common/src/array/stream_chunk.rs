@@ -248,6 +248,14 @@ impl StreamChunk {
             data: self.data.project_with_vis(indices, vis),
         }
     }
+
+    /// Clone the `StreamChunk` with a new visibility.
+    pub fn with_visibility(&self, vis: Vis) -> Self {
+        Self {
+            ops: self.ops.clone(),
+            data: self.data.with_visibility(vis),
+        }
+    }
 }
 
 impl Deref for StreamChunk {

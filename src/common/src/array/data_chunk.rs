@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::hash::BuildHasher;
+use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
@@ -57,7 +58,7 @@ use crate::util::value_encoding::{
 #[derive(Clone, PartialEq)]
 #[must_use]
 pub struct DataChunk {
-    columns: Vec<ArrayRef>,
+    columns: Arc<[ArrayRef]>,
     vis2: Vis,
 }
 
@@ -71,13 +72,16 @@ impl DataChunk {
             assert_eq!(capacity, column.len());
         }
 
-        DataChunk { columns, vis2: vis }
+        DataChunk {
+            columns: columns.into(),
+            vis2: vis,
+        }
     }
 
     /// `new_dummy` creates a data chunk without columns but only a cardinality.
     pub fn new_dummy(cardinality: usize) -> Self {
         DataChunk {
-            columns: vec![],
+            columns: Arc::new([]),
             vis2: Vis::Compact(cardinality),
         }
     }
@@ -117,7 +121,7 @@ impl DataChunk {
     }
 
     pub fn into_parts(self) -> (Vec<ArrayRef>, Vis) {
-        (self.columns, self.vis2)
+        (self.columns.to_vec(), self.vis2)
     }
 
     pub fn dimension(&self) -> usize {
@@ -154,8 +158,11 @@ impl DataChunk {
         }
     }
 
-    pub fn with_visibility(&self, visibility: Bitmap) -> Self {
-        DataChunk::new(self.columns.clone(), visibility)
+    pub fn with_visibility(&self, visibility: impl Into<Vis>) -> Self {
+        DataChunk {
+            columns: self.columns.clone(),
+            vis2: visibility.into(),
+        }
     }
 
     pub fn visibility(&self) -> Option<&Bitmap> {
@@ -207,7 +214,7 @@ impl DataChunk {
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
-        for array in &self.columns {
+        for array in self.columns.iter() {
             column_ref.push(array.to_protobuf());
         }
         proto
@@ -452,7 +459,7 @@ impl DataChunk {
             .map(|col| col.create_builder(indexes.len()))
             .collect();
         for &i in indexes {
-            for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
+            for (builder, col) in array_builders.iter_mut().zip_eq_fast(self.columns.iter()) {
                 builder.append(col.value_at(i));
             }
         }
@@ -488,7 +495,7 @@ impl DataChunk {
     fn partition_sizes(&self) -> (usize, Vec<&ArrayRef>) {
         let mut col_variable: Vec<&ArrayRef> = vec![];
         let mut row_len_fixed: usize = 0;
-        for c in &self.columns {
+        for c in self.columns.iter() {
             if let Some(field_len) = try_get_exact_serialize_datum_size(c) {
                 row_len_fixed += field_len;
             } else {
@@ -573,7 +580,7 @@ impl DataChunk {
                 }
 
                 // Then do the actual serialization
-                for c in &self.columns {
+                for c in self.columns.iter() {
                     let c = c;
                     assert_eq!(c.len(), rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
@@ -595,7 +602,7 @@ impl DataChunk {
                         buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
                     }
                 }
-                for c in &self.columns {
+                for c in self.columns.iter() {
                     let c = c;
                     assert_eq!(c.len(), *rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
