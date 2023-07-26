@@ -259,7 +259,7 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
-            watermark_cache: StateTableWatermarkCache::new(),
+            watermark_cache: StateTableWatermarkCache::new(pk_indices.to_vec()),
         }
     }
 
@@ -412,7 +412,7 @@ where
                 ),
                 Arc::from(table_columns.into_boxed_slice()),
             ),
-            pk_indices,
+            pk_indices: pk_indices.to_vec(),
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
             vnodes,
@@ -421,7 +421,7 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
-            watermark_cache: StateTableWatermarkCache::new(),
+            watermark_cache: StateTableWatermarkCache::new(pk_indices),
         }
     }
 
@@ -658,10 +658,9 @@ where
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: impl Row) {
-        // TODO
-        // self.watermark_min_value_cache
-        //     .handle_insert(&value, &self.watermark_col_idx);
         let pk = (&value).project(self.pk_indices());
+        // FIXME: use arc for pk indices so we can drop the immutable ref..
+        // self.watermark_cache.handle_insert(&pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
