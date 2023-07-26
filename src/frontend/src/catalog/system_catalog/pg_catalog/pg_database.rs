@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_database` stores database.
 ///
@@ -73,4 +75,16 @@ pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
         Some(ScalarImpl::Int32(1663)),
         None,
     ])
+}
+
+impl SysCatalogReaderImpl {
+    pub fn read_database_info(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.catalog_reader.read_guard();
+        let databases = reader.get_all_database_names();
+
+        Ok(databases
+            .iter()
+            .map(|db| new_pg_database_row(reader.get_database_by_name(db).unwrap().id(), db))
+            .collect_vec())
+    }
 }

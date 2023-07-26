@@ -15,7 +15,9 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use anyhow::Ok;
 use aws_sdk_kinesis::Client as KinesisClient;
+use clickhouse::Client;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
@@ -219,6 +221,30 @@ impl KinesisCommon {
             builder = builder.endpoint_url(endpoint);
         }
         Ok(KinesisClient::from_conf(builder.build()))
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ClickHouseCommon {
+    #[serde(rename = "clickhouse.url")]
+    pub url: String,
+    #[serde(rename = "clickhouse.user")]
+    pub user: String,
+    #[serde(rename = "clickhouse.password")]
+    pub password: String,
+    #[serde(rename = "clickhouse.database")]
+    pub database: String,
+    #[serde(rename = "clickhouse.table")]
+    pub table: String,
+}
+
+impl ClickHouseCommon {
+    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
+        let client = Client::default()
+            .with_url(&self.url)
+            .with_user(&self.user)
+            .with_password(&self.password);
+        Ok(client)
     }
 }
 

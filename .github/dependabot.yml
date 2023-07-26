@@ -5,3 +5,5 @@ updates:
   schedule:
     interval: "daily"
   open-pull-requests-limit: 10
+  # Disable auto rebase to reduce cost. Use `@dependabot rebase` manually instead.
+  rebase-strategy: "disabled"

@@ -40,7 +40,7 @@ pub trait Access {
 
 pub enum AccessImpl<'a, 'b> {
     Avro(AvroAccess<'a, 'b>),
-    Bytes(BytesAccess),
+    Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
     Json(JsonAccess<'a, 'b>),
 }

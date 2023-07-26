@@ -27,7 +27,7 @@ pub struct KinesisMessage {
 impl From<KinesisMessage> for SourceMessage {
     fn from(msg: KinesisMessage) -> Self {
         SourceMessage {
-            key: None,
+            key: Some(msg.partition_key.into_bytes()),
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.shard_id,

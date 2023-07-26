@@ -283,18 +283,8 @@ impl LogicalAggBuilder {
     fn new(group_by: GroupBy, input_schema_len: usize) -> Result<Self> {
         let mut input_proj_builder = ProjectBuilder::default();
 
-        let (group_key, grouping_sets) = match group_by {
-            GroupBy::GroupKey(group_key) => {
-                let group_key = group_key
-                    .into_iter()
-                    .map(|expr| input_proj_builder.add_expr(&expr))
-                    .try_collect()
-                    .map_err(|err| {
-                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                    })?;
-                (group_key, vec![])
-            }
-            GroupBy::GroupingSets(grouping_sets) => {
+        let mut gen_group_key_and_grouping_sets =
+            |grouping_sets: Vec<Vec<ExprImpl>>| -> Result<(IndexSet, Vec<IndexSet>)> {
                 let grouping_sets: Vec<IndexSet> = grouping_sets
                     .into_iter()
                     .map(|set| {
@@ -317,7 +307,33 @@ impl LogicalAggBuilder {
                         acc.union(&x.to_bitset()).collect()
                     });
 
-                (IndexSet::from_iter(group_key.ones()), grouping_sets)
+                Ok((IndexSet::from_iter(group_key.ones()), grouping_sets))
+            };
+
+        let (group_key, grouping_sets) = match group_by {
+            GroupBy::GroupKey(group_key) => {
+                let group_key = group_key
+                    .into_iter()
+                    .map(|expr| input_proj_builder.add_expr(&expr))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+                    })?;
+                (group_key, vec![])
+            }
+            GroupBy::GroupingSets(grouping_sets) => gen_group_key_and_grouping_sets(grouping_sets)?,
+            GroupBy::Rollup(rollup) => {
+                // Convert rollup to grouping sets.
+                let grouping_sets = (0..=rollup.len())
+                    .map(|n| {
+                        rollup
+                            .iter()
+                            .take(n)
+                            .flat_map(|x| x.iter().cloned())
+                            .collect_vec()
+                    })
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
             }
         };
 
@@ -422,6 +438,26 @@ impl LogicalAggBuilder {
         // subquery/agg/table are rejected in `bind_agg`.
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
+
+        if matches!(agg_kind, AggKind::Grouping) {
+            if self.grouping_sets.is_empty() {
+                return Err(ErrorCode::NotSupported(
+                    "GROUPING must be used in a query with grouping sets".into(),
+                    "try to use grouping sets instead".into(),
+                ));
+            }
+            if inputs.len() >= 32 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUPING must have fewer than 32 arguments".into(),
+                ));
+            }
+            if inputs.iter().any(|x| self.try_as_group_expr(x).is_none()) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "arguments to GROUPING must be grouping expressions of the associated query level"
+                        .into(),
+                ));
+            }
+        }
 
         let inputs: Vec<_> = inputs
             .iter()
@@ -647,7 +683,6 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-
             _ => Ok(self
                 .push_agg_call(PlanAggCall {
                     agg_kind,

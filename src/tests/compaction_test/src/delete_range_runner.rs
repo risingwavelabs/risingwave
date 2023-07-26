@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -122,6 +123,7 @@ async fn compaction_test(
         )]),
         fragment_id: 0,
         dml_fragment_id: None,
+        initialized_at_epoch: None,
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
@@ -134,6 +136,8 @@ async fn compaction_test(
         version: None,
         watermark_indices: vec![],
         dist_key_in_pk: vec![],
+        cardinality: None,
+        created_at_epoch: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -257,6 +261,7 @@ async fn compaction_test(
                 .sum::<usize>()
         );
     }
+
     compactor_shutdown_tx.send(()).unwrap();
     compactor_thrd.await.unwrap();
     Ok(())
@@ -562,10 +567,12 @@ fn run_compactor_thread(
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
+        running_task_count: Arc::new(AtomicU32::new(0)),
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,
         meta_client,
+        2.0, // max_compactor_task_multiplier
     )
 }
 

@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_shdescription` stores optional descriptions (comments) for shared database
 /// objects. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-shdescription.html`]
@@ -24,3 +26,9 @@ pub const PG_SHDESCRIPTION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "classoid"),
     (DataType::Varchar, "description"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_shdescription_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}
