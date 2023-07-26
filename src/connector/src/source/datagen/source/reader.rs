@@ -316,6 +316,7 @@ mod tests {
     use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
+    use crate::parser::SpecificParserConfig;
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -374,7 +375,14 @@ mod tests {
         let mut reader = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
+            ParserConfig {
+                specific: SpecificParserConfig {
+                    key_encoding_config: None,
+                    encoding_config: EncodingProperties::Native,
+                    protocol_config: ProtocolProperties::Native,
+                },
+                ..Default::default()
+            },
             Default::default(),
             Some(mock_datum),
         )
@@ -425,10 +433,18 @@ mod tests {
             rows_per_second: 10,
             fields: HashMap::new(),
         };
+        let parser_config = ParserConfig {
+            specific: SpecificParserConfig {
+                key_encoding_config: None,
+                encoding_config: EncodingProperties::Native,
+                protocol_config: ProtocolProperties::Native,
+            },
+            ..Default::default()
+        };
         let stream = DatagenSplitReader::new(
             properties.clone(),
             state,
-            Default::default(),
+            parser_config.clone(),
             Default::default(),
             Some(mock_datum.clone()),
         )
@@ -445,7 +461,7 @@ mod tests {
         let mut stream = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
+            parser_config,
             Default::default(),
             Some(mock_datum),
         )
