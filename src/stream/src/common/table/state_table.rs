@@ -55,84 +55,10 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::TopNStateCache;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
+use crate::common::table::state_table_cache::StateTableWatermarkCache;
 
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
-
-/// INSERT
-///    A. Cache evicted. Update cached value.
-///    B. Cache uninitialized. Initialize cache, insert into TopNCache.
-///    C. Cache not empty. Insert into TopNCache.
-///
-/// DELETE
-///    A. Matches lowest value pk. Remove lowest value. Mark cache as Evicted.
-///       Later on Barrier we will refresh the cache with table scan.
-///       Since on barrier we will clean up all values before watermark,
-///       We have less rows to scan.
-///    B. Does not match. Do nothing.
-///
-/// UPDATE
-///    A. Do delete then insert.
-///
-/// BARRIER
-///    State table commit. See below.
-///
-/// STATE TABLE COMMIT
-///    Update `prev_cleaned_watermark`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum WatermarkCacheState {
-    /// All values deleted. Need refresh cache on barrier.
-    Evicted,
-    /// Either no lowest values, or some lowest values.
-    Ready,
-}
-
-type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
-
-#[derive(Clone)]
-struct StateTableWatermarkCache {
-    inner: TopNStateCache<WatermarkCacheKey, ()>,
-}
-
-
-impl StateTableWatermarkCache {
-    fn new() -> Self {
-        Self {
-            inner: TopNStateCache::new(100), // TODO: This number is arbitrary
-        }
-    }
-    /// Handle inserts / updates.
-    fn handle_insert(&mut self, row: impl Row, watermark_col_idx: &Option<usize>) {
-        todo!()
-    }
-    //     let Some(idx) = watermark_col_idx else {
-    //         *self = Self::Empty;
-    //         return;
-    //     };
-    //     let new_value = row.datum_at(*idx);
-    //     match self {
-    //         Self::Smallest(current_row) => {
-    //             let current_value = current_row.datum_at(*idx);
-    //             if cmp_datum(new_value, current_value.to_datum_ref(), Default::default())
-    //                 == Ordering::Less
-    //             {
-    //                 *self = Self::Smallest(row.into_owned_row());
-    //             }
-    //             // Otherwise keep the old value.
-    //         }
-    //         Self::Uninitialized => {
-    //             *self = Self::Smallest(row.into_owned_row());
-    //         }
-    //         Self::Empty => {
-    //             // If we delete the smallest value, we need to do table scan to find it back.
-    //             // Empty -> We don't know the smallest value.
-    //             // So we can't update anything.
-    //             // We have to do a table scan
-    //             // if we wish to refresh the cache.
-    //         }
-    //     }
-    // }
-}
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.

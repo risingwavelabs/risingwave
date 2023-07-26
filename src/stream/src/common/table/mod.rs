@@ -14,6 +14,7 @@
 
 pub mod state_table;
 mod watermark;
+mod state_table_cache;
 
 #[cfg(test)]
 pub mod test_state_table;
