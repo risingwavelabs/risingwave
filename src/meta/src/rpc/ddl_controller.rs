@@ -608,11 +608,10 @@ where
             // `associated_source_id`. Indexes also need to be dropped atomically.
             let (version, delete_jobs) = self
                 .catalog_manager
-                .drop_table_with_source(
-                    source_id,
-                    table_id,
-                    internal_table_ids,
+                .drop_relation(
+                    RelationIdEnum::Table(table_id),
                     fragment_manager.clone(),
+                    DropMode::Restrict,
                 )
                 .await?;
             // Unregister source connector worker.

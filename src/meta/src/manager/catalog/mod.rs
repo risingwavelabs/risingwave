@@ -1275,7 +1275,7 @@ where
         // let mut all_index_internal_table_ids = vec![];
 
         // let mut all_sink_ids = vec![];
-        // let mut all_source_ids = vec![];
+        let mut all_source_ids = vec![];
         // let mut all_view_ids = vec![];
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
@@ -1460,6 +1460,10 @@ where
                             }
                         }
                     }
+
+                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id)) = table.optional_associated_source_id {
+                        all_source_ids.push(associated_source_id);
+                    }
                 }
                 RelationInfo::Index(index) => {
                     all_index_ids.push(index.id);
@@ -1525,6 +1529,11 @@ where
             .map(|index_id| indexes.remove(*index_id).unwrap())
             .collect_vec();
 
+        let sources_removed = all_source_ids
+            .iter()
+            .map(|source_id| sources.remove(*source_id).unwrap())
+            .collect_vec();
+
         let internal_tables = all_internal_table_ids
             .iter()
             .map(|internal_table_id| {
@@ -1550,7 +1559,7 @@ where
             )
         };
 
-        commit_meta!(self, tables, indexes, users)?;
+        commit_meta!(self, tables, indexes, sources, users)?;
 
         indexes_removed.iter().for_each(|index| {
             user_core.decrease_ref(index.owner);
@@ -1559,6 +1568,10 @@ where
         // `tables_removed` contains both index table and mv.
         tables_removed.iter().for_each(|table| {
             user_core.decrease_ref(table.owner);
+        });
+
+        sources_removed.iter().for_each(|source| {
+            refcnt_dec_connection(database_core, source.connection_id);
         });
 
         for user in users_need_update {
@@ -1586,6 +1599,9 @@ where
                         }))
                         .chain(tables_removed.into_iter().map(|table| Relation {
                             relation_info: RelationInfo::Table(table).into(),
+                        }))
+                        .chain(sources_removed.into_iter().map(|source| Relation {
+                            relation_info: RelationInfo::Source(source).into(),
                         }))
                         .collect_vec(),
                 }),
