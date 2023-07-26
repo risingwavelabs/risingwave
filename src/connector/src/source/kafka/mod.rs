@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 
 pub mod enumerator;
 pub mod private_link;
@@ -37,19 +38,23 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 /// These properties are not intended to be exposed to users in the majority of cases.
 ///
 /// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct RdKafkaProperties {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
     #[serde(rename = "properties.queued.min.messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub queued_min_messages: Option<usize>,
 
     #[serde(rename = "properties.queued.max.messages.kbytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub queued_max_messages_kbytes: Option<usize>,
 
     /// Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
     /// messages.
     #[serde(rename = "properties.fetch.wait.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_wait_max_ms: Option<usize>,
 
     /// How long to postpone the next fetch request for a topic+partition in case the current fetch
@@ -58,6 +63,7 @@ pub struct RdKafkaProperties {
     /// and the application is experiencing long (~1s) delays between messages. Low values may
     /// increase CPU utilization.
     #[serde(rename = "properties.fetch.queue.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_queue_backoff_ms: Option<usize>,
 
     /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
@@ -68,6 +74,7 @@ pub struct RdKafkaProperties {
     /// topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
     /// `message.max.bytes` (consumer config).
     #[serde(rename = "properties.fetch.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_max_bytes: Option<usize>,
 
     /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
@@ -75,6 +82,7 @@ pub struct RdKafkaProperties {
     /// `fetch.max.bytes` + 512 to allow for protocol overhead; the value is adjusted automatically
     /// unless the configuration property is explicitly set.
     #[serde(rename = "properties.receive.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub receive_message_max_bytes: Option<usize>,
 }
 
