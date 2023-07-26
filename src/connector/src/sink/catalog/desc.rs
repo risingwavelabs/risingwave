@@ -80,6 +80,8 @@ impl SinkDesc {
             properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
             connection_id,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
         }
     }
 

@@ -422,6 +422,7 @@ struct FunctionAttr {
     init_state: Option<String>,
     prebuild: Option<String>,
     type_infer: Option<String>,
+    deprecated: bool,
     user_fn: UserFunctionAttr,
 }
 

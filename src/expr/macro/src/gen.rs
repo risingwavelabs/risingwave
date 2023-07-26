@@ -70,6 +70,7 @@ impl FunctionAttr {
         } else {
             self.generate_build_fn()?
         };
+        let deprecated = self.deprecated;
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
@@ -79,6 +80,7 @@ impl FunctionAttr {
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
                     build: #build_fn,
+                    deprecated: #deprecated,
                 }) };
             }
         })

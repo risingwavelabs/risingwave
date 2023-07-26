@@ -77,7 +77,7 @@ rust_decimal = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
-serde_with = { version = "2", features = ["json"] }
+serde_with = { version = "3", features = ["json"] }
 simd-json = "0.9.1"
 tempfile = "3"
 thiserror = "1"

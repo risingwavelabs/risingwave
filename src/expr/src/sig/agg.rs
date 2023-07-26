@@ -47,6 +47,7 @@ impl fmt::Debug for AggFuncSig {
             inputs_type: self.inputs_type,
             ret_type: self.ret_type,
             set_returning: false,
+            deprecated: false,
         }
         .fmt(f)
     }
