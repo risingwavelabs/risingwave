@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The view `pg_indexes` provides access to useful information about each index in the database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-indexes.html`]
@@ -26,3 +30,24 @@ pub const PG_INDEXES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "tablespace"),
     (DataType::Varchar, "indexdef"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_indexes_info(&self) -> Result<Vec<OwnedRow>> {
+        let catalog_reader = self.catalog_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema: &SchemaCatalog| {
+                schema.iter_index().map(|index| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(index.primary_table.name.clone().into())),
+                        Some(ScalarImpl::Utf8(index.index_table.name.clone().into())),
+                        None,
+                        Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+}

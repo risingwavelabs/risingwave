@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_operator` stores operator info.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-operator.html`]
@@ -36,3 +38,9 @@ pub const PG_OPERATOR_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oprrest"),
     (DataType::Int32, "oprjoin"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_operator_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}
