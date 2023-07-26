@@ -176,9 +176,6 @@ impl Compactor {
             ])
             .start_timer();
 
-        let (need_quota, total_file_count, total_key_count) =
-            estimate_state_for_compaction(&compact_task);
-
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let mut compact_table_ids = compact_task
@@ -256,6 +253,9 @@ impl Compactor {
                 return Self::compact_done(compact_task, context.clone(), vec![], task_status);
             }
         }
+
+        let (need_quota, total_file_count, total_key_count) =
+            estimate_state_for_compaction(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
