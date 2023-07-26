@@ -809,14 +809,22 @@ where
 
         let mut deque = VecDeque::new();
 
-        // `all_table_ids` are materialized view ids, table ids and index table ids.
-        let mut all_table_ids = vec![];
-        let mut all_internal_table_ids = vec![];
-        let mut all_index_ids = vec![];
+        // Relation dependencies is a DAG rather than a tree, so we need to use `HashSet` instead of `Vec` to record ids.
+        //        Sink
+        //          |
+        //        MView
+        //        /   \
+        //       View  |
+        //        \   /
+        //        Table
 
-        let mut all_sink_ids = vec![];
-        let mut all_source_ids = vec![];
-        let mut all_view_ids = vec![];
+        // `all_table_ids` are materialized view ids, table ids and index table ids.
+        let mut all_table_ids: HashSet<TableId> = HashSet::default();
+        let mut all_internal_table_ids: HashSet<TableId> = HashSet::default();
+        let mut all_index_ids: HashSet<IndexId> = HashSet::default();
+        let mut all_sink_ids: HashSet<SinkId> = HashSet::default();
+        let mut all_source_ids: HashSet<SourceId> = HashSet::default();
+        let mut all_view_ids: HashSet<ViewId> = HashSet::default();
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -855,7 +863,7 @@ where
                 })
                 .collect_vec();
 
-            // We don't need to output indexes because they are handled by tables.
+            // We don't need to output indexes because they have been handled by tables.
             tables_depend_on
                 .into_iter()
                 .chain(sinks_depend_on)
@@ -863,6 +871,7 @@ where
                 .collect()
         };
 
+        // Initial push into deque.
         match relation {
             RelationIdEnum::Table(table_id) => {
                 let table = tables.get(&table_id).cloned();
@@ -906,11 +915,14 @@ where
             }
         }
 
+        // Drop cascade loop
         while let Some(relation_info) = deque.pop_front() {
             match relation_info {
                 RelationInfo::Table(table) => {
                     let table_id: TableId = table.id;
-                    all_table_ids.push(table_id);
+                    if !all_table_ids.insert(table_id) {
+                        continue
+                    }
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&table_id.into())
                         .await?;
@@ -940,7 +952,7 @@ where
 
                         // 1 should be used by table scan.
                         if internal_table_ids.len() == 1 {
-                            all_internal_table_ids.push(internal_table_ids[0]);
+                            all_internal_table_ids.insert(internal_table_ids[0]);
                         } else {
                             // backwards compatibility with indexes
                             // without backfill state persisted.
@@ -991,8 +1003,13 @@ where
                                 DropMode::Cascade => {
                                     for relation_info in relations_depend_on(table.id as RelationId)
                                     {
-                                        // Filter relation belongs to index_table_ids.
-                                        if let RelationInfo::Table(t) = &relation_info && !index_table_ids.contains(&t.id) {
+
+                                        if let RelationInfo::Table(t) = &relation_info {
+                                            // Filter table belongs to index_table_ids.
+                                            if !index_table_ids.contains(&t.id) {
+                                                deque.push_back(relation_info);
+                                            }
+                                        } else {
                                             deque.push_back(relation_info);
                                         }
                                     }
@@ -1005,12 +1022,14 @@ where
                         associated_source_id,
                     )) = table.optional_associated_source_id
                     {
-                        all_source_ids.push(associated_source_id);
+                        all_source_ids.insert(associated_source_id);
                     }
                 }
                 RelationInfo::Index(index) => {
-                    all_index_ids.push(index.id);
-                    all_table_ids.push(index.index_table_id);
+                    if !all_index_ids.insert(index.id) {
+                        continue
+                    }
+                    all_table_ids.insert(index.index_table_id);
 
                     let internal_table_ids = match fragment_manager
                         .select_table_fragments_by_table_id(&(index.index_table_id.into()))
@@ -1024,7 +1043,7 @@ where
 
                     // 1 should be used by table scan.
                     if internal_table_ids.len() == 1 {
-                        all_internal_table_ids.push(internal_table_ids[0]);
+                        all_internal_table_ids.insert(internal_table_ids[0]);
                     } else {
                         // backwards compatibility with indexes
                         // without backfill state persisted.
@@ -1057,7 +1076,9 @@ where
                     }
                 }
                 RelationInfo::Source(source) => {
-                    all_source_ids.push(source.id);
+                    if !all_source_ids.insert(source.id) {
+                        continue
+                    }
                     if let Some(ref_count) =
                         database_core.relation_ref_count.get(&source.id).cloned()
                     {
@@ -1082,7 +1103,9 @@ where
                     }
                 }
                 RelationInfo::View(view) => {
-                    all_view_ids.push(view.id);
+                    if !all_view_ids.insert(view.id) {
+                        continue
+                    }
                     if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
                     {
                         if ref_count > 0 {
@@ -1105,8 +1128,9 @@ where
                     }
                 }
                 RelationInfo::Sink(sink) => {
-                    all_sink_ids.push(sink.id);
-
+                    if !all_sink_ids.insert(sink.id) {
+                        continue
+                    }
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&sink.id.into())
                         .await?;
