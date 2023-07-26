@@ -64,6 +64,15 @@ impl CompactionConfigBuilder {
                     compaction_config::level0_sub_level_compact_level_count(),
                 level0_overlapping_sub_level_compact_level_count:
                     compaction_config::level0_overlapping_sub_level_compact_level_count(),
+
+                // We expect the number of merge iters to be less than 128, and we want the
+                // overlapping file count + non-overlapping sub level count to be below this
+                // threshold
+                level0_stop_write_threshold_merge_iter_count:
+                    compaction_config::level0_stop_write_threshold_merge_iter_count(),
+
+                level0_stop_write_threshold_overlapping_file_count:
+                    compaction_config::level0_stop_write_threshold_overlapping_file_count(),
             },
         }
     }
@@ -150,4 +159,7 @@ builder_field! {
     level0_max_compact_file_number: u64,
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
+
+    level0_stop_write_threshold_merge_iter_count: u64,
+    level0_stop_write_threshold_overlapping_file_count: u64,
 }

@@ -396,10 +396,14 @@ impl<S: MetaStore> HummockManager<S> {
                 self.env.meta_store(),
             )
             .await?;
-        if config_to_update
-            .iter()
-            .any(|c| matches!(c, MutableConfig::Level0StopWriteThresholdSubLevelNumber(_)))
-        {
+        if config_to_update.iter().any(|c| {
+            matches!(c, MutableConfig::Level0StopWriteThresholdSubLevelNumber(_))
+                || matches!(c, MutableConfig::Level0StopWriteThresholdMergeIterCount(_))
+                || matches!(
+                    c,
+                    MutableConfig::Level0StopWriteThresholdOverlappingFileCount(_)
+                )
+        }) {
             self.try_update_write_limits(compaction_group_ids).await;
         }
         Ok(())
@@ -914,6 +918,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::Level0MaxCompactFileNumber(c) => {
                 target.level0_max_compact_file_number = *c;
+            }
+            MutableConfig::Level0StopWriteThresholdMergeIterCount(c) => {
+                target.level0_stop_write_threshold_merge_iter_count = *c;
+            }
+            MutableConfig::Level0StopWriteThresholdOverlappingFileCount(c) => {
+                target.level0_stop_write_threshold_overlapping_file_count = *c;
             }
         }
     }

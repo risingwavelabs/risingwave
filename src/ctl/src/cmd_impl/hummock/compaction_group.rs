@@ -60,6 +60,8 @@ pub fn build_compaction_config_vec(
     max_space_reclaim_bytes: Option<u64>,
     level0_max_compact_file_number: Option<u64>,
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
+    level0_stop_write_threshold_merge_iter_count: Option<u64>,
+    level0_stop_write_threshold_overlapping_file_count: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -100,6 +102,14 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = level0_overlapping_sub_level_compact_level_count {
         configs.push(MutableConfig::Level0OverlappingSubLevelCompactLevelCount(c))
+    }
+    if let Some(c) = level0_stop_write_threshold_merge_iter_count {
+        configs.push(MutableConfig::Level0StopWriteThresholdMergeIterCount(c))
+    }
+    if let Some(c) = level0_stop_write_threshold_overlapping_file_count {
+        configs.push(MutableConfig::Level0StopWriteThresholdOverlappingFileCount(
+            c,
+        ))
     }
     configs
 }

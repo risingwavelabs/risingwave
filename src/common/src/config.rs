@@ -990,10 +990,13 @@ pub mod default {
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_NON_OVERLAPPING_SUB_LEVEL_NUMBER: u64 = 384;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MERGE_ITER_COUNT: u64 = 512;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_OVERLAPPING_FILE_COUNT: u64 = 384;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1022,7 +1025,7 @@ pub mod default {
             DEFAULT_MAX_SUB_COMPACTION
         }
         pub fn level0_stop_write_threshold_sub_level_number() -> u64 {
-            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_NON_OVERLAPPING_SUB_LEVEL_NUMBER
         }
         pub fn level0_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT
@@ -1035,6 +1038,14 @@ pub mod default {
         }
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+
+        pub fn level0_stop_write_threshold_merge_iter_count() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MERGE_ITER_COUNT
+        }
+
+        pub fn level0_stop_write_threshold_overlapping_file_count() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_OVERLAPPING_FILE_COUNT
         }
     }
 }

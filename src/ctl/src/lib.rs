@@ -222,6 +222,10 @@ enum HummockCommands {
         level0_max_compact_file_number: Option<u64>,
         #[clap(long)]
         level0_overlapping_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_merge_iter_count: Option<u64>,
+        #[clap(long)]
+        level0_stop_write_threshold_overlapping_file_count: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -487,6 +491,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_space_reclaim_bytes,
             level0_max_compact_file_number,
             level0_overlapping_sub_level_compact_level_count,
+            level0_stop_write_threshold_merge_iter_count,
+            level0_stop_write_threshold_overlapping_file_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -505,6 +511,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_space_reclaim_bytes,
                     level0_max_compact_file_number,
                     level0_overlapping_sub_level_compact_level_count,
+                    level0_stop_write_threshold_merge_iter_count,
+                    level0_stop_write_threshold_overlapping_file_count,
                 ),
             )
             .await?

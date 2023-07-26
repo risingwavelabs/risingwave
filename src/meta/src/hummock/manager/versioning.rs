@@ -30,7 +30,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats,
+    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -294,18 +294,83 @@ pub(super) fn calc_new_write_limits(
             Some(levels) => levels,
         };
         // Add write limit conditions here.
-        let threshold = config
-            .compaction_config
-            .level0_stop_write_threshold_sub_level_number as usize;
-        let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
-        if threshold < l0_sub_level_number {
+        let l0_non_overlapping_sub_level_count: usize = levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+            .count();
+
+        let l0_overlapping_file_count: usize = levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type() == LevelType::Overlapping)
+            .map(|sub_level| sub_level.table_infos.len())
+            .sum();
+
+        if l0_non_overlapping_sub_level_count
+            > config
+                .compaction_config
+                .level0_stop_write_threshold_sub_level_number as usize
+        {
             new_write_limits.insert(
                 *id,
                 WriteLimit {
                     table_ids: levels.member_table_ids.clone(),
                     reason: format!(
-                        "too many L0 sub levels: {} > {}",
-                        l0_sub_level_number, threshold
+                        "too many L0 non-overlapping sub levels: {} > {}",
+                        l0_non_overlapping_sub_level_count,
+                        config
+                            .compaction_config
+                            .level0_stop_write_threshold_sub_level_number
+                    ),
+                },
+            );
+            continue;
+        }
+
+        if l0_overlapping_file_count
+            > config
+                .compaction_config
+                .level0_stop_write_threshold_overlapping_file_count as usize
+        {
+            new_write_limits.insert(
+                *id,
+                WriteLimit {
+                    table_ids: levels.member_table_ids.clone(),
+                    reason: format!(
+                        "too many L0 overlapping files: {} > {}",
+                        l0_overlapping_file_count,
+                        config
+                            .compaction_config
+                            .level0_stop_write_threshold_overlapping_file_count
+                    ),
+                },
+            );
+            continue;
+        }
+
+        if l0_non_overlapping_sub_level_count + l0_overlapping_file_count
+            > config
+                .compaction_config
+                .level0_stop_write_threshold_merge_iter_count as usize
+        {
+            new_write_limits.insert(
+                *id,
+                WriteLimit {
+                    table_ids: levels.member_table_ids.clone(),
+                    reason: format!(
+                        "too many L0 files and level non-overlapping sub levels: {} l0_overlapping_file_count {} level0_stop_write_threshold_merge_iter_count {}",
+                        l0_non_overlapping_sub_level_count,
+                        l0_overlapping_file_count,
+                        config
+                            .compaction_config
+                            .level0_stop_write_threshold_merge_iter_count
                     ),
                 },
             );
