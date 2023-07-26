@@ -31,7 +31,6 @@ use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_proctime::ProcTimeExpression;
-use crate::expr::expr_to_timestamp_const_tmpl::build_to_timestamp_expr_legacy;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -81,11 +80,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
                 .map(build_from_prost)
                 .try_collect()?;
 
-            // deprecated exprs not in signature map just for backward compatibility
-            if func_type == E::ToTimestamp1 && ret_type == DataType::Timestamp {
-                return build_to_timestamp_expr_legacy(ret_type, children);
-            }
-
             build_func(func_type, ret_type, children)
         }
     }
@@ -111,6 +105,7 @@ pub fn build_func(
                     inputs_type: &args,
                     ret_type: (&ret_type).into(),
                     set_returning: false,
+                    deprecated: false,
                 }
             ))
         })?;

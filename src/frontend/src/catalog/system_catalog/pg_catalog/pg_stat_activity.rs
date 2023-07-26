@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The `pg_stat_activity` view will have one row per server process, showing information related to
 /// the current activity of that process. Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
@@ -38,3 +40,9 @@ pub const PG_STAT_ACTIVITY_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
                                        * communication with this backend, or -1 if a Unix socket
                                        * is used. */
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}

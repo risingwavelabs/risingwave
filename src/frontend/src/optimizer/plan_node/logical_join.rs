@@ -515,7 +515,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping = ColIndexMapping::new(map);
+            let mut mapping =
+                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -870,7 +871,7 @@ impl LogicalJoin {
         let mut left = self.left();
 
         let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
-        let l2r = predicate.l2r_eq_columns_mapping(left.schema().len());
+        let l2r = predicate.l2r_eq_columns_mapping(left.schema().len(), right.schema().len());
 
         let right_dist = right.distribution();
         match right_dist {

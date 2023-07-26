@@ -52,7 +52,7 @@ impl ApplyOffsetRewriter {
     pub fn new(offset: usize, correlated_indices: &[usize], correlated_id: CorrelatedId) -> Self {
         Self {
             offset,
-            index_mapping: ColIndexMapping::new(
+            index_mapping: ColIndexMapping::without_target_size(
                 correlated_indices.iter().copied().map(Some).collect_vec(),
             )
             .inverse()
