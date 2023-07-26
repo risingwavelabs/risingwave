@@ -1276,7 +1276,7 @@ where
 
         // let mut all_sink_ids = vec![];
         let mut all_source_ids = vec![];
-        // let mut all_view_ids = vec![];
+        let mut all_view_ids = vec![];
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -1536,7 +1536,29 @@ where
                         }
                     }
                 },
-                RelationInfo::View(view) => todo!(),
+                RelationInfo::View(view) => {
+                    all_view_ids.push(view.id);
+                    if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned() {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete view `{}` because {} other relation(s) depend on it",
+                                        view.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                    relations_depend_on(view.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 RelationInfo::Sink(sink) => todo!(),
             }
         }
@@ -1554,6 +1576,11 @@ where
         let sources_removed = all_source_ids
             .iter()
             .map(|source_id| sources.remove(*source_id).unwrap())
+            .collect_vec();
+
+        let views_removed = all_view_ids
+            .iter()
+            .map(|view_id| views.remove(*view_id).unwrap())
             .collect_vec();
 
         let internal_tables = all_internal_table_ids
@@ -1578,32 +1605,45 @@ where
                     .into_iter()
                     .map(|table_id| Object::TableId(*table_id))
                     .chain(all_source_ids.into_iter().map(|source_id| Object::SourceId(source_id)))
+                    .chain(all_view_ids.into_iter().map(|view_id| Object::ViewId(view_id)))
                     .collect_vec(),
             )
         };
 
-        commit_meta!(self, tables, indexes, sources, users)?;
+        commit_meta!(self, tables, indexes, sources, views, users)?;
 
-        indexes_removed.iter().for_each(|index| {
+        for index in &indexes_removed {
             user_core.decrease_ref(index.owner);
-        });
+        }
 
         // `tables_removed` contains both index table and mv.
-        tables_removed.iter().for_each(|table| {
+        for table in &tables_removed {
             user_core.decrease_ref(table.owner);
-        });
+        }
 
-        sources_removed.iter().for_each(|source| {
+        for source in &sources_removed {
+            user_core.decrease_ref(source.owner);
             refcnt_dec_connection(database_core, source.connection_id);
-        });
+        }
+
+        for view in &views_removed {
+            user_core.decrease_ref(view.owner);
+        }
 
         for user in users_need_update {
             self.notify_frontend(Operation::Update, Info::User(user))
                 .await;
         }
 
+        // decrease dependent relations
         for table in &tables_removed {
             for dependent_relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
+            }
+        }
+
+        for view in &views_removed {
+            for dependent_relation_id in &view.dependent_relations {
                 database_core.decrease_ref_count(*dependent_relation_id);
             }
         }
@@ -1625,6 +1665,9 @@ where
                         }))
                         .chain(sources_removed.into_iter().map(|source| Relation {
                             relation_info: RelationInfo::Source(source).into(),
+                        }))
+                        .chain(views_removed.into_iter().map(|view| Relation {
+                            relation_info: RelationInfo::View(view).into(),
                         }))
                         .collect_vec(),
                 }),
