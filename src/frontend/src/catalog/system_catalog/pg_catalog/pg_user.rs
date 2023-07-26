@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_user` provides access to information about database users.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
@@ -29,3 +32,23 @@ pub const PG_USER_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Boolean, "usesuper"),
     (DataType::Varchar, "passwd"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_user_info(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.user_info_reader.read_guard();
+        let users = reader.get_all_users();
+        Ok(users
+            .iter()
+            .map(|user| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(user.id as i32)),
+                    Some(ScalarImpl::Utf8(user.name.clone().into())),
+                    Some(ScalarImpl::Bool(user.can_create_db)),
+                    Some(ScalarImpl::Bool(user.is_super)),
+                    // compatible with PG.
+                    Some(ScalarImpl::Utf8("********".into())),
+                ])
+            })
+            .collect_vec())
+    }
+}

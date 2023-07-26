@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// Mapping from sql name to system locale groups.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-collation.html`].
@@ -32,3 +34,9 @@ pub const PG_COLLATION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "colliculocale"),
     (DataType::Varchar, "collversion"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_collation_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}

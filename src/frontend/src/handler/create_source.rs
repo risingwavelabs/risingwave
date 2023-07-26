@@ -943,6 +943,8 @@ pub async fn handle_create_source(
         watermark_descs,
         definition,
         connection_id,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
         optional_associated_table_id: None,
     };
 

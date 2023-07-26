@@ -126,7 +126,8 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
                     func: kind,
                     inputs_type: &args,
                     ret_type: call.return_type.clone().into(),
-                    set_returning: false
+                    set_returning: false,
+                    deprecated: false,
                 }
             )));
         }

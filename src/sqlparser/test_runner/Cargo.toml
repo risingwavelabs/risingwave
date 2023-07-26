@@ -15,7 +15,7 @@ console = "0.15"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 risingwave_sqlparser = { path = "../" }
 serde = { version = "1", features = ["derive"] }
-serde_with = "2"
+serde_with = "3"
 serde_yaml = "0.9"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

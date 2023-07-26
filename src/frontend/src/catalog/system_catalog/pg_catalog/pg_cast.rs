@@ -15,10 +15,11 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
+use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 use crate::expr::cast_map_array;
 
 /// The catalog `pg_cast` stores data type conversion paths.
@@ -47,3 +48,9 @@ pub static PG_CAST_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
         })
         .collect_vec()
 });
+
+impl SysCatalogReaderImpl {
+    pub fn read_cast(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_CAST_DATA_ROWS.clone())
+    }
+}
