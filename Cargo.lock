@@ -1040,7 +1040,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4114279215a005bc675e386011e594e1d9b800918cea18fcadadcce864a2046b"
 dependencies = [
  "borsh-derive",
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -1353,7 +1353,7 @@ checksum = "2da6da31387c7e4ef160ffab6d5e7f00c42626fe39aea70a7b0f1773f7dd6c1b"
 [[package]]
 name = "clickhouse"
 version = "0.11.5"
-source = "git+https://github.com/risingwavelabs/clickhouse.rs?branch=xxh/add_update_and_delete#363a6d3daca149d2c865372f5d71e8825d388d24"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?branch=xxh/add_schema_build_v2#cdab31c64d177fb1809610581342cf6a1b06f574"
 dependencies = [
  "bstr",
  "bytes",
@@ -1375,7 +1375,7 @@ dependencies = [
 [[package]]
 name = "clickhouse-derive"
 version = "0.1.1"
-source = "git+https://github.com/risingwavelabs/clickhouse.rs?branch=xxh/add_update_and_delete#363a6d3daca149d2c865372f5d71e8825d388d24"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?branch=xxh/add_schema_build_v2#cdab31c64d177fb1809610581342cf6a1b06f574"
 dependencies = [
  "proc-macro2",
  "quote",
