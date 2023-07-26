@@ -24,7 +24,7 @@ use risingwave_connector::source::{SourceColumnDesc, SourceEncode, SourceFormat,
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::{
-    PbColumnCatalog, PbEncodeType, PbFormatType, PbRowFormatType, RowFormatType,
+    PbColumnCatalog, PbEncodeType, PbFormatType, RowFormatType,
 };
 
 use crate::connector_source::ConnectorSource;
@@ -165,10 +165,9 @@ impl SourceDescBuilder {
 
 // Only return valid (format, encode)
 pub fn extract_format_encode(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
-    let old_format = info.get_row_format()?;
     // old version meta.
-    if old_format != PbRowFormatType::RowUnspecified {
-        let (format, encode) = match old_format {
+    if let Ok(format) = info.get_row_format() {
+        let (format, encode) = match format {
             RowFormatType::Json => (SourceFormat::Plain, SourceEncode::Json),
             RowFormatType::Protobuf => (SourceFormat::Plain, SourceEncode::Protobuf),
             RowFormatType::DebeziumJson => (SourceFormat::Debezium, SourceEncode::Json),
