@@ -151,7 +151,7 @@ impl SstableStore {
             data_file_cache: data_file_cache.clone(),
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
-        let data_file_cache_refill_filter = if data_file_cache.enable_filter() {
+        let data_file_cache_refill_filter = if data_file_cache.is_filter_enabled() {
             Some(Arc::new(RecentFilter::new(6, Duration::from_secs(10))))
         } else {
             None

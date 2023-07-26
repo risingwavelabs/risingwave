@@ -457,7 +457,7 @@ where
         }
     }
 
-    pub fn enable_filter(&self) -> bool {
+    pub fn is_filter_enabled(&self) -> bool {
         match self {
             FileCache::None => false,
             FileCache::Foyer { enable_filter, .. } => *enable_filter,

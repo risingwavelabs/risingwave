@@ -106,7 +106,8 @@ impl CacheRefillPolicy {
                 policy.metrics.preload_io_count.inc_by(preload_count as u64);
                 let insert_ssts = try_join_all(reqs.into_iter().map(try_join_all)).await;
 
-                if !levels.is_empty() && !policy.refill_data_file_cache_levels.is_empty() {
+                if !levels.is_empty() && !policy.sstable_store.data_file_cache().is_filter_enabled()
+                {
                     tokio::spawn({
                         async move {
                             if let Err(e) = Self::refill_data_file_cache(
