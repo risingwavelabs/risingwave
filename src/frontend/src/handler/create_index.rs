@@ -240,6 +240,8 @@ pub(crate) fn gen_create_index_plan(
         primary_table_id: table.id.table_id,
         index_item,
         original_columns,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
     };
 
     let plan: PlanRef = materialize.into();
