@@ -206,7 +206,7 @@ async fn extract_protobuf_table_schema(
         ..Default::default()
     };
     let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
+        SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
         &info,
         &with_properties,
     )?;

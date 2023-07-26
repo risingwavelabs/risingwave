@@ -206,25 +206,6 @@ pub struct SourceInfo {
     pub fragment_id: u32,
 }
 
-// #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-// pub enum SourceFormat {
-//     #[default]
-//     Invalid,
-//     Json,
-//     UpsertJson,
-//     Protobuf,
-//     DebeziumJson,
-//     Avro,
-//     UpsertAvro,
-//     Maxwell,
-//     CanalJson,
-//     Csv,
-//     Native,
-//     DebeziumAvro,
-//     DebeziumMongoJson,
-//     Bytes,
-// }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SourceFormat {
     #[default]
