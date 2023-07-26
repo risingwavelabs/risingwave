@@ -30,6 +30,8 @@ pub const RW_INDEXES: BuiltinTable = BuiltinTable {
         (DataType::Int32, "owner"),
         (DataType::Varchar, "definition"),
         (DataType::Varchar, "acl"),
+        (DataType::Timestamptz, "initialized_at"),
+        (DataType::Timestamptz, "created_at"),
     ],
     pk: &[0],
 };
@@ -49,6 +51,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(index.index_table.owner as i32)),
                         Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),
                         Some(ScalarImpl::Utf8("".into())),
+                        index.initialized_at_epoch.map(|e| e.as_scalar()),
+                        index.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })
             })

@@ -35,6 +35,8 @@ pub const RW_SINKS: BuiltinTable = BuiltinTable {
         (DataType::Int32, "connection_id"),
         (DataType::Varchar, "definition"),
         (DataType::Varchar, "acl"),
+        (DataType::Timestamptz, "initialized_at"),
+        (DataType::Timestamptz, "created_at"),
     ],
     pk: &[0],
 };
@@ -73,6 +75,8 @@ impl SysCatalogReaderImpl {
                             get_acl_items(&Object::SinkId(sink.id.sink_id), &users, username_map)
                                 .into(),
                         ),
+                        sink.initialized_at_epoch.map(|e| e.as_scalar()),
+                        sink.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })
             })

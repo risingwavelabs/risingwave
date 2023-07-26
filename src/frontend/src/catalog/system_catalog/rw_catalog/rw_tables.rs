@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -31,6 +30,8 @@ pub const RW_TABLES: BuiltinTable = BuiltinTable {
         (DataType::Int32, "owner"),
         (DataType::Varchar, "definition"),
         (DataType::Varchar, "acl"),
+        (DataType::Timestamptz, "initialized_at"),
+        (DataType::Timestamptz, "created_at"),
     ],
     pk: &[0],
 };
@@ -60,6 +61,8 @@ impl SysCatalogReaderImpl {
                             )
                             .into(),
                         )),
+                        table.initialized_at_epoch.map(|e| e.as_scalar()),
+                        table.created_at_epoch.map(|e| e.as_scalar()),
                     ])
                 })
             })
