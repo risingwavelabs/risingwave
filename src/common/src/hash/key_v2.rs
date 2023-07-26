@@ -330,8 +330,14 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
 
             // Dispatch types once to accelerate the inner call.
             dispatch_all_variants!(array, ArrayImpl, array, {
-                for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
-                    serializer.serialize(scalar);
+                for ((scalar, visible), serializer) in array
+                    .iter()
+                    .zip_eq_fast(data_chunk.vis().iter())
+                    .zip_eq_fast(&mut serializers)
+                {
+                    if visible {
+                        serializer.serialize(scalar);
+                    }
                 }
             });
         }
@@ -400,7 +406,11 @@ impl DataChunk {
             })
         }
 
-        let mut sizes = vec![exact_size; self.capacity()];
+        let mut sizes = self
+            .vis()
+            .iter()
+            .map(|visible| if visible { exact_size } else { 0 })
+            .collect_vec();
 
         for i in estimated_column_indices {
             dispatch_all_variants!(&*self.columns()[i], ArrayImpl, col, {
