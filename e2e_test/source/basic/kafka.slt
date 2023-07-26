@@ -777,8 +777,8 @@ create table s25 (v1 int, v2 varchar) with (
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
-  properties.fetch.queue.backoff.ms = 250,
-  properties.queued.min.messages = 10000
+  properties.queued.min.messages = 10000,
+  properties.queued.max.messages.kbytes = 65536
 ) FORMAT PLAIN ENCODE JSON
 
 query I

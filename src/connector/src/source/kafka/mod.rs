@@ -62,6 +62,7 @@ pub struct RdKafkaProperties {
     /// exceeded. This property may need to be decreased if the queue thresholds are set low
     /// and the application is experiencing long (~1s) delays between messages. Low values may
     /// increase CPU utilization.
+    // FIXME: need to upgrade rdkafka to v2.2.0 to use this property
     #[serde(rename = "properties.fetch.queue.backoff.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_queue_backoff_ms: Option<usize>,
