@@ -20,7 +20,7 @@ use crate::common::cache::TopNCache;
 
 /// An implementation of [`StateCache`] that uses a [`TopNCache`] as the underlying cache, with
 /// limited capacity.
-#[derive(EstimateSize)]
+#[derive(Clone, EstimateSize)]
 pub struct TopNStateCache<K: Ord + EstimateSize, V: EstimateSize> {
     table_row_count: Option<usize>,
     cache: TopNCache<K, V>,
