@@ -30,6 +30,6 @@
       topic = 'kafka_1_csv_topic',
       properties.bootstrap.server = 'message_queue:29092',
       scan.startup.mode = 'earliest'
-    ) FORMAT PLAIN ENCODE CSV (delimiter = '\t', without_header = true);
+    ) FORMAT PLAIN ENCODE CSV (delimiter = E'\t', without_header = true);
   expected_outputs:
   - explain_output

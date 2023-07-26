@@ -583,6 +583,7 @@ impl SourceSchemaV2 {
             .iter()
             .cloned()
             .map(|x| match x.value {
+                Value::CstyleEscapesString(s) => Ok((x.name.real_value(), s)),
                 Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
@@ -846,7 +847,7 @@ pub fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
         "," => Ok(b','),    // comma
         "\\t" => Ok(b'\t'), // tab
         other => Err(ParserError::ParserError(format!(
-            "The delimiter should be one of ',', '\\t', but got {:?}",
+            "The delimiter should be one of ',', E'\\t', but got {:?}",
             other
         ))),
     }
