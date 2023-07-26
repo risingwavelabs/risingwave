@@ -66,6 +66,8 @@ pub async fn validate_source(context: &CtlContext, props: String) -> anyhow::Res
     let resp = meta_client
         .rw_cloud_validate_source(source_type, with_props)
         .await?;
-    println!("{}", serde_json::to_string(&resp).unwrap());
+    if !resp.ok {
+        return Err(anyhow!(serde_json::to_string(&resp).unwrap()));
+    }
     Ok(())
 }
