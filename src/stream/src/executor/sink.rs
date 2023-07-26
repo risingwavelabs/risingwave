@@ -21,7 +21,7 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::{compact_chunk, Op, StreamChunk};
+use risingwave_common::array::{merge_chunk_row, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
@@ -179,7 +179,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 Message::Chunk(chunk) => {
                     // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                     // K->K).
-                    let chunk = compact_chunk(chunk);
+                    let chunk = merge_chunk_row(chunk);
                     let visible_chunk = if sink_type == SinkType::ForceAppendOnly {
                         // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                         // user forces the sink to be append-only while it is actually not based on

@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{compact_chunk, StreamChunk};
+use risingwave_common::array::{merge_chunk_row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
@@ -133,7 +133,7 @@ impl Inner {
         }
         let (_, vis) = data_chunk.into_parts();
         let vis = vis.into_visibility();
-        let new_chunk = compact_chunk(StreamChunk::new(ops, projected_columns, vis));
+        let new_chunk = merge_chunk_row(StreamChunk::new(ops, projected_columns, vis));
         Ok(Some(new_chunk))
     }
 
