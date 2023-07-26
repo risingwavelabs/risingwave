@@ -39,7 +39,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id = sink_desc.get_id().into();
         let properties = sink_desc.get_properties().clone();
-        let pk_indices = sink_desc
+        let downstream_pk = sink_desc
             .downstream_pk
             .iter()
             .map(|i| *i as usize)
@@ -65,9 +65,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 },
                 columns,
                 properties,
-                pk_indices,
+                downstream_pk,
                 sink_type,
                 sink_id,
+                params.pk_indices,
                 params.actor_context,
                 factory,
             )

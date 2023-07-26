@@ -306,6 +306,8 @@ impl KafkaSinkWriter {
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        // We convert the INSERT and DELETE rows in the chunk based on the downstream pk instead of
+        // stream key here.
         let chunk = gen_update_from_pk(&self.pk_indices, chunk);
         let dbz_stream = gen_debezium_message_stream(
             &self.schema,

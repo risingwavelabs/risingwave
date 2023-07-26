@@ -133,7 +133,10 @@ impl Inner {
         }
         let (_, vis) = data_chunk.into_parts();
         let vis = vis.into_visibility();
-        let new_chunk = merge_chunk_row(StreamChunk::new(ops, projected_columns, vis));
+        let new_chunk = merge_chunk_row(
+            StreamChunk::new(ops, projected_columns, vis),
+            &self.info.pk_indices,
+        );
         Ok(Some(new_chunk))
     }
 

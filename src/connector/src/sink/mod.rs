@@ -56,7 +56,7 @@ pub struct SinkParam {
     pub sink_id: SinkId,
     pub properties: HashMap<String, String>,
     pub columns: Vec<ColumnDesc>,
-    pub pk_indices: Vec<usize>,
+    pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
 }
 
@@ -67,7 +67,7 @@ impl SinkParam {
             sink_id: SinkId::from(pb_param.sink_id),
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
-            pk_indices: table_schema
+            downstream_pk: table_schema
                 .pk_indices
                 .iter()
                 .map(|i| *i as usize)
@@ -84,7 +84,7 @@ impl SinkParam {
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
-                pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
+                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
         }
@@ -107,7 +107,7 @@ impl From<SinkCatalog> for SinkParam {
             sink_id: sink_catalog.id,
             properties: sink_catalog.properties,
             columns,
-            pk_indices: sink_catalog.downstream_pk,
+            downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
         }
     }
@@ -370,13 +370,13 @@ impl SinkImpl {
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
                 *cfg,
                 param.schema(),
-                param.pk_indices,
+                param.downstream_pk,
                 param.sink_type.is_append_only(),
             )),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
                 *cfg,
                 param.schema(),
-                param.pk_indices,
+                param.downstream_pk,
                 param.sink_type.is_append_only(),
             )),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),

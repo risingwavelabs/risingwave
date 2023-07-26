@@ -33,7 +33,7 @@ use risingwave_connector::sink::{
 };
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, Executor, Message};
+use super::{BoxedExecutor, Executor, Message, PkIndices};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
@@ -43,6 +43,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     metrics: Arc<StreamingMetrics>,
     sink: SinkImpl,
     identity: String,
+    pk_indices: PkIndices,
     input_columns: Vec<ColumnCatalog>,
     input_schema: Schema,
     sink_param: SinkParam,
@@ -79,9 +80,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_writer_param: SinkWriterParam,
         columns: Vec<ColumnCatalog>,
         properties: HashMap<String, String>,
-        pk_indices: Vec<usize>,
+        downstream_pk: Vec<usize>,
         sink_type: SinkType,
         sink_id: SinkId,
+        pk_indices: PkIndices,
         actor_context: ActorContextRef,
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
@@ -95,7 +97,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            pk_indices,
+            downstream_pk,
             sink_type,
         };
         let sink = build_sink(sink_param.clone())?;
@@ -108,6 +110,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             metrics,
             sink,
             identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
+            pk_indices,
             input_columns: columns,
             input_schema,
             sink_param,
@@ -130,6 +133,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let write_log_stream = Self::execute_write_log(
             self.input,
+            self.pk_indices,
             self.log_writer,
             self.input_columns.clone(),
             self.sink_param.sink_type,
@@ -151,6 +155,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_write_log(
         input: BoxedExecutor,
+        stream_key: PkIndices,
         mut log_writer: impl LogWriter,
         columns: Vec<ColumnCatalog>,
         sink_type: SinkType,
@@ -178,8 +183,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
-                    // K->K).
-                    let chunk = merge_chunk_row(chunk);
+                    // V->V).
+                    let chunk = merge_chunk_row(chunk, &stream_key);
                     let visible_chunk = if sink_type == SinkType::ForceAppendOnly {
                         // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                         // user forces the sink to be append-only while it is actually not based on
@@ -312,7 +317,7 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.sink_param.pk_indices
+        &self.pk_indices
     }
 
     fn identity(&self) -> &str {
@@ -401,6 +406,7 @@ mod test {
             pk.clone(),
             SinkType::ForceAppendOnly,
             0.into(),
+            pk.clone(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
@@ -491,6 +497,7 @@ mod test {
             pk.clone(),
             SinkType::ForceAppendOnly,
             0.into(),
+            pk.clone(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
