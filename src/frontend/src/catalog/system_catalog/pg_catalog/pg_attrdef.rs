@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_attrdef` stores column default values. The main information about columns is
 /// stored in `pg_attribute`. Only columns for which a default value has been explicitly set will
@@ -28,3 +30,9 @@ pub const PG_ATTRDEF_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     // expression. We don't have `pg_node_tree` type yet, so we use `text` instead.
     (DataType::Varchar, "adbin"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_attrdef_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}

@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
@@ -96,4 +98,15 @@ pub fn get_pg_type_data(namespace_id: u32) -> Vec<OwnedRow> {
             ])
         })
         .collect_vec()
+}
+
+impl SysCatalogReaderImpl {
+    pub fn read_types(&self) -> Result<Vec<OwnedRow>> {
+        let schema_id = self
+            .catalog_reader
+            .read_guard()
+            .get_schema_by_name(&self.auth_context.database, PG_CATALOG_SCHEMA_NAME)?
+            .id();
+        Ok(get_pg_type_data(schema_id))
+    }
 }
