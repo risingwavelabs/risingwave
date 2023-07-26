@@ -735,6 +735,7 @@ impl SpecificParserConfig {
             }
             (
                 SourceFormat::Debezium
+                | SourceFormat::DebeziumMongo
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
                 | SourceFormat::Plain
