@@ -228,7 +228,7 @@ where
 
     async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let version = self.catalog_manager.drop_source(source_id).await?;
+        let version = self.catalog_manager.drop_relation(RelationIdEnum::Source(source_id), self.fragment_manager.clone(), DropMode::Restrict).await?.0;
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
@@ -355,12 +355,10 @@ where
                 .await?
             }
             StreamingJobId::Index(index_id) => {
-                let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-                let version = self
+                self
                     .catalog_manager
-                    .drop_index(index_id, index_table_id, internal_table_ids)
-                    .await?;
-                (version, vec![index_table_id.into()])
+                    .drop_relation( RelationIdEnum::Index(index_id), self.fragment_manager.clone(), DropMode::Restrict)
+                    .await?
             }
         };
 

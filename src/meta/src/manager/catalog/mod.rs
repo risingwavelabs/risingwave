@@ -1513,9 +1513,31 @@ where
                         }
                     }
                 }
+                RelationInfo::Source(source) => {
+                    all_source_ids.push(source.id);
+                    if let Some(ref_count) = database_core.relation_ref_count.get(&source.id).cloned() {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete source `{}` because {} other relation(s) depend on it",
+                                        source.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                    relations_depend_on(source.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 RelationInfo::View(view) => todo!(),
                 RelationInfo::Sink(sink) => todo!(),
-                RelationInfo::Source(source) => todo!(),
             }
         }
 
@@ -1555,6 +1577,7 @@ where
                 &table_to_drop_ids
                     .into_iter()
                     .map(|table_id| Object::TableId(*table_id))
+                    .chain(all_source_ids.into_iter().map(|source_id| Object::SourceId(source_id)))
                     .collect_vec(),
             )
         };
