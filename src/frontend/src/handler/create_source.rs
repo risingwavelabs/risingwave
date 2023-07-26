@@ -41,7 +41,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    self, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
+    self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
     DebeziumAvroSchema, Encode, Format, ProtobufSchema, RowFormat, SourceSchemaV2, SourceWatermark,
 };
 
@@ -325,14 +325,9 @@ pub(crate) async fn try_bind_columns_from_source(
             )
         }
         (Format::Plain, Encode::Csv) => {
-            let mut chars = consume_string_from_options(&mut options, "delimiter")?.0;
-            if chars.len() != 1 {
-                return Err(RwError::from(ProtocolError(format!(
-                    "The delimiter should be a char, but got {:?}",
-                    chars
-                ))));
-            }
-            let delimiter = chars.remove(0) as u8;
+            let chars = consume_string_from_options(&mut options, "delimiter")?.0;
+            let delimiter =
+                get_delimiter(chars.as_str()).map_err(|e| RwError::from(e.to_string()))?;
             let has_header = try_consume_string_from_options(&mut options, "without_header")
                 .map(|s| s.0 == "false")
                 .unwrap_or(true);

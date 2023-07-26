@@ -841,7 +841,7 @@ pub struct CsvInfo {
     pub has_header: bool,
 }
 
-fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
+pub fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
     match chars {
         "," => Ok(b','),    // comma
         "\\t" => Ok(b'\t'), // tab
