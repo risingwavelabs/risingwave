@@ -15,7 +15,7 @@
 use std::cmp::Reverse;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DefaultOrdered, ScalarImpl};
-use crate::common::cache::TopNStateCache;
+use crate::common::cache::{StateCache, TopNStateCache};
 
 /// The watermark cache key is just an OwnedRow wrapped in `DefaultOrdered`.
 /// This is because we want to use the `DefaultOrdered` implementation of `Ord`.
@@ -108,6 +108,13 @@ impl StateTableWatermarkCache {
     /// Get the lowest value.
     pub fn get_lowest(&self) -> StateTableWatermarkCacheEntry {
         todo!()
+    }
+
+    /// Insert a new value.
+    /// FIXME: WE should just copy the whole interface of StateCAche impl
+    /// for top n state cache.
+    pub fn insert(&mut self, key: impl Row) -> Option<()> {
+        self.inner.insert(Reverse(DefaultOrdered(key.into_owned_row())), ())
     }
 }
 

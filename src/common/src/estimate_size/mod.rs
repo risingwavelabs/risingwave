@@ -138,10 +138,6 @@ impl<T> ZeroHeapSize for PhantomData<T> {}
 
 impl ZeroHeapSize for DataType {}
 
-// Reverse is `#[repr(transparent)]` and has no heap size.
-// `https://doc.rust-lang.org/std/cmp/struct.Reverse.html`
-impl<T: ZeroHeapSize> ZeroHeapSize for Reverse<T> {}
-
 #[derive(Clone)]
 pub struct VecWithKvSize<T: EstimateSize> {
     inner: Vec<T>,

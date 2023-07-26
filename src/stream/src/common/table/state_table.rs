@@ -18,7 +18,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
@@ -26,8 +26,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::{DefaultOrdered, ScalarImpl, ToDatumRef};
+use risingwave_common::row::{self, CompactedRow, Once, once, OwnedRow, Row, RowExt};
+use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -50,6 +50,7 @@ use risingwave_storage::store::{
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
+use risingwave_storage::table::merge_sort::merge_sort;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -787,7 +788,34 @@ where
         self.watermark_buffer_strategy.tick();
         self.seal_current_epoch(new_epoch.curr)
             .instrument(tracing::info_span!("state_table_commit"))
-            .await
+            .await?;
+
+        // Refresh watermark cache.
+        if let Some(ref watermark) = self.state_clean_watermark {
+            let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
+                (Included(once(Some(watermark.clone()))), Unbounded);
+            let mut streams = vec![];
+            for vnode in self.vnodes().iter_vnodes() {
+                // TODO(kwannoel): Is it possible to have a state_table interface to read the
+                // 1st value per vnode? Since that's all we need.
+                let stream = self
+                    .iter_key_and_val_with_pk_range(
+                        &range,
+                        vnode,
+                        PrefetchOptions::new_for_exhaust_iter(),
+                    )
+                    .await?;
+                streams.push(Box::pin(stream));
+            }
+            let merged_stream = merge_sort(streams);
+            pin_mut!(merged_stream);
+            if let Some((pk, _row)) = merged_stream.next().await.transpose()? {
+                let pk = self.pk_serde.deserialize(&pk[..])?; // FIXME: Maybe have a pk iter here? We don't want to deser the value.
+                // self.watermark_cache.insert(pk);
+                todo!();
+            }
+        }
+        Ok(())
     }
 
     // TODO(st1page): maybe we should extract a pub struct to do it
