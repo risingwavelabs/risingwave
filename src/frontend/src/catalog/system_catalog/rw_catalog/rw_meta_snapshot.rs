@@ -13,27 +13,31 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamp};
 use risingwave_common::util::epoch::Epoch;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_META_SNAPSHOT_TABLE_NAME: &str = "rw_meta_snapshot";
-
-pub const RW_META_SNAPSHOT_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int64, "meta_snapshot_id"),
-    (DataType::Int64, "hummock_version_id"),
-    // the smallest epoch this meta snapshot includes
-    (DataType::Int64, "safe_epoch"),
-    // human-readable timestamp of safe_epoch
-    (DataType::Timestamp, "safe_epoch_ts"),
-    // the largest epoch this meta snapshot includes
-    (DataType::Int64, "max_committed_epoch"),
-    // human-readable timestamp of max_committed_epoch
-    (DataType::Timestamp, "max_committed_epoch_ts"),
-];
+pub const RW_META_SNAPSHOT: BuiltinTable = BuiltinTable {
+    name: "rw_meta_snapshot",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int64, "meta_snapshot_id"),
+        (DataType::Int64, "hummock_version_id"),
+        // the smallest epoch this meta snapshot includes
+        (DataType::Int64, "safe_epoch"),
+        // human-readable timestamp of safe_epoch
+        (DataType::Timestamp, "safe_epoch_ts"),
+        // the largest epoch this meta snapshot includes
+        (DataType::Int64, "max_committed_epoch"),
+        // human-readable timestamp of max_committed_epoch
+        (DataType::Timestamp, "max_committed_epoch_ts"),
+    ],
+    pk: &[],
+};
 
 impl SysCatalogReaderImpl {
     pub async fn read_meta_snapshot(&self) -> Result<Vec<OwnedRow>> {

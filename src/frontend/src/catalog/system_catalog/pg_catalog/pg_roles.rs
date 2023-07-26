@@ -13,26 +13,31 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
 /// publicly readable view of `pg_authid` that blanks out the password field.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-roles.html`]
-pub const PG_ROLES_TABLE_NAME: &str = "pg_roles";
-pub const PG_ROLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "rolname"),
-    (DataType::Boolean, "rolsuper"),
-    (DataType::Boolean, "rolinherit"),
-    (DataType::Boolean, "rolcreaterole"),
-    (DataType::Boolean, "rolcreatedb"),
-    (DataType::Boolean, "rolcanlogin"),
-    (DataType::Varchar, "rolpassword"),
-];
+pub const PG_ROLES: BuiltinTable = BuiltinTable {
+    name: "pg_roles",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "rolname"),
+        (DataType::Boolean, "rolsuper"),
+        (DataType::Boolean, "rolinherit"),
+        (DataType::Boolean, "rolcreaterole"),
+        (DataType::Boolean, "rolcreatedb"),
+        (DataType::Boolean, "rolcanlogin"),
+        (DataType::Varchar, "rolpassword"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_roles_info(&self) -> Result<Vec<OwnedRow>> {

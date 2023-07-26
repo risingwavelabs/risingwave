@@ -13,24 +13,29 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_description` stores description.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-description.html`]
-pub const PG_DESCRIPTION_TABLE_NAME: &str = "pg_description";
-pub const PG_DESCRIPTION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "objoid"),
-    // None
-    (DataType::Int32, "classoid"),
-    // 0
-    (DataType::Int32, "objsubid"),
-    // None
-    (DataType::Varchar, "description"),
-];
+pub const PG_DESCRIPTION: BuiltinTable = BuiltinTable {
+    name: "pg_description",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "objoid"),
+        // None
+        (DataType::Int32, "classoid"),
+        // 0
+        (DataType::Int32, "objsubid"),
+        // None
+        (DataType::Varchar, "description"),
+    ],
+    pk: &[0],
+};
 
 pub fn new_pg_description_row(id: u32) -> OwnedRow {
     OwnedRow::new(vec![
