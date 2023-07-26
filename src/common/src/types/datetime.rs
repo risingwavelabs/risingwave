@@ -111,7 +111,17 @@ type Result<T> = std::result::Result<T, InvalidParamsError>;
 
 impl ToText for Date {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        if self.0.year() < 0 {
+            write!(
+                f,
+                "{}-{:02}-{:02} BC",
+                -self.0.year(),
+                self.0.month(),
+                self.0.day()
+            )
+        } else {
+            write!(f, "{}", self.0)
+        }
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
