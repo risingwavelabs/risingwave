@@ -14,9 +14,16 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::array::ListValue;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{
+    get_acl_items, SysCatalogReaderImpl, SystemCatalogColumnsDef,
+};
 
 pub const RW_FUNCTIONS_TABLE_NAME: &str = "rw_functions";
 
@@ -36,3 +43,45 @@ pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
         (DataType::Varchar, "acl"),
     ]
 });
+
+impl SysCatalogReaderImpl {
+    pub fn read_rw_functions_info(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+        let user_reader = self.user_info_reader.read_guard();
+        let users = user_reader.get_all_users();
+        let username_map = user_reader.get_user_name_map();
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema.iter_function().map(|function| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int32(function.id.function_id() as i32)),
+                        Some(ScalarImpl::Utf8(function.name.clone().into())),
+                        Some(ScalarImpl::Int32(schema.id() as i32)),
+                        Some(ScalarImpl::Int32(function.owner as i32)),
+                        Some(ScalarImpl::Utf8(function.kind.to_string().into())),
+                        Some(ScalarImpl::List(ListValue::new(
+                            function
+                                .arg_types
+                                .iter()
+                                .map(|t| Some(ScalarImpl::Int32(t.to_oid())))
+                                .collect_vec(),
+                        ))),
+                        Some(ScalarImpl::Int32(function.return_type.to_oid())),
+                        Some(ScalarImpl::Utf8(function.language.clone().into())),
+                        Some(ScalarImpl::Utf8(function.link.clone().into())),
+                        Some(ScalarImpl::Utf8(
+                            get_acl_items(
+                                &Object::FunctionId(function.id.function_id()),
+                                &users,
+                                username_map,
+                            )
+                            .into(),
+                        )),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+}

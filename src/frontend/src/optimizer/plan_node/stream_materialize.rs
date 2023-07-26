@@ -219,6 +219,8 @@ impl StreamMaterialize {
             watermark_columns,
             dist_key_in_pk: vec![],
             cardinality,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
         })
     }
 

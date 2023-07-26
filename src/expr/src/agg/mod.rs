@@ -93,7 +93,8 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
                     func: agg.kind,
                     inputs_type: &args,
                     ret_type,
-                    set_returning: false
+                    set_returning: false,
+                    deprecated: false,
                 }
             ))
         })?;
