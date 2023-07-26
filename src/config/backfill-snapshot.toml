@@ -3,7 +3,6 @@
 # before barrier comes.
 # In that case we want to flush existing data still.
 stream_chunk_size = 10000000000
-stream_exchange_concurrent_barriers = 100000000
 
 [system]
-barrier_interval_ms = 1
+barrier_interval_ms = 10
