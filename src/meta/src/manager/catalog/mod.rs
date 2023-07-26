@@ -1257,6 +1257,10 @@ where
         }
 
         for sink in &sinks_removed {
+            if let Some(connection_id) = sink.connection_id {
+                // TODO(siyuan): wait for yezizp to refactor ref cnt
+                database_core.decrease_ref_count(connection_id);
+            }
             for dependent_relation_id in &sink.dependent_relations {
                 database_core.decrease_ref_count(*dependent_relation_id);
             }
