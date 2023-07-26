@@ -35,15 +35,8 @@ impl Aggregator for Projection {
         self.inner.return_type()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &StreamChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        self.inner
-            .update_multi(&input.project(&self.indices), start_row_id, end_row_id)
-            .await
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        self.inner.update(&input.project(&self.indices)).await
     }
 
     fn get_output(&self) -> Result<Datum> {

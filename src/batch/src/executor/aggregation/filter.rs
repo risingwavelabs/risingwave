@@ -15,9 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::agg::{Aggregator, BoxedAggState};
 use risingwave_expr::expr::Expression;
 use risingwave_expr::Result;
@@ -43,53 +41,16 @@ impl Aggregator for Filter {
         self.inner.return_type()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &StreamChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let bitmap = if start_row_id == 0 && end_row_id == input.capacity() {
-            // if the input if the whole chunk, use `eval` to speed up
-            self.condition
-                .eval(input.data_chunk())
-                .await?
-                .as_bool()
-                .to_bitmap()
-        } else {
-            let mut bitmap_builder = BitmapBuilder::default();
-            // otherwise, run `eval_row` on each row
-            for row_id in start_row_id..end_row_id {
-                let (_, row_ref, vis) = input.row_at(row_id);
-                assert!(vis); // cuz the input chunk is supposed to be compacted
-                let b = self
-                    .condition
-                    .eval_row(&row_ref.into_owned_row())
-                    .await?
-                    .map(ScalarImpl::into_bool)
-                    .unwrap_or(false);
-                bitmap_builder.append(b);
-            }
-            bitmap_builder.finish()
-        };
-        if bitmap.all() {
-            // if the bitmap is all set, meaning all rows satisfy the filter,
-            // call `update_multi` for potential optimization
-            self.inner
-                .update_multi(input, start_row_id, end_row_id)
-                .await
-        } else {
-            // TODO(yuchao): we might want to pass visibility bitmap to the
-            // inner aggregator, or re-compact the input chunk after filtering.
-            // https://github.com/risingwavelabs/risingwave/pull/4972#discussion_r958013816
-            for (_, row_id) in (start_row_id..end_row_id)
-                .enumerate()
-                .filter(|(i, _)| bitmap.is_set(*i))
-            {
-                self.inner.update_single(input, row_id).await?;
-            }
-            Ok(())
-        }
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        let bitmap = self
+            .condition
+            .eval(input.data_chunk())
+            .await?
+            .as_bool()
+            .to_bitmap();
+        let mut input1 = input.clone();
+        input1.set_vis(input.vis() & &bitmap);
+        self.inner.update(&input1).await
     }
 
     fn get_output(&self) -> Result<Datum> {
@@ -138,14 +99,8 @@ mod tests {
             DataType::Int64
         }
 
-        async fn update_multi(
-            &mut self,
-            _input: &StreamChunk,
-            start_row_id: usize,
-            end_row_id: usize,
-        ) -> Result<()> {
-            self.count
-                .fetch_add(end_row_id - start_row_id, Ordering::Relaxed);
+        async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+            self.count.fetch_add(input.cardinality(), Ordering::Relaxed);
             Ok(())
         }
 

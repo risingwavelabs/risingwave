@@ -80,19 +80,11 @@ impl Aggregator for ProjectionOrderBy {
         self.inner.return_type()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &StreamChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        self.unordered_values.reserve(end_row_id - start_row_id);
-        for row_id in start_row_id..end_row_id {
-            let (op, row, vis) = input.row_at(row_id);
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        self.unordered_values.reserve(input.cardinality());
+        for (op, row) in input.rows() {
             assert_eq!(op, Op::Insert, "only support append");
-            if vis {
-                self.push_row(row)?;
-            }
+            self.push_row(row)?;
         }
         Ok(())
     }

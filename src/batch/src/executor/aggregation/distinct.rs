@@ -46,15 +46,10 @@ impl Aggregator for Distinct {
         self.inner.return_type()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &StreamChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
         let mut bitmap_builder = BitmapBuilder::with_capacity(input.capacity());
         bitmap_builder.append_bitmap(&input.data_chunk().vis().to_bitmap());
-        for row_id in start_row_id..end_row_id {
+        for row_id in 0..input.capacity() {
             let (row_ref, vis) = input.data_chunk().row_at(row_id);
             let row = row_ref.to_owned_row();
             let row_size = row.estimated_heap_size();
@@ -64,12 +59,8 @@ impl Aggregator for Distinct {
             }
             bitmap_builder.set(row_id, b);
         }
-        let mut input = input.clone();
-        input.set_visibility(bitmap_builder.finish());
-
-        self.inner
-            .update_multi(&input, start_row_id, end_row_id)
-            .await
+        let input = input.with_visibility(bitmap_builder.finish().into());
+        self.inner.update(&input).await
     }
 
     fn get_output(&self) -> Result<Datum> {

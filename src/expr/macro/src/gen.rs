@@ -416,22 +416,12 @@ impl FunctionAttr {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
-                    async fn update_multi(
-                        &mut self,
-                        input: &StreamChunk,
-                        start_row_id: usize,
-                        end_row_id: usize,
-                    ) -> Result<()> {
+                    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
                         #(#let_arrays)*
                         let mut state = #let_state;
                         match input.vis() {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
-                                    if row_id < start_row_id {
-                                        continue;
-                                    } else if row_id >= end_row_id {
-                                        break;
-                                    }
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
                                     #check_retract
                                     #(#let_values)*
@@ -439,7 +429,7 @@ impl FunctionAttr {
                                 }
                             }
                             Vis::Compact(_) => {
-                                for row_id in start_row_id..end_row_id {
+                                for row_id in 0..input.capacity() {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
                                     #check_retract
                                     #(#let_values)*

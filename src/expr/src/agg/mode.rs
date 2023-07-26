@@ -14,6 +14,7 @@
 
 use risingwave_common::array::*;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
@@ -102,15 +103,9 @@ impl Aggregator for Mode {
         self.return_type.clone()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &StreamChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let array = input.column_at(0);
-        for row_id in start_row_id..end_row_id {
-            self.add_datum(array.value_at(row_id));
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        for (_, row) in input.rows() {
+            self.add_datum(row.datum_at(0));
         }
         Ok(())
     }
