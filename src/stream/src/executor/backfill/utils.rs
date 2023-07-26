@@ -36,7 +36,6 @@ use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, StateTableInner};
-use crate::executor::backfill::upstream_table::SchemaTableName;
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };

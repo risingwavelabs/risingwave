@@ -1,17 +1,17 @@
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
+use risingwave_connector::source::external::ExternalTableReader;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
-use crate::executor::backfill::upstream_table::external::{
-    ExternalStorageTable, ExternalTableReader,
-};
+use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::UpstreamTable;
 use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
 use crate::executor::StreamExecutorResult;
@@ -65,7 +65,6 @@ impl<T: UpstreamTable> UpstreamTableReader<T> {
     }
 }
 
-// TODO: we can customize the snapshot read for different kind of table
 impl<S: StateStore> UpstreamSnapshotRead for UpstreamTableReader<StorageTable<S>> {
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
@@ -111,12 +110,25 @@ impl UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable> {
     fn snapshot_read(&self, _args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
         #[try_stream]
         async move {
-            #[for_await]
-            for chunk in self
+            let primary_keys = self
+                .inner
+                .pk_indices()
+                .iter()
+                .map(|idx| {
+                    let f = &self.inner.schema().fields[*idx];
+                    f.name.clone()
+                })
+                .collect_vec();
+
+            let row_stream = self
                 .inner
                 .table_reader()
-                .snapshot_read(self.inner.schema_table_name(), vec![])
-            {
+                .snapshot_read(self.inner.schema_table_name(), primary_keys);
+
+            pin_mut!(row_stream);
+            let mut chunk_stream = iter_chunks(row_stream, self.inner.schema(), 1000);
+            #[for_await]
+            for chunk in chunk_stream {
                 yield chunk?;
             }
         }

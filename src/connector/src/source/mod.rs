@@ -28,7 +28,7 @@ pub use base::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
-mod external;
+pub mod external;
 mod manager;
 
 pub use manager::SourceColumnDesc;

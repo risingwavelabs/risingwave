@@ -35,17 +35,17 @@ pub struct SchemaTableName {
     pub table_name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BinlogOffset {
     pub filename: String,
     pub position: u64,
 }
 
 pub trait ExternalTableReader {
-    type BinlogOffsetFuture<'a>: Future<Output = ConnectorResult<Option<BinlogOffset>>> + Send + 'a
+    type BinlogOffsetFuture<'a>: Future<Output = ConnectorResult<BinlogOffset>> + Send + 'a
     where
         Self: 'a;
-    type RowStream<'a>: Stream<Item = ConnectorResult<Option<OwnedRow>>> + Send + 'a
+    type RowStream<'a>: Stream<Item = ConnectorResult<OwnedRow>> + Send + 'a
     where
         Self: 'a;
 
@@ -116,8 +116,8 @@ impl MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<Option<BinlogOffset>>> + 'a;
-    type RowStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
+    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
+    type RowStream<'a> = impl Stream<Item = ConnectorResult<OwnedRow>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
@@ -138,10 +138,10 @@ impl ExternalTableReader for MySqlExternalTableReader {
                 .exactly_one()
                 .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
 
-            Ok(Some(BinlogOffset {
+            Ok(BinlogOffset {
                 filename: row.take("File").unwrap(),
                 position: row.take("Position").unwrap(),
-            }))
+            })
         }
     }
 
@@ -170,7 +170,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
                     // convert mysql row into OwnedRow
                     let mut row = row?;
                     let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                    Ok::<_, ConnectorError>(Some(OwnedRow::new(datums)))
+                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
                 });
 
                 pin_mut!(row_stream);
@@ -185,15 +185,15 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
-    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<Option<BinlogOffset>>> + 'a;
-    type RowStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
+    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
+    type RowStream<'a> = impl Stream<Item = ConnectorResult<OwnedRow>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         unimplemented!("get normalized table name")
     }
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
-        async move { Ok(None) }
+        async move { Ok(BinlogOffset::default()) }
     }
 
     fn snapshot_read(
