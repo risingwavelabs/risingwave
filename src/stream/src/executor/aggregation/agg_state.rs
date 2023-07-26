@@ -47,7 +47,6 @@ pub enum AggStateStorage<S: StateStore> {
 
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
-#[derive(EstimateSize)]
 pub enum AggState {
     /// State as single scalar value and is same as output.
     /// e.g. `count`, `sum`, append-only `min`/`max`.
@@ -58,7 +57,17 @@ pub enum AggState {
     Table(TableState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
-    MaterializedInput(MaterializedInputState),
+    MaterializedInput(Box<MaterializedInputState>),
+}
+
+impl EstimateSize for AggState {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            Self::Value(state) => state.estimated_heap_size(),
+            Self::Table(state) => state.estimated_heap_size(),
+            Self::MaterializedInput(state) => state.estimated_size(),
+        }
+    }
 }
 
 impl AggState {
@@ -85,13 +94,13 @@ impl AggState {
                 Self::Table(TableState::new(agg_call, table, group_key).await?)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
-                Self::MaterializedInput(MaterializedInputState::new(
+                Self::MaterializedInput(Box::new(MaterializedInputState::new(
                     agg_call,
                     pk_indices,
                     mapping,
                     extreme_cache_size,
                     input_schema,
-                )?)
+                )?))
             }
         })
     }
@@ -115,8 +124,7 @@ impl AggState {
             }
             Self::MaterializedInput(state) => {
                 // the input chunk for minput is unprojected
-                let mut chunk = chunk.clone();
-                chunk.set_vis(visibility);
+                let chunk = chunk.with_visibility(visibility);
                 state.apply_chunk(&chunk)
             }
         }

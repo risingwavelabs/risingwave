@@ -209,19 +209,21 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
-        let states =
-            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
-                AggState::create(
-                    agg_call,
-                    &storages[idx],
-                    prev_outputs.as_ref().map(|outputs| &outputs[idx]),
-                    pk_indices,
-                    group_key.as_ref(),
-                    extreme_cache_size,
-                    input_schema,
-                )
-            }))
+        // XXX(wrj): don't use try_join_all here to avoid weird memmove overhead
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            let state = AggState::create(
+                agg_call,
+                &storages[idx],
+                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                pk_indices,
+                group_key.as_ref(),
+                extreme_cache_size,
+                input_schema,
+            )
             .await?;
+            states.push(state);
+        }
 
         Ok(Self {
             group_key,
