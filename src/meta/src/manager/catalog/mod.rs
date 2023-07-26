@@ -809,8 +809,8 @@ where
 
         let mut deque = VecDeque::new();
 
-        // Relation dependencies is a DAG rather than a tree, so we need to use `HashSet` instead of `Vec` to record ids.
-        //        Sink
+        // Relation dependencies is a DAG rather than a tree, so we need to use `HashSet` instead of
+        // `Vec` to record ids.        Sink
         //          |
         //        MView
         //        /   \
@@ -921,7 +921,7 @@ where
                 RelationInfo::Table(table) => {
                     let table_id: TableId = table.id;
                     if !all_table_ids.insert(table_id) {
-                        continue
+                        continue;
                     }
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&table_id.into())
@@ -1003,7 +1003,6 @@ where
                                 DropMode::Cascade => {
                                     for relation_info in relations_depend_on(table.id as RelationId)
                                     {
-
                                         if let RelationInfo::Table(t) = &relation_info {
                                             // Filter table belongs to index_table_ids.
                                             if !index_table_ids.contains(&t.id) {
@@ -1027,7 +1026,7 @@ where
                 }
                 RelationInfo::Index(index) => {
                     if !all_index_ids.insert(index.id) {
-                        continue
+                        continue;
                     }
                     all_table_ids.insert(index.index_table_id);
 
@@ -1077,7 +1076,7 @@ where
                 }
                 RelationInfo::Source(source) => {
                     if !all_source_ids.insert(source.id) {
-                        continue
+                        continue;
                     }
                     if let Some(ref_count) =
                         database_core.relation_ref_count.get(&source.id).cloned()
@@ -1104,7 +1103,7 @@ where
                 }
                 RelationInfo::View(view) => {
                     if !all_view_ids.insert(view.id) {
-                        continue
+                        continue;
                     }
                     if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
                     {
@@ -1129,7 +1128,7 @@ where
                 }
                 RelationInfo::Sink(sink) => {
                     if !all_sink_ids.insert(sink.id) {
-                        continue
+                        continue;
                     }
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&sink.id.into())
