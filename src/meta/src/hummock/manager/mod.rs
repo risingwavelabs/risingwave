@@ -951,22 +951,7 @@ where
                 compaction_group_id,
             );
 
-            let (file_count, file_size) = {
-                let mut count = 0;
-                let mut size = 0;
-                for select_level in &compact_task.input_ssts {
-                    count += select_level.table_infos.len();
-
-                    for sst in &select_level.table_infos {
-                        size += sst.get_file_size();
-                    }
-                }
-
-                (count, size)
-            };
-
-            let (compact_task_size, compact_task_file_count, _) =
-                estimate_state_for_compaction(&compact_task);
+            let compact_task_estimated_state = estimate_state_for_compaction(&compact_task);
 
             let level_type_label = format!(
                 "L{}->L{}",
@@ -985,23 +970,30 @@ where
             self.metrics
                 .compact_task_size
                 .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_size as _);
+                .observe(compact_task_estimated_state.total_file_size as _);
+
+            self.metrics
+                .compact_task_size
+                .with_label_values(&[
+                    &compaction_group_id.to_string(),
+                    &format!("{} uncompressed", level_type_label),
+                ])
+                .observe(compact_task_estimated_state.total_uncompressed_file_size as _);
 
             self.metrics
                 .compact_task_file_count
                 .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_file_count as _);
+                .observe(compact_task_estimated_state.total_file_count as _);
 
             tracing::trace!(
-                    "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
+                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_estimated_state {:?}",
                     compaction_group_id,
                     level_count,
                     compact_task.input_ssts[0].level_type().as_str_name(),
                     compact_task.input_ssts[0].level_idx,
-                    file_count,
-                    file_size,
                     compact_task.target_level,
-                    start_time.elapsed()
+                    start_time.elapsed(),
+                    compact_task_estimated_state
                 );
         }
 

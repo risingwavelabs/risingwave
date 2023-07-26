@@ -254,28 +254,25 @@ impl CompactorManagerInner {
                 cancellable_tasks.push(task.clone());
 
                 if task_duration_too_long {
-                    let (need_quota, total_file_count, total_key_count) =
-                        estimate_state_for_compaction(task);
+                    let compact_task_estimated_state = estimate_state_for_compaction(task);
                     tracing::info!(
-                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} \
-                                pending_read_io_count {} pending_write_io_count {} need_quota {} total_file_count {} total_key_count {} target_level {} \
-                                base_level {} target_sub_level_id {} task_type {}",
-                                task.compaction_group_id,
-                                task.task_id,
-                                create_time,
-                                num_ssts_sealed,
-                                num_ssts_uploaded,
-                                num_progress_key,
-                                num_pending_read_io,
-                                num_pending_write_io,
-                                need_quota,
-                                total_file_count,
-                                total_key_count,
-                                task.target_level,
-                                task.base_level,
-                                task.target_sub_level_id,
-                                task.task_type,
-                            );
+                        "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} \
+                            pending_read_io_count {} pending_write_io_count {} target_level {} \
+                            base_level {} target_sub_level_id {} task_type {} compact_task_estimated_state {:?}",
+                            task.compaction_group_id,
+                            task.task_id,
+                            create_time,
+                            num_ssts_sealed,
+                            num_ssts_uploaded,
+                            num_progress_key,
+                            num_pending_read_io,
+                            num_pending_write_io,
+                            task.target_level,
+                            task.base_level,
+                            task.target_sub_level_id,
+                            task.task_type,
+                            compact_task_estimated_state
+                    );
                 }
             }
         }

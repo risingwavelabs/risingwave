@@ -254,8 +254,7 @@ impl Compactor {
             }
         }
 
-        let (need_quota, total_file_count, total_key_count) =
-            estimate_state_for_compaction(&compact_task);
+        let compact_task_estimated_state = estimate_state_for_compaction(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -280,18 +279,13 @@ impl Compactor {
             }
         };
 
-        let (capacity, total_file_size, total_file_size_uncompressed) =
-            estimate_task_memory_capacity(context.clone(), &compact_task);
+        let capacity = estimate_task_memory_capacity(context.clone(), &compact_task);
         let task_memory_capacity_with_parallelism = capacity * parallelism;
 
         tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                "Ready to handle compaction task: {} compact_task_estimated_state {:?} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
                 compact_task.task_id,
-                need_quota,
-                total_file_count,
-                total_file_size,
-                total_file_size_uncompressed,
-                total_key_count,
+                compact_task_estimated_state,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
                 parallelism,
