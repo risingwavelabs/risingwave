@@ -77,8 +77,8 @@ impl<'i, R: Row> Project<'i, R> {
 
 impl<R: Row> Hash for Project<'_, R> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        for i in self.indices {
-            self.datum_at(*i).hash(state);
+        for i in 0..self.len() {
+            self.datum_at(i).hash(state);
         }
     }
 }
