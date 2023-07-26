@@ -236,13 +236,13 @@ pub fn estimate_task_memory_capacity(
     task: &CompactTask,
 ) -> (usize, usize, usize) {
     let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
-    let total_file_size = task
+    let total_input_file_size = task
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
         .map(|table| table.file_size)
         .sum::<u64>();
-    let total_uncompressed_file_size = task
+    let total_input_uncompressed_file_size = task
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
@@ -250,7 +250,7 @@ pub fn estimate_task_memory_capacity(
         .sum::<u64>();
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
-    let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+    let total_file_size = (total_input_file_size as f64 * 1.2).round() as usize;
 
     let c = match task.compression_algorithm {
         0 => std::cmp::min(capacity, total_file_size),
@@ -258,7 +258,7 @@ pub fn estimate_task_memory_capacity(
     };
     (
         c,
-        total_file_size as usize,
-        total_uncompressed_file_size as usize,
+        total_input_file_size as usize,
+        total_input_uncompressed_file_size as usize,
     )
 }
