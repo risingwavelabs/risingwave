@@ -96,7 +96,7 @@ impl Binder {
         // `CTID` is a system column in postgres.
         // https://www.postgresql.org/docs/current/ddl-system-columns.html
         //
-        // We return an empty string here to support some tool such as DataGrip.
+        // We return an empty string here to support some tools such as DataGrip.
         //
         // FIXME: The type of `CTID` should be `tid`.
         // FIXME: The `CTID` column should be unique, so literal may break something.
