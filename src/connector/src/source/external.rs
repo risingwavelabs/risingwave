@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use anyhow::anyhow;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::RwError;
 use risingwave_common::row::{OwnedRow, Row};
 use serde_derive::Deserialize;
 
@@ -34,14 +35,23 @@ pub struct SchemaTableName {
     pub table_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct BinlogOffset {
+    pub filename: String,
+    pub position: u64,
+}
+
 pub trait ExternalTableReader {
+    type BinlogOffsetFuture<'a>: Future<Output = ConnectorResult<Option<BinlogOffset>>> + Send + 'a
+    where
+        Self: 'a;
     type RowStream<'a>: Stream<Item = ConnectorResult<Option<OwnedRow>>> + Send + 'a
     where
         Self: 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String;
 
-    fn current_binlog_offset(&self) -> Option<String>;
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_>;
 
     fn snapshot_read(
         &self,
@@ -98,17 +108,41 @@ impl MySqlExternalTableReader {
             rw_schema,
         })
     }
+
+    pub async fn disconnect(&self) -> ConnectorResult<()> {
+        self.pool.clone().disconnect().await?;
+        Ok(())
+    }
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
+    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<Option<BinlogOffset>>> + 'a;
     type RowStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
     }
 
-    fn current_binlog_offset(&self) -> Option<String> {
-        todo!()
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+        async move {
+            let mut conn = self
+                .pool
+                .get_conn()
+                .await
+                .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
+
+            let sql = format!("SHOW MASTER STATUS");
+            let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
+            let row = rs
+                .iter_mut()
+                .exactly_one()
+                .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
+
+            Ok(Some(BinlogOffset {
+                filename: row.take("File").unwrap(),
+                position: row.take("Position").unwrap(),
+            }))
+        }
     }
 
     fn snapshot_read(
@@ -151,14 +185,15 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
+    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<Option<BinlogOffset>>> + 'a;
     type RowStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         unimplemented!("get normalized table name")
     }
 
-    fn current_binlog_offset(&self) -> Option<String> {
-        unimplemented!("current binlog offset")
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+        async move { Ok(None) }
     }
 
     fn snapshot_read(
@@ -232,6 +267,9 @@ mod tests {
         };
 
         let reader = MySqlExternalTableReader::new(cdc_props).await.unwrap();
+        let offset = reader.current_binlog_offset().await.unwrap();
+        println!("BinlogOffset: {:?}", offset);
+
         let table_name = SchemaTableName {
             schema_name: "mydb".to_string(),
             table_name: "t1".to_string(),
