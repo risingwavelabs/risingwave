@@ -266,10 +266,7 @@ mod tests {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             vec!["c1".to_owned(), "c2".to_owned()],
-            SourceStruct {
-                format: SourceFormat::Plain,
-                encode: SourceEncode::Json,
-            },
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Json),
             data_types,
             rows_per_second,
             0,
