@@ -176,9 +176,6 @@ impl Compactor {
             ])
             .start_timer();
 
-        let (need_quota, total_file_count, total_key_count) =
-            estimate_state_for_compaction(&compact_task);
-
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let mut compact_table_ids = compact_task
@@ -256,6 +253,9 @@ impl Compactor {
                 return Self::compact_done(compact_task, context.clone(), vec![], task_status);
             }
         }
+
+        let (need_quota, total_file_count, total_key_count) =
+            estimate_state_for_compaction(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -279,14 +279,17 @@ impl Compactor {
             }
         };
 
-        let task_memory_capacity_with_parallelism =
-            estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+        let (capacity, total_file_size, total_file_size_uncompressed) =
+            estimate_task_memory_capacity(context.clone(), &compact_task);
+        let task_memory_capacity_with_parallelism = capacity * parallelism;
 
         tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
                 compact_task.task_id,
                 need_quota,
                 total_file_count,
+                total_file_size,
+                total_file_size_uncompressed,
                 total_key_count,
                 compact_task.target_level,
                 compact_task.compression_algorithm,

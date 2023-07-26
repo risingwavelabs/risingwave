@@ -14,10 +14,11 @@
 
 use std::sync::LazyLock;
 
+use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_proc` stores information about functions, procedures, aggregate functions, and
 /// window functions (collectively also known as routines).
@@ -35,3 +36,9 @@ pub const PG_PROC_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
 // TODO: read real data including oid etc in rw, currently there are no such data in rw.
 // more details can be found here: https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_proc.dat
 pub static PG_PROC_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
+
+impl SysCatalogReaderImpl {
+    pub fn read_pg_proc_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_PROC_DATA_ROWS.clone())
+    }
+}

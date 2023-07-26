@@ -84,7 +84,7 @@ rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
-serde_with = { version = "2", features = ["json"] }
+serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
@@ -174,7 +174,7 @@ rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
-serde_with = { version = "2", features = ["json"] }
+serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }

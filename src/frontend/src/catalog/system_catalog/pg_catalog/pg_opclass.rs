@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 /// The catalog `pg_opclass` defines index access method operator classes.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-opclass.html`].
@@ -30,3 +32,9 @@ pub const PG_OPCLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "opcdefault"),
     (DataType::Int32, "opckeytype"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_opclass_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}
