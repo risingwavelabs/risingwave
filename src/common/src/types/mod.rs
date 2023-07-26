@@ -40,6 +40,7 @@ pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
+use crate::util::must_not_impl::MustNotImplOrd;
 
 mod datetime;
 mod decimal;
@@ -586,6 +587,9 @@ macro_rules! scalar_impl_enum {
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
+
+impl MustNotImplOrd for ScalarImpl {}
+impl MustNotImplOrd for ScalarRefImpl<'_> {}
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
