@@ -588,7 +588,7 @@ impl SourceSchemaV2 {
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
                 _ => Err(ParserError::ParserError(
-                    "`row format options` only support single quoted string value".to_owned(),
+                    "`row format options` only support single quoted string value and C style escaped string".to_owned(),
                 )),
             })
             .try_collect()

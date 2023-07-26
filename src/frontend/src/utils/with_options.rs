@@ -156,7 +156,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
                 _ => Err(ErrorCode::InvalidParameterValue(
-                    "`with options` or `with properties` only support single quoted string value"
+                    "`with options` or `with properties` only support single quoted string value and C style escaped string"
                         .to_owned(),
                 )),
             })
