@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fs;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+use risingwave_common::config::AutoDumpHeapProfileConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 
 use super::MemoryControlRef;
-use crate::memory_management::MemoryControlStats;
+use crate::memory_management::{build_memory_control_policy, MemoryControlStats};
 
 /// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
 pub struct GlobalMemoryManager {
@@ -44,10 +46,17 @@ impl GlobalMemoryManager {
 
     pub fn new(
         metrics: Arc<StreamingMetrics>,
-        memory_control_policy: MemoryControlRef,
+        total_memory_bytes: usize,
+        auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
     ) -> Arc<Self> {
+        let memory_control_policy =
+            build_memory_control_policy(total_memory_bytes, auto_dump_heap_profile_config.clone())
+                .unwrap();
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
+        if auto_dump_heap_profile_config.enabled() {
+            fs::create_dir_all(&auto_dump_heap_profile_config.dir).unwrap();
+        }
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             metrics,

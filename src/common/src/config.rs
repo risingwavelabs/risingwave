@@ -386,6 +386,10 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[serde(default = "default::streaming::auto_dump_heap_profile")]
+    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
+
     #[serde(default, with = "streaming_prefix")]
     pub developer: StreamingDeveloperConfig,
 
@@ -530,6 +534,20 @@ impl AsyncStackTraceOption {
             Self::On => Some(false),
             Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct AutoDumpHeapProfileConfig {
+    #[serde(default = "default::auto_dump_heap_profile::dir")]
+    pub dir: String,
+    #[serde(default = "default::auto_dump_heap_profile::threshold")]
+    pub threshold: f32,
+}
+
+impl AutoDumpHeapProfileConfig {
+    pub fn enabled(&self) -> bool {
+        !self.dir.is_empty()
     }
 }
 
@@ -846,7 +864,7 @@ pub mod default {
     }
 
     pub mod streaming {
-        use crate::config::AsyncStackTraceOption;
+        use crate::config::{AsyncStackTraceOption, AutoDumpHeapProfileConfig};
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -856,6 +874,10 @@ pub mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::default()
+        }
+
+        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
+            Default::default()
         }
 
         pub fn unique_user_stream_errors() -> usize {
@@ -887,6 +909,16 @@ pub mod default {
 
         pub fn cache_file_max_write_size_mb() -> usize {
             4
+        }
+    }
+
+    pub mod auto_dump_heap_profile {
+        pub fn dir() -> String {
+            "".to_string()
+        }
+
+        pub fn threshold() -> f32 {
+            0.9
         }
     }
 

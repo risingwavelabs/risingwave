@@ -60,6 +60,10 @@ in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 
+[streaming.auto_dump_heap_profile]
+dir = ""
+threshold = 0.8999999761581421
+
 [streaming.developer]
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
