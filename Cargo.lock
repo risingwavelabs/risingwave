@@ -154,7 +154,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snap",
- "strum",
+ "strum 0.24.1",
  "strum_macros",
  "thiserror",
  "typed-builder",
@@ -1448,7 +1448,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e7b787b0dc42e8111badfdbe4c3059158ccb2db8780352fa1b01e8ccf45cc4d"
 dependencies = [
  "crossterm",
- "strum",
+ "strum 0.24.1",
  "strum_macros",
  "unicode-width",
 ]
@@ -5713,7 +5713,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
- "strum",
+ "strum 0.25.0",
  "strum_macros",
  "task_stats_alloc",
  "tempfile",
@@ -5793,7 +5793,7 @@ dependencies = [
  "smallbitset",
  "speedate",
  "static_assertions",
- "strum",
+ "strum 0.25.0",
  "strum_macros",
  "sysinfo",
  "tempfile",
@@ -7523,7 +7523,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ddae0c66b5fc0cceffae4ef2f7ad9f9f7636d3d0d3599ba849db08eb1a313b9"
 dependencies = [
- "strum",
+ "strum 0.24.1",
  "strum_macros",
 ]
 
@@ -7640,6 +7640,12 @@ checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 dependencies = [
  "strum_macros",
 ]
+
+[[package]]
+name = "strum"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 
 [[package]]
 name = "strum_macros"
