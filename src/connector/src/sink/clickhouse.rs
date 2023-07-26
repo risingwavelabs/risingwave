@@ -297,7 +297,7 @@ impl ClickHouseSinkWriter {
             for (index, data) in row.iter().enumerate() {
                 let clickhouse_schema_feature = self.column_correct_vec.get(index).unwrap();
 
-                clickhouse_filed_vec.push(ClickHouseInsertField::from_scalar_ref(
+                clickhouse_filed_vec.push(ClickHouseFieldWithNull::from_scalar_ref(
                     data,
                     clickhouse_schema_feature,
                     true,
@@ -337,7 +337,7 @@ impl ClickHouseSinkWriter {
                     for (index, data) in row.iter().enumerate() {
                         let clickhouse_schema_feature = self.column_correct_vec.get(index).unwrap();
 
-                        clickhouse_filed_vec.push(ClickHouseInsertField::from_scalar_ref(
+                        clickhouse_filed_vec.push(ClickHouseFieldWithNull::from_scalar_ref(
                             data,
                             clickhouse_schema_feature,
                             true,
@@ -350,8 +350,8 @@ impl ClickHouseSinkWriter {
                     insert.end().await?;
                 }
                 Op::Delete => {
-                    if let ClickHouseInsertField::WithoutSome(v) =
-                        ClickHouseInsertField::from_scalar_ref(
+                    if let ClickHouseFieldWithNull::WithoutSome(v) =
+                        ClickHouseFieldWithNull::from_scalar_ref(
                             row.datum_at(pk_index),
                             clickhouse_schema_feature,
                             false,
@@ -367,18 +367,17 @@ impl ClickHouseSinkWriter {
                 }
                 Op::UpdateDelete => continue,
                 Op::UpdateInsert => {
-                    let pk = ClickHouseInsertField::from_scalar_ref(
+                    let pk = ClickHouseFieldWithNull::from_scalar_ref(
                         row.datum_at(pk_index),
                         clickhouse_schema_feature,
                         false,
                     )?;
                     let mut clickhouse_filed_vec = vec![];
                     for (index, data) in row.iter().enumerate() {
-                        println!("{:?}", self.column_correct_vec);
                         if !self.pk_indices.contains(&index) {
                             let clickhouse_schema_feature =
                                 self.column_correct_vec.get(index).unwrap();
-                            clickhouse_filed_vec.push(ClickHouseInsertField::from_scalar_ref(
+                            clickhouse_filed_vec.push(ClickHouseFieldWithNull::from_scalar_ref(
                                 data,
                                 clickhouse_schema_feature,
                                 false,
@@ -434,11 +433,13 @@ struct SystemColumn {
     r#type: String,
 }
 
+/// Serialize this structure to simulate the `struct` call clickhouse interface
 #[derive(ClickHouseRow, Debug)]
 struct ClickHouseColumn {
-    // row: Row,
-    row: Vec<ClickHouseInsertField>,
+    row: Vec<ClickHouseFieldWithNull>,
 }
+
+/// Basic data types for use with the clickhouse interface
 #[derive(Debug)]
 enum ClickHouseField {
     Int16(i16),
@@ -447,30 +448,32 @@ enum ClickHouseField {
     Serial(Serial),
     Float32(f32),
     Float64(f64),
-    Utf8(String),
+    String(String),
     Bool(bool),
-    List(Vec<ClickHouseInsertField>),
+    List(Vec<ClickHouseFieldWithNull>),
 }
+
+/// Enum that support clickhouse nullable
 #[derive(Debug)]
-enum ClickHouseInsertField {
+enum ClickHouseFieldWithNull {
     WithSome(ClickHouseField),
     WithoutSome(ClickHouseField),
     None,
 }
 
-impl ClickHouseInsertField {
+impl ClickHouseFieldWithNull {
     pub fn from_scalar_ref(
         data: Option<ScalarRefImpl<'_>>,
         clickhouse_schema_feature: &ClickHouseSchemaFeature,
         is_insert: bool,
-    ) -> Result<ClickHouseInsertField> {
+    ) -> Result<ClickHouseFieldWithNull> {
         if data.is_none() {
             if !clickhouse_schema_feature.can_null {
                 return Err(SinkError::ClickHouse(
                     "clickhouse column can not insert null".to_string(),
                 ));
             } else {
-                return Ok(ClickHouseInsertField::None);
+                return Ok(ClickHouseFieldWithNull::None);
             }
         }
         let data = match data.unwrap() {
@@ -485,7 +488,7 @@ impl ClickHouseInsertField {
             ScalarRefImpl::Serial(v) => ClickHouseField::Serial(v),
             ScalarRefImpl::Float32(v) => ClickHouseField::Float32(v.into_inner()),
             ScalarRefImpl::Float64(v) => ClickHouseField::Float64(v.into_inner()),
-            ScalarRefImpl::Utf8(v) => ClickHouseField::Utf8(v.to_string()),
+            ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_string()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(_) => todo!(),
             ScalarRefImpl::Interval(_) => {
@@ -509,7 +512,7 @@ impl ClickHouseInsertField {
                     ClickHouseField::Int64(time)
                 } else {
                     let time = v.truncate_micros().to_string();
-                    ClickHouseField::Utf8(time)
+                    ClickHouseField::String(time)
                 }
             }
             ScalarRefImpl::Timestamptz(_) => {
@@ -528,7 +531,7 @@ impl ClickHouseInsertField {
                         is_insert,
                     )?)
                 }
-                return Ok(ClickHouseInsertField::WithoutSome(ClickHouseField::List(
+                return Ok(ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(
                     vec,
                 )));
             }
@@ -538,10 +541,12 @@ impl ClickHouseInsertField {
                 ))
             }
         };
+        // Insert needs to be serialized with `Some`, update doesn't need to be serialized with
+        // `Some`
         let data = if is_insert && clickhouse_schema_feature.can_null {
-            ClickHouseInsertField::WithSome(data)
+            ClickHouseFieldWithNull::WithSome(data)
         } else {
-            ClickHouseInsertField::WithoutSome(data)
+            ClickHouseFieldWithNull::WithoutSome(data)
         };
         Ok(data)
     }
@@ -559,7 +564,7 @@ impl Serialize for ClickHouseField {
             ClickHouseField::Serial(v) => v.serialize(serializer),
             ClickHouseField::Float32(v) => serializer.serialize_f32(*v),
             ClickHouseField::Float64(v) => serializer.serialize_f64(*v),
-            ClickHouseField::Utf8(v) => serializer.serialize_str(v),
+            ClickHouseField::String(v) => serializer.serialize_str(v),
             ClickHouseField::Bool(v) => serializer.serialize_bool(*v),
             ClickHouseField::List(v) => {
                 let mut s = serializer.serialize_seq(Some(v.len()))?;
@@ -571,16 +576,15 @@ impl Serialize for ClickHouseField {
         }
     }
 }
-impl Serialize for ClickHouseInsertField {
+impl Serialize for ClickHouseFieldWithNull {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        println!("{:?}", self);
         match self {
-            ClickHouseInsertField::WithSome(v) => serializer.serialize_some(v),
-            ClickHouseInsertField::WithoutSome(v) => v.serialize(serializer),
-            ClickHouseInsertField::None => serializer.serialize_none(),
+            ClickHouseFieldWithNull::WithSome(v) => serializer.serialize_some(v),
+            ClickHouseFieldWithNull::WithoutSome(v) => v.serialize(serializer),
+            ClickHouseFieldWithNull::None => serializer.serialize_none(),
         }
     }
 }
@@ -589,9 +593,9 @@ impl Serialize for ClickHouseColumn {
     where
         S: serde::Serializer,
     {
-        let mut s = serializer.serialize_struct("table", self.row.len())?;
+        let mut s = serializer.serialize_struct("useless", self.row.len())?;
         for data in &self.row {
-            s.serialize_field("v", &data)?
+            s.serialize_field("useless", &data)?
         }
         s.end()
     }
