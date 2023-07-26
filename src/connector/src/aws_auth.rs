@@ -116,9 +116,14 @@ impl AwsAuthProps {
         let credentials_provider = self
             .with_role_provider(self.build_credential_provider())
             .await?;
-        let config_loader = aws_config::from_env()
+        let mut config_loader = aws_config::from_env()
             .region(region)
             .credentials_provider(credentials_provider);
+
+        if let Some(endpoint) = self.endpoint.as_ref() {
+            config_loader = config_loader.endpoint_url(endpoint);
+        }
+
         Ok(config_loader.load().await)
     }
 }

@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 pub const RW_USERS_TABLE_NAME: &str = "rw_users";
 
@@ -26,3 +29,24 @@ pub const RW_USERS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Boolean, "create_user"),
     (DataType::Boolean, "can_login"),
 ];
+
+impl SysCatalogReaderImpl {
+    pub fn read_rw_user_info(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.user_info_reader.read_guard();
+        let users = reader.get_all_users();
+
+        Ok(users
+            .into_iter()
+            .map(|user| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(user.id as i32)),
+                    Some(ScalarImpl::Utf8(user.name.into())),
+                    Some(ScalarImpl::Bool(user.is_super)),
+                    Some(ScalarImpl::Bool(user.can_create_db)),
+                    Some(ScalarImpl::Bool(user.can_create_user)),
+                    Some(ScalarImpl::Bool(user.can_login)),
+                ])
+            })
+            .collect_vec())
+    }
+}

@@ -45,12 +45,12 @@ impl CardinalityVisitor {
             && scan.is_sys_table()
             && scan.table_name() == PG_NAMESPACE_TABLE_NAME
         {
-            let nspname = scan
+            if let Some(nspname) = scan
                 .output_col_idx()
                 .iter()
-                .find(|i| scan.table_desc().columns[**i].name == "nspname")
-                .unwrap();
-            unique_keys.push([*nspname].into_iter().collect());
+                .find(|i| scan.table_desc().columns[**i].name == "nspname") {
+                unique_keys.push([*nspname].into_iter().collect());
+            }
         }
 
         if unique_keys
