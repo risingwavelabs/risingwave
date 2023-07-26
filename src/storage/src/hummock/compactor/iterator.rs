@@ -34,8 +34,6 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, HummockResult, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
-const MAX_RETRY_TIME: u64 = 600; // 10min
-
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
@@ -55,6 +53,7 @@ pub struct SstableStreamIterator {
     sstable_info: SstableInfo,
     existing_table_ids: HashSet<StateTableId>,
     task_progress: Arc<TaskProgress>,
+    io_retry_timeout_ms: u64,
     create_time: Instant,
 }
 
@@ -81,6 +80,7 @@ impl SstableStreamIterator {
         stats: &StoreLocalStatistic,
         task_progress: Arc<TaskProgress>,
         sstable_store: SstableStoreRef,
+        io_retry_timeout_ms: u64,
     ) -> Self {
         Self {
             block_stream: None,
@@ -93,6 +93,7 @@ impl SstableStreamIterator {
             create_time: Instant::now(),
             sstable_store,
             task_progress,
+            io_retry_timeout_ms,
         }
     }
 
@@ -174,7 +175,8 @@ impl SstableStreamIterator {
                     Ok(None) => break,
                     Err(e) => {
                         if !e.is_object_error()
-                            || self.create_time.elapsed().as_secs() > MAX_RETRY_TIME
+                            || self.create_time.elapsed().as_millis() as u64
+                                > self.io_retry_timeout_ms
                         {
                             return Err(e);
                         }
@@ -276,6 +278,7 @@ pub struct ConcatSstableIterator {
 
     stats: StoreLocalStatistic,
     task_progress: Arc<TaskProgress>,
+    io_retry_timeout_ms: u64,
 }
 
 impl ConcatSstableIterator {
@@ -288,6 +291,7 @@ impl ConcatSstableIterator {
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
+        io_retry_timeout_ms: u64,
     ) -> Self {
         Self {
             key_range,
@@ -298,6 +302,7 @@ impl ConcatSstableIterator {
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
+            io_retry_timeout_ms,
         }
     }
 
@@ -314,6 +319,7 @@ impl ConcatSstableIterator {
             key_range,
             sstable_store,
             Arc::new(TaskProgress::default()),
+            0,
         )
     }
 
@@ -399,6 +405,7 @@ impl ConcatSstableIterator {
                     &self.stats,
                     self.task_progress.clone(),
                     self.sstable_store.clone(),
+                    self.io_retry_timeout_ms,
                 );
                 sstable_iter.seek(seek_key).await?;
 

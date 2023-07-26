@@ -142,6 +142,11 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
+        let compact_io_retry_time = self
+            .compactor
+            .context
+            .storage_opts
+            .object_store_streaming_read_timeout_ms;
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -171,6 +176,7 @@ impl CompactorRunner {
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                     task_progress.clone(),
+                    compact_io_retry_time,
                 ));
             } else {
                 for table_info in &level.table_infos {
@@ -189,6 +195,7 @@ impl CompactorRunner {
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
+                        compact_io_retry_time,
                     ));
                 }
             }
