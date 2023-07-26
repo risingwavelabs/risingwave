@@ -20,12 +20,13 @@ use mysql_async::prelude::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::row::{OwnedRow, Row};
+use serde_derive::Deserialize;
 
 use crate::error::ConnectorError;
 use crate::parser::mysql_row_to_datums;
 use crate::source::cdc::CdcProperties;
 
-pub type ConnectorResult<T> = std::result::Result<T, RwError>;
+pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
 #[derive(Debug, Clone)]
 pub struct SchemaTableName {
@@ -34,7 +35,7 @@ pub struct SchemaTableName {
 }
 
 pub trait ExternalTableReader {
-    type SnapshotStream<'a>: Stream<Item = ConnectorResult<Option<OwnedRow>>> + Send + 'a
+    type RowStream<'a>: Stream<Item = ConnectorResult<Option<OwnedRow>>> + Send + 'a
     where
         Self: 'a;
 
@@ -46,7 +47,7 @@ pub trait ExternalTableReader {
         &self,
         table_name: SchemaTableName,
         primary_keys: Vec<String>,
-    ) -> Self::SnapshotStream<'_>;
+    ) -> Self::RowStream<'_>;
 }
 
 #[derive(Debug)]
@@ -58,22 +59,49 @@ pub enum ExternalTableReaderImpl {
 #[derive(Debug)]
 pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,
+    config: ExternalTableConfig,
     rw_schema: Schema,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalTableConfig {
+    #[serde(rename = "hostname")]
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    #[serde(rename = "database.name")]
+    pub database: String,
+    #[serde(rename = "schema.name", default = "Default::default")]
+    pub schema: String,
+    #[serde(rename = "table.name")]
+    pub table: String,
+}
+
 impl MySqlExternalTableReader {
-    pub async fn new(cdc_props: CdcProperties) -> Self {
-        let database_url = "mysql://root:123456@localhost:3306/mydb";
-        let pool = mysql_async::Pool::new(database_url);
-        Self {
+    pub async fn new(cdc_props: CdcProperties) -> ConnectorResult<Self> {
+        let rw_schema = cdc_props.schema();
+        let config = serde_json::from_value::<ExternalTableConfig>(
+            serde_json::to_value(cdc_props.props).unwrap(),
+        )
+        .map_err(|e| ConnectorError::Config(anyhow!(e)))?;
+
+        let database_url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            config.username, config.password, config.host, config.port, config.database
+        );
+        let pool = mysql_async::Pool::from_url(database_url)?;
+        Ok(Self {
             pool,
-            rw_schema: cdc_props.schema(),
-        }
+            config,
+            rw_schema,
+        })
     }
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    type SnapshotStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
+    type RowStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
@@ -87,7 +115,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
         &self,
         table_name: SchemaTableName,
         primary_keys: Vec<String>,
-    ) -> Self::SnapshotStream<'_> {
+    ) -> Self::RowStream<'_> {
         #[try_stream]
         async move {
             let order_key = primary_keys.into_iter().join(",");
@@ -100,21 +128,15 @@ impl ExternalTableReader for MySqlExternalTableReader {
                 .pool
                 .get_conn()
                 .await
-                .map_err(|e| anyhow!("failed to get conn {}", e))?;
-            let mut result_set = conn
-                .query_iter(sql)
-                .await
-                .map_err(|e| anyhow!("fail to query {}", e))?;
-            let mut rs_stream = result_set
-                .stream::<mysql_async::Row>()
-                .await
-                .map_err(|e| anyhow!(e))?;
+                .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
+            let mut result_set = conn.query_iter(sql).await?;
+            let mut rs_stream = result_set.stream::<mysql_async::Row>().await?;
             if let Some(mut rs_stream) = rs_stream {
                 let row_stream = rs_stream.map(|row| {
                     // convert mysql row into OwnedRow
-                    let mut row = row.map_err(|e| anyhow!(e))?;
+                    let mut row = row?;
                     let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                    Ok::<_, RwError>(Some(OwnedRow::new(datums)))
+                    Ok::<_, ConnectorError>(Some(OwnedRow::new(datums)))
                 });
 
                 pin_mut!(row_stream);
@@ -129,7 +151,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
-    type SnapshotStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
+    type RowStream<'a> = impl Stream<Item = ConnectorResult<Option<OwnedRow>>> + 'a;
 
     fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         unimplemented!("get normalized table name")
@@ -143,7 +165,7 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         &self,
         table_name: SchemaTableName,
         primary_keys: Vec<String>,
-    ) -> Self::SnapshotStream<'_> {
+    ) -> Self::RowStream<'_> {
         #[try_stream]
         async move {
             let stream = match self {
@@ -167,8 +189,11 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use futures::{pin_mut, Stream, StreamExt};
     use futures_async_stream::for_await;
+    use maplit::{convert_args, hashmap};
     use mysql_async::prelude::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::DataType;
@@ -178,7 +203,7 @@ mod tests {
     use crate::source::cdc::CdcProperties;
     use crate::source::external::{ExternalTableReader, MySqlExternalTableReader, SchemaTableName};
 
-    // unit test for external table reader
+    #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
         let param = SinkParam {
@@ -186,7 +211,9 @@ mod tests {
             properties: Default::default(),
             columns: vec![
                 ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
-                ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(2), DataType::Decimal),
+                ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar),
+                ColumnDesc::unnamed(ColumnId::new(4), DataType::Date),
             ],
             pk_indices: vec![0],
             sink_type: SinkType::AppendOnly,
@@ -194,11 +221,17 @@ mod tests {
         let pb_sink = param.to_proto();
         let cdc_props = CdcProperties {
             source_type: "mysql".to_string(),
-            props: Default::default(),
+            props: convert_args!(hashmap!(
+                "hostname" => "localhost",
+                "port" => "8306",
+                "username" => "root",
+                "password" => "123456",
+                "database.name" => "mydb",
+                "table.name" => "t1")),
             table_schema: pb_sink.table_schema.unwrap(),
         };
 
-        let reader = MySqlExternalTableReader::new(cdc_props).await;
+        let reader = MySqlExternalTableReader::new(cdc_props).await.unwrap();
         let table_name = SchemaTableName {
             schema_name: "mydb".to_string(),
             table_name: "t1".to_string(),
@@ -206,12 +239,9 @@ mod tests {
 
         let stream = reader.snapshot_read(table_name, vec!["v1".to_string()]);
         pin_mut!(stream);
-        // while let row = stream.next().await {
-        //     println!("{:?}", row);
-        // }
         #[for_await]
         for row in stream {
-            println!("{:?}", row);
+            println!("OwnedRow: {:?}", row);
         }
     }
 }
