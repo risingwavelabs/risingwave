@@ -470,7 +470,7 @@ where
             checkpoint_version
         } else {
             // Read checkpoint from object store.
-            versioning_guard.checkpoint = self.read_checkpoint().await?.expect("checkpoint exists");
+            versioning_guard.checkpoint = self.read_checkpoint().await?;
             versioning_guard
                 .checkpoint
                 .version
