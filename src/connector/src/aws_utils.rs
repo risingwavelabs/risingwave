@@ -105,6 +105,7 @@ pub fn s3_client(
         s3_config::Builder::from(&sdk_config.clone())
             .retry_config(retry_conf)
             .timeout_config(timeout_conf)
+            .force_path_style(true)
             .build()
     } else {
         s3_config::Config::new(sdk_config)
