@@ -29,7 +29,11 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::{CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory, IndexId, MetaSrvEnv, NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
+    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, RelationIdEnum, SchemaId, SinkId,
+    SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+};
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::storage::MetaStore;
@@ -46,16 +50,17 @@ pub enum DropMode {
 }
 
 pub enum StreamingJobId {
-    MaterializedView(TableId, DropMode),
+    MaterializedView(TableId),
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
 }
 
 impl StreamingJobId {
+    #[allow(dead_code)]
     fn id(&self) -> TableId {
         match self {
-            StreamingJobId::MaterializedView(id, _)
+            StreamingJobId::MaterializedView(id)
             | StreamingJobId::Sink(id)
             | StreamingJobId::Table(_, id)
             | StreamingJobId::Index(id) => *id,
@@ -69,13 +74,13 @@ pub enum DdlCommand {
     CreateSchema(Schema),
     DropSchema(SchemaId),
     CreateSource(Source),
-    DropSource(SourceId),
+    DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
     CreateView(View),
-    DropView(ViewId),
+    DropView(ViewId, DropMode),
     CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
-    DropStreamingJob(StreamingJobId),
+    DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     CreateConnection(Connection),
@@ -147,15 +152,21 @@ where
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
                 DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
                 DdlCommand::CreateSource(source) => ctrl.create_source(source).await,
-                DdlCommand::DropSource(source_id) => ctrl.drop_source(source_id).await,
+                DdlCommand::DropSource(source_id, drop_mode) => {
+                    ctrl.drop_source(source_id, drop_mode).await
+                }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
                 DdlCommand::CreateView(view) => ctrl.create_view(view).await,
-                DdlCommand::DropView(view_id) => ctrl.drop_view(view_id).await,
+                DdlCommand::DropView(view_id, drop_mode) => {
+                    ctrl.drop_view(view_id, drop_mode).await
+                }
                 DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
-                DdlCommand::DropStreamingJob(job_id) => ctrl.drop_streaming_job(job_id).await,
+                DdlCommand::DropStreamingJob(job_id, drop_mode) => {
+                    ctrl.drop_streaming_job(job_id, drop_mode).await
+                }
                 DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
@@ -226,9 +237,21 @@ where
             .await
     }
 
-    async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
+    async fn drop_source(
+        &self,
+        source_id: SourceId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let version = self.catalog_manager.drop_relation(RelationIdEnum::Source(source_id), self.fragment_manager.clone(), DropMode::Restrict).await?.0;
+        let version = self
+            .catalog_manager
+            .drop_relation(
+                RelationIdEnum::Source(source_id),
+                self.fragment_manager.clone(),
+                drop_mode,
+            )
+            .await?
+            .0;
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
@@ -249,8 +272,23 @@ where
         self.catalog_manager.create_view(&view).await
     }
 
-    async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.drop_view(view_id).await
+    async fn drop_view(
+        &self,
+        view_id: ViewId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        let (version, streaming_job_ids) = self
+            .catalog_manager
+            .drop_relation(
+                RelationIdEnum::View(view_id),
+                self.fragment_manager.clone(),
+                drop_mode,
+            )
+            .await?;
+        self.stream_manager
+            .drop_streaming_jobs(streaming_job_ids)
+            .await;
+        Ok(version)
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
@@ -325,38 +363,47 @@ where
         }
     }
 
-    async fn drop_streaming_job(&self, job_id: StreamingJobId) -> MetaResult<NotificationVersion> {
+    async fn drop_streaming_job(
+        &self,
+        job_id: StreamingJobId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
-        let table_fragments = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&job_id.id().into())
-            .await?;
-        let internal_table_ids = table_fragments.internal_table_ids();
         let (version, streaming_job_ids) = match job_id {
-            StreamingJobId::MaterializedView(table_id, drop_mode) => {
+            StreamingJobId::MaterializedView(table_id) => {
                 self.catalog_manager
-                    .drop_relation(RelationIdEnum::Table(table_id), self.fragment_manager.clone(), drop_mode)
+                    .drop_relation(
+                        RelationIdEnum::Table(table_id),
+                        self.fragment_manager.clone(),
+                        drop_mode,
+                    )
                     .await?
             }
             StreamingJobId::Sink(sink_id) => {
-                self
-                    .catalog_manager
-                    .drop_relation(RelationIdEnum::Sink(sink_id), self.fragment_manager.clone(), DropMode::Restrict)
+                self.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Sink(sink_id),
+                        self.fragment_manager.clone(),
+                        drop_mode,
+                    )
                     .await?
             }
             StreamingJobId::Table(source_id, table_id) => {
                 self.drop_table_inner(
                     source_id,
                     table_id,
-                    internal_table_ids,
                     self.fragment_manager.clone(),
+                    drop_mode,
                 )
                 .await?
             }
             StreamingJobId::Index(index_id) => {
-                self
-                    .catalog_manager
-                    .drop_relation( RelationIdEnum::Index(index_id), self.fragment_manager.clone(), DropMode::Restrict)
+                self.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Index(index_id),
+                        self.fragment_manager.clone(),
+                        drop_mode,
+                    )
                     .await?
             }
         };
@@ -594,8 +641,8 @@ where
         &self,
         source_id: Option<SourceId>,
         table_id: TableId,
-        internal_table_ids: Vec<TableId>,
         fragment_manager: FragmentManagerRef<S>,
+        drop_mode: DropMode,
     ) -> MetaResult<(
         NotificationVersion,
         Vec<risingwave_common::catalog::TableId>,
@@ -608,7 +655,7 @@ where
                 .drop_relation(
                     RelationIdEnum::Table(table_id),
                     fragment_manager.clone(),
-                    DropMode::Restrict,
+                    drop_mode,
                 )
                 .await?;
             // Unregister source connector worker.
@@ -618,7 +665,7 @@ where
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
-                .drop_relation(RelationIdEnum::Table(table_id), fragment_manager, DropMode::Restrict)
+                .drop_relation(RelationIdEnum::Table(table_id), fragment_manager, drop_mode)
                 .await
         }
     }

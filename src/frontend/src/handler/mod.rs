@@ -300,10 +300,18 @@ pub async fn handle(
             let mut cascade = false;
             if let AstOption::Some(DropMode::Cascade) = drop_mode {
                 match object_type {
-                    ObjectType::MaterializedView => {
+                    ObjectType::MaterializedView
+                    | ObjectType::View
+                    | ObjectType::Sink
+                    | ObjectType::Source
+                    | ObjectType::Index
+                    | ObjectType::Table => {
                         cascade = true;
                     }
-                    _ => {
+                    ObjectType::Schema
+                    | ObjectType::Database
+                    | ObjectType::User
+                    | ObjectType::Connection => {
                         return Err(ErrorCode::NotImplemented(
                             "DROP CASCADE".to_string(),
                             None.into(),
@@ -314,19 +322,22 @@ pub async fn handle(
             };
             match object_type {
                 ObjectType::Table => {
-                    drop_table::handle_drop_table(handler_args, object_name, if_exists).await
+                    drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::MaterializedView => {
                     drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Index => {
-                    drop_index::handle_drop_index(handler_args, object_name, if_exists).await
+                    drop_index::handle_drop_index(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::Source => {
-                    drop_source::handle_drop_source(handler_args, object_name, if_exists).await
+                    drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::Sink => {
-                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(
@@ -356,7 +367,7 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::View => {
-                    drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+                    drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Connection => {
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
