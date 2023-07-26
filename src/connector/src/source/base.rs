@@ -206,23 +206,60 @@ pub struct SourceInfo {
     pub fragment_id: u32,
 }
 
+// #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+// pub enum SourceFormat {
+//     #[default]
+//     Invalid,
+//     Json,
+//     UpsertJson,
+//     Protobuf,
+//     DebeziumJson,
+//     Avro,
+//     UpsertAvro,
+//     Maxwell,
+//     CanalJson,
+//     Csv,
+//     Native,
+//     DebeziumAvro,
+//     DebeziumMongoJson,
+//     Bytes,
+// }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SourceFormat {
     #[default]
     Invalid,
-    Json,
-    UpsertJson,
-    Protobuf,
-    DebeziumJson,
-    Avro,
-    UpsertAvro,
-    Maxwell,
-    CanalJson,
-    Csv,
     Native,
-    DebeziumAvro,
-    DebeziumMongoJson,
+    Debezium,
+    DebeziumMongo,
+    Maxwell,
+    Canal,
+    Upsert,
+    Plain,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SourceEncode {
+    #[default]
+    Invalid,
+    Native,
+    Avro,
+    Csv,
+    Protobuf,
+    Json,
     Bytes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SourceStruct {
+    pub format: SourceFormat,
+    pub encode: SourceEncode,
+}
+
+impl SourceStruct {
+    pub fn new(format: SourceFormat, encode: SourceEncode) -> Self {
+        Self { format, encode }
+    }
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;

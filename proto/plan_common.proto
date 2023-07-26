@@ -81,6 +81,26 @@ enum JoinType {
   RIGHT_ANTI = 8;
 }
 
+// https://github.com/tokio-rs/prost/issues/80
+enum FormatType {
+  FORMAT_TYPE_NATIVE = 0;
+  FORMAT_TYPE_DEBEZIUM = 1;
+  FORMAT_TYPE_DEBEZIUM_MONGO = 2;
+  FORMAT_TYPE_MAXWELL = 3;
+  FORMAT_TYPE_CANAL = 4;
+  FORMAT_TYPE_UPSERT = 5;
+  FORMAT_TYPE_PLAIN = 6;
+}
+
+enum EncodeType {
+  ENCODE_TYPE_NATIVE = 0;
+  ENCODE_TYPE_AVRO = 1;
+  ENCODE_TYPE_CSV = 2;
+  ENCODE_TYPE_PROTOBUF = 3;
+  ENCODE_TYPE_JSON = 4;
+  ENCODE_TYPE_BYTES = 5;
+}
+
 enum RowFormatType {
   ROW_UNSPECIFIED = 0;
   JSON = 1;
