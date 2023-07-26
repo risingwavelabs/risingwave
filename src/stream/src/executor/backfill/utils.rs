@@ -272,6 +272,7 @@ pub(crate) async fn restore_backfill_progress<S: StateStore>(
     state_len: usize,
 ) -> StreamExecutorResult<(Option<String>, bool)> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
+    todo!("restore_backfill_progress");
     // TODO
     let is_finished = false;
     Ok((None, is_finished))

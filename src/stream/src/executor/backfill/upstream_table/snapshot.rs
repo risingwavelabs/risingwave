@@ -14,7 +14,7 @@ use risingwave_storage::StateStore;
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::UpstreamTable;
 use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
-use crate::executor::StreamExecutorResult;
+use crate::executor::{StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamSnapshotRead {
     type SnapshotStream<'a>: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + 'a
@@ -43,6 +43,15 @@ impl SnapshotReadArgs {
             epoch,
             current_pos,
             ordered,
+            chunk_size,
+        }
+    }
+
+    pub fn new_for_cdc(current_pos: Option<OwnedRow>, chunk_size: usize) -> Self {
+        Self {
+            epoch: INVALID_EPOCH,
+            current_pos,
+            ordered: false,
             chunk_size,
         }
     }

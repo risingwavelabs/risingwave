@@ -75,7 +75,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// Upstream table
     upstream_table: ExternalStorageTable,
 
-    /// Upstream with the same schema with the upstream table.
+    /// Upstream changelog with the same schema with the external table.
     upstream: BoxedExecutor,
 
     /// Internal state table for persisting state of backfill state.
@@ -240,12 +240,7 @@ where
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
-                let args = SnapshotReadArgs::new(
-                    snapshot_read_epoch,
-                    current_pos.clone(),
-                    true,
-                    self.chunk_size,
-                );
+                let args = SnapshotReadArgs::new_for_cdc(current_pos.clone(), self.chunk_size);
                 let right_snapshot =
                     pin!(upstream_table_reader.snapshot_read(args).map(Either::Right));
 
