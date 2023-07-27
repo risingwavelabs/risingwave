@@ -155,8 +155,8 @@ impl RdKafkaPropertiesProducer {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
     #[serde(skip_serializing)]
     pub connector: String, // Must be "kafka" here.
