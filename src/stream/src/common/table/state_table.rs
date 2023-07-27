@@ -27,7 +27,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, CompactedRow, Once, once, OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl, ToDatumRef};
+use risingwave_common::types::{Datum, DefaultOrd, DefaultOrdered, ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -661,7 +661,7 @@ where
     pub fn insert(&mut self, value: impl Row) {
         let pk = (&value).project(self.pk_indices());
         // FIXME: use arc for pk indices so we can drop the immutable ref..
-        // self.watermark_cache.handle_insert(&pk);
+        // self.watermark_cache.insert(&pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
@@ -672,6 +672,8 @@ where
     /// column desc of the table.
     pub fn delete(&mut self, old_value: impl Row) {
         let pk = (&old_value).project(self.pk_indices());
+        // FIXME: use arc for pk indices so we can drop the immutable ref..
+        // self.watermark_cache.delete(&pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(old_value);
@@ -861,13 +863,27 @@ where
         } else {
             Some(self.pk_serde.prefix(1))
         };
+
+        let should_clean_watermark = match watermark {
+            Some(ref watermark) => {
+                if let Some(key) = self.watermark_cache.lowest_value() {
+                    watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
+                } else {
+                    false
+                }
+            },
+            _ => false,
+        };
+
         let watermark_suffix = watermark.map(|watermark| {
             serialize_pk(
                 row::once(Some(watermark)),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        if let Some(watermark_suffix) = watermark_suffix && let Some(first_byte) = watermark_suffix.first() {
+
+        // Compute Delete Ranges
+        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix && let Some(first_byte) = watermark_suffix.first() {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");

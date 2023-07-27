@@ -16,7 +16,7 @@ use std::cmp::Reverse;
 use risingwave_common::array::Op;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DefaultOrdered, ScalarImpl};
+use risingwave_common::types::{DefaultOrdered, ScalarImpl, ScalarRefImpl};
 use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
 
 /// The watermark cache key is just an OwnedRow wrapped in `DefaultOrdered`.
@@ -41,27 +41,22 @@ type WatermarkCacheKey = Reverse<DefaultOrdered<OwnedRow>>;
 ///    B. Does not match. Do nothing.
 ///
 /// UPDATE
-///    A. Do delete then insert.
+///    Nothing. Watermark is part of pk. Pk won't change.
 ///
 /// BARRIER
 ///    State table commit. See below.
 ///
 /// STATE TABLE COMMIT
-///    Update `prev_cleaned_watermark`.
+///     A. Decide whether to do state cleaning:
+///        if watermark_to_be_cleaned < smallest val OR no value in cache + cache is synced: No need issue delete range.
+///        if watermark_to_be_cleaned => smallest val OR cache not synced: Issue delete ranges.
 ///
-/// Using the Cache:
-/// ----------------
-/// When state cleaning,
-/// if watermark_to_be_cleaned < smallest val OR no value in cache + cache is synced: No need issue delete range.
-/// if watermark_to_be_cleaned => smallest val OR cache not synced: Issue delete ranges.
+///     B. Refreshing the cache:
+///        On barrier, do table scan from `[most_recently_cleaned_watermark, +inf)`.
+///        Take the Top N rows and insert into cache.
+///        This has to be implemented in `state_table`.
+///        We don't need to store any values, just the keys.
 ///
-/// Refreshing the cache:
-/// ---------------------
-/// On barrier, do table scan from `[most_recently_cleaned_watermark, +inf)`.
-/// Take the Top N rows and insert into cache.
-/// This has to be implemented in `state_table`.
-///
-/// We don't need to store any values, just the keys.
 /// TODO(kwannoel): Optimization: We can use cache to do point delete rather than range delete.
 /// FIXME(kwannoel): This should be a trait.
 /// Then only when building state table with watermark we will initialize it.
@@ -114,15 +109,22 @@ impl StateTableWatermarkCache {
     }
 
     /// Get the lowest value.
-    pub fn get_lowest(&self) -> StateTableWatermarkCacheEntry {
-        todo!()
+    fn first_key(&self) -> Option<&WatermarkCacheKey> {
+        self.inner.first_key_value().map(|(k, _)| k)
+    }
+
+    pub fn lowest_value(&self) -> Option<ScalarRefImpl> {
+        self.first_key().and_then(|k| k.0.0.datum_at(0))
     }
 
     /// Insert a new value.
-    /// FIXME: WE should just copy the whole interface of StateCAche impl
-    /// for top n state cache.
     pub fn insert(&mut self, key: impl Row) -> Option<()> {
         self.inner.insert(Reverse(DefaultOrdered(key.into_owned_row())), ())
+    }
+
+    /// Delete a value
+    pub fn delete(&mut self, key: & impl Row) -> Option<()> {
+        self.inner.delete(&Reverse(DefaultOrdered(key.into_owned_row())))
     }
 }
 
