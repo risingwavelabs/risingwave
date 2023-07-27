@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -54,7 +54,7 @@ use risingwave_storage::table::merge_sort::merge_sort;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
-use crate::common::cache::TopNStateCache;
+use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
 
@@ -790,8 +790,8 @@ where
             .instrument(tracing::info_span!("state_table_commit"))
             .await?;
 
-        // Refresh watermark cache.
-        if self.watermark_cache.get_lowest().not_synced() {
+        // Refresh watermark cache if it is out of sync.
+        if !self.watermark_cache.is_synced() {
              if let Some(ref watermark) = self.state_clean_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
@@ -825,7 +825,9 @@ where
                 }
 
                 for pk in pks {
-                    self.watermark_cache.insert(pk);
+                    let mut filler = self.watermark_cache.begin_syncing();
+                    filler.insert(Reverse(DefaultOrdered(pk)), ());
+                    filler.finish();
                 }
             }
         }

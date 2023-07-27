@@ -129,30 +129,30 @@ impl StateTableWatermarkCache {
 impl StateCache for StateTableWatermarkCache {
     type Key = WatermarkCacheKey;
     type Value = ();
-    type Filler<'a> = &'a mut Self where Self: 'a;
+    type Filler<'a> = &'a mut TopNStateCache<WatermarkCacheKey, ()>;
 
     fn is_synced(&self) -> bool {
-        todo!()
+        self.inner.is_synced()
     }
 
     fn begin_syncing(&mut self) -> Self::Filler<'_> {
-        todo!()
+        self.inner.begin_syncing()
     }
 
     fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
-        todo!()
+        self.inner.insert(key, value)
     }
 
     fn delete(&mut self, key: &Self::Key) -> Option<Self::Value> {
-        todo!()
+        self.inner.delete(key)
     }
 
     fn apply_batch(&mut self, batch: impl IntoIterator<Item=(Op, Self::Key, Self::Value)>) {
-        todo!()
+        self.inner.apply_batch(batch)
     }
 
     fn clear(&mut self) {
-        todo!()
+        self.inner.clear()
     }
 
     fn values(&self) -> impl Iterator<Item=&Self::Value> {
@@ -160,23 +160,6 @@ impl StateCache for StateTableWatermarkCache {
     }
 
     fn first_key_value(&self) -> Option<(&Self::Key, &Self::Value)> {
-        todo!()
-    }
-}
-
-impl StateCacheFiller for &mut StateTableWatermarkCache {
-    type Key = WatermarkCacheKey;
-    type Value = ();
-
-    fn capacity(&self) -> Option<usize> {
-        self.inner.capacity()
-    }
-
-    fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {
-        self.inner.insert(key, value);
-    }
-
-    fn finish(self) {
-        self.inner.finish()
+        self.inner.first_key_value()
     }
 }
