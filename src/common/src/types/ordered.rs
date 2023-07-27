@@ -32,6 +32,8 @@ macro_rules! gen_default_partial_cmp_scalar_ref_impl {
         }
     };
 }
+
+// TODO: refactor with dispatch macro
 for_all_scalar_variants!(gen_default_partial_cmp_scalar_ref_impl);
 
 pub trait DefaultPartialOrd: PartialEq {

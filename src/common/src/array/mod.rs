@@ -68,7 +68,7 @@ pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::types::*;
-use crate::{dispatch_array_variants, for_all_array_variants};
+use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -450,88 +450,74 @@ macro_rules! array_builder_impl_enum {
 
 for_all_array_variants! { array_builder_impl_enum }
 
-// TODO
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
-macro_rules! impl_array_builder {
-    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        impl ArrayBuilderImpl {
-            pub fn with_type(capacity: usize, ty: DataType) -> Self {
-                ty.create_array_builder(capacity)
-            }
+impl ArrayBuilderImpl {
+    pub fn get_ident(&self) -> &'static str {
+        dispatch_array_builder_variants!(self, [I = VARIANT_NAME], { I })
+    }
 
-            pub fn append_array(&mut self, other: &ArrayImpl) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
-                }
-            }
+    pub fn with_type(capacity: usize, ty: DataType) -> Self {
+        ty.create_array_builder(capacity)
+    }
 
-            pub fn append_null(&mut self) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.append(None), )*
-                }
-            }
+    pub fn append_array(&mut self, other: &ArrayImpl) {
+        dispatch_array_builder_variants!(self, inner, { inner.append_array(other.into()) })
+    }
 
-            /// Append a [`Datum`] or [`DatumRef`] multiple times,
-            /// panicking if the datum's type does not match the array builder's type.
-            pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
-                match datum.to_datum_ref() {
-                    None => match self {
-                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
-                    }
-                    Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
-                        (this_builder, this_scalar_ref) => panic!(
-                            "Failed to append datum, array builder type: {}, scalar type: {}",
-                            this_builder.get_ident(),
-                            this_scalar_ref.get_ident()
-                        ),
-                    },
-                }
-            }
+    pub fn append_null(&mut self) {
+        dispatch_array_builder_variants!(self, inner, { inner.append(None) })
+    }
 
-            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append(&mut self, datum: impl ToDatumRef) {
-                self.append_n(1, datum);
-            }
+    /// Append a [`Datum`] or [`DatumRef`] multiple times,
+    /// panicking if the datum's type does not match the array builder's type.
+    pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
+        match datum.to_datum_ref() {
+            None => dispatch_array_builder_variants!(self, inner, { inner.append_n(n, None) }),
 
-            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
-                };
-            }
-
-            pub fn pop(&mut self) -> Option<()> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.pop(), )*
-                }
-            }
-
-            pub fn finish(self) -> ArrayImpl {
-                match self {
-                    $( Self::$variant_name(inner) => inner.finish().into(), )*
-                }
-            }
-
-            pub fn get_ident(&self) -> &'static str {
-                match self {
-                    $( Self::$variant_name(_) => stringify!($variant_name), )*
-                }
-            }
-
-            pub fn len(&self) -> usize {
-                match self {
-                    $( Self::$variant_name(inner) => inner.len(), )*
-                }
-            }
-
-            pub fn is_empty(&self) -> bool {
-                self.len() == 0
+            Some(scalar_ref) => {
+                dispatch_array_builder_variants!(self, inner, [I = VARIANT_NAME], {
+                    inner.append_n(
+                        n,
+                        Some(scalar_ref.try_into().unwrap_or_else(|_| {
+                            panic!(
+                                "type mismatch, array builder type: {}, scalar type: {}",
+                                I,
+                                scalar_ref.get_ident()
+                            )
+                        })),
+                    )
+                })
             }
         }
     }
-}
 
-for_all_array_variants! { impl_array_builder }
+    /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+    pub fn append(&mut self, datum: impl ToDatumRef) {
+        self.append_n(1, datum);
+    }
+
+    pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
+        dispatch_array_builder_variants!(self, inner, {
+            inner.append_array_element(other.into(), idx)
+        })
+    }
+
+    pub fn pop(&mut self) -> Option<()> {
+        dispatch_array_builder_variants!(self, inner, { inner.pop() })
+    }
+
+    pub fn finish(self) -> ArrayImpl {
+        dispatch_array_builder_variants!(self, inner, { inner.finish().into() })
+    }
+
+    pub fn len(&self) -> usize {
+        dispatch_array_builder_variants!(self, inner, { inner.len() })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
 
 // TODO
 /// Implements all `Array` functions with `for_all_variant`.

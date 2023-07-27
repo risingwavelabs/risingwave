@@ -82,6 +82,7 @@ macro_rules! for_all_filter_key_extractor_variants {
     };
 }
 
+// TODO: refactor with dispatch macro
 for_all_filter_key_extractor_variants! { impl_filter_key_extractor }
 
 #[derive(Default)]

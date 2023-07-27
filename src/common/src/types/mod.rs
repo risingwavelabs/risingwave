@@ -953,6 +953,7 @@ macro_rules! scalar_impl_hash {
     };
 }
 
+// TODO: refactor with dispatch macro
 for_all_scalar_variants! { scalar_impl_hash }
 
 /// Feeds the raw scalar reference of `datum` to the given `state`, which should behave the same

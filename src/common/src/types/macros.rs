@@ -76,11 +76,18 @@ macro_rules! project_type_pairs {
 
 #[macro_export]
 macro_rules! do_expand_alias {
-    ($array:ty, ($(Array, $array_alias:ident,)? $(ArrayBuilder, $array_builder_alias:ident,)? $(Scalar, $scalar_alias:ident,)? $(ScalarRef, $scalar_ref_alias:ident,)?)) => {
+    ($array:ty, $variant_name:ident, (
+        $(Array, $array_alias:ident,)?
+        $(ArrayBuilder, $array_builder_alias:ident,)?
+        $(Scalar, $scalar_alias:ident,)?
+        $(ScalarRef, $scalar_ref_alias:ident,)?
+        $(VARIANT_NAME, $variant_name_alias:ident,)?
+    )) => {
         $(type $array_alias = $array;)?
         $(type $array_builder_alias = <$array as Array>::Builder;)?
         $(type $scalar_alias = <$array as Array>::OwnedItem;)?
         $(type $scalar_ref_alias<'scalar> = <$array as Array>::RefItem<'scalar>;)?
+        $(const $variant_name_alias: &'static str = stringify!($variant_name);)?
     };
 }
 
@@ -89,7 +96,7 @@ macro_rules! do_dispatch_variants {
     ($impl:expr, $type:ident, $inner:pat, [$alias:tt], $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         match $impl {
             $( $type::$variant_name($inner) => {
-                do_expand_alias!($array, $alias);
+                do_expand_alias!($array, $variant_name, $alias);
                 #[allow(unused_braces)]
                 $body
             }, )*
@@ -110,6 +117,7 @@ macro_rules! dispatch_array_variants {
     };
 }
 
+// TODO: macro_metavar_expr
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_array_builder_variants {
     ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
@@ -137,11 +145,24 @@ macro_rules! dispatch_scalar_variants {
 }
 
 #[macro_export(local_inner_macros)]
+macro_rules! dispatch_scalar_ref_variants {
+    ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
+        dispatch_scalar_ref_variants!($impl, _, [$($k = $v),*], $body)
+    };
+    ($impl:expr, $inner:pat, $body:tt) => {
+        dispatch_scalar_ref_variants!($impl, $inner, [], $body)
+    };
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+        for_all_variants! { do_dispatch_variants, $impl, ScalarRefImpl, $inner, [($($v, $k,)*)], $body }
+    };
+}
+
+#[macro_export(local_inner_macros)]
 macro_rules! do_dispatch_data_types {
     ($impl:expr, [$alias:tt], $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         match $impl {
             $( $crate::types::DataType::$data_type { .. } => {
-                do_expand_alias!($array, $alias);
+                do_expand_alias!($array, $variant_name, $alias);
                 #[allow(unused_braces)]
                 $body
             }, )*

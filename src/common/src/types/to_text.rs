@@ -210,6 +210,7 @@ macro_rules! impl_totext_for_scalar {
         }
     };
 }
+// TODO: refactor with dispatch macro
 for_all_scalar_variants! { impl_totext_for_scalar }
 
 impl ToText for DatumRef<'_> {
