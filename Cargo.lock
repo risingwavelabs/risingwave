@@ -6146,11 +6146,11 @@ dependencies = [
  "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_rt",
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
  "risingwave_udf",
+ "risingwave_variables",
  "serde",
  "serde_json",
  "sha2",
@@ -6443,6 +6443,7 @@ dependencies = [
  "pprof",
  "prometheus",
  "risingwave_common",
+ "risingwave_variables",
  "time 0.3.23",
  "tracing",
  "tracing-opentelemetry",
@@ -6732,6 +6733,15 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "thiserror",
+]
+
+[[package]]
+name = "risingwave_variables"
+version = "1.0.0-alpha"
+dependencies = [
+ "chrono",
+ "opentelemetry",
+ "workspace-hack",
 ]
 
 [[package]]

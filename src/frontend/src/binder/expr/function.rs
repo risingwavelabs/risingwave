@@ -954,7 +954,7 @@ impl Binder {
                 }))),
                 ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 ("pg_postmaster_start_time", guard_by_len(0, raw(|_binder, _inputs|{
-                    let server_start_time = risingwave_rt::get_server_start_time();
+                    let server_start_time = risingwave_variables::get_server_start_time();
                     let datum = server_start_time.map(Timestamptz::from).map(ScalarImpl::from);
                     let literal = Literal::new(datum, DataType::Timestamptz);
                     Ok(literal.into())

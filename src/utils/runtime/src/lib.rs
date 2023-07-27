@@ -30,8 +30,6 @@ mod panic_hook;
 pub use panic_hook::*;
 mod prof;
 use prof::*;
-mod variables;
-pub use variables::*;
 
 /// Start RisingWave components with configs from environment variable.
 ///
@@ -51,7 +49,7 @@ where
 {
     set_panic_hook();
 
-    init_server_start_time();
+    risingwave_variables::init_server_start_time();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 
