@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -237,14 +238,39 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         self.group_key.as_ref()
     }
 
+    pub fn group_key_row(&self) -> OwnedRow {
+        self.group_key
+            .as_ref()
+            .map(GroupKey::table_row)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn prev_row_count(&self) -> usize {
         match &self.prev_outputs {
             Some(states) => states[self.row_count_index]
                 .as_ref()
-                .map(|x| *x.as_int64() as usize)
+                .map(|x| {
+                    TryInto::try_into(*x.as_int64()).expect("row count should be non-negative")
+                })
                 .unwrap_or(0),
             None => 0,
         }
+    }
+
+    /// Get current row count of this group.
+    fn curr_row_count(&self) -> StreamExecutorResult<usize> {
+        let row_count_state = must_match!(
+            self.states[self.row_count_index],
+            AggState::Value(ref state) => state
+        );
+        let row_count = row_count_state
+            .get_output()
+            .expect("row count should never output NULL")
+            .into_int64();
+        Ok(row_count
+            .try_into()
+            .map_err(|_| anyhow!("row count should be non-negative, but got {}", row_count))?)
     }
 
     pub(crate) fn is_uninitialized(&self) -> bool {
@@ -261,15 +287,36 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         visibilities: Vec<Option<Bitmap>>,
         materialized: &Bitmap,
     ) -> StreamExecutorResult<()> {
+        if self.curr_row_count()? == 0 {
+            tracing::debug!(group = ?self.group_key_row(), "first time see this group");
+        }
+
         for (((state, storage), visibility), materialized) in self
             .states
             .iter_mut()
             .zip_eq_fast(storages)
-            .zip_eq_fast(visibilities)
+            .zip_eq_fast(&visibilities)
             .zip_eq_fast(materialized.iter())
         {
             state.apply_chunk(ops, visibility.as_ref(), columns, storage, materialized)?;
         }
+
+        // check row count to prevent from bad things happening
+        if let Err(err) = self.curr_row_count() {
+            let chunk = StreamChunk::new(
+                ops.to_vec(),
+                columns.to_vec(),
+                visibilities[self.row_count_index].clone(),
+            );
+            tracing::error!(
+                group = ?self.group_key_row(),
+                chunk = chunk.to_pretty_string(),
+                err = ?err,
+                "bad row count"
+            );
+            return Err(err);
+        }
+
         Ok(())
     }
 
@@ -303,17 +350,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Possibly need to read/sync from state table if the state not cached in memory.
     /// This method is idempotent, i.e. it can be called multiple times and the outputs are
     /// guaranteed to be the same.
-    pub async fn get_outputs(
+    async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
-    ) -> StreamExecutorResult<OwnedRow> {
-        // Row count doesn't need I/O, so the following statement is supposed to be fast.
-        let row_count = self.states[self.row_count_index]
-            .get_output(&storages[self.row_count_index], self.group_key.as_ref())
-            .await?
-            .as_ref()
-            .map(|x| *x.as_int64() as usize)
-            .expect("row count should not be None");
+    ) -> StreamExecutorResult<(usize, OwnedRow)> {
+        let row_count = self.curr_row_count()?;
         if row_count == 0 {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
@@ -329,23 +370,17 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
-        .map(OwnedRow::new)
+        .map(|row| (row_count, OwnedRow::new(row)))
     }
 
     /// Build aggregation result change, according to previous and current agg outputs.
     /// The saved previous outputs will be updated to the latest outputs after this method.
-    pub fn build_change(&mut self, curr_outputs: OwnedRow) -> Option<Record<OwnedRow>> {
+    pub async fn build_change(
+        &mut self,
+        storages: &[AggStateStorage<S>],
+    ) -> StreamExecutorResult<Option<Record<OwnedRow>>> {
         let prev_row_count = self.prev_row_count();
-        let curr_row_count = curr_outputs[self.row_count_index]
-            .as_ref()
-            .map(|x| *x.as_int64() as usize)
-            .expect("row count should not be None");
-
-        trace!(
-            "prev_row_count = {}, curr_row_count = {}",
-            prev_row_count,
-            curr_row_count
-        );
+        let (curr_row_count, curr_outputs) = self.get_outputs(storages).await?;
 
         let change_type = Strtg::infer_change_type(
             prev_row_count,
@@ -354,7 +389,14 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             &curr_outputs,
         );
 
-        change_type.map(|change_type| match change_type {
+        tracing::debug!(
+            group = ?self.group_key_row(),
+            prev_row_count,
+            curr_row_count,
+            change_type = ?change_type,
+        );
+
+        Ok(change_type.map(|change_type| match change_type {
             RecordType::Insert => {
                 let new_row = self
                     .group_key()
@@ -387,7 +429,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                     .into_owned_row();
                 Record::Update { old_row, new_row }
             }
-        })
+        }))
     }
 }
 
