@@ -265,16 +265,15 @@ where
 
     /// Add kv pair to sstable.
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
-        // if let Some(builder) = self.current_builder.as_mut() && builder.reach_capacity() &&
-        // event.new_epoch != HummockEpoch::MAX {     if builder.
-        // last_range_tombstone_epoch() != HummockEpoch::MAX {         builder.
-        // add_monotonic_delete(MonotonicDeleteEvent {             event_key:
-        // PointRange::from_user_key(event.event_key.left_user_key.clone(), false),
-        //             new_epoch: HummockEpoch::MAX,
-        //         });
-        //     }
-        //     self.seal_current().await?;
-        // }
+        if let Some(builder) = self.current_builder.as_mut() && builder.reach_capacity() && event.new_epoch != HummockEpoch::MAX {
+            if builder.last_range_tombstone_epoch() != HummockEpoch::MAX {
+                builder.add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key: event.event_key.clone(),
+                    new_epoch: HummockEpoch::MAX,
+                });
+            }
+            self.seal_current().await?;
+        }
 
         if self.current_builder.is_none() {
             if event.new_epoch == HummockEpoch::MAX {
