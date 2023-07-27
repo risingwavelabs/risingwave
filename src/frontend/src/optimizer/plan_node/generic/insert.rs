@@ -73,7 +73,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Insert<PlanRef> {
 impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
     pub fn output_len(&self) -> usize {
         if self.returning {
-            self.input.schema().len()
+            self.table_visible_columns.len()
         } else {
             1
         }
