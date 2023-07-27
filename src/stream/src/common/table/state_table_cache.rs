@@ -215,4 +215,115 @@ mod tests {
         let lowest = cache.lowest_key().unwrap();
         assert_eq!(lowest, v5[0].clone().unwrap().as_scalar_ref_impl());
     }
+
+    /// With capacity 3, seed the following sequence of inserts:
+    /// Insert:
+    /// [1000, ...]
+    /// [999, ...]
+    /// [2000, ...]
+    /// [3000, ...]
+    /// [900, ...]
+    ///
+    /// In the cache there should be:
+    /// [900, 999, 1000]
+    /// Then run one DELETE.
+    /// [999].
+    ///
+    /// The cache should be:
+    /// [900, 1000].
+    /// Lowest val: 900.
+    ///
+    /// Then run one INSERT.
+    /// [1001].
+    /// This should be ignored. It is larger than the largest val in the cache (1000).
+    /// And cache no longer matches state table rows.
+    ///
+    /// Then run another INSERT.
+    /// [950].
+    /// This should be accepted. It is smaller than the largest val in the cache (1000).
+    ///
+    /// Then run DELETEs.
+    /// [900].
+    /// Lowest val: 1000.
+    ///
+    /// Then run DELETE.
+    /// [1000].
+    /// Lowest val: None.
+    ///
+    /// Then run INSERT.
+    /// Cache should be out of sync, should reject the insert.
+    /// Cache len = 0.
+    #[test]
+    fn test_state_table_watermark_cache_deletes() {
+        // Initial INSERTs
+        let mut cache = StateTableWatermarkCache::new(3);
+        assert_eq!(cache.capacity(), 3);
+        let filler = cache.begin_syncing();
+        filler.finish();
+        let v1 = [
+            Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v2 = [
+            Some(Timestamptz::from_secs(999).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v3 = [
+            Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v4 = [
+            Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v5 = [
+            Some(Timestamptz::from_secs(900).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        cache.insert(&v1);
+        cache.insert(&v2);
+        cache.insert(&v3);
+        cache.insert(&v4);
+        cache.insert(&v5);
+
+        // First Delete
+        cache.delete(&v2);
+        assert_eq!(cache.len(), 2);
+        let lowest = cache.lowest_key().unwrap();
+        assert_eq!(lowest, v5[0].clone().unwrap().as_scalar_ref_impl());
+
+        // Insert 1001
+        let v6 = [
+            Some(Timestamptz::from_secs(1001).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        cache.insert(&v6);
+        assert_eq!(cache.len(), 2);
+
+        // Insert 950
+        let v7 = [
+            Some(Timestamptz::from_secs(950).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        cache.insert(&v7);
+        assert_eq!(cache.len(), 3);
+
+        // Delete 950
+        cache.delete(&v7);
+        assert_eq!(cache.len(), 2);
+
+        // DELETEs
+        cache.delete(&v5);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.lowest_key().unwrap(), v1[0].clone().unwrap().as_scalar_ref_impl());
+
+        // DELETEs
+        cache.delete(&v1);
+        assert_eq!(cache.len(), 0);
+        assert!(!cache.is_synced());
+
+        // INSERT after Out of sync
+        cache.insert(&v1);
+        assert_eq!(cache.len(), 0);
+    }
 }
