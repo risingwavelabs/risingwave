@@ -671,6 +671,10 @@ pub async fn handle_create_table(
         session.notice_to_user(notice)
     }
 
+    if append_only {
+        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
+    }
+
     match session.check_relation_name_duplicated(table_name.clone()) {
         Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
             return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
