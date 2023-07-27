@@ -128,3 +128,5 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }
+# patch: unlimit 4MB message size for grpc client
+etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }
