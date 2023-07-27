@@ -76,7 +76,7 @@ serde_with = "3"
 smallbitset = "0.6.1"
 speedate = "0.7.0"
 static_assertions = "1"
-strum = "0.24"
+strum = "0.25"
 strum_macros = "0.24"
 sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
