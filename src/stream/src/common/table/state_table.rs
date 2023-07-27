@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Reverse;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -26,12 +26,12 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, CompactedRow, Once, once, OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrd, DefaultOrdered, ScalarImpl, ToDatumRef};
+use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
+use risingwave_common::types::{Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::{cmp_datum, OrderType};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
@@ -47,16 +47,16 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
+use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
-use risingwave_storage::table::merge_sort::merge_sort;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
-use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
-use crate::executor::{StreamExecutorError, StreamExecutorResult};
+use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
@@ -662,7 +662,7 @@ where
     pub fn insert(&mut self, value: impl Row) {
         let pk_indices = self.pk_indices.clone();
         let pk = (&value).project(&pk_indices);
-        self.watermark_cache.insert(&pk);
+        self.watermark_cache.insert(pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
@@ -808,19 +808,20 @@ where
 
         // Refresh watermark cache if it is out of sync.
         if !self.watermark_cache.is_synced() {
-             if let Some(ref watermark) = self.state_clean_watermark {
+            if let Some(ref watermark) = self.state_clean_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
-                /// NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-                /// because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-                /// and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-                /// We can optimize it with `RefCell` if needed.
+                // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
+                // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
+                // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
+                // We can optimize it with `RefCell` if needed.
                 let mut pks = vec![];
                 {
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
-                        // TODO(kwannoel): Is it possible to have a state_table interface to read the
-                        // 1st value per vnode? Since that's all we need.
+                        // TODO(kwannoel): Is it possible to have a state_table interface to read
+                        // the 1st value per vnode? Since that's all we
+                        // need.
                         let stream = self
                             .iter_key_and_val_with_pk_range(
                                 &range,
@@ -833,7 +834,8 @@ where
                     let merged_stream = merge_sort(streams);
                     pin_mut!(merged_stream);
                     // FIXME: We should take top N pk rather than only the first.
-                    // FIXME: Invariant should be enforced, that watermark is the first column of pk.
+                    // FIXME: Invariant should be enforced, that watermark is the first column of
+                    // pk.
                     if let Some((pk, _row)) = merged_stream.next().await.transpose()? {
                         let pk = self.pk_serde.deserialize(&pk[..])?; // FIXME: Maybe have a pk iter here? We don't want to deser the value.
                         pks.push(pk);
@@ -841,7 +843,7 @@ where
                 }
 
                 for pk in pks {
-                    let mut filler = self.watermark_cache.begin_syncing();
+                    let filler = self.watermark_cache.begin_syncing();
                     filler.insert(Reverse(DefaultOrdered(pk)), ());
                     filler.finish();
                 }
@@ -885,7 +887,7 @@ where
                 } else {
                     false
                 }
-            },
+            }
             _ => false,
         };
 

@@ -14,7 +14,6 @@
 
 pub mod collections;
 
-use std::cmp::Reverse;
 use std::marker::PhantomData;
 
 use bytes::Bytes;
