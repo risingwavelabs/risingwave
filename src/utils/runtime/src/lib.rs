@@ -49,6 +49,8 @@ where
 {
     set_panic_hook();
 
+    risingwave_variables::init_server_start_time();
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 
     if let Ok(worker_threads) = std::env::var("RW_WORKER_THREADS") {
