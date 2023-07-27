@@ -277,8 +277,7 @@ impl ConnectorClient {
             .rpc_client
             .clone()
             .sink_writer_stream(Request::new(ReceiverStream::new(request_receiver)))
-            .await
-            .map_err(RpcError::GrpcStatus)?
+            .await?
             .into_inner();
 
         match response.next().await.ok_or(RpcError::Internal(anyhow!(
