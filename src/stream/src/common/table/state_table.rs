@@ -89,7 +89,7 @@ pub struct StateTableInner<
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    pk_indices: Vec<usize>,
+    pk_indices: Arc<Vec<usize>>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -251,7 +251,7 @@ where
             local_store: local_state_store,
             pk_serde,
             row_serde,
-            pk_indices: pk_indices.to_vec(),
+            pk_indices: pk_indices.to_vec().into(),
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -413,7 +413,7 @@ where
                 ),
                 Arc::from(table_columns.into_boxed_slice()),
             ),
-            pk_indices: pk_indices.to_vec(),
+            pk_indices: pk_indices.to_vec().into(),
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
             vnodes,
@@ -660,9 +660,9 @@ where
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: impl Row) {
-        let pk = (&value).project(self.pk_indices());
-        // FIXME: use arc for pk indices so we can drop the immutable ref..
-        // self.watermark_cache.insert(&pk);
+        let pk_indices = self.pk_indices.clone();
+        let pk = (&value).project(&pk_indices);
+        self.watermark_cache.insert(&pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
@@ -672,9 +672,9 @@ where
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
     pub fn delete(&mut self, old_value: impl Row) {
-        let pk = (&old_value).project(self.pk_indices());
-        // FIXME: use arc for pk indices so we can drop the immutable ref..
-        // self.watermark_cache.delete(&pk);
+        let pk_indices = self.pk_indices.clone();
+        let pk = (&old_value).project(&pk_indices);
+        self.watermark_cache.delete(&pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(old_value);
@@ -737,29 +737,42 @@ where
                 if let Some(r) = r {
                     self.pk_serde.serialize(r, &mut buffer);
                 }
-                buffer.freeze()
+                (r, buffer.freeze())
             })
             .collect_vec();
 
-        let (_, vis) = key_chunk.into_parts();
+        // let (_, vis) = key_chunk.into_parts();
+        let vis = key_chunk.vis();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in
+                for ((op, (key, key_bytes), value), vis) in
                     izip!(op, vnode_and_pks, values).zip_eq_debug(vis.iter())
                 {
                     if vis {
                         match op {
-                            Op::Insert | Op::UpdateInsert => self.insert_inner(key, value),
-                            Op::Delete | Op::UpdateDelete => self.delete_inner(key, value),
+                            Op::Insert | Op::UpdateInsert => {
+                                key.as_ref().map(|key| self.watermark_cache.insert(key));
+                                self.insert_inner(key_bytes, value);
+                            }
+                            Op::Delete | Op::UpdateDelete => {
+                                key.as_ref().map(|key| self.watermark_cache.delete(key));
+                                self.delete_inner(key_bytes, value);
+                            }
                         }
                     }
                 }
             }
             Vis::Compact(_) => {
-                for (op, key, value) in izip!(op, vnode_and_pks, values) {
+                for (op, (key, key_bytes), value) in izip!(op, vnode_and_pks, values) {
                     match op {
-                        Op::Insert | Op::UpdateInsert => self.insert_inner(key, value),
-                        Op::Delete | Op::UpdateDelete => self.delete_inner(key, value),
+                        Op::Insert | Op::UpdateInsert => {
+                            key.as_ref().map(|key| self.watermark_cache.insert(key));
+                            self.insert_inner(key_bytes, value);
+                        }
+                        Op::Delete | Op::UpdateDelete => {
+                            key.as_ref().map(|key| self.watermark_cache.delete(key));
+                            self.delete_inner(key_bytes, value);
+                        }
                     }
                 }
             }

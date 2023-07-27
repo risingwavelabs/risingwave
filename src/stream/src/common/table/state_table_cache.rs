@@ -113,7 +113,7 @@ impl StateTableWatermarkCache {
         self.inner.first_key_value().map(|(k, _)| k)
     }
 
-    pub fn lowest_value(&self) -> Option<ScalarRefImpl> {
+    pub fn lowest_value(&self) -> Option<ScalarRefImpl<'_>> {
         self.first_key().and_then(|k| k.0.0.datum_at(0))
     }
 
