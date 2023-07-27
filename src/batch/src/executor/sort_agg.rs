@@ -268,9 +268,7 @@ impl EqGroups {
 
     /// Detect the equality groups in the given array.
     fn detect(array: &ArrayImpl) -> Result<EqGroups> {
-        dispatch_array_variants!(array, array, {
-            Ok(Self::detect_inner(array))
-        })
+        dispatch_array_variants!(array, array, { Ok(Self::detect_inner(array)) })
     }
 
     fn detect_inner<T>(array: &T) -> EqGroups

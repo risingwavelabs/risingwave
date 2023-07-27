@@ -452,10 +452,6 @@ for_all_array_variants! { array_builder_impl_enum }
 
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
 impl ArrayBuilderImpl {
-    pub fn get_ident(&self) -> &'static str {
-        dispatch_array_builder_variants!(self, [I = VARIANT_NAME], { I })
-    }
-
     pub fn with_type(capacity: usize, ty: DataType) -> Self {
         ty.create_array_builder(capacity)
     }
@@ -510,6 +506,10 @@ impl ArrayBuilderImpl {
         dispatch_array_builder_variants!(self, inner, { inner.finish().into() })
     }
 
+    pub fn get_ident(&self) -> &'static str {
+        dispatch_array_builder_variants!(self, [I = VARIANT_NAME], { I })
+    }
+
     pub fn len(&self) -> usize {
         dispatch_array_builder_variants!(self, inner, { inner.len() })
     }
@@ -519,137 +519,103 @@ impl ArrayBuilderImpl {
     }
 }
 
-// TODO
-/// Implements all `Array` functions with `for_all_variant`.
-macro_rules! impl_array {
-    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        impl ArrayImpl {
-            /// Number of items in array.
-            pub fn len(&self) -> usize {
-                match self {
-                    $( Self::$variant_name(inner) => inner.len(), )*
-                }
-            }
+impl ArrayImpl {
+    /// Number of items in array.
+    pub fn len(&self) -> usize {
+        dispatch_array_variants!(self, inner, { inner.len() })
+    }
 
-            pub fn is_empty(&self) -> bool {
-                self.len() == 0
-            }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
-            /// Get the null `Bitmap` of the array.
-            pub fn null_bitmap(&self) -> &Bitmap {
-                match self {
-                    $( Self::$variant_name(inner) => inner.null_bitmap(), )*
-                }
-            }
+    /// Get the null `Bitmap` of the array.
+    pub fn null_bitmap(&self) -> &Bitmap {
+        dispatch_array_variants!(self, inner, { inner.null_bitmap() })
+    }
 
-            pub fn into_null_bitmap(self) -> Bitmap {
-                match self {
-                    $( Self::$variant_name(inner) => inner.into_null_bitmap(), )*
-                }
-            }
+    pub fn into_null_bitmap(self) -> Bitmap {
+        dispatch_array_variants!(self, inner, { inner.into_null_bitmap() })
+    }
 
-            pub fn to_protobuf(&self) -> PbArray {
-                match self {
-                    $( Self::$variant_name(inner) => inner.to_protobuf(), )*
-                }
-            }
+    pub fn to_protobuf(&self) -> PbArray {
+        dispatch_array_variants!(self, inner, { inner.to_protobuf() })
+    }
 
-            pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.hash_at(idx, state), )*
-                }
-            }
+    pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        dispatch_array_variants!(self, inner, { inner.hash_at(idx, state) })
+    }
 
-            pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
-                }
-            }
+    pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
+        dispatch_array_variants!(self, inner, { inner.hash_vec(hashers) })
+    }
 
-            /// Select some elements from `Array` based on `visibility` bitmap.
-            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-                match self {
-                    $( Self::$variant_name(inner) => inner.compact(visibility, cardinality).into(), )*
-                }
-            }
+    /// Select some elements from `Array` based on `visibility` bitmap.
+    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+        dispatch_array_variants!(self, inner, {
+            inner.compact(visibility, cardinality).into()
+        })
+    }
 
-            pub fn get_ident(&self) -> &'static str {
-                match self {
-                    $( Self::$variant_name(_) => stringify!($variant_name), )*
-                }
-            }
+    pub fn get_ident(&self) -> &'static str {
+        dispatch_array_variants!(self, [I = VARIANT_NAME], { I })
+    }
 
-            /// Get the enum-wrapped `Datum` out of the `Array`.
-            pub fn datum_at(&self, idx: usize) -> Datum {
-                match self {
-                    $( Self::$variant_name(inner) => inner
-                        .value_at(idx)
-                        .map(|item| item.to_owned_scalar().to_scalar_value()), )*
-                }
-            }
+    /// Get the enum-wrapped `Datum` out of the `Array`.
+    pub fn datum_at(&self, idx: usize) -> Datum {
+        self.value_at(idx).to_owned_datum()
+    }
 
-            /// If the array only have one single element, convert it to `Datum`.
-            pub fn to_datum(&self) -> Datum {
-                assert_eq!(self.len(), 1);
-                self.datum_at(0)
-            }
+    /// If the array only have one single element, convert it to `Datum`.
+    pub fn to_datum(&self) -> Datum {
+        assert_eq!(self.len(), 1);
+        self.datum_at(0)
+    }
 
-            /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
-            pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
-                }
-            }
+    /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
+    pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
+        dispatch_array_variants!(self, inner, {
+            inner.value_at(idx).map(ScalarRefImpl::from)
+        })
+    }
 
-            /// # Safety
-            ///
-            /// This function is unsafe because it does not check the validity of `idx`. It is caller's
-            /// responsibility to ensure the validity of `idx`.
-            ///
-            /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
-            pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.value_at_unchecked(idx).map(ScalarRefImpl::$variant_name), )*
-                }
-            }
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not check the validity of `idx`. It is caller's
+    /// responsibility to ensure the validity of `idx`.
+    ///
+    /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
+    pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
+        dispatch_array_variants!(self, inner, {
+            inner.value_at_unchecked(idx).map(ScalarRefImpl::from)
+        })
+    }
 
-            pub fn set_bitmap(&mut self, bitmap: Bitmap) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.set_bitmap(bitmap), )*
-                }
-            }
+    pub fn set_bitmap(&mut self, bitmap: Bitmap) {
+        dispatch_array_variants!(self, inner, { inner.set_bitmap(bitmap) })
+    }
 
-            pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-                match self {
-                    $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
-                }
-            }
+    pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
+        dispatch_array_variants!(self, inner, { inner.create_builder(capacity).into() })
+    }
 
-            /// Returns the `DataType` of this array.
-            pub fn data_type(&self) -> DataType {
-                match self {
-                    $( Self::$variant_name(inner) => inner.data_type(), )*
-                }
-            }
+    /// Returns the `DataType` of this array.
+    pub fn data_type(&self) -> DataType {
+        dispatch_array_variants!(self, inner, { inner.data_type() })
+    }
 
-            pub fn into_ref(self) -> ArrayRef {
-                Arc::new(self)
-            }
-        }
+    pub fn into_ref(self) -> ArrayRef {
+        Arc::new(self)
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
+        (0..self.len()).map(|i| self.value_at(i))
     }
 }
-
-for_all_array_variants! { impl_array }
 
 impl EstimateSize for ArrayImpl {
     fn estimated_heap_size(&self) -> usize {
         dispatch_array_variants!(self, inner, { inner.estimated_heap_size() })
-    }
-}
-
-impl ArrayImpl {
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
-        (0..self.len()).map(|i| self.value_at(i))
     }
 }
 

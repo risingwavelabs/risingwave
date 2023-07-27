@@ -17,24 +17,21 @@
 use std::cmp::{Ord, Ordering};
 use std::ops::Deref;
 
+use crate::array::*;
+use crate::dispatch_scalar_ref_variants;
 use crate::estimate_size::EstimateSize;
-use crate::for_all_scalar_variants;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::sort_util::{cmp_datum, partial_cmp_datum, OrderType};
 
-macro_rules! gen_default_partial_cmp_scalar_ref_impl {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        pub fn default_partial_cmp_scalar_ref_impl(lhs: ScalarRefImpl<'_>, rhs: ScalarRefImpl<'_>) -> Option<Ordering> {
-            match (lhs, rhs) {
-                $((ScalarRefImpl::$variant_name(lhs_inner), ScalarRefImpl::$variant_name(ref rhs_inner)) => Some(lhs_inner.cmp(rhs_inner)),)*
-                _ => None,
-            }
-        }
-    };
+pub fn default_partial_cmp_scalar_ref_impl(
+    lhs: ScalarRefImpl<'_>,
+    rhs: ScalarRefImpl<'_>,
+) -> Option<Ordering> {
+    dispatch_scalar_ref_variants!(lhs, lhs, [S = ScalarRef], {
+        let rhs: S<'_> = rhs.try_into().ok()?;
+        Some(lhs.cmp(&rhs))
+    })
 }
-
-// TODO: refactor with dispatch macro
-for_all_scalar_variants!(gen_default_partial_cmp_scalar_ref_impl);
 
 pub trait DefaultPartialOrd: PartialEq {
     fn default_partial_cmp(&self, other: &Self) -> Option<Ordering>;

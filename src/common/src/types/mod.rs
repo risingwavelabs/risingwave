@@ -40,7 +40,10 @@ pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
-use crate::{dispatch_data_types, for_all_scalar_variants, for_all_type_pairs};
+use crate::{
+    dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants,
+    for_all_scalar_variants, for_all_type_pairs,
+};
 
 mod datetime;
 mod decimal;
@@ -902,59 +905,31 @@ impl ScalarImpl {
     }
 }
 
-macro_rules! impl_scalar_impl_ref_conversion {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl ScalarImpl {
-            /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
-            pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
-                match self {
-                    $(
-                        Self::$variant_name(inner) => ScalarRefImpl::<'_>::$variant_name(inner.as_scalar_ref())
-                    ), *
-                }
-            }
-        }
-
-        impl<'a> ScalarRefImpl<'a> {
-            /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
-            pub fn into_scalar_impl(self) -> ScalarImpl {
-                match self {
-                    $(
-                        Self::$variant_name(inner) => ScalarImpl::$variant_name(inner.to_owned_scalar())
-                    ), *
-                }
-            }
-        }
-    };
+impl ScalarImpl {
+    /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
+    pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
+        dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().into() })
+    }
 }
 
-for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
-
-/// Implement [`Hash`] for [`ScalarImpl`] and [`ScalarRefImpl`] with `hash_scalar`.
-///
-/// Should behave the same as [`crate::array::Array::hash_at`].
-macro_rules! scalar_impl_hash {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl Hash for ScalarRefImpl<'_> {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.hash_scalar(state), )*
-                }
-            }
-        }
-
-        impl Hash for ScalarImpl {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.as_scalar_ref().hash_scalar(state), )*
-                }
-            }
-        }
-    };
+impl<'a> ScalarRefImpl<'a> {
+    /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
+    pub fn into_scalar_impl(self) -> ScalarImpl {
+        dispatch_scalar_ref_variants!(self, inner, { inner.to_owned_scalar().into() })
+    }
 }
 
-// TODO: refactor with dispatch macro
-for_all_scalar_variants! { scalar_impl_hash }
+impl Hash for ScalarImpl {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().hash_scalar(state) })
+    }
+}
+
+impl Hash for ScalarRefImpl<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        dispatch_scalar_ref_variants!(self, inner, { inner.hash_scalar(state) })
+    }
+}
 
 /// Feeds the raw scalar reference of `datum` to the given `state`, which should behave the same
 /// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
