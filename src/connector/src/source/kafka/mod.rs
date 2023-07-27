@@ -40,7 +40,7 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 /// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
-pub struct RdKafkaProperties {
+pub struct RdKafkaPropertiesConsumer {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
     #[serde(rename = "properties.queued.min.messages")]
@@ -63,9 +63,9 @@ pub struct RdKafkaProperties {
     /// and the application is experiencing long (~1s) delays between messages. Low values may
     /// increase CPU utilization.
     // FIXME: need to upgrade rdkafka to v2.2.0 to use this property
-    #[serde(rename = "properties.fetch.queue.backoff.ms")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub fetch_queue_backoff_ms: Option<usize>,
+    // #[serde(rename = "properties.fetch.queue.backoff.ms")]
+    // #[serde_as(as = "Option<DisplayFromStr>")]
+    // pub fetch_queue_backoff_ms: Option<usize>,
 
     /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
     /// batches by the consumer and if the first message batch in the first non-empty partition of
@@ -129,7 +129,16 @@ pub struct KafkaProperties {
     pub common: KafkaCommon,
 
     #[serde(flatten)]
-    pub rdkafka_properties: RdKafkaProperties,
+    pub rdkafka_properties: RdKafkaPropertiesConsumer,
+}
+
+impl KafkaProperties {
+    pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        self.common.set_client(c);
+        self.rdkafka_properties.set_client(c);
+
+        tracing::info!("kafka client starts with: {:?}", c);
+    }
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -137,7 +146,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
 
-impl RdKafkaProperties {
+impl RdKafkaPropertiesConsumer {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         if let Some(v) = &self.queued_min_messages {
             c.set("queued.min.messages", v.to_string());
@@ -148,9 +157,9 @@ impl RdKafkaProperties {
         if let Some(v) = &self.fetch_wait_max_ms {
             c.set("fetch.wait.max.ms", v.to_string());
         }
-        if let Some(v) = &self.fetch_queue_backoff_ms {
-            c.set("fetch.queue.backoff.ms", v.to_string());
-        }
+        // if let Some(v) = &self.fetch_queue_backoff_ms {
+        //     c.set("fetch.queue.backoff.ms", v.to_string());
+        // }
         if let Some(v) = &self.fetch_max_bytes {
             c.set("fetch.max.bytes", v.to_string());
         }
