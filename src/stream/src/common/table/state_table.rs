@@ -848,8 +848,8 @@ where
                 }
 
                 for pk in pks {
-                    let filler = self.watermark_cache.begin_syncing();
-                    filler.insert(DefaultOrdered(pk), ());
+                    let mut filler = self.watermark_cache.begin_syncing();
+                    filler.insert_unchecked(DefaultOrdered(pk), ());
                     filler.finish();
                 }
             }
