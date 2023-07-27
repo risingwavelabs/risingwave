@@ -91,23 +91,6 @@ impl StateTableWatermarkCache {
         }
     }
 
-    /// Handle inserts / updates.
-    /// TODO: Ignore rows with null in watermark col.
-    pub fn handle_insert(&mut self, row: impl Row) {
-        todo!()
-    }
-
-    /// Handle inserts / updates.
-    /// TODO: Ignore rows with null in watermark col.
-    pub fn handle_delete(&mut self, row: impl Row) {
-        todo!()
-    }
-
-    /// Handle inserts / updates.
-    pub fn handle_commit(&mut self, row: impl Row) {
-        todo!()
-    }
-
     /// Get the lowest value.
     fn first_key(&self) -> Option<&WatermarkCacheKey> {
         self.inner.first_key_value().map(|(k, _)| k)
