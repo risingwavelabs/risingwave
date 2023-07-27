@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_database` stores database.
 ///
@@ -35,31 +36,33 @@ use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsD
 /// ```
 ///
 /// Ref: [`pg_database`](https://www.postgresql.org/docs/current/catalog-pg-database.html)
-
-pub const PG_DATABASE_TABLE_NAME: &str = "pg_database";
-
-pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "datname"),
-    // None
-    (DataType::Int32, "datdba"),
-    // 6
-    (DataType::Int32, "encoding"),
-    // 'C'
-    (DataType::Varchar, "datcollate"),
-    // 'C'
-    (DataType::Varchar, "datctype"),
-    // false
-    (DataType::Boolean, "datistemplate"),
-    // true
-    (DataType::Boolean, "datallowconn"),
-    // -1
-    (DataType::Int32, "datconnlimit"),
-    // 1663
-    (DataType::Int32, "dattablespace"),
-    // null
-    (DataType::Varchar, "datacl"),
-];
+pub const PG_DATABASE: BuiltinTable = BuiltinTable {
+    name: "pg_database",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "datname"),
+        // None
+        (DataType::Int32, "datdba"),
+        // 6
+        (DataType::Int32, "encoding"),
+        // 'C'
+        (DataType::Varchar, "datcollate"),
+        // 'C'
+        (DataType::Varchar, "datctype"),
+        // false
+        (DataType::Boolean, "datistemplate"),
+        // true
+        (DataType::Boolean, "datallowconn"),
+        // -1
+        (DataType::Int32, "datconnlimit"),
+        // 1663
+        (DataType::Int32, "dattablespace"),
+        // null
+        (DataType::Varchar, "datacl"),
+    ],
+    pk: &[0],
+};
 
 pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
     OwnedRow::new(vec![

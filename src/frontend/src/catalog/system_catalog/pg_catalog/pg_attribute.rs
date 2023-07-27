@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_attribute` stores information about table columns. There will be exactly one
 /// `pg_attribute` row for every column in every table in the database. (There will also be
@@ -26,19 +27,23 @@ use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsD
 ///
 /// In RisingWave, we simply make it contain the columns of the view and all the columns of the
 /// tables that are not internal tables.
-pub const PG_ATTRIBUTE_TABLE_NAME: &str = "pg_attribute";
-pub const PG_ATTRIBUTE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "attrelid"),
-    (DataType::Varchar, "attname"),
-    (DataType::Int32, "atttypid"),
-    (DataType::Int16, "attlen"),
-    (DataType::Int16, "attnum"),
-    (DataType::Boolean, "attnotnull"),
-    (DataType::Boolean, "attisdropped"),
-    (DataType::Varchar, "attidentity"),
-    (DataType::Varchar, "attgenerated"),
-    (DataType::Int32, "atttypmod"),
-];
+pub const PG_ATTRIBUTE: BuiltinTable = BuiltinTable {
+    name: "pg_attribute",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "attrelid"),
+        (DataType::Varchar, "attname"),
+        (DataType::Int32, "atttypid"),
+        (DataType::Int16, "attlen"),
+        (DataType::Int16, "attnum"),
+        (DataType::Boolean, "attnotnull"),
+        (DataType::Boolean, "attisdropped"),
+        (DataType::Varchar, "attidentity"),
+        (DataType::Varchar, "attgenerated"),
+        (DataType::Int32, "atttypmod"),
+    ],
+    pk: &[0, 4],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_pg_attribute(&self) -> Result<Vec<OwnedRow>> {

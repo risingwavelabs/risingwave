@@ -14,24 +14,29 @@
 
 use std::sync::LazyLock;
 
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_proc` stores information about functions, procedures, aggregate functions, and
 /// window functions (collectively also known as routines).
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-proc.html`]
-pub const PG_PROC_TABLE_NAME: &str = "pg_proc";
-pub const PG_PROC_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "proname"),
-    (DataType::Int32, "pronamespace"),
-    (DataType::Int32, "proowner"),
-    (DataType::Int32, "proargdefaults"),
-    (DataType::Int32, "prorettype"), // Data type of the return value, refer to pg_type.
-];
+pub const PG_PROC: BuiltinTable = BuiltinTable {
+    name: "pg_proc",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "proname"),
+        (DataType::Int32, "pronamespace"),
+        (DataType::Int32, "proowner"),
+        (DataType::Int32, "proargdefaults"),
+        (DataType::Int32, "prorettype"), // Data type of the return value, refer to pg_type.
+    ],
+    pk: &[0],
+};
 
 // TODO: read real data including oid etc in rw, currently there are no such data in rw.
 // more details can be found here: https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_proc.dat

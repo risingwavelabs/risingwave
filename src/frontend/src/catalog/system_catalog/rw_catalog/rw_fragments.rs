@@ -16,14 +16,13 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
-
-pub const RW_FRAGMENTS_TABLE_NAME: &str = "rw_fragments";
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 pub static RW_FRAGMENTS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -37,6 +36,13 @@ pub static RW_FRAGMENTS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
         ),
         (DataType::List(Box::new(DataType::Varchar)), "flags"),
     ]
+});
+
+pub static RW_FRAGMENTS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_fragments",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &RW_FRAGMENTS_COLUMNS,
+    pk: &[0],
 });
 
 impl SysCatalogReaderImpl {

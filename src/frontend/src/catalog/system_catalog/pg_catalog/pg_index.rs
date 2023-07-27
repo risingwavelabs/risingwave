@@ -16,14 +16,13 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
-/// The catalog `pg_index` contains part of the information about indexes.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
 pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
 pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -36,6 +35,15 @@ pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
         (DataType::Varchar, "indpred"),
     ]
+});
+
+/// The catalog `pg_index` contains part of the information about indexes.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
+pub static PG_INDEX: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: PG_INDEX_TABLE_NAME,
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &PG_INDEX_COLUMNS,
+    pk: &[0],
 });
 
 impl SysCatalogReaderImpl {

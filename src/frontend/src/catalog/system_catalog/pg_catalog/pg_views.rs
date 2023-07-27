@@ -13,23 +13,28 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The view `pg_views` provides access to useful information about each view in the database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-views.html`]
 ///
 /// `pg_views` in RisingWave doesn't contain system catalog.
-pub const PG_VIEWS_TABLE_NAME: &str = "pg_views";
-pub const PG_VIEWS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "viewname"),
-    (DataType::Varchar, "viewowner"),
-    (DataType::Varchar, "definition"),
-];
+pub const PG_VIEWS: BuiltinTable = BuiltinTable {
+    name: "pg_views",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "schemaname"),
+        (DataType::Varchar, "viewname"),
+        (DataType::Varchar, "viewowner"),
+        (DataType::Varchar, "definition"),
+    ],
+    pk: &[0, 1],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_views_info(&self) -> Result<Vec<OwnedRow>> {

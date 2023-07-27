@@ -12,21 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// Stores information about relation access methods.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
-pub const PG_AM_TABLE_NAME: &str = "pg_am";
-pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "amname"),
-    (DataType::Int32, "amhandler"),
-    (DataType::Varchar, "amtype"),
-];
+pub const PG_AM: BuiltinTable = BuiltinTable {
+    name: "pg_am",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "amname"),
+        (DataType::Int32, "amhandler"),
+        (DataType::Varchar, "amtype"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_am_info(&self) -> Result<Vec<OwnedRow>> {
