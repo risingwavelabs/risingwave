@@ -40,7 +40,6 @@ pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
-use crate::util::must_not_impl::MustNotImplOrd;
 
 mod datetime;
 mod decimal;
@@ -591,8 +590,8 @@ for_all_scalar_variants! { scalar_impl_enum }
 // We MUST NOT implement `Ord` for `ScalarImpl` because that will make `Datum` derive an incorrect
 // default `Ord`. To get a default-ordered `ScalarImpl`/`ScalarRefImpl`/`Datum`/`DatumRef`, you can
 // use `DefaultOrdered<T>`. If non-default order is needed, please refer to `sort_util`.
-impl MustNotImplOrd for ScalarImpl {}
-impl MustNotImplOrd for ScalarRefImpl<'_> {}
+impl !PartialOrd for ScalarImpl {}
+impl !PartialOrd for ScalarRefImpl<'_> {}
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
