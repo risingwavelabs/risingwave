@@ -6740,7 +6740,6 @@ name = "risingwave_variables"
 version = "1.0.0-alpha"
 dependencies = [
  "chrono",
- "opentelemetry",
  "workspace-hack",
 ]
 

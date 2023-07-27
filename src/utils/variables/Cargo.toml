@@ -21,5 +21,4 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 
 [target.'cfg(not(madsim))'.dependencies]
-opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }
