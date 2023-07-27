@@ -79,10 +79,6 @@ where
                 "unexpected source type, only kafka source is supported",
             ));
         }
-        if self.aws_client.is_none() {
-            return Err(Status::internal("AWS client is not configured"));
-        }
-        let cli = self.aws_client.as_ref().unwrap();
         let mut source_cfg: BTreeMap<String, String> =
             req.source_config.into_iter().map(|(k, v)| (k, v)).collect();
         // if connection_id provided, check whether endpoint service is available and resolve
@@ -102,6 +98,13 @@ where
                 ));
             }
             if let Some(PrivateLinkService(service)) = connection.unwrap().info {
+                if self.aws_client.is_none() {
+                    return Ok(new_rwc_validate_fail_response(
+                        ErrorType::AwsClientNotConfigured,
+                        "AWS client is not configured".to_string(),
+                    ));
+                }
+                let cli = self.aws_client.as_ref().unwrap();
                 let privatelink_status = cli
                     .is_vpc_endpoint_ready(service.endpoint_id.as_str())
                     .await;

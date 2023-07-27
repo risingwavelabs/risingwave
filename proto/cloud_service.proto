@@ -25,6 +25,7 @@ message RwCloudValidateSourceResponse {
     KAFKA_TOPIC_NOT_FOUND = 5;
     KAFKA_BROKER_UNREACHABLE = 6;
     KAFKA_OTHER = 7;
+    AWS_CLIENT_NOT_CONFIGURED = 8;
   }
 
   message Error {
