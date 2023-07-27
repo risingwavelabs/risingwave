@@ -43,7 +43,7 @@ impl StreamValues {
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
             Distribution::Single,
-            false,
+            true,
             false,
             FixedBitSet::with_capacity(logical.schema().len()),
         );
