@@ -34,6 +34,7 @@ pub struct BatchUpdate {
 
 impl BatchUpdate {
     pub fn new(logical: generic::Update<PlanRef>, schema: Schema) -> Self {
+        assert_eq!(logical.input.distribution(), &Distribution::Single);
         let ctx = logical.input.ctx();
         let base = PlanBase::new_batch(ctx, schema, Distribution::Single, Order::any());
         Self { base, logical }
