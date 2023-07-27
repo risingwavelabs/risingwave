@@ -18,7 +18,7 @@ static SERVER_START_TIME: OnceLock<chrono::DateTime<chrono::Utc>> = OnceLock::ne
 
 /// Init the server start time, should be called only once.
 pub(crate) fn init_server_start_time() {
-    SERVER_START_TIME.get_or_init(|| chrono::Utc::now());
+    SERVER_START_TIME.get_or_init(chrono::Utc::now);
 }
 
 /// Get the server start time. Returns none if not initialized.
