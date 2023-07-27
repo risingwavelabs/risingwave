@@ -51,7 +51,6 @@ use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
-use super::heuristic_optimizer::HeuristicOptimizer;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 pub trait PlanNodeMeta {
@@ -346,10 +345,11 @@ impl PlanRef {
 }
 
 impl ColPrunable for PlanRef {
+    #[allow(clippy::let_and_return)]
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let res = self.prune_col_inner(required_cols, ctx);
         #[cfg(debug_assertions)]
-        HeuristicOptimizer::check_equivalent_plan(
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
             "column pruning",
             &LogicalProject::with_out_col_idx(self.clone(), required_cols.iter().cloned()).into(),
             &res,
@@ -359,16 +359,21 @@ impl ColPrunable for PlanRef {
 }
 
 impl PredicatePushdown for PlanRef {
+    #[allow(clippy::let_and_return)]
     fn predicate_pushdown(
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let res = self.predicate_pushdown_inner(predicate.clone(), ctx);
         #[cfg(debug_assertions)]
-        HeuristicOptimizer::check_equivalent_plan(
+        let predicate_clone = predicate.clone();
+
+        let res = self.predicate_pushdown_inner(predicate, ctx);
+
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
             "predicate push down",
-            &LogicalFilter::new(self.clone(), predicate).into(),
+            &LogicalFilter::new(self.clone(), predicate_clone).into(),
             &res,
         );
         res
