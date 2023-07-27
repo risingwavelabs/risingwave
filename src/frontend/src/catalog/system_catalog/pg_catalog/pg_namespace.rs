@@ -13,25 +13,30 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{
-    get_acl_items, SysCatalogReaderImpl, SystemCatalogColumnsDef,
-};
+use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+
+pub const PG_NAMESPACE_TABLE_NAME: &str = "pg_namespace";
 
 /// The catalog `pg_namespace` stores namespaces. A namespace is the structure underlying SQL
 /// schemas: each namespace can have a separate collection of relations, types, etc. without name
 /// conflicts. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
-pub const PG_NAMESPACE_TABLE_NAME: &str = "pg_namespace";
-pub const PG_NAMESPACE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "nspname"),
-    (DataType::Int32, "nspowner"),
-    (DataType::Varchar, "nspacl"),
-];
+pub const PG_NAMESPACE: BuiltinTable = BuiltinTable {
+    name: PG_NAMESPACE_TABLE_NAME,
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "nspname"),
+        (DataType::Int32, "nspowner"),
+        (DataType::Varchar, "nspacl"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_namespace(&self) -> Result<Vec<OwnedRow>> {

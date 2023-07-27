@@ -101,6 +101,16 @@ impl RewriteExprsRecursive for BoundSelect {
                     })
                     .collect::<Vec<_>>(),
             ),
+            GroupBy::Cube(cube) => GroupBy::Cube(
+                std::mem::take(cube)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         };
         self.group_by = new_group_by;
 
@@ -221,8 +231,10 @@ impl Binder {
             GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
         } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
             GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
+        } else if select.group_by.len() == 1 && let Expr::Cube(cube) = &select.group_by[0] {
+            GroupBy::Cube(self.bind_grouping_items_expr_in_select(cube.clone(), &out_name_to_index, &select_items)?)
         } else {
-            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_))) {
+            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_)) || matches!(expr, Expr::Cube(_))) {
                 return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
             }
             GroupBy::GroupKey(select

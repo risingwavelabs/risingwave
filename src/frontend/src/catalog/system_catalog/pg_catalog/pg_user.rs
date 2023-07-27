@@ -13,25 +13,31 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-/// The catalog `pg_user` provides access to information about database users.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
 pub const PG_USER_TABLE_NAME: &str = "pg_user";
 pub const PG_USER_ID_INDEX: usize = 0;
 pub const PG_USER_NAME_INDEX: usize = 1;
 
-pub const PG_USER_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "usesysid"),
-    (DataType::Varchar, "name"),
-    (DataType::Boolean, "usecreatedb"),
-    (DataType::Boolean, "usesuper"),
-    (DataType::Varchar, "passwd"),
-];
+/// The catalog `pg_user` provides access to information about database users.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
+pub const PG_USER: BuiltinTable = BuiltinTable {
+    name: PG_USER_TABLE_NAME,
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "usesysid"),
+        (DataType::Varchar, "name"),
+        (DataType::Boolean, "usecreatedb"),
+        (DataType::Boolean, "usesuper"),
+        (DataType::Varchar, "passwd"),
+    ],
+    pk: &[PG_USER_ID_INDEX],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_user_info(&self) -> Result<Vec<OwnedRow>> {
