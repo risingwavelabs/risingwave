@@ -139,6 +139,9 @@ enum HummockCommands {
     ListVersion {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
+
+        #[clap(long = "verbose_key_range", default_value_t = false)]
+        verbose_key_range: bool,
     },
 
     /// list hummock version deltas in the meta store
@@ -173,6 +176,9 @@ enum HummockCommands {
 
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
+
+        #[clap(short, long = "sst-ids")]
+        sst_ids: Vec<u64>,
     },
     /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
     /// sst_retention_time_sec.
@@ -366,6 +372,9 @@ enum MetaCommands {
         /// Show the plan only, no actual operation
         #[clap(long, default_value = "false")]
         dry_run: bool,
+        /// Resolve NO_SHUFFLE upstream
+        #[clap(long, default_value = "false")]
+        resolve_no_shuffle: bool,
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
@@ -414,8 +423,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
             cmd_impl::hummock::disable_commit_epoch(context).await?
         }
-        Commands::Hummock(HummockCommands::ListVersion { verbose }) => {
-            cmd_impl::hummock::list_version(context, verbose).await?;
+        Commands::Hummock(HummockCommands::ListVersion {
+            verbose,
+            verbose_key_range,
+        }) => {
+            cmd_impl::hummock::list_version(context, verbose, verbose_key_range).await?;
         }
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,
@@ -437,12 +449,14 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compaction_group_id,
             table_id,
             level,
+            sst_ids,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
                 table_id,
                 level,
+                sst_ids,
             )
             .await?
         }
@@ -533,7 +547,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             dry_run,
             plan,
             revision,
-        }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
+            resolve_no_shuffle,
+        }) => {
+            cmd_impl::meta::reschedule(context, plan, revision, from, dry_run, resolve_no_shuffle)
+                .await?
+        }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?

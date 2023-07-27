@@ -63,6 +63,10 @@ pub const SYSTEM_SCHEMAS: [&str; 3] = [
     RW_CATALOG_SCHEMA_NAME,
 ];
 
+// When there is no primary key specified while creating source, will use the
+// the message key as primary key in `BYTEA` type with this name.
+pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";
+
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
 }

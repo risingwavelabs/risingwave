@@ -46,7 +46,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Add new files](#add-new-files)
 - [Add new dependencies](#add-new-dependencies)
 - [Submit PRs](#submit-prs)
-- [Profiling](#profiling)
+- [Profiling](#benchmarking-and-profiling)
 
 ## Read the design docs
 
@@ -441,6 +441,13 @@ MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**
 
 Deterministic test is included in CI as well. See [CI script](../ci/scripts/deterministic-e2e-test.sh) for details.
 
+### Deterministic Simulation Integration tests
+
+To run these tests:
+```shell
+./risedev sit-test
+```
+
 ## Miscellaneous checks
 
 For shell code, please run:
@@ -485,7 +492,8 @@ after deps get updated.
 
 Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
 
-## Profiling
+## Benchmarking and Profiling
 
 - [CPU Profiling Guide](./cpu-profiling.md)
 - [Memory (Heap) Profiling Guide](./memory-profiling.md)
+- [Microbench Guide](./microbenchmarks.md)

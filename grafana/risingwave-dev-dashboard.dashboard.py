@@ -26,10 +26,9 @@ def section_actor_info(panels):
         panels.table_info("Actor Id Info",
                           "Mapping from actor id to fragment id",
                           [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
-        panels.table_info("Table Id Info",
-                          "Mapping from table id to actor id and table name",
-                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
-
+        panels.table_info("Materialized View Info",
+                          "Mapping from materialized view table id to it's internal table ids",
+                           [panels.table_target(f"{metric('materialized_info')}")], excluded_cols),
     ]
 
 
@@ -160,17 +159,6 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
                             "write - {{table_id}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_count(
-                    "Compactor Core Count To Scale",
-                    "The number of CPUs needed to meet the demand of compaction.",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_compactor_suggest_core_count')})",
-                            "suggest-core-count"
                         ),
                     ],
                 ),
@@ -1111,6 +1099,23 @@ def section_streaming_actors(outer_panels):
                                       "{{actor_id}} {{side}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Join Executor Matched Rows",
+                    "The number of matched rows on the opposite side",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, actor_id, table_id, job, instance))",
+                                f"p{legend} - actor_id {{{{actor_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                            ),
+                            [90, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, actor_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
+                            "avg - actor_id {{actor_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_actor_ops(
                     "Aggregation Executor Cache Statistics For Each Key/State",
                     "Lookup miss count counts the number of aggregation key's cache miss per second."
@@ -1999,6 +2004,38 @@ def section_hummock(panels):
                 ),
             ],
         ),
+        panels.timeseries_bytes(
+            "Mem Table Size",
+            "This metric shows the memory usage of mem_table.",
+            [
+                panels.target(
+                    f"sum({metric('state_store_mem_table_memory_size')}) by (job,instance)",
+                    "mem_table size total - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"{metric('state_store_mem_table_memory_size')}",
+                    "mem_table size - table id {{table_id}} instance id {{instance_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Mem Table Count",
+            "This metric shows the item counts in mem_table.",
+            [
+                panels.target(
+                    f"sum({metric('state_store_mem_table_item_count')}) by (job,instance)",
+                    "mem_table counts total - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"{metric('state_store_mem_table_item_count')}",
+                    "mem_table count - table id {{table_id}} instance id {{instance_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
         panels.timeseries_latency(
             "Row SeqScan Next Duration",
             "",
@@ -2064,7 +2101,7 @@ def section_hummock(panels):
             "The times of move_state_table occurs",
             [
                 panels.target(
-                    f"sum({table_metric('storage_move_state_table_count')}[$__rate_interval]) by (group)",
+                    f"sum({table_metric('storage_move_state_table_count')}) by (group)",
                     "move table cg{{group}}",
                 ),
             ],
@@ -2182,6 +2219,7 @@ def section_hummock_manager(outer_panels):
     total_key_size_filter = "metric='total_key_size'"
     total_value_size_filter = "metric='total_value_size'"
     total_key_count_filter = "metric='total_key_count'"
+    mv_total_size_filter = "metric='materialized_view_total_size'"
     return [
         outer_panels.row_collapsed(
             "Hummock Manager",
@@ -2249,7 +2287,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "Table KV Size",
+                    "Table Size",
                     "",
                     [
                         panels.target(f"{table_metric('storage_version_stats', total_key_size_filter)}/1024",
@@ -2258,6 +2296,17 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
+
+                panels.timeseries_kilobytes(
+                    "Materialized View Size",
+                    "",
+                    [
+                        panels.target(f"{table_metric('storage_materialized_view_stats', mv_total_size_filter)}/1024",
+                                      "{{metric}}, mv id - {{table_id}} "),
+                    ],
+                ),
+
+        
                 panels.timeseries_count(
                     "Table KV Count",
                     "",

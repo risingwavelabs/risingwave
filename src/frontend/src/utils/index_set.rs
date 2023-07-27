@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::{BitAnd, BitOr};
+
 use fixedbitset::FixedBitSet;
 
 /// A set of deduplicated column indices.
@@ -90,6 +92,46 @@ impl FromIterator<usize> for IndexSet {
     fn from_iter<T: IntoIterator<Item = usize>>(iter: T) -> Self {
         IndexSet {
             bitset: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl BitAnd for IndexSet {
+    type Output = IndexSet;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        IndexSet {
+            bitset: &self.bitset & &rhs.bitset,
+        }
+    }
+}
+
+impl<'a> BitAnd for &'a IndexSet {
+    type Output = IndexSet;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        IndexSet {
+            bitset: &self.bitset & &rhs.bitset,
+        }
+    }
+}
+
+impl BitOr for IndexSet {
+    type Output = IndexSet;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        IndexSet {
+            bitset: &self.bitset | &rhs.bitset,
+        }
+    }
+}
+
+impl<'a> BitOr for &'a IndexSet {
+    type Output = IndexSet;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        IndexSet {
+            bitset: &self.bitset | &rhs.bitset,
         }
     }
 }

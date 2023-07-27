@@ -18,7 +18,7 @@ use std::ops::Bound;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use futures::stream;
+use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
@@ -30,10 +30,11 @@ use risingwave_common::types::{
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::StateStore;
 
 use super::{StreamExecutorError, StreamExecutorResult};
-use crate::common::cache::{OrderedStateCache, StateCache, StateCacheFiller};
+use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 
 type CacheKey = (
@@ -57,6 +58,9 @@ fn row_to_cache_key<S: StateStore>(
     (timestamp_val.into(), pk.into())
 }
 
+// TODO(rc): need to make this configurable?
+const CACHE_CAPACITY: usize = 2048;
+
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a buffer table passed in, whose schema is same as
 /// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
@@ -65,8 +69,8 @@ pub struct SortBuffer<S: StateStore> {
     /// The timestamp column to sort on.
     sort_column_index: usize,
 
-    /// Cache of buffer table. `TopNStateCache` also works, may switch to it if needed later.
-    cache: OrderedStateCache<CacheKey, OwnedRow>,
+    /// Cache of buffer table.
+    cache: TopNStateCache<CacheKey, OwnedRow>,
 
     _phantom: PhantomData<S>,
 }
@@ -82,20 +86,9 @@ impl<S: StateStore> SortBuffer<S> {
 
         Self {
             sort_column_index,
-            cache: OrderedStateCache::new(),
+            cache: TopNStateCache::new(CACHE_CAPACITY),
             _phantom: PhantomData,
         }
-    }
-
-    /// Recover a [`SortBuffer`] from a buffer table.
-    #[allow(dead_code)]
-    pub async fn recover(
-        sort_column_index: usize,
-        buffer_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
-        let mut this = Self::new(sort_column_index, buffer_table);
-        this.refill_cache(None, buffer_table).await?;
-        Ok(this)
     }
 
     /// Insert a new row into the buffer.
@@ -178,8 +171,10 @@ impl<S: StateStore> SortBuffer<S> {
 
     #[try_stream(ok = (CacheKey, OwnedRow), error = StreamExecutorError)]
     async fn consume_from_cache<'a>(&'a mut self, watermark: ScalarRefImpl<'a>) {
-        assert!(self.cache.is_synced());
-        while let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) {
+        while self.cache.is_synced() {
+            let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) else {
+                break;
+            };
             if key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt() {
                 let row = self.cache.delete(&key).unwrap();
                 yield (key, row);
@@ -205,20 +200,23 @@ impl<S: StateStore> SortBuffer<S> {
             Bound::<row::Empty>::Unbounded,
         );
 
-        let streams =
+        let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
                 buffer_table.iter_key_and_val_with_pk_range(
                     &pk_range,
                     vnode,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions {
+                        exhaust_iter: filler.capacity().is_none(),
+                    },
                 )
             }))
             .await?
             .into_iter()
-            .map(Box::pin);
+            .map(Box::pin)
+            .collect();
 
         #[for_await]
-        for kv in stream::select_all(streams) {
+        for kv in merge_sort(streams).take(filler.capacity().unwrap_or(usize::MAX)) {
             // NOTE: The rows may not appear in order.
             let row = key_value_to_full_row(kv?, buffer_table)?;
             let key = row_to_cache_key(self.sort_column_index, &row, buffer_table);

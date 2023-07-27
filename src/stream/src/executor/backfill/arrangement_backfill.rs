@@ -66,9 +66,9 @@ pub struct ArrangementBackfillExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     metrics: Arc<StreamingMetrics>,
-}
 
-const CHUNK_SIZE: usize = 1024;
+    chunk_size: usize,
+}
 
 impl<S> ArrangementBackfillExecutor<S>
 where
@@ -85,6 +85,7 @@ where
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -99,6 +100,7 @@ where
             actor_id: progress.actor_id(),
             progress,
             metrics,
+            chunk_size,
         }
     }
 
@@ -126,7 +128,7 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        let progress_per_vnode = get_progress_per_vnode(&self.state_table, state_len).await?;
+        let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
         let is_completely_finished = progress_per_vnode
             .iter()
@@ -151,6 +153,7 @@ where
                     schema.clone(),
                     &upstream_table,
                     backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
+                    self.chunk_size,
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -232,6 +235,7 @@ where
                         schema.clone(),
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
+                        self.chunk_size,
                     )
                     .map(Either::Right),);
 
@@ -473,6 +477,7 @@ where
         schema: Arc<Schema>,
         upstream_table: &ReplicatedStateTable<S>,
         backfill_state: BackfillState,
+        chunk_size: usize,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {
@@ -494,7 +499,7 @@ where
                 .await?;
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, CHUNK_SIZE)
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, chunk_size)
                 .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));

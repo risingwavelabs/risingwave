@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -125,12 +126,17 @@ pub async fn handle_create_function(
     fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
         arrow_schema::Field::new("", data_type, true)
     }
-    let args = arrow_schema::Schema::new(arg_types.iter().map(|t| to_field(t.into())).collect());
+    let args = arrow_schema::Schema::new(
+        arg_types
+            .iter()
+            .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+            .try_collect::<_, Fields, _>()?,
+    );
     let returns = arrow_schema::Schema::new(match kind {
-        Kind::Scalar(_) => vec![to_field(return_type.clone().into())],
+        Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
         Kind::Table(_) => vec![
             arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-            to_field(return_type.clone().into()),
+            to_field(return_type.clone().try_into()?),
         ],
         _ => unreachable!(),
     });

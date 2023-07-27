@@ -31,8 +31,6 @@ pub enum Error {
     ObjectStore(ObjectError),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
-    #[error("compaction task {0} already assigned to compactor {1}")]
-    CompactionTaskAlreadyAssigned(u64, HummockContextId),
     #[error("compaction group error: {0}")]
     CompactionGroup(String),
     #[error("SST {0} is invalid")]

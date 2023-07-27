@@ -108,6 +108,7 @@ impl TableDesc {
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             versioned: self.versioned,
+            stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
         }
     }
 

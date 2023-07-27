@@ -18,9 +18,7 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{
-    ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
-};
+use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
@@ -171,8 +169,6 @@ pub async fn handle(
     sql: &str,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
-    const IGNORE_NOTICE: &str = "Ignored temporarily. See details in https://github.com/risingwavelabs/risingwave/issues/2541";
-
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
 
@@ -250,16 +246,9 @@ pub async fn handle(
                 .await;
             }
             // TODO(st1page): refacor it
-            let mut notice = Default::default();
-            let source_schema = source_schema
-                .map(|source_schema| -> Result<SourceSchema> {
-                    let (source_schema, _, n) = source_schema
-                        .into_source_schema()
-                        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
-                    notice = n;
-                    Ok(source_schema)
-                })
-                .transpose()?;
+            let notice = Default::default();
+            let source_schema =
+                source_schema.map(|source_schema| source_schema.into_source_schema_v2());
 
             create_table::handle_create_table(
                 handler_args,
@@ -495,9 +484,11 @@ pub async fn handle(
         Statement::Rollback { chain } => {
             transaction::handle_rollback(handler_args, ROLLBACK, chain).await
         }
-        Statement::SetTransaction { .. } => Ok(PgResponse::builder(SET_TRANSACTION)
-            .notice(IGNORE_NOTICE)
-            .into()),
+        Statement::SetTransaction {
+            modes,
+            snapshot,
+            session,
+        } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

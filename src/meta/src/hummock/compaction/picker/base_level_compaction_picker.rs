@@ -98,6 +98,12 @@ impl LevelCompactionPicker {
             return None;
         }
 
+        // no running base_compaction
+        let strict_check = level_handlers[0]
+            .get_pending_tasks()
+            .iter()
+            .any(|task| task.target_level != 0);
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
@@ -152,7 +158,7 @@ impl LevelCompactionPicker {
 
             // The size of target level may be too large, we shall skip this compact task and wait
             //  the data in base level compact to lower level.
-            if target_level_size > self.config.max_compaction_bytes {
+            if target_level_size > self.config.max_compaction_bytes && strict_check {
                 continue;
             }
 
@@ -170,19 +176,13 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        if !min_write_amp_meet {
-            let is_base_level_task_pending = level_handlers[0]
-                .get_pending_tasks()
-                .iter()
-                .any(|task| task.target_level != 0);
+        if !min_write_amp_meet && strict_check {
             // If the write-amplification of all candidate task are large, we may hope to wait base
             // level compact more data to lower level.  But if we skip all task, I'm
             // afraid the data will be blocked in level0 and will be never compacted to base level.
             // So we only allow one task exceed write-amplification-limit running in
             // level0 to base-level.
-            if is_base_level_task_pending {
-                return None;
-            }
+            return None;
         }
 
         for (input, target_file_size, target_level_files) in input_levels {
@@ -802,6 +802,55 @@ pub mod tests {
     }
 
     #[test]
+    fn test_issue_11154() {
+        let mut local_stats = LocalPickerStatistic::default();
+        let mut l0 = generate_l0_overlapping_sublevels(vec![
+            vec![
+                generate_table(4, 1, 1, 200, 1),
+                generate_table(5, 1, 400, 600, 1),
+            ],
+            vec![
+                generate_table(6, 1, 1, 200, 1),
+                generate_table(7, 1, 400, 600, 1),
+            ],
+            vec![
+                generate_table(8, 1, 1, 200, 1),
+                generate_table(9, 1, 400, 600, 1),
+            ],
+            vec![generate_table(10, 1, 1, 600, 1)],
+        ]);
+        // We can set level_type only because the input above is valid.
+        for s in &mut l0.sub_levels {
+            s.level_type = LevelType::Nonoverlapping as i32;
+        }
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            member_table_ids: vec![1],
+            ..Default::default()
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        // Pick with large max_compaction_bytes results all sub levels included in input.
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(800)
+                .sub_level_max_compaction_bytes(50000)
+                .max_bytes_for_level_base(500000)
+                .level0_sub_level_compact_level_count(1)
+                .build(),
+        );
+        // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
+        // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
+        let mut picker = LevelCompactionPicker::new(1, config);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        // avoid add sst_10 and cause a big task
+        assert_eq!(3, ret.input_levels.len());
+    }
+
+    #[test]
     fn test_l0_to_l1_break_on_pending_sub_level() {
         let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
             vec![
@@ -849,6 +898,7 @@ pub mod tests {
         // But stopped by pending sub-level when trying to include more sub-levels.
         let mut picker = LevelCompactionPicker::new(1, config.clone());
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+
         assert!(ret.is_none());
 
         // Free the pending sub-level.

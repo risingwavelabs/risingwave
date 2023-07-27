@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::str;
 use std::str::Utf8Error;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
@@ -39,10 +39,24 @@ use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
-    FePasswordMessage, FeStartupMessage,
+    FePasswordMessage, FeStartupMessage, TransactionStatus,
 };
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
+
+/// Truncates query log if it's longer than `RW_QUERY_LOG_TRUNCATE_LEN`, to avoid log file being too
+/// large.
+static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
+    LazyLock::new(|| match std::env::var("RW_QUERY_LOG_TRUNCATE_LEN") {
+        Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
+        _ => {
+            if cfg!(debug_assertions) {
+                usize::MAX
+            } else {
+                1024
+            }
+        }
+    });
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -160,10 +174,13 @@ where
 
     /// Processes one message. Returns true if the connection is terminated.
     pub async fn process(&mut self, msg: FeMessage) -> bool {
-        self.do_process(msg).await || self.is_terminate
+        self.do_process(msg).await.is_none() || self.is_terminate
     }
 
-    async fn do_process(&mut self, msg: FeMessage) -> bool {
+    /// Return type `Option<()>` is essentially a bool, but allows `?` for early return.
+    /// - `None` means to terminate the current connection
+    /// - `Some(())` means to continue processing the next message
+    async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
         let result = AssertUnwindSafe(self.do_process_inner(msg))
             .rw_catch_unwind()
             .await
@@ -175,49 +192,46 @@ where
             .inspect_err(|error| error!(%error, "error when process message"));
 
         match result {
-            Ok(v) => v,
+            Ok(()) => Some(()),
             Err(e) => {
                 match e {
                     PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
-                            return true;
+                            return None;
                         }
                     }
 
                     PsqlError::SslError(_) => {
                         // For ssl error, because the stream has already been consumed, so there is
                         // no way to write more message.
-                        return true;
+                        return None;
                     }
 
                     PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
-                        // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
+                            .ok()?;
                         let _ = self.stream.flush().await;
-                        return true;
+                        return None;
                     }
 
                     PsqlError::QueryError(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
-                        self.stream
-                            .write_no_flush(&BeMessage::ReadyForQuery)
-                            .unwrap();
+                            .ok()?;
+                        self.ready_for_query().ok()?;
                     }
 
                     PsqlError::Panic(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
+                            .ok()?;
                         let _ = self.stream.flush().await;
 
                         // Catching the panic during message processing may leave the session in an
                         // inconsistent state. We forcefully close the connection (then end the
                         // session) here for safety.
-                        return true;
+                        return None;
                     }
 
                     PsqlError::Internal(_)
@@ -225,16 +239,16 @@ where
                     | PsqlError::ExecuteError(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
+                            .ok()?;
                     }
                 }
                 let _ = self.stream.flush().await;
-                false
+                Some(())
             }
         }
     }
 
-    async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<bool> {
+    async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
@@ -246,12 +260,12 @@ where
             FeMessage::Bind(m) => self.process_bind_msg(m)?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
             FeMessage::Describe(m) => self.process_describe_msg(m)?,
-            FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
+            FeMessage::Sync => self.ready_for_query()?,
             FeMessage::Close(m) => self.process_close_msg(m)?,
             FeMessage::Flush => self.stream.flush().await?,
         }
         self.stream.flush().await?;
-        Ok(false)
+        Ok(())
     }
 
     pub async fn read_message(&mut self) -> io::Result<FeMessage> {
@@ -259,6 +273,16 @@ where
             PgProtocolState::Startup => self.stream.read_startup().await,
             PgProtocolState::Regular => self.stream.read().await,
         }
+    }
+
+    /// Writes a `ReadyForQuery` message to the client without flushing.
+    fn ready_for_query(&mut self) -> io::Result<()> {
+        self.stream.write_no_flush(&BeMessage::ReadyForQuery(
+            self.session
+                .as_ref()
+                .map(|s| s.transaction_status())
+                .unwrap_or(TransactionStatus::Idle),
+        ))
     }
 
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
@@ -313,7 +337,7 @@ where
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
                         application_name: application_name.cloned(),
                     })?;
-                self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+                self.ready_for_query()?;
             }
             UserAuthenticator::ClearText(_) => {
                 self.stream
@@ -341,7 +365,7 @@ where
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.ready_for_query()?;
         self.state = PgProtocolState::Regular;
         Ok(())
     }
@@ -370,7 +394,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
         );
 
         result
@@ -385,13 +409,19 @@ where
         let stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
             .map_err(|err| PsqlError::QueryError(err.into()))?;
+        if stmts.is_empty() {
+            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        }
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
             let span = tracing::info_span!(
                 "process_query_msg_one_stmt",
                 session_id = session.id().0,
-                stmt = format_args!("{}", truncated_fmt::TruncatedFmt(&stmt, 1024)),
+                stmt = format_args!(
+                    "{}",
+                    truncated_fmt::TruncatedFmt(&stmt, *RW_QUERY_LOG_TRUNCATE_LEN)
+                ),
             );
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
@@ -400,7 +430,7 @@ where
         }
         // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
         // sure the reason.
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.ready_for_query()?;
         Ok(())
     }
 
@@ -489,7 +519,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
         );
 
         result
@@ -521,14 +551,7 @@ where
                 ));
             }
 
-            // TODO: This behavior is not compatible with Postgres.
-            if stmts.is_empty() {
-                return Err(PsqlError::ParseError(
-                    "Empty statement is parsed in extended query mode".into(),
-                ));
-            }
-
-            stmts.into_iter().next().unwrap()
+            stmts.into_iter().next()
         };
 
         let param_types = type_ids
@@ -632,7 +655,7 @@ where
                 session = %session_id,
                 status = %if result.is_ok() { "ok" } else { "err" },
                 time = %format_args!("{}ms", mills),
-                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
+                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
             );
 
             let pg_response = result.map_err(PsqlError::ExecuteError)?;
@@ -818,7 +841,7 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("8.3.0"),
+            BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(
