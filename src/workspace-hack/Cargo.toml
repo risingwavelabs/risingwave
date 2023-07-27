@@ -30,7 +30,7 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.26" }
+crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -119,7 +119,7 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.26" }
+crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
