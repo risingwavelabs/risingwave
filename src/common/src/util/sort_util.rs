@@ -20,7 +20,7 @@ use parse_display::Display;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use super::iter_util::ZipEqDebug;
-use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::dispatch_array_variants;
 use crate::error::ErrorCode::InternalError;

@@ -130,9 +130,9 @@ macro_rules! do_expand_alias {
         $(VARIANT_NAME, $variant_name_alias:ident,)?
     )) => {
         $(type $array_alias = $array;)?
-        $(type $array_builder_alias = <$array as Array>::Builder;)?
-        $(type $scalar_alias = <$array as Array>::OwnedItem;)?
-        $(type $scalar_ref_alias<'scalar> = <$array as Array>::RefItem<'scalar>;)?
+        $(type $array_builder_alias = <$array as $crate::array::Array>::Builder;)?
+        $(type $scalar_alias = <$array as $crate::array::Array>::OwnedItem;)?
+        $(type $scalar_ref_alias<'scalar> = <$array as $crate::array::Array>::RefItem<'scalar>;)?
         $(const $variant_name_alias: &'static str = stringify!($variant_name);)?
     };
 }
@@ -215,9 +215,10 @@ macro_rules! dispatch_array_variants {
         dispatch_array_variants!($impl, $inner, [], $body)
     };
     // Switch the order of alias bindings to avoid ambiguousness.
-    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {{
+        use $crate::array::ArrayImpl;
         for_all_variants! { do_dispatch_variants, $impl, ArrayImpl, $inner, [($($v, $k,)*)], $body }
-    };
+    }};
 }
 
 /// Dispatch the code block to all variants of `ArrayBuilderImpl`.
@@ -232,9 +233,10 @@ macro_rules! dispatch_array_builder_variants {
     ($impl:expr, $inner:pat, $body:tt) => {
         dispatch_array_builder_variants!($impl, $inner, [], $body)
     };
-    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {{
+        use $crate::array::ArrayBuilderImpl;
         for_all_variants! { do_dispatch_variants, $impl, ArrayBuilderImpl, $inner, [($($v, $k,)*)], $body }
-    };
+    }};
 }
 
 /// Dispatch the code block to all variants of `ScalarImpl`.
@@ -249,9 +251,10 @@ macro_rules! dispatch_scalar_variants {
     ($impl:expr, $inner:pat, $body:tt) => {
         dispatch_scalar_variants!($impl, $inner, [], $body)
     };
-    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {{
+        use $crate::types::ScalarImpl;
         for_all_variants! { do_dispatch_variants, $impl, ScalarImpl, $inner, [($($v, $k,)*)], $body }
-    };
+    }};
 }
 
 /// Dispatch the code block to all variants of `ScalarRefImpl`.
@@ -266,9 +269,10 @@ macro_rules! dispatch_scalar_ref_variants {
     ($impl:expr, $inner:pat, $body:tt) => {
         dispatch_scalar_ref_variants!($impl, $inner, [], $body)
     };
-    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {{
+        use $crate::types::ScalarRefImpl;
         for_all_variants! { do_dispatch_variants, $impl, ScalarRefImpl, $inner, [($($v, $k,)*)], $body }
-    };
+    }};
 }
 
 /// Helper macro for generating dispatching code. Internally used by `dispatch_data_types` macros.

@@ -23,7 +23,7 @@ use itertools::Itertools;
 use tinyvec::ArrayVec;
 
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
