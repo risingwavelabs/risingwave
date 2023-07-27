@@ -71,18 +71,18 @@ pub(crate) struct StateTableWatermarkCache {
 impl StateTableWatermarkCache {
     pub fn new(size: usize) -> Self {
         Self {
-            inner: TopNStateCache::new(size), // TODO: This number is arbitrary
+            inner: TopNStateCache::with_table_row_count(size, 0), // TODO: This number is arbitrary
         }
     }
 
     /// Get the lowest key.
-    fn top_key(&self) -> Option<&WatermarkCacheKey> {
-        self.inner.top_key_value().map(|(k, _)| k)
+    fn first_key(&self) -> Option<&WatermarkCacheKey> {
+        self.inner.first_key_value().map(|(k, _)| k)
     }
 
     // Get the watermark value from the top key.
     pub fn lowest_key(&self) -> Option<ScalarRefImpl<'_>> {
-        self.top_key().and_then(|k| k.0.datum_at(0))
+        self.first_key().and_then(|k| k.0.datum_at(0))
     }
 
     /// Insert a new value.
@@ -95,6 +95,14 @@ impl StateTableWatermarkCache {
     pub fn delete(&mut self, key: &impl Row) -> Option<()> {
         self.inner
             .delete(&DefaultOrdered(key.into_owned_row()))
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity_inner()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 }
 
@@ -145,20 +153,19 @@ mod tests {
     use super::*;
 
     // TODO: Test out of sync -> sync
-    // TODO: Test eviction.
+    /// With capacity 3, test the following sequence of inserts:
+    /// Insert
+    /// [1000, ...], should insert, cache is empty.
+    /// [999, ...], should insert, smaller than 1000, should be lowest value.
+    /// [2000, ...], should insert, although larger than largest val (1000), cache rows still match state table rows.
+    /// [3000, ...], should be ignored
+    /// [900, ...], should evict 2000
     #[test]
-    fn test_state_table_watermark_cache_insert_then_delete() {
+    fn test_state_table_watermark_cache_inserts() {
         let mut cache = StateTableWatermarkCache::new(3);
+        assert_eq!(cache.capacity(), 3);
         let filler = cache.begin_syncing();
         filler.finish();
-        assert!(
-            DefaultOrdered(Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()))
-            < DefaultOrdered(Some(Timestamptz::from_secs(999).unwrap().to_scalar_value()))
-        );
-        assert_eq!(
-            DefaultOrdered(Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value())),
-            DefaultOrdered(Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()))
-        );
         assert!(cache.first_key_value().is_none());
         assert!(cache.lowest_key().is_none());
 
@@ -175,56 +182,37 @@ mod tests {
             Some(Timestamptz::from_secs(999).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
         ];
-
-        assert!(DefaultOrdered(&v1) > DefaultOrdered(&v2));
-        assert!(!(DefaultOrdered(&v1) <= DefaultOrdered(&v2)));
         let old_v = cache.insert(&v2);
+        assert_eq!(cache.len(), 2);
         assert!(old_v.is_none());
         let lowest = cache.lowest_key().unwrap();
         assert_eq!(lowest, v2[0].clone().unwrap().as_scalar_ref_impl());
 
-        // cache.insert(3);
-        // cache.insert(1);
-        // assert_eq!(cache.len(), 3);
-        // assert_eq!(
-        //     cache.first_key_value(),
-        //     Some((&1, &"risingwave!".to_string()))
-        // );
-        // assert_eq!(cache.first_key(), Some(&1));
-        // assert_eq!(cache.last_key_value(), Some((&5, &"hello".to_string())));
-        // assert_eq!(cache.last_key(), Some(&5));
-        // assert_eq!(
-        //     cache.values().collect_vec(),
-        //     vec!["risingwave!", "world", "hello"]
-        // );
-        //
-        // cache.insert(0, "foo".to_string());
-        // assert_eq!(cache.capacity(), 3);
-        // assert_eq!(cache.len(), 3);
-        // assert_eq!(cache.first_key(), Some(&0));
-        // assert_eq!(cache.last_key(), Some(&3));
-        // assert_eq!(
-        //     cache.values().collect_vec(),
-        //     vec!["foo", "risingwave!", "world"]
-        // );
-        //
-        // let old_val = cache.remove(&0);
-        // assert_eq!(old_val, Some("foo".to_string()));
-        // assert_eq!(cache.len(), 2);
-        // assert_eq!(cache.first_key(), Some(&1));
-        // assert_eq!(cache.last_key(), Some(&3));
-        // cache.remove(&3);
-        // assert_eq!(cache.len(), 1);
-        // assert_eq!(cache.first_key(), Some(&1));
-        // assert_eq!(cache.last_key(), Some(&1));
-        // let old_val = cache.remove(&100); // can remove non-existing key
-        // assert!(old_val.is_none());
-        // assert_eq!(cache.len(), 1);
-        //
-        // cache.clear();
-        // assert_eq!(cache.len(), 0);
-        // assert_eq!(cache.capacity(), 3);
-        // assert_eq!(cache.first_key(), None);
-        // assert_eq!(cache.last_key(), None);
+        let v3 = [
+            Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let old_v = cache.insert(&v3);
+        assert!(old_v.is_none());
+        assert_eq!(cache.len(), 3);
+
+
+        let v4 = [
+            Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let old_v = cache.insert(&v4);
+        assert!(old_v.is_none());
+        assert_eq!(cache.len(), 3);
+
+        let v5 = [
+            Some(Timestamptz::from_secs(900).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let old_v = cache.insert(&v5);
+        assert_eq!(old_v.unwrap(), ());
+        assert_eq!(cache.len(), 3);
+        let lowest = cache.lowest_key().unwrap();
+        assert_eq!(lowest, v5[0].clone().unwrap().as_scalar_ref_impl());
     }
 }
