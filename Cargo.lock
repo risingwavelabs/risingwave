@@ -2260,8 +2260,7 @@ dependencies = [
 [[package]]
 name = "etcd-client"
 version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4b0ea5ef6dc2388a4b1669fa32097249bc03a15417b97cb75e38afb309e4a89"
+source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=d55550a#d55550a182f2119e39e64858771468e1b26f6777"
 dependencies = [
  "http",
  "prost",
@@ -8531,9 +8530,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.3.2"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dad5567ad0cf5b760e5665964bec1b47dfd077ba8a2544b513f3556d3d239a2"
+checksum = "79daa5ed5740825c40b389c5e50312b9c86df53fccd33f281df655642b43869d"
 dependencies = [
  "getrandom",
  "rand",
