@@ -206,6 +206,7 @@ pub struct KafkaConfig {
     /// as a string.
     pub primary_key: Option<String>,
 
+    #[serde(flatten)]
     pub rdkafka_properties: RdKafkaPropertiesProducer,
 }
 
