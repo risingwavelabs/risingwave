@@ -29,6 +29,7 @@ pub fn default_partial_cmp_scalar_ref_impl(
 ) -> Option<Ordering> {
     dispatch_scalar_ref_variants!(lhs, lhs, [S = ScalarRef], {
         let rhs: S<'_> = rhs.try_into().ok()?;
+        #[allow(clippy::needless_borrow)] // false positive
         Some(lhs.cmp(&rhs))
     })
 }
