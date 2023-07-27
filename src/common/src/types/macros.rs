@@ -1,3 +1,25 @@
+/// `for_all_variants` includes all variants of our type system. If you introduced a new array type
+/// (also known as scalar type or physical type), be sure to add a variant here.
+///
+/// It is used to simplify the boilerplate code of repeating all array types, while each type
+/// has exactly the same code.
+///
+/// Take `Utf8` as an example, the layout of the variant is:
+/// - `$data_type: Varchar` data type variant name, e.g. `DataType::Varchar`
+/// - `$variant_name: Utf8` array type variant name, e.g. `ArrayImpl::Utf8`, `ScalarImpl::Utf8`
+/// - `$suffix_name: utf8` the suffix of some functions, e.g. `ArrayImpl::as_utf8`
+/// - `$scalar: Box<str>` the scalar type, e.g. `ScalarImpl::Utf8(Box<str>)`
+/// - `$scalar_ref: &'scalar str` the scalar reference type, e.g. `ScalarRefImpl::Utf8(&'scalar
+///   str)`
+/// - `$array: Utf8Array` the array type, e.g. `ArrayImpl::Utf8(Utf8Array)`
+/// - `$builder: Utf8ArrayBuilder` the array builder type, e.g.
+///   `ArrayBuilderImpl::Utf8(Utf8ArrayBuilder)`
+///
+/// To use it, one need to provide another macro which accepts arguments in the layout described
+/// above. Refer to the following implementations as examples.
+///
+/// **Note**: See also `dispatch_xx_variants` and `dispatch_data_types` which doesn't require
+/// another macro for the implementation and can be easier to use in most cases.
 #[macro_export]
 macro_rules! for_all_variants {
     ($macro:ident $(, $x:tt)*) => {
@@ -26,6 +48,9 @@ macro_rules! for_all_variants {
     };
 }
 
+/// The projected version of `for_all_variants` for handling scalar variants.
+///
+/// Arguments are `$variant_name`, `$suffix_name`, `$scalar`, `$scalar_ref`.
 #[macro_export(local_inner_macros)]
 macro_rules! for_all_scalar_variants {
     ($macro:ident $(, $x:tt)*) => {
@@ -42,6 +67,9 @@ macro_rules! project_scalar_variants {
     };
 }
 
+/// The projected version of `for_all_variants` for handling array variants.
+///
+/// Arguments are `$variant_name`, `$suffix_name`, `$array`, `$builder`.
 #[macro_export(local_inner_macros)]
 macro_rules! for_all_array_variants {
     ($macro:ident $(, $x:tt)*) => {
@@ -58,6 +86,9 @@ macro_rules! project_array_variants {
     };
 }
 
+/// The projected version of `for_all_variants` for handling mapping of data types and array types.
+///
+/// Arguments are `$data_type`, `$variant_name`.
 #[macro_export(local_inner_macros)]
 macro_rules! for_all_type_pairs {
     ($macro:ident $(, $x:tt)*) => {
@@ -74,6 +105,7 @@ macro_rules! project_type_pairs {
     };
 }
 
+/// Helper macro for expanding type aliases and constants. Internally used by `dispatch_` macros.
 #[macro_export]
 macro_rules! do_expand_alias {
     ($array:ty, $variant_name:ident, (
@@ -91,8 +123,10 @@ macro_rules! do_expand_alias {
     };
 }
 
+/// Helper macro for generating dispatching code. Internally used by `dispatch_xx_variants` macros.
 #[macro_export(local_inner_macros)]
 macro_rules! do_dispatch_variants {
+    // Use `tt` for `$alias` as a workaround of nested repetition.
     ($impl:expr, $type:ident, $inner:pat, [$alias:tt], $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         match $impl {
             $( $type::$variant_name($inner) => {
@@ -104,6 +138,60 @@ macro_rules! do_dispatch_variants {
     };
 }
 
+/// Dispatch the code block to all variants of `ArrayImpl`.
+///
+/// # Usage
+///
+/// The basic usage to access the inner concrete `impl Array` value is:
+///
+/// ```ignore
+/// fn do_stuff<A: Array>(array: &A) { .. }
+///
+/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+///     dispatch_array_variants!(array_impl, array, {
+///         do_stuff(array)
+///     })
+/// }
+/// ```
+///
+/// One can also bind the inner concrete `impl Array` type to an alias:
+///
+/// ```ignore
+/// fn do_stuff<A: Array>() { .. }
+///
+/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+///     dispatch_array_variants!(array_impl, [A = Array], {
+///         do_stuff::<A>()
+///     })
+/// }
+/// ```
+///
+/// There're more to bind, including type aliases of associated `ArrayBuilder`, `Scalar`, and
+/// `ScalarRef`, or even the constant string of the variant name `VARIANT_NAME`. This can be
+/// achieved by writing one or more of them in the square brackets. Due to the limitation of macro,
+/// the order of the bindings matters.
+///
+/// ```ignore
+/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+///     dispatch_array_variants!(
+///         array_impl,
+///         [A = Array, B = ArrayBuilder, S = Scalar, R = ScalarRef, N = VARIANT_NAME],
+///         { .. }
+///     )
+/// }
+/// ```
+///
+/// Alias bindings can also be used along with the inner value accessing:
+///
+/// ```ignore
+/// fn do_stuff<A: Array>(array: &A) { .. }
+///
+/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+///     dispatch_array_variants!(array_impl, array, [A = Array], {
+///         do_stuff::<A>(array)
+///     })
+/// }
+/// ```
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_array_variants {
     ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
@@ -112,12 +200,16 @@ macro_rules! dispatch_array_variants {
     ($impl:expr, $inner:pat, $body:tt) => {
         dispatch_array_variants!($impl, $inner, [], $body)
     };
+    // Switch the order of alias bindings to avoid ambiguousness.
     ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
         for_all_variants! { do_dispatch_variants, $impl, ArrayImpl, $inner, [($($v, $k,)*)], $body }
     };
 }
 
-// TODO: macro_metavar_expr
+/// Dispatch the code block to all variants of `ArrayBuilderImpl`.
+///
+/// Refer to [`dispatch_array_variants`] for usage.
+// TODO: avoid duplication by `macro_metavar_expr` feature
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_array_builder_variants {
     ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
@@ -131,6 +223,10 @@ macro_rules! dispatch_array_builder_variants {
     };
 }
 
+/// Dispatch the code block to all variants of `ScalarImpl`.
+///
+/// Refer to [`dispatch_array_variants`] for usage.
+// TODO: avoid duplication by `macro_metavar_expr` feature
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_scalar_variants {
     ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
@@ -144,6 +240,10 @@ macro_rules! dispatch_scalar_variants {
     };
 }
 
+/// Dispatch the code block to all variants of `ScalarRefImpl`.
+///
+/// Refer to [`dispatch_array_variants`] for usage.
+// TODO: avoid duplication by `macro_metavar_expr` feature
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_scalar_ref_variants {
     ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
@@ -157,6 +257,7 @@ macro_rules! dispatch_scalar_ref_variants {
     };
 }
 
+/// Helper macro for generating dispatching code. Internally used by `dispatch_data_types` macros.
 #[macro_export(local_inner_macros)]
 macro_rules! do_dispatch_data_types {
     ($impl:expr, [$alias:tt], $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
@@ -170,6 +271,10 @@ macro_rules! do_dispatch_data_types {
     };
 }
 
+/// Dispatch the code block to all variants of `DataType`.
+///
+/// There's no inner value to access, so only alias bindings are supported. Refer to
+/// [`dispatch_array_variants`] for usage.
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_data_types {
     ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
