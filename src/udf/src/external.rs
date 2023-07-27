@@ -20,8 +20,9 @@ use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::Schema;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
-use static_assertions::const_assert_eq;
 use tonic::transport::Channel;
+
+use crate::{Error, Result};
 
 /// Client for external function service based on Arrow Flight.
 #[derive(Debug)]
@@ -145,46 +146,6 @@ impl ArrowFlightUdfClient {
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
         panic!("UDF is not supported in simulation yet");
         Ok(stream::empty())
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("failed to connect to UDF service: {0}")]
-    Connect(#[from] tonic::transport::Error),
-
-    #[error("failed to check UDF: {0}")]
-    Tonic(Box<tonic::Status>),
-
-    #[error("failed to call UDF: {0}")]
-    Flight(Box<FlightError>),
-
-    #[error("type mismatch: {0}")]
-    TypeMismatch(String),
-
-    #[error("arrow error: {0}")]
-    Arrow(#[from] arrow_schema::ArrowError),
-
-    #[error("UDF unsupported: {0}")]
-    Unsupported(String),
-
-    #[error("UDF service returned no data")]
-    NoReturned,
-}
-
-const_assert_eq!(std::mem::size_of::<Error>(), 32);
-
-impl From<tonic::Status> for Error {
-    fn from(status: tonic::Status) -> Self {
-        Error::Tonic(Box::new(status))
-    }
-}
-
-impl From<FlightError> for Error {
-    fn from(error: FlightError) -> Self {
-        Error::Flight(Box::new(error))
     }
 }
 
