@@ -17,6 +17,7 @@ pub mod tables;
 
 pub use columns::*;
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
@@ -52,7 +53,7 @@ impl SysCatalogReaderImpl {
                             // TODO: refactor when we support "NOT NULL".
                             Some(ScalarImpl::Utf8("YES".into())),
                             None,
-                            Some(ScalarImpl::Utf8("pg_catalog".into())),
+                            Some(ScalarImpl::Utf8(PG_CATALOG_SCHEMA_NAME.into())),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                             Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
                         ])
@@ -81,7 +82,7 @@ impl SysCatalogReaderImpl {
                                     // TODO: refactor when we support "NOT NULL".
                                     Some(ScalarImpl::Utf8("YES".into())),
                                     None,
-                                    Some(ScalarImpl::Utf8("pg_catalog".into())),
+                                    Some(ScalarImpl::Utf8(PG_CATALOG_SCHEMA_NAME.into())),
                                     Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                                     Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
                                 ])
