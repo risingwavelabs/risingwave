@@ -34,6 +34,9 @@ pub const PG_ROLES: BuiltinTable = BuiltinTable {
         (DataType::Boolean, "rolcreaterole"),
         (DataType::Boolean, "rolcreatedb"),
         (DataType::Boolean, "rolcanlogin"),
+        (DataType::Boolean, "rolreplication"),
+        (DataType::Timestamptz, "rolvaliduntil"),
+        (DataType::Boolean, "rolbypassrls"),
         (DataType::Varchar, "rolpassword"),
     ],
     pk: &[0],
@@ -54,6 +57,9 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Bool(user.can_create_user)),
                     Some(ScalarImpl::Bool(user.can_create_db)),
                     Some(ScalarImpl::Bool(user.can_login)),
+                    Some(ScalarImpl::Bool(true)),
+                    None,
+                    Some(ScalarImpl::Bool(true)),
                     Some(ScalarImpl::Utf8("********".into())),
                 ])
             })

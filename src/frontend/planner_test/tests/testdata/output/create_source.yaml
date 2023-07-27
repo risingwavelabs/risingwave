@@ -11,3 +11,31 @@
   sql: |
     create source s with(connector='kafka') FORMAT PLAIN ENCODE JSON;
   planner_error: 'Invalid input syntax: schema definition is required for ENCODE JSON'
+- id: csv_delimiter_tab
+  sql: |
+    explain create table s0 (v1 int, v2 varchar) with (
+      connector = 'kafka',
+      topic = 'kafka_1_csv_topic',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamDml { columns: [v1, v2, _row_id] }
+          └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
+- id: csv_delimiter_tab
+  sql: |
+    explain create table s0 (v1 int, v2 varchar) with (
+      connector = 'kafka',
+      topic = 'kafka_1_csv_topic',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE CSV (delimiter = E'\t', without_header = true);
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamDml { columns: [v1, v2, _row_id] }
+          └─StreamSource { source: s0, columns: [v1, v2, _row_id] }

@@ -35,6 +35,8 @@ pub const INFORMATION_SCHEMA_COLUMNS: BuiltinTable = BuiltinTable {
         (DataType::Int32, "character_maximum_length"),
         (DataType::Int32, "ordinal_position"),
         (DataType::Varchar, "is_nullable"),
+        (DataType::Varchar, "collation_name"),
+        (DataType::Varchar, "udt_schema"),
         (DataType::Varchar, "data_type"),
         (DataType::Varchar, "udt_name"),
     ],
