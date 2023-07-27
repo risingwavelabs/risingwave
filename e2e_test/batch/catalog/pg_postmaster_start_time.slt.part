@@ -1,0 +1,4 @@
+query T
+select pg_postmaster_start_time() is not null;
+----
+t

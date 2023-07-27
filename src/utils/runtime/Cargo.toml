@@ -16,6 +16,10 @@ normal = ["workspace-hack"]
 
 [dependencies]
 await-tree = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 console = "0.15"
 console-subscriber = "0.1.8"
 either = "1"

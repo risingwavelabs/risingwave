@@ -6146,6 +6146,7 @@ dependencies = [
  "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_rt",
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
@@ -6428,6 +6429,7 @@ name = "risingwave_rt"
 version = "1.0.0-alpha"
 dependencies = [
  "await-tree",
+ "chrono",
  "console",
  "console-subscriber",
  "either",

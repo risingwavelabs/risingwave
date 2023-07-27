@@ -56,6 +56,7 @@ risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_rt = { path = "../utils/runtime" }
 risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 risingwave_storage = { path = "../storage" }
