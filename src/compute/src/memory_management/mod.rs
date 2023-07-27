@@ -75,7 +75,14 @@ pub fn build_memory_control_policy(
     total_memory_bytes: usize,
     auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
 ) -> Result<MemoryControlRef> {
+    use risingwave_common::bail;
+    use tikv_jemalloc_ctl::opt;
+
     use self::policy::JemallocMemoryControl;
+
+    if !opt::prof::read().unwrap() && auto_dump_heap_profile_config.enabled() {
+        bail!("Auto heap profile dump should not be enabled with Jemalloc profile disable");
+    }
 
     Ok(Box::new(JemallocMemoryControl::new(
         total_memory_bytes,
@@ -93,7 +100,14 @@ pub fn build_memory_control_policy(
     // tracing::warn!("memory control is only enabled on Linux now");
     // Ok(Box::new(DummyPolicy))
 
+    use risingwave_common::bail;
+    use tikv_jemalloc_ctl::opt;
+
     use self::policy::JemallocMemoryControl;
+
+    if !opt::prof::read().unwrap() && auto_dump_heap_profile_config.enabled() {
+        bail!("Auto heap profile dump should not be enabled with Jemalloc profile disable");
+    }
 
     Ok(Box::new(JemallocMemoryControl::new(
         total_memory_bytes,
