@@ -81,6 +81,10 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
         }
         old_val
     }
+
+    pub fn capacity(&self) -> Option<usize> {
+        Some(self.cache.capacity())
+    }
 }
 
 impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for TopNStateCache<K, V> {
@@ -153,7 +157,7 @@ impl<K: Ord + EstimateSize, V: EstimateSize> StateCacheFiller for &mut TopNState
     type Value = V;
 
     fn capacity(&self) -> Option<usize> {
-        Some(self.cache.capacity())
+        self.capacity()
     }
 
     fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {

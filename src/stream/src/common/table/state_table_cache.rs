@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::cmp::Reverse;
+use risingwave_common::array::Op;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DefaultOrdered, ScalarImpl};
-use crate::common::cache::{StateCache, TopNStateCache};
+use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
 
 /// The watermark cache key is just an OwnedRow wrapped in `DefaultOrdered`.
 /// This is because we want to use the `DefaultOrdered` implementation of `Ord`.
@@ -65,7 +67,7 @@ type WatermarkCacheKey = Reverse<DefaultOrdered<OwnedRow>>;
 /// Then only when building state table with watermark we will initialize it.
 /// Otherwise point it to a no-op implementation.
 /// TODO(kwannoel): Add tests for it.
-#[derive(Clone)]
+#[derive(EstimateSize, Clone)]
 pub(crate) struct StateTableWatermarkCache {
     pk_indices: Vec<usize>,
     inner: TopNStateCache<WatermarkCacheKey, ()>,
@@ -124,3 +126,57 @@ impl StateTableWatermarkCache {
     }
 }
 
+impl StateCache for StateTableWatermarkCache {
+    type Key = WatermarkCacheKey;
+    type Value = ();
+    type Filler<'a> = &'a mut Self where Self: 'a;
+
+    fn is_synced(&self) -> bool {
+        todo!()
+    }
+
+    fn begin_syncing(&mut self) -> Self::Filler<'_> {
+        todo!()
+    }
+
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
+        todo!()
+    }
+
+    fn delete(&mut self, key: &Self::Key) -> Option<Self::Value> {
+        todo!()
+    }
+
+    fn apply_batch(&mut self, batch: impl IntoIterator<Item=(Op, Self::Key, Self::Value)>) {
+        todo!()
+    }
+
+    fn clear(&mut self) {
+        todo!()
+    }
+
+    fn values(&self) -> impl Iterator<Item=&Self::Value> {
+        self.inner.values()
+    }
+
+    fn first_key_value(&self) -> Option<(&Self::Key, &Self::Value)> {
+        todo!()
+    }
+}
+
+impl StateCacheFiller for &mut StateTableWatermarkCache {
+    type Key = WatermarkCacheKey;
+    type Value = ();
+
+    fn capacity(&self) -> Option<usize> {
+        self.inner.capacity()
+    }
+
+    fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {
+        self.inner.insert(key, value);
+    }
+
+    fn finish(self) {
+        self.inner.finish()
+    }
+}
