@@ -39,25 +39,25 @@ macro_rules! for_all_variants {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             $($x, )*
-            { Int16, Int16, int16, i16, i16, I16Array, I16ArrayBuilder },
-            { Int32, Int32, int32, i32, i32, I32Array, I32ArrayBuilder },
-            { Int64, Int64, int64, i64, i64, I64Array, I64ArrayBuilder },
-            { Int256, Int256, int256, Int256, Int256Ref<'scalar>, Int256Array, Int256ArrayBuilder },
-            { Float32, Float32, float32, F32, F32, F32Array, F32ArrayBuilder },
-            { Float64, Float64, float64, F64, F64, F64Array, F64ArrayBuilder },
-            { Varchar, Utf8, utf8, Box<str>, &'scalar str, Utf8Array, Utf8ArrayBuilder },
-            { Boolean, Bool, bool, bool, bool, BoolArray, BoolArrayBuilder },
-            { Decimal, Decimal, decimal, Decimal, Decimal, DecimalArray, DecimalArrayBuilder },
-            { Interval, Interval, interval, Interval, Interval, IntervalArray, IntervalArrayBuilder },
-            { Date, Date, date, Date, Date, DateArray, DateArrayBuilder },
-            { Time, Time, time, Time, Time, TimeArray, TimeArrayBuilder },
-            { Timestamp, Timestamp, timestamp, Timestamp, Timestamp, TimestampArray, TimestampArrayBuilder },
-            { Timestamptz, Timestamptz, timestamptz, Timestamptz, Timestamptz, TimestamptzArray, TimestamptzArrayBuilder },
-            { Jsonb, Jsonb, jsonb, JsonbVal, JsonbRef<'scalar>, JsonbArray, JsonbArrayBuilder },
-            { Serial, Serial, serial, Serial, Serial, SerialArray, SerialArrayBuilder },
-            { Struct, Struct, struct, StructValue, StructRef<'scalar>, StructArray, StructArrayBuilder },
-            { List, List, list, ListValue, ListRef<'scalar>, ListArray, ListArrayBuilder },
-            { Bytea, Bytea, bytea, Box<[u8]>, &'scalar [u8], BytesArray, BytesArrayBuilder }
+            { Int16,        Int16,        int16,        i16,                        i16,                                $crate::array::I16Array,            $crate::array::I16ArrayBuilder          },
+            { Int32,        Int32,        int32,        i32,                        i32,                                $crate::array::I32Array,            $crate::array::I32ArrayBuilder          },
+            { Int64,        Int64,        int64,        i64,                        i64,                                $crate::array::I64Array,            $crate::array::I64ArrayBuilder          },
+            { Int256,       Int256,       int256,       $crate::types::Int256,      $crate::types::Int256Ref<'scalar>,  $crate::array::Int256Array,         $crate::array::Int256ArrayBuilder       },
+            { Float32,      Float32,      float32,      $crate::types::F32,         $crate::types::F32,                 $crate::array::F32Array,            $crate::array::F32ArrayBuilder          },
+            { Float64,      Float64,      float64,      $crate::types::F64,         $crate::types::F64,                 $crate::array::F64Array,            $crate::array::F64ArrayBuilder          },
+            { Varchar,      Utf8,         utf8,         Box<str>,                   &'scalar str,                       $crate::array::Utf8Array,           $crate::array::Utf8ArrayBuilder         },
+            { Boolean,      Bool,         bool,         bool,                       bool,                               $crate::array::BoolArray,           $crate::array::BoolArrayBuilder         },
+            { Decimal,      Decimal,      decimal,      $crate::types::Decimal,     $crate::types::Decimal,             $crate::array::DecimalArray,        $crate::array::DecimalArrayBuilder      },
+            { Interval,     Interval,     interval,     $crate::types::Interval,    $crate::types::Interval,            $crate::array::IntervalArray,       $crate::array::IntervalArrayBuilder     },
+            { Date,         Date,         date,         $crate::types::Date,        $crate::types::Date,                $crate::array::DateArray,           $crate::array::DateArrayBuilder         },
+            { Time,         Time,         time,         $crate::types::Time,        $crate::types::Time,                $crate::array::TimeArray,           $crate::array::TimeArrayBuilder         },
+            { Timestamp,    Timestamp,    timestamp,    $crate::types::Timestamp,   $crate::types::Timestamp,           $crate::array::TimestampArray,      $crate::array::TimestampArrayBuilder    },
+            { Timestamptz,  Timestamptz,  timestamptz,  $crate::types::Timestamptz, $crate::types::Timestamptz,         $crate::array::TimestamptzArray,    $crate::array::TimestamptzArrayBuilder  },
+            { Jsonb,        Jsonb,        jsonb,        $crate::types::JsonbVal,    $crate::types::JsonbRef<'scalar>,   $crate::array::JsonbArray,          $crate::array::JsonbArrayBuilder        },
+            { Serial,       Serial,       serial,       $crate::types::Serial,      $crate::types::Serial,              $crate::array::SerialArray,         $crate::array::SerialArrayBuilder       },
+            { Struct,       Struct,       struct,       $crate::types::StructValue, $crate::types::StructRef<'scalar>,  $crate::array::StructArray,         $crate::array::StructArrayBuilder       },
+            { List,         List,         list,         $crate::types::ListValue,   $crate::types::ListRef<'scalar>,    $crate::array::ListArray,           $crate::array::ListArrayBuilder         },
+            { Bytea,        Bytea,        bytea,        Box<[u8]>,                  &'scalar [u8],                      $crate::array::BytesArray,          $crate::array::BytesArrayBuilder        }
         }
     };
 }

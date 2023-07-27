@@ -207,8 +207,6 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
 
     /// Deserializes a type-erased datum from the hash key.
     fn deserialize_impl(&mut self, data_type: &DataType) -> Datum {
-        use crate::array::*;
-
         dispatch_data_types!(data_type, [S = Scalar], {
             self.deserialize::<S>(data_type).map(ScalarImpl::from)
         })
@@ -379,8 +377,6 @@ impl DataChunk {
         let mut exact_size = 0;
 
         for &i in column_indices {
-            use crate::array::*;
-
             dispatch_array_variants!(&*self.columns()[i], [S = ScalarRef], {
                 match S::exact_size() {
                     Some(size) => exact_size += size,

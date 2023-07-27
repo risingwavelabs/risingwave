@@ -95,8 +95,6 @@ pub trait HashKeyDispatcher: Sized {
 }
 
 fn hash_key_size(data_type: &DataType) -> HashKeySize {
-    use crate::array::*;
-
     let exact_size = dispatch_data_types!(data_type, [S = ScalarRef], { S::exact_size() });
 
     match exact_size {

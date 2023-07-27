@@ -192,8 +192,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::interval_array::IntervalArray;
-    use crate::array::*;
     use crate::for_all_array_variants;
 
     #[test]

@@ -17,7 +17,6 @@
 use std::cmp::{Ord, Ordering};
 use std::ops::Deref;
 
-use crate::array::*;
 use crate::dispatch_scalar_ref_variants;
 use crate::estimate_size::EstimateSize;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
