@@ -27,9 +27,7 @@ use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{
-    extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
-};
+use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -87,7 +85,7 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
     })
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let config = load_config(&opts.config_path, NO_OVERRIDE);
+    let config = load_config(&opts.config_path, NoOverride);
     let compaction_config = CompactionConfigBuilder::new().build();
     compaction_test(compaction_config, config, &opts.state_store, 1000000, 800).await
 }
