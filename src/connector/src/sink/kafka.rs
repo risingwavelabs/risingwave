@@ -78,13 +78,81 @@ pub struct RdKafkaPropertiesProducer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub queue_buffering_max_messages: Option<usize>,
 
+    /// Maximum total message size sum allowed on the producer queue. This queue is shared by all
+    /// topics and partitions. This property has higher priority than queue.buffering.max.messages.
     #[serde(rename = "properties.queue.buffering.max.kbytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     queue_buffering_max_kbytes: Option<usize>,
 
+    /// Delay in milliseconds to wait for messages in the producer queue to accumulate before
+    /// constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+    /// larger and more effective (less overhead, improved compression) batches of messages to
+    /// accumulate at the expense of increased message delivery latency.
     #[serde(rename = "properties.queue.buffering.max.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    queue_buffering_max_ms: Option<usize>,
+    queue_buffering_max_ms: Option<f64>,
+
+    /// When set to true, the producer will ensure that messages are successfully produced exactly
+    /// once and in the original produce order. The following configuration properties are adjusted
+    /// automatically (if not modified by the user) when idempotence is enabled:
+    /// max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
+    /// retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+    /// will fail if user-supplied configuration is incompatible.
+    #[serde(rename = "properties.enable.idempotence")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    enable_idempotence: Option<bool>,
+
+    /// How many times to retry sending a failing Message.
+    #[serde(rename = "properties.message.send.max.retries")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    message_send_max_retries: Option<usize>,
+
+    /// The backoff time in milliseconds before retrying a protocol request.
+    #[serde(rename = "properties.retry.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    retry_backoff_ms: Option<usize>,
+
+    /// Maximum number of messages batched in one MessageSet
+    #[serde(rename = "properties.batch.num.messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    batch_num_messages: Option<usize>,
+
+    /// Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+    /// framing overhead. This limit is applied after the first message has been added to the
+    /// batch, regardless of the first message's size, this is to ensure that messages that exceed
+    /// batch.size are produced.
+    #[serde(rename = "properties.batch.size")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    batch_size: Option<usize>,
+}
+
+impl RdKafkaPropertiesProducer {
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.queue_buffering_max_messages {
+            c.set("queue.buffering.max.messages", v.to_string());
+        }
+        if let Some(v) = self.queue_buffering_max_kbytes {
+            c.set("queue.buffering.max.kbytes", v.to_string());
+        }
+        if let Some(v) = self.queue_buffering_max_ms {
+            c.set("queue.buffering.max.ms", v.to_string());
+        }
+        if let Some(v) = self.enable_idempotence {
+            c.set("enable.idempotence", v.to_string());
+        }
+        if let Some(v) = self.message_send_max_retries {
+            c.set("message.send.max.retries", v.to_string());
+        }
+        if let Some(v) = self.retry_backoff_ms {
+            c.set("retry.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.batch_num_messages {
+            c.set("batch.num.messages", v.to_string());
+        }
+        if let Some(v) = self.batch_size {
+            c.set("batch.size", v.to_string());
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -137,6 +205,8 @@ pub struct KafkaConfig {
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
     pub primary_key: Option<String>,
+
+    pub rdkafka_properties: RdKafkaPropertiesProducer,
 }
 
 impl KafkaConfig {
@@ -157,6 +227,13 @@ impl KafkaConfig {
             )));
         }
         Ok(config)
+    }
+
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        self.common.set_client(c);
+        self.rdkafka_properties.set_client(c);
+
+        tracing::info!("kafka client starts with: {:?}", c);
     }
 }
 
