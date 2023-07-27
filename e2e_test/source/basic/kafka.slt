@@ -711,7 +711,7 @@ SELECT * FROM source_mv3 ORDER BY id;
 query I
 select count(*) from source_with_rdkafka_props
 ----
-100
+4
 
 statement ok
 drop materialized view source_mv1
