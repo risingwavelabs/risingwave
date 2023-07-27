@@ -27,8 +27,9 @@ use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_with::{serde_as, DisplayFromStr};
 
 use super::{
     Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -66,6 +67,24 @@ const fn _default_use_transaction() -> bool {
 
 const fn _default_force_append_only() -> bool {
     false
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RdKafkaPropertiesProducer {
+    /// Maximum number of messages allowed on the producer queue. This queue is shared by all
+    /// topics and partitions. A value of 0 disables this limit.
+    #[serde(rename = "properties.queue.buffering.max.messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub queue_buffering_max_messages: Option<usize>,
+
+    #[serde(rename = "properties.queue.buffering.max.kbytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    queue_buffering_max_kbytes: Option<usize>,
+
+    #[serde(rename = "properties.queue.buffering.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    queue_buffering_max_ms: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
