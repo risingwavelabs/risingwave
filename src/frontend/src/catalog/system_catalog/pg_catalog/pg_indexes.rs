@@ -13,23 +13,28 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The view `pg_indexes` provides access to useful information about each index in the database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-indexes.html`]
-pub const PG_INDEXES_TABLE_NAME: &str = "pg_indexes";
-pub const PG_INDEXES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "tablename"),
-    (DataType::Varchar, "indexname"),
-    (DataType::Varchar, "tablespace"),
-    (DataType::Varchar, "indexdef"),
-];
+pub const PG_INDEXES: BuiltinTable = BuiltinTable {
+    name: "pg_indexes",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "schemaname"),
+        (DataType::Varchar, "tablename"),
+        (DataType::Varchar, "indexname"),
+        (DataType::Varchar, "tablespace"),
+        (DataType::Varchar, "indexdef"),
+    ],
+    pk: &[0, 2],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_indexes_info(&self) -> Result<Vec<OwnedRow>> {

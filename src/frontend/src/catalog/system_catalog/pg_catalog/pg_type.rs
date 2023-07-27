@@ -18,39 +18,43 @@ use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
-pub const PG_TYPE_TABLE_NAME: &str = "pg_type";
-pub const PG_TYPE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "typname"),
-    // 0
-    (DataType::Int32, "typelem"),
-    // false
-    (DataType::Boolean, "typnotnull"),
-    // 0
-    (DataType::Int32, "typbasetype"),
-    // -1
-    (DataType::Int32, "typtypmod"),
-    // 0
-    (DataType::Int32, "typcollation"),
-    // 0
-    (DataType::Int32, "typlen"),
-    // should be pg_catalog oid.
-    (DataType::Int32, "typnamespace"),
-    // 'b'
-    (DataType::Varchar, "typtype"),
-    // 0
-    (DataType::Int32, "typrelid"),
-    // None
-    (DataType::Varchar, "typdefault"),
-    // None
-    (DataType::Varchar, "typcategory"),
-    // None
-    (DataType::Int32, "typreceive"),
-];
+pub const PG_TYPE: BuiltinTable = BuiltinTable {
+    name: "pg_type",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "typname"),
+        // 0
+        (DataType::Int32, "typelem"),
+        // false
+        (DataType::Boolean, "typnotnull"),
+        // 0
+        (DataType::Int32, "typbasetype"),
+        // -1
+        (DataType::Int32, "typtypmod"),
+        // 0
+        (DataType::Int32, "typcollation"),
+        // 0
+        (DataType::Int32, "typlen"),
+        // should be pg_catalog oid.
+        (DataType::Int32, "typnamespace"),
+        // 'b'
+        (DataType::Varchar, "typtype"),
+        // 0
+        (DataType::Int32, "typrelid"),
+        // None
+        (DataType::Varchar, "typdefault"),
+        // None
+        (DataType::Varchar, "typcategory"),
+        // None
+        (DataType::Int32, "typreceive"),
+    ],
+    pk: &[0],
+};
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
 pub const PG_TYPE_DATA: &[(i32, &str)] = &[

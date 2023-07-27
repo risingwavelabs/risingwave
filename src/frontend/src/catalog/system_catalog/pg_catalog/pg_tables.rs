@@ -13,23 +13,28 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The view `pg_tables` provides access to useful information about each table in the database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-tables.html`]
-pub const PG_TABLES_TABLE_NAME: &str = "pg_tables";
-
-pub const PG_TABLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "tablename"),
-    (DataType::Varchar, "tableowner"),
-    (DataType::Varchar, "tablespace"), /* Since we don't have any concept of tablespace, we will
-                                        * set this to null. */
-];
+pub const PG_TABLES: BuiltinTable = BuiltinTable {
+    name: "pg_tables",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "schemaname"),
+        (DataType::Varchar, "tablename"),
+        (DataType::Varchar, "tableowner"),
+        (DataType::Varchar, "tablespace"), /* Since we don't have any concept of tablespace, we
+                                            * will
+                                            * set this to null. */
+    ],
+    pk: &[],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_pg_tables_info(&self) -> Result<Vec<OwnedRow>> {

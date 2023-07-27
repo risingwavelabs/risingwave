@@ -21,6 +21,7 @@ pub enum GroupBy {
     GroupKey(Vec<ExprImpl>),
     GroupingSets(Vec<Vec<ExprImpl>>),
     Rollup(Vec<Vec<ExprImpl>>),
+    Cube(Vec<Vec<ExprImpl>>),
 }
 
 impl GroupBy {
@@ -29,6 +30,7 @@ impl GroupBy {
             GroupBy::GroupKey(group_key) => group_key.is_empty(),
             GroupBy::GroupingSets(grouping_sets) => grouping_sets.is_empty(),
             GroupBy::Rollup(rollup) => rollup.is_empty(),
+            GroupBy::Cube(cube) => cube.is_empty(),
         }
     }
 
@@ -38,6 +40,7 @@ impl GroupBy {
             GroupBy::GroupKey(group_key) => group_key.iter(),
             GroupBy::GroupingSets(grouping_sets) => grouping_sets.iter().flat_map(|v| v.iter()),
             GroupBy::Rollup(rollup) => rollup.iter().flat_map(|v| v.iter()),
+            GroupBy::Cube(cube) => cube.iter().flat_map(|v| v.iter()),
         }
     }
 
@@ -49,6 +52,7 @@ impl GroupBy {
                 grouping_sets.iter_mut().flat_map(|v| v.iter_mut())
             }
             GroupBy::Rollup(rollup) => rollup.iter_mut().flat_map(|v| v.iter_mut()),
+            GroupBy::Cube(cube) => cube.iter_mut().flat_map(|v| v.iter_mut()),
         }
     }
 }
