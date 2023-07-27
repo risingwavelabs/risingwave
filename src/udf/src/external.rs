@@ -154,16 +154,22 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("failed to connect to UDF service: {0}")]
     Connect(#[from] tonic::transport::Error),
+
     #[error("failed to check UDF: {0}")]
     Tonic(Box<tonic::Status>),
+
     #[error("failed to call UDF: {0}")]
     Flight(Box<FlightError>),
+
     #[error("type mismatch: {0}")]
     TypeMismatch(String),
+
     #[error("arrow error: {0}")]
     Arrow(#[from] arrow_schema::ArrowError),
+
     #[error("UDF unsupported: {0}")]
     Unsupported(String),
+
     #[error("UDF service returned no data")]
     NoReturned,
 }
