@@ -337,6 +337,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&PG_CLASS), read_class_info },
     { BuiltinCatalog::Table(&PG_INDEX), read_index_info },
     { BuiltinCatalog::Table(&PG_OPCLASS), read_opclass_info },
+    { BuiltinCatalog::Table(&PG_LOCKS), read_locks_info },
     { BuiltinCatalog::Table(&PG_COLLATION), read_collation_info },
     { BuiltinCatalog::Table(&PG_AM), read_am_info },
     { BuiltinCatalog::Table(&PG_OPERATOR), read_operator_info },
