@@ -12,29 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The `pg_stat_activity` view will have one row per server process, showing information related to
-/// the current activity of that process. Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
-pub const PG_STAT_ACTIVITY_TABLE_NAME: &str = "pg_stat_activity";
-pub const PG_STAT_ACTIVITY_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "pid"),       // Process ID of this backend.
-    (DataType::Int32, "datid"),     // OID of the database this backend is connected to.
-    (DataType::Varchar, "datname"), // Name of the database this backend is connected to.
-    (DataType::Int32, "leader_pid"), /* Process ID of the parallel group leader, if this process
-                                     * is a parallel query worker. NULL if this process is a
-                                     * parallel group leader or does not participate in
-                                     * parallel query. */
-    (DataType::Int32, "usesysid"), // OID of the user logged into this backend.
-    (DataType::Varchar, "usename"), // Name of the user logged into this backend.
-    (DataType::Varchar, "application_name"), /* Name of the application that is connected to
-                                    * this backend. */
-    (DataType::Varchar, "client_addr"), // IP address of the client connected to this backend.
-    (DataType::Varchar, "client_hostname"), /* Host name of the connected client, as reported by a
-                                         * reverse DNS lookup of client_addr. */
-    (DataType::Int16, "client_port"), /* TCP port number that the client is using for
-                                       * communication with this backend, or -1 if a Unix socket
-                                       * is used. */
-];
+/// the current activity of that process.
+/// Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
+pub const PG_STAT_ACTIVITY: BuiltinTable = BuiltinTable {
+    name: "pg_stat_activity",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "pid"),       // Process ID of this backend.
+        (DataType::Int32, "datid"),     // OID of the database this backend is connected to.
+        (DataType::Varchar, "datname"), // Name of the database this backend is connected to.
+        (DataType::Int32, "leader_pid"), /* Process ID of the parallel group leader, if this
+                                         * process
+                                         * is a parallel query worker. NULL if this process is a
+                                         * parallel group leader or does not participate in
+                                         * parallel query. */
+        (DataType::Int32, "usesysid"), // OID of the user logged into this backend.
+        (DataType::Varchar, "usename"), // Name of the user logged into this backend.
+        (DataType::Varchar, "application_name"), /* Name of the application that is connected to
+                                        * this backend. */
+        (DataType::Varchar, "client_addr"), // IP address of the client connected to this backend.
+        (DataType::Varchar, "client_hostname"), /* Host name of the connected client, as reported by
+                                             * a
+                                             * reverse DNS lookup of client_addr. */
+        (DataType::Int16, "client_port"), /* TCP port number that the client is using for
+                                           * communication with this backend, or -1 if a Unix
+                                           * socket is
+                                           * used. */
+    ],
+    pk: &[0],
+};
+
+impl SysCatalogReaderImpl {
+    pub fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}

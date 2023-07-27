@@ -355,6 +355,7 @@ macro_rules! for_all_variants {
     };
 }
 
+#[macro_export]
 macro_rules! do_dispatch {
     ($impl:expr, $type:ident, $inner:ident, $body:tt, $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         match $impl {
@@ -363,6 +364,7 @@ macro_rules! do_dispatch {
     };
 }
 
+#[macro_export(local_inner_macros)]
 macro_rules! dispatch_all_variants {
     ($impl:expr, $type:ident, $scalar:ident, $body:tt) => {{
         for_all_variants! { do_dispatch, $impl, $type, $scalar, $body }

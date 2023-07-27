@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -124,11 +124,7 @@ where
     S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
-        let table_fragments = try_match_expand!(
-            TableFragments::list(env.meta_store()).await,
-            Ok,
-            "TableFragments::list fail"
-        )?;
+        let table_fragments = TableFragments::list(env.meta_store()).await?;
 
         let table_fragments = table_fragments
             .into_iter()

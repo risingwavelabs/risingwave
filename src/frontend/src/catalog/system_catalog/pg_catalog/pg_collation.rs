@@ -12,23 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// Mapping from sql name to system locale groups.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-collation.html`].
-pub const PG_COLLATION_TABLE_NAME: &str = "pg_collation";
-pub const PG_COLLATION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "collname"),
-    (DataType::Int32, "collnamespace"),
-    (DataType::Int32, "collowner"),
-    (DataType::Int32, "collprovider"),
-    (DataType::Boolean, "collisdeterministic"),
-    (DataType::Int32, "collencoding"),
-    (DataType::Varchar, "collcollate"),
-    (DataType::Varchar, "collctype"),
-    (DataType::Varchar, "colliculocale"),
-    (DataType::Varchar, "collversion"),
-];
+pub const PG_COLLATION: BuiltinTable = BuiltinTable {
+    name: "pg_collation",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "collname"),
+        (DataType::Int32, "collnamespace"),
+        (DataType::Int32, "collowner"),
+        (DataType::Int32, "collprovider"),
+        (DataType::Boolean, "collisdeterministic"),
+        (DataType::Int32, "collencoding"),
+        (DataType::Varchar, "collcollate"),
+        (DataType::Varchar, "collctype"),
+        (DataType::Varchar, "colliculocale"),
+        (DataType::Varchar, "collversion"),
+    ],
+    pk: &[0],
+};
+
+impl SysCatalogReaderImpl {
+    pub fn read_collation_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+}
