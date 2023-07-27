@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
+use std::path::PathBuf;
+use std::time::Duration;
+
+pub(crate) fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
     tracing::info!("writing prof data to directory {}", profile_path);
     let profile_path = PathBuf::from(profile_path);
 

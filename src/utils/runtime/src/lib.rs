@@ -20,9 +20,6 @@
 #![feature(panic_update_hook)]
 #![feature(let_chains)]
 
-use std::path::PathBuf;
-use std::time::Duration;
-
 use futures::Future;
 
 mod logger;
@@ -31,6 +28,8 @@ mod deadlock;
 pub use deadlock::*;
 mod panic_hook;
 pub use panic_hook::*;
+mod prof;
+use prof::*;
 
 /// Start RisingWave components with configs from environment variable.
 ///
