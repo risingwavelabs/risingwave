@@ -67,8 +67,8 @@ pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
-use crate::for_all_array_variants;
 use crate::types::*;
+use crate::{dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -450,6 +450,7 @@ macro_rules! array_builder_impl_enum {
 
 for_all_array_variants! { array_builder_impl_enum }
 
+// TODO
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
 macro_rules! impl_array_builder {
     ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -532,6 +533,7 @@ macro_rules! impl_array_builder {
 
 for_all_array_variants! { impl_array_builder }
 
+// TODO
 /// Implements all `Array` functions with `for_all_variant`.
 macro_rules! impl_array {
     ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -653,19 +655,11 @@ macro_rules! impl_array {
 
 for_all_array_variants! { impl_array }
 
-macro_rules! impl_array_estimate_size {
-    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        impl EstimateSize for ArrayImpl {
-            fn estimated_heap_size(&self) -> usize {
-                match self {
-                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
-                }
-            }
-        }
+impl EstimateSize for ArrayImpl {
+    fn estimated_heap_size(&self) -> usize {
+        dispatch_array_variants!(self, inner, { inner.estimated_heap_size() })
     }
 }
-
-for_all_array_variants! { impl_array_estimate_size }
 
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {

@@ -26,6 +26,12 @@ macro_rules! for_all_variants {
     };
 }
 
+#[macro_export(local_inner_macros)]
+macro_rules! for_all_scalar_variants {
+    ($macro:ident $(, $x:tt)*) => {
+        for_all_variants! { project_scalar_variants, $macro, [ $($x, )* ] }
+    };
+}
 #[macro_export]
 macro_rules! project_scalar_variants {
     ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
@@ -37,12 +43,11 @@ macro_rules! project_scalar_variants {
 }
 
 #[macro_export(local_inner_macros)]
-macro_rules! for_all_scalar_variants {
+macro_rules! for_all_array_variants {
     ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_scalar_variants, $macro, [ $($x, )* ] }
+        for_all_variants! { project_array_variants, $macro, [ $($x, )* ] }
     };
 }
-
 #[macro_export]
 macro_rules! project_array_variants {
     ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
@@ -54,12 +59,11 @@ macro_rules! project_array_variants {
 }
 
 #[macro_export(local_inner_macros)]
-macro_rules! for_all_array_variants {
+macro_rules! for_all_type_pairs {
     ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_array_variants, $macro, [ $($x, )* ] }
+        for_all_variants! { project_type_pairs, $macro, [ $($x, )* ] }
     };
 }
-
 #[macro_export]
 macro_rules! project_type_pairs {
     ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
@@ -70,71 +74,84 @@ macro_rules! project_type_pairs {
     };
 }
 
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_type_pairs {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_type_pairs, $macro, [ $($x, )* ] }
-    };
-}
-
 #[macro_export]
-macro_rules! do_dispatch {
-    ($impl:expr, $type:ident, $inner:pat, $body:tt, $( { $_:ident, $variant_name:ident } ),*) => {
-        match $impl {
-            $( $type::$variant_name($inner) => $body, )*
-        }
+macro_rules! do_expand_alias {
+    ($array:ty, ($(Array, $array_alias:ident,)? $(ArrayBuilder, $array_builder_alias:ident,)? $(Scalar, $scalar_alias:ident,)? $(ScalarRef, $scalar_ref_alias:ident,)?)) => {
+        $(type $array_alias = $array;)?
+        $(type $array_builder_alias = <$array as Array>::Builder;)?
+        $(type $scalar_alias = <$array as Array>::OwnedItem;)?
+        $(type $scalar_ref_alias<'scalar> = <$array as Array>::RefItem<'scalar>;)?
     };
 }
 
 #[macro_export(local_inner_macros)]
-macro_rules! dispatch_all_variants {
-    ($impl:expr,array: $inner:pat, $body:tt) => {{
-        for_all_type_pairs! { do_dispatch, $impl, ArrayImpl, $inner, $body }
-    }};
-    ($impl:expr,array_builder: $inner:pat, $body:tt) => {{
-        for_all_type_pairs! { do_dispatch, $impl, ArrayBuilderImpl, $inner, $body }
-    }};
-    ($impl:expr,scalar: $inner:pat, $body:tt) => {{
-        for_all_type_pairs! { do_dispatch, $impl, ScalarImpl, $inner, $body }
-    }};
-}
-
-#[macro_export]
-macro_rules! do_data_type_dispatch {
-    ($impl:expr, $array_alias:ident, $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
+macro_rules! do_dispatch_variants {
+    ($impl:expr, $type:ident, $inner:pat, [$alias:tt], $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         match $impl {
-            $( DataType::$data_type { .. } => {
-                type $array_alias = $array;
+            $( $type::$variant_name($inner) => {
+                do_expand_alias!($array, $alias);
+                #[allow(unused_braces)]
                 $body
             }, )*
         }
     };
 }
 
-// TODO:
+#[macro_export(local_inner_macros)]
+macro_rules! dispatch_array_variants {
+    ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
+        dispatch_array_variants!($impl, _, [$($k = $v),*], $body)
+    };
+    ($impl:expr, $inner:pat, $body:tt) => {
+        dispatch_array_variants!($impl, $inner, [], $body)
+    };
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+        for_all_variants! { do_dispatch_variants, $impl, ArrayImpl, $inner, [($($v, $k,)*)], $body }
+    };
+}
+
+#[macro_export(local_inner_macros)]
+macro_rules! dispatch_array_builder_variants {
+    ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
+        dispatch_array_builder_variants!($impl, _, [$($k = $v),*], $body)
+    };
+    ($impl:expr, $inner:pat, $body:tt) => {
+        dispatch_array_builder_variants!($impl, $inner, [], $body)
+    };
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+        for_all_variants! { do_dispatch_variants, $impl, ArrayBuilderImpl, $inner, [($($v, $k,)*)], $body }
+    };
+}
+
+#[macro_export(local_inner_macros)]
+macro_rules! dispatch_scalar_variants {
+    ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
+        dispatch_scalar_variants!($impl, _, [$($k = $v),*], $body)
+    };
+    ($impl:expr, $inner:pat, $body:tt) => {
+        dispatch_scalar_variants!($impl, $inner, [], $body)
+    };
+    ($impl:expr, $inner:pat, [$($k:ident = $v:ident),*], $body:tt) => {
+        for_all_variants! { do_dispatch_variants, $impl, ScalarImpl, $inner, [($($v, $k,)*)], $body }
+    };
+}
+
+#[macro_export(local_inner_macros)]
+macro_rules! do_dispatch_data_types {
+    ($impl:expr, [$alias:tt], $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
+        match $impl {
+            $( $crate::types::DataType::$data_type { .. } => {
+                do_expand_alias!($array, $alias);
+                #[allow(unused_braces)]
+                $body
+            }, )*
+        }
+    };
+}
+
 #[macro_export(local_inner_macros)]
 macro_rules! dispatch_data_types {
-    ($impl:expr, $array_alias:ident, $body:tt) => {{
-        for_all_variants! { do_data_type_dispatch, $impl, $array_alias, $body }
-    }};
-}
-
-#[macro_export]
-macro_rules! do_phys_type_dispatch {
-    ($type:ident, $impl:expr, $array_alias:ident, $body:tt, $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        match $impl {
-            $( $type::$variant_name { .. } => {
-                type $array_alias = $array;
-                $body
-            }, )*
-        }
+    ($impl:expr, [$($k:ident = $v:ident),*], $body:tt) => {
+        for_all_variants! { do_dispatch_data_types, $impl, [($($v, $k,)*)], $body }
     };
-}
-
-// TODO:
-#[macro_export(local_inner_macros)]
-macro_rules! dispatch_phys_types {
-    ($type:ident, $impl:expr, $array_alias:ident, $body:tt) => {{
-        for_all_variants! { do_phys_type_dispatch, $type, $impl, $array_alias, $body }
-    }};
 }

@@ -283,8 +283,8 @@ impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
 
-        dispatch_data_types!(self, A, {
-            <A as Array>::Builder::with_type(capacity, self.clone()).into()
+        dispatch_data_types!(self, [B = ArrayBuilder], {
+            B::with_type(capacity, self.clone()).into()
         })
     }
 
