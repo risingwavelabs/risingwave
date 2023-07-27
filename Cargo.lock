@@ -2260,8 +2260,7 @@ dependencies = [
 [[package]]
 name = "etcd-client"
 version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4b0ea5ef6dc2388a4b1669fa32097249bc03a15417b97cb75e38afb309e4a89"
+source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=d55550a#d55550a182f2119e39e64858771468e1b26f6777"
 dependencies = [
  "http",
  "prost",
