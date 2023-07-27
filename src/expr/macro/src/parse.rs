@@ -62,6 +62,7 @@ impl FunctionAttr {
             init_state: find_argument(attr, "init_state"),
             prebuild: find_argument(attr, "prebuild"),
             type_infer: find_argument(attr, "type_infer"),
+            deprecated: find_name(attr, "deprecated"),
             user_fn,
         })
     }
@@ -177,5 +178,13 @@ fn find_argument(attr: &syn::AttributeArgs, name: &str) -> Option<String> {
         }
         let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
         Some(lit_str.value())
+    })
+}
+
+/// Find name `#[xxx(.., name)]`.
+fn find_name(attr: &syn::AttributeArgs, name: &str) -> bool {
+    attr.iter().any(|n| {
+        let syn::NestedMeta::Meta(syn::Meta::Path(path)) = n else { return false };
+        path.is_ident(name)
     })
 }

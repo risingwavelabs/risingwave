@@ -953,11 +953,16 @@ impl Binder {
                         Ok(ExprImpl::literal_bool(false))
                 }))),
                 ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
+                // TODO: really implement them.
+                // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
+                ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 8.3-RisingWave-{} ({})",
+                    "PostgreSQL 9.5-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),

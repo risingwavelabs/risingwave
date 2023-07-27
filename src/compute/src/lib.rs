@@ -38,7 +38,7 @@ use risingwave_common::util::resource_util::memory::total_memory_available_bytes
 use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
 #[command(
     version,
     about = "The worker node that executes query plans and handles data ingestion and output"
@@ -87,22 +87,16 @@ pub struct ComputeNodeOpts {
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
+    #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
 
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
     pub role: Role,
 
-    #[clap(flatten)]
-    override_config: OverrideConfigOpts,
-}
-
-/// Command-line arguments for compute-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
+    /// 0 = disable metrics
+    /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,

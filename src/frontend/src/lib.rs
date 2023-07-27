@@ -74,7 +74,7 @@ use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
 #[command(
     version,
     about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
@@ -124,16 +124,9 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    override_opts: OverrideConfigOpts,
-}
-
-/// Command-line arguments for frontend-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
+    /// 0 = disable metrics
+    /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,

@@ -27,7 +27,7 @@ use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, SchemaId, SinkId, SourceId, ViewId};
@@ -57,7 +57,7 @@ pub struct SchemaCatalog {
     // This field is currently used only for `show connections`
     connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
-    system_table_by_name: HashMap<String, SystemCatalog>,
+    system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
     owner: u32,
 }
 
@@ -75,7 +75,7 @@ impl SchemaCatalog {
         table_ref
     }
 
-    pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
+    pub fn create_sys_table(&mut self, sys_table: Arc<SystemTableCatalog>) {
         self.system_table_by_name
             .try_insert(sys_table.name.clone(), sys_table)
             .unwrap();
@@ -418,7 +418,7 @@ impl SchemaCatalog {
         self.connection_by_name.values()
     }
 
-    pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
+    pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
         self.system_table_by_name.values()
     }
 
@@ -461,7 +461,7 @@ impl SchemaCatalog {
             .unwrap_or_default()
     }
 
-    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
+    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {
         self.system_table_by_name.get(table_name)
     }
 
