@@ -2,8 +2,7 @@ FROM ubuntu:22.04 AS base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install build-essential pkg-config wget openjdk-11-jdk libsasl2-dev
 
 FROM base AS builder
 
