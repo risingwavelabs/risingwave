@@ -80,6 +80,12 @@ pub(crate) enum StateTableWatermarkCacheEntry {
     Empty,
 }
 
+impl StateTableWatermarkCacheEntry {
+    pub fn not_synced(&self) -> bool {
+        matches!(self, Self::NotSynced)
+    }
+}
+
 impl StateTableWatermarkCache {
     pub fn new(pk_indices: Vec<usize>) -> Self {
         Self {

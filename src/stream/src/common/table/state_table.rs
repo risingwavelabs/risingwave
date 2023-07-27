@@ -791,42 +791,45 @@ where
             .await?;
 
         // Refresh watermark cache.
-        if let Some(ref watermark) = self.state_clean_watermark {
-            let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
-                (Included(once(Some(watermark.clone()))), Unbounded);
-            /// NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-            /// because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-            /// and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-            /// We can optimize it with `RefCell` if needed.
-            let mut pks = vec![];
-            {
-                let mut streams = vec![];
-                for vnode in self.vnodes().iter_vnodes() {
-                    // TODO(kwannoel): Is it possible to have a state_table interface to read the
-                    // 1st value per vnode? Since that's all we need.
-                    let stream = self
-                        .iter_key_and_val_with_pk_range(
-                            &range,
-                            vnode,
-                            PrefetchOptions::new_for_exhaust_iter(),
-                        )
-                        .await?;
-                    streams.push(Box::pin(stream));
+        if self.watermark_cache.get_lowest().not_synced() {
+             if let Some(ref watermark) = self.state_clean_watermark {
+                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
+                    (Included(once(Some(watermark.clone()))), Unbounded);
+                /// NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
+                /// because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
+                /// and a mutable ref (via `self.watermark_cache.insert`) at the same time.
+                /// We can optimize it with `RefCell` if needed.
+                let mut pks = vec![];
+                {
+                    let mut streams = vec![];
+                    for vnode in self.vnodes().iter_vnodes() {
+                        // TODO(kwannoel): Is it possible to have a state_table interface to read the
+                        // 1st value per vnode? Since that's all we need.
+                        let stream = self
+                            .iter_key_and_val_with_pk_range(
+                                &range,
+                                vnode,
+                                PrefetchOptions::new_for_exhaust_iter(),
+                            )
+                            .await?;
+                        streams.push(Box::pin(stream));
+                    }
+                    let merged_stream = merge_sort(streams);
+                    pin_mut!(merged_stream);
+                    // FIXME: We should take top N pk rather than only the first.
+                    // FIXME: Invariant should be enforced, that watermark is the first column of pk.
+                    if let Some((pk, _row)) = merged_stream.next().await.transpose()? {
+                        let pk = self.pk_serde.deserialize(&pk[..])?; // FIXME: Maybe have a pk iter here? We don't want to deser the value.
+                        pks.push(pk);
+                    }
                 }
-                let merged_stream = merge_sort(streams);
-                pin_mut!(merged_stream);
-                // FIXME: We should take top N pk rather than only the first.
-                // FIXME: Invariant should be enforced, that watermark is the first column of pk.
-                if let Some((pk, _row)) = merged_stream.next().await.transpose()? {
-                    let pk = self.pk_serde.deserialize(&pk[..])?; // FIXME: Maybe have a pk iter here? We don't want to deser the value.
-                    pks.push(pk);
-                }
-            }
 
-            for pk in pks {
-                self.watermark_cache.insert(pk);
+                for pk in pks {
+                    self.watermark_cache.insert(pk);
+                }
             }
         }
+
         Ok(())
     }
 
