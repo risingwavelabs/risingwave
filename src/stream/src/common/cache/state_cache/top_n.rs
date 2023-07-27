@@ -85,6 +85,13 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
     fn capacity_inner(&self) -> Option<usize> {
         Some(self.cache.capacity())
     }
+
+    pub fn top_key_value(&self) -> Option<(&K, &V)> {
+        assert!(self.synced);
+        let key= self.cache.last_key_value();
+        // let key = self.cache.first_key_value();
+        key
+    }
 }
 
 impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for TopNStateCache<K, V> {

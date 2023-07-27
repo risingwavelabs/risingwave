@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Reverse;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -60,6 +59,8 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
+/// This num is arbitrary and we may want to improve this choice in the future.
+const WATERMARK_CACHE_ENTRIES: usize = 1024;
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -246,12 +247,16 @@ where
             table_catalog.version.is_some()
         );
 
+        let mut watermark_cache = StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES);
+        let filler = watermark_cache.begin_syncing();
+        filler.finish();
+
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
             row_serde,
-            pk_indices: pk_indices.to_vec().into(),
+            pk_indices: pk_indices.into(),
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -260,7 +265,7 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
-            watermark_cache: StateTableWatermarkCache::new(pk_indices.to_vec()),
+            watermark_cache,
         }
     }
 
@@ -413,7 +418,7 @@ where
                 ),
                 Arc::from(table_columns.into_boxed_slice()),
             ),
-            pk_indices: pk_indices.to_vec().into(),
+            pk_indices: pk_indices.into(),
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
             vnodes,
@@ -422,7 +427,7 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
-            watermark_cache: StateTableWatermarkCache::new(pk_indices),
+            watermark_cache: StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES),
         }
     }
 
@@ -844,7 +849,7 @@ where
 
                 for pk in pks {
                     let filler = self.watermark_cache.begin_syncing();
-                    filler.insert(Reverse(DefaultOrdered(pk)), ());
+                    filler.insert(DefaultOrdered(pk), ());
                     filler.finish();
                 }
             }
@@ -882,7 +887,7 @@ where
 
         let should_clean_watermark = match watermark {
             Some(ref watermark) => {
-                if let Some(key) = self.watermark_cache.lowest_value() {
+                if let Some(key) = self.watermark_cache.lowest_key() {
                     watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
                 } else {
                     false
