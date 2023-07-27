@@ -847,6 +847,10 @@ impl crate::hash::HashKeySer<'_> for Interval {
         let b = cmp_value.0.to_ne_bytes();
         buf.put_slice(&b);
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(16)
+    }
 }
 
 impl crate::hash::HashKeyDe for Interval {
