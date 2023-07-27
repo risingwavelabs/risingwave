@@ -28,7 +28,7 @@ use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
@@ -44,7 +44,7 @@ pub struct BoundBaseTable {
 #[derive(Debug, Clone)]
 pub struct BoundSystemTable {
     pub table_id: TableId,
-    pub sys_table_catalog: SystemCatalog,
+    pub sys_table_catalog: Arc<SystemTableCatalog>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,7 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
-        let resolve_sys_table_relation = |sys_table_catalog: &SystemCatalog| {
+        let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
             let table = BoundSystemTable {
                 table_id: sys_table_catalog.id(),
                 sys_table_catalog: sys_table_catalog.clone(),
