@@ -410,6 +410,80 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.get_object_id());
             }
         }
+        #[cfg(debug_assertions)]
+        if compact_task.input_ssts.iter().all(|level| {
+            level.table_infos.iter().all(|sst| {
+                sst.table_ids
+                    .iter()
+                    .all(|table_id| existing_table_ids.contains(table_id))
+            })
+        }) {
+            use crate::hummock::iterator::{
+                ConcatIterator, ForwardMergeRangeIterator, UnorderedMergeIteratorInner,
+                UserIterator,
+            };
+            use crate::hummock::SstableIteratorReadOptions;
+            let mut iters = vec![];
+            let read_options = Arc::new(SstableIteratorReadOptions::default());
+            let mut delete_range_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+            for level in &compact_task.input_ssts {
+                if level.level_type == risingwave_pb::hummock::LevelType::Nonoverlapping as i32 {
+                    iters.push(ConcatIterator::new(
+                        level.table_infos.clone(),
+                        context.sstable_store.clone(),
+                        read_options.clone(),
+                    ));
+                    delete_range_iter
+                        .add_concat_iter(level.table_infos.clone(), context.sstable_store.clone());
+                } else {
+                    for sst in &level.table_infos {
+                        delete_range_iter
+                            .add_concat_iter(vec![sst.clone()], context.sstable_store.clone());
+                        iters.push(ConcatIterator::new(
+                            vec![sst.clone()],
+                            context.sstable_store.clone(),
+                            read_options.clone(),
+                        ));
+                    }
+                }
+            }
+            let iter = UnorderedMergeIteratorInner::new(iters);
+            let mut iter1 = UserIterator::new(
+                iter,
+                (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded),
+                HummockEpoch::MAX,
+                0,
+                None,
+                delete_range_iter,
+            );
+            let mut delete_range_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+            delete_range_iter.add_concat_iter(
+                compact_task.sorted_output_ssts.clone(),
+                context.sstable_store.clone(),
+            );
+            let mut iter2 = UserIterator::new(
+                ConcatIterator::new(
+                    compact_task.sorted_output_ssts.clone(),
+                    context.sstable_store.clone(),
+                    read_options.clone(),
+                ),
+                (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded),
+                HummockEpoch::MAX,
+                0,
+                None,
+                delete_range_iter,
+            );
+            iter1.rewind().await.unwrap();
+            iter2.rewind().await.unwrap();
+            while iter1.is_valid() && iter2.is_valid() {
+                debug_assert_eq!(iter1.key(), iter2.key());
+                debug_assert_eq!(iter1.value(), iter2.value());
+                iter1.next().await.unwrap();
+                iter2.next().await.unwrap();
+            }
+            debug_assert!(!iter1.is_valid());
+            debug_assert!(!iter2.is_valid());
+        }
         (compact_task, table_stats)
     }
 

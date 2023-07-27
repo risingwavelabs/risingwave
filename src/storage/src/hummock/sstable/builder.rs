@@ -341,7 +341,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            debug_assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
+            assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
             if monotonic_delete.event_key.is_exclude_left_key {
                 if largest_key.is_empty()
                     || !KeyComparator::encoded_greater_than_unencoded(
@@ -373,6 +373,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
+            assert_ne!(monotonic_delete.new_epoch, HummockEpoch::MAX);
             if smallest_key.is_empty()
                 || !KeyComparator::encoded_less_than_unencoded(
                     user_key(&smallest_key),
