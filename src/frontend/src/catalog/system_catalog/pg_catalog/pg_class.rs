@@ -13,27 +13,32 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
 /// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
-pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
-pub const PG_CLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "relname"),
-    (DataType::Int32, "relnamespace"),
-    (DataType::Int32, "relowner"),
-    (DataType::Varchar, "relkind"),
-    // 0
-    (DataType::Int32, "relam"),
-    // 0
-    (DataType::Int32, "reltablespace"),
-];
+pub const PG_CLASS: BuiltinTable = BuiltinTable {
+    name: "pg_class",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "relname"),
+        (DataType::Int32, "relnamespace"),
+        (DataType::Int32, "relowner"),
+        (DataType::Varchar, "relkind"),
+        // 0
+        (DataType::Int32, "relam"),
+        // 0
+        (DataType::Int32, "reltablespace"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_class_info(&self) -> Result<Vec<OwnedRow>> {

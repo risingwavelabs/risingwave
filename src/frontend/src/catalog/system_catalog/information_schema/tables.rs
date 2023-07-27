@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::BuiltinTable;
 
 /// The view tables contains all tables and views defined in the current database. Only those tables
 /// and views are shown that the current user has access to (by way of being the owner or having
@@ -22,11 +23,15 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// Ref: [`https://www.postgresql.org/docs/current/infoschema-tables.html`]
 ///
 /// In RisingWave, `tables` also contains all materialized views.
-pub const TABLES_TABLE_NAME: &str = "tables";
-pub const TABLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "table_catalog"),
-    (DataType::Varchar, "table_schema"),
-    (DataType::Varchar, "table_name"),
-    (DataType::Varchar, "table_type"),
-    (DataType::Varchar, "is_insertable_into"),
-];
+pub const INFORMATION_SCHEMA_TABLES: BuiltinTable = BuiltinTable {
+    name: "tables",
+    schema: INFORMATION_SCHEMA_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "table_catalog"),
+        (DataType::Varchar, "table_schema"),
+        (DataType::Varchar, "table_name"),
+        (DataType::Varchar, "table_type"),
+        (DataType::Varchar, "is_insertable_into"),
+    ],
+    pk: &[],
+};
