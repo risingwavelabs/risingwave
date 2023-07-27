@@ -807,10 +807,14 @@ where
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
+        // The deque holds all the relations we need to drop.
+        // As we traverse the relation DAG,
+        // more relations will be added and popped from this.
         let mut deque = VecDeque::new();
 
         // Relation dependencies is a DAG rather than a tree, so we need to use `HashSet` instead of
-        // `Vec` to record ids.        Sink
+        // `Vec` to record ids.
+        //         Sink
         //          |
         //        MView
         //        /   \

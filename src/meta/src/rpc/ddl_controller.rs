@@ -50,6 +50,16 @@ pub enum DropMode {
     Cascade,
 }
 
+impl DropMode {
+    pub fn from_request_setting(cascade: bool) -> DropMode {
+        if cascade {
+            DropMode::Cascade
+        } else {
+            DropMode::Restrict
+        }
+    }
+}
+
 pub enum StreamingJobId {
     MaterializedView(TableId),
     Sink(SinkId),

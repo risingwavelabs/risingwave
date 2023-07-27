@@ -196,11 +196,7 @@ where
     ) -> Result<Response<DropSourceResponse>, Status> {
         let request = request.into_inner();
         let source_id = request.source_id;
-        let drop_mode = if request.cascade {
-            DropMode::Cascade
-        } else {
-            DropMode::Restrict
-        };
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropSource(source_id, drop_mode))
@@ -249,11 +245,7 @@ where
     ) -> Result<Response<DropSinkResponse>, Status> {
         let request = request.into_inner();
         let sink_id = request.sink_id;
-        let drop_mode = if request.cascade {
-            DropMode::Cascade
-        } else {
-            DropMode::Restrict
-        };
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
@@ -302,11 +294,7 @@ where
 
         let request = request.into_inner();
         let table_id = request.table_id;
-        let drop_mode = if request.cascade {
-            DropMode::Cascade
-        } else {
-            DropMode::Restrict
-        };
+        let drop_mode = DropMode::from_request_setting(request.cascade);
 
         let version = self
             .ddl_controller
@@ -357,11 +345,7 @@ where
 
         let request = request.into_inner();
         let index_id = request.index_id;
-        let drop_mode = if request.cascade {
-            DropMode::Cascade
-        } else {
-            DropMode::Restrict
-        };
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
@@ -476,11 +460,7 @@ where
         let source_id = request.source_id;
         let table_id = request.table_id;
 
-        let drop_mode = if request.cascade {
-            DropMode::Cascade
-        } else {
-            DropMode::Restrict
-        };
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
@@ -522,11 +502,7 @@ where
     ) -> Result<Response<DropViewResponse>, Status> {
         let request = request.into_inner();
         let view_id = request.get_view_id();
-        let drop_mode = if request.cascade {
-            DropMode::Cascade
-        } else {
-            DropMode::Restrict
-        };
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropView(view_id, drop_mode))
