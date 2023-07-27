@@ -425,6 +425,16 @@ CREATE TABLE dbz_ignore_case_json (
     topic = 'debezium_ignore_case_json'
 ) FORMAT DEBEZIUM ENCODE JSON
 
+# create kafka source with additional rdkafka properties
+statement ok
+create table source_with_rdkafka_props (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+  properties.queued.min.messages = 10000,
+  properties.queued.max.messages.kbytes = 65536
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 flush;
@@ -698,6 +708,11 @@ SELECT * FROM source_mv3 ORDER BY id;
 \x6b6b
 \x776561776566776566
 
+query I
+select count(*) from source_with_rdkafka_props
+----
+100
+
 statement ok
 drop materialized view source_mv1
 
@@ -770,21 +785,5 @@ DROP TABLE upsert_students;
 statement ok
 drop table dbz_ignore_case_json;
 
-# create kafka source with additional rdkafka properties
 statement ok
-create table s25 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  properties.queued.min.messages = 10000,
-  properties.queued.max.messages.kbytes = 65536
-) FORMAT PLAIN ENCODE JSON
-
-query I
-select count(*) from s25
-----
-100
-
-statement ok
-drop table s25;
+drop table source_with_rdkafka_props;
