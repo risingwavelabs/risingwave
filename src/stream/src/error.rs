@@ -134,3 +134,5 @@ impl From<StreamError> for tonic::Status {
         tonic::Status::internal(error.inner.to_string())
     }
 }
+
+static_assertions::const_assert_eq!(std::mem::size_of::<StreamError>(), 8);
