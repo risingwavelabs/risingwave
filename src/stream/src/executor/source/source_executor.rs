@@ -548,6 +548,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .collect::<Vec<&str>>(),
                         )
                         .inc_by(chunk.cardinality() as u64);
+                    tracing::info!("[src] chunk meta: {:?}", chunk.meta());
                     yield Message::Chunk(chunk);
                 }
             }

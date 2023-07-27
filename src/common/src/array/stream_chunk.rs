@@ -81,6 +81,7 @@ pub struct StreamChunkMeta {
     pub(super) offsets: Vec<Offset>,
 }
 
+/// Offset from upstream system
 #[derive(Debug, Clone, PartialEq)]
 pub struct Offset(String);
 
@@ -97,7 +98,7 @@ impl StreamChunkMeta {
 
     pub fn to_protobuf(self) -> PbStreamChunkMeta {
         PbStreamChunkMeta {
-            offsets: self.offsets.into_iter().map(|o| o.0).collect(),
+            offsets: self.offsets.into_iter().map(|o| o.0).collect_vec(),
         }
     }
 
@@ -106,7 +107,7 @@ impl StreamChunkMeta {
             .offsets
             .iter()
             .map(|o| Offset(o.clone()))
-            .collect::<Vec<_>>();
+            .collect_vec();
         Ok(StreamChunkMeta::new(offsets))
     }
 }
@@ -254,6 +255,19 @@ impl StreamChunk {
         let (columns, vis) = self.data.into_parts();
         let visibility = vis.into_visibility();
         (self.ops, columns, visibility)
+    }
+
+    pub fn into_inner_with_meta(
+        self,
+    ) -> (
+        Vec<Op>,
+        Vec<ArrayRef>,
+        Option<Bitmap>,
+        Option<StreamChunkMeta>,
+    ) {
+        let (columns, vis) = self.data.into_parts();
+        let visibility = vis.into_visibility();
+        (self.ops, columns, visibility, self.meta)
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {

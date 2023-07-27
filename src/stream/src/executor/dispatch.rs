@@ -617,6 +617,8 @@ impl Dispatcher for HashDataDispatcher {
             // Apply output indices after calculating the vnode.
             let chunk = chunk.reorder_columns(&self.output_indices);
             // TODO: refactor with `Vis`.
+
+            // TODO: handle chunk metadata
             let (ops, columns, visibility) = chunk.into_inner();
 
             let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
