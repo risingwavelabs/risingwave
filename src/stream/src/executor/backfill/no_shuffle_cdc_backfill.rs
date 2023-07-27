@@ -25,6 +25,7 @@ use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;

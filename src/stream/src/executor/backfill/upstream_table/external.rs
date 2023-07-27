@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::row_serde::*;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
 use risingwave_storage::row_serde::ColumnMapping;
@@ -29,6 +29,9 @@ use risingwave_storage::StateStore;
 
 /// This struct represents an external table to be read during backfill
 pub struct ExternalStorageTable {
+    /// Id for this table.
+    table_id: TableId,
+
     /// The normalized name of the table, e.g. `dbname.schema_name.table_name`.
     table_name: String,
 
@@ -41,9 +44,14 @@ pub struct ExternalStorageTable {
     /// todo: the schema of the external table defined in the CREATE TABLE DDL
     schema: Schema,
 
+    /// Used for serializing and deserializing the primary key.
+    pk_serializer: OrderedRowSerde,
+
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table.
     pk_indices: Vec<usize>,
+
+    output_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
@@ -58,12 +66,30 @@ pub struct ExternalStorageTable {
 }
 
 impl ExternalStorageTable {
+    pub fn table_id(&self) -> TableId {
+        self.table_id
+    }
+
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+        &self.pk_serializer
+    }
+
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    /// Get the indices of the primary key columns in the output columns.
+    ///
+    /// Returns `None` if any of the primary key columns is not in the output columns.
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        self.pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
     }
 
     pub fn schema_table_name(&self) -> SchemaTableName {

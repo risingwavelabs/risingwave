@@ -16,7 +16,7 @@ use std::fmt;
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::data::{PbOp, PbStreamChunk};
+use risingwave_pb::data::{PbOp, PbStreamChunk, PbStreamChunkMeta};
 
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
 use crate::array::{DataChunk, Vis};
@@ -73,6 +73,42 @@ pub struct StreamChunk {
     ops: Vec<Op>,
 
     pub(super) data: DataChunk,
+    pub(super) meta: Option<StreamChunkMeta>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamChunkMeta {
+    pub(super) offsets: Vec<Offset>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Offset(String);
+
+impl Offset {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl StreamChunkMeta {
+    pub fn new(offsets: Vec<Offset>) -> Self {
+        Self { offsets }
+    }
+
+    pub fn to_protobuf(self) -> PbStreamChunkMeta {
+        PbStreamChunkMeta {
+            offsets: self.offsets.into_iter().map(|o| o.0).collect(),
+        }
+    }
+
+    pub fn from_protobuf(prost: &PbStreamChunkMeta) -> ArrayResult<StreamChunkMeta> {
+        let offsets = prost
+            .offsets
+            .iter()
+            .map(|o| Offset(o.clone()))
+            .collect::<Vec<_>>();
+        Ok(StreamChunkMeta::new(offsets))
+    }
 }
 
 impl Default for StreamChunk {
@@ -83,6 +119,7 @@ impl Default for StreamChunk {
         Self {
             ops: Default::default(),
             data: DataChunk::new(vec![], 0),
+            meta: None,
         }
     }
 }
@@ -98,13 +135,36 @@ impl StreamChunk {
             None => Vis::Compact(ops.len()),
         };
         let data = DataChunk::new(columns, vis);
-        StreamChunk { ops, data }
+        StreamChunk {
+            ops,
+            data,
+            meta: None,
+        }
+    }
+
+    pub fn new_with_meta(
+        ops: Vec<Op>,
+        columns: Vec<ArrayRef>,
+        visibility: Option<Bitmap>,
+        meta: Option<StreamChunkMeta>,
+    ) -> Self {
+        let mut chunk = Self::new(ops, columns, visibility);
+        chunk.meta = meta;
+        chunk
+    }
+
+    pub fn set_meta(&mut self, meta: StreamChunkMeta) {
+        self.meta = Some(meta);
     }
 
     /// Create a `StreamChunk` from the given `DataChunk` and `Op`s.
     pub fn from_data_chunk(ops: Vec<Op>, data: DataChunk) -> Self {
         assert_eq!(ops.len(), data.capacity());
-        StreamChunk { ops, data }
+        StreamChunk {
+            ops,
+            data,
+            meta: None,
+        }
     }
 
     /// Build a `StreamChunk` from rows.
@@ -163,6 +223,7 @@ impl StreamChunk {
             return self;
         }
 
+        let meta = self.meta.clone();
         let (ops, columns, visibility) = self.into_inner();
         let visibility = visibility.unwrap();
 
@@ -177,7 +238,7 @@ impl StreamChunk {
         for idx in visibility.iter_ones() {
             new_ops.push(ops[idx]);
         }
-        StreamChunk::new(new_ops, columns, None)
+        StreamChunk::new_with_meta(new_ops, columns, None, meta)
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
@@ -200,6 +261,7 @@ impl StreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
             columns: self.columns().iter().map(|col| col.to_protobuf()).collect(),
+            meta: self.meta.clone().map(|meta| meta.to_protobuf()),
         }
     }
 
@@ -213,7 +275,16 @@ impl StreamChunk {
         for column in prost.get_columns() {
             columns.push(ArrayImpl::from_protobuf(column, cardinality)?.into());
         }
-        Ok(StreamChunk::new(ops, columns, None))
+        let meta = prost
+            .meta
+            .as_ref()
+            .map(|meta| StreamChunkMeta::from_protobuf(meta))
+            .transpose()?;
+        Ok(StreamChunk::new_with_meta(ops, columns, None, meta))
+    }
+
+    pub fn meta(&self) -> Option<&StreamChunkMeta> {
+        self.meta.as_ref()
     }
 
     pub fn ops(&self) -> &[Op] {
@@ -273,6 +344,7 @@ impl StreamChunk {
             Self {
                 ops: self.ops,
                 data: self.data.reorder_columns(column_mapping),
+                meta: None,
             }
         }
     }
@@ -283,7 +355,8 @@ impl fmt::Debug for StreamChunk {
         if f.alternate() {
             write!(
                 f,
-                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
+                "StreamChunk {{ meta: {:?}, cardinality: {}, capacity: {}, data: \n{}\n }}",
+                self.meta(),
                 self.cardinality(),
                 self.capacity(),
                 self.to_pretty_string()
@@ -379,6 +452,7 @@ impl StreamChunkTestExt for StreamChunk {
                 return StreamChunk {
                     ops: vec![],
                     data: DataChunk::from_pretty(s),
+                    meta: None,
                 };
             }
         };
@@ -406,6 +480,7 @@ impl StreamChunkTestExt for StreamChunk {
         StreamChunk {
             ops,
             data: DataChunk::from_pretty(&chunk_str),
+            meta: None,
         }
     }
 
@@ -430,7 +505,11 @@ impl StreamChunkTestExt for StreamChunk {
             .into_iter()
             .next()
             .unwrap();
-        StreamChunk { ops, data }
+        StreamChunk {
+            ops,
+            data,
+            meta: None,
+        }
     }
 
     fn sort_rows(self) -> Self {
@@ -446,11 +525,16 @@ impl StreamChunkTestExt for StreamChunk {
         StreamChunk {
             ops: idx.iter().map(|&i| self.ops[i]).collect(),
             data: self.data.reorder_rows(&idx),
+            meta: None,
         }
     }
 
     fn new_from_data_chunk(ops: Vec<Op>, chunk: DataChunk) -> Self {
-        StreamChunk { ops, data: chunk }
+        StreamChunk {
+            ops,
+            data: chunk,
+            meta: None,
+        }
     }
 
     /// Generate `num_of_chunks` data chunks with type `data_types`,

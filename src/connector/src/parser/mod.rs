@@ -25,6 +25,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 pub use json_parser::*;
 pub use protobuf::*;
+use risingwave_common::array::stream_chunk::{Offset, StreamChunkMeta};
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -67,6 +68,8 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
+    // TOOD:
+    offset_builder: Vec<Offset>,
 }
 
 impl SourceStreamChunkBuilder {
@@ -79,6 +82,7 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
+            offset_builder: Vec::with_capacity(cap),
         }
     }
 
@@ -87,18 +91,34 @@ impl SourceStreamChunkBuilder {
             descs: &self.descs,
             builders: &mut self.builders,
             op_builder: &mut self.op_builder,
+            offset_builder: &mut self.offset_builder,
+            row_offset: None,
+        }
+    }
+
+    pub fn row_writer_with_offset(&mut self, offset: Offset) -> SourceStreamChunkRowWriter<'_> {
+        SourceStreamChunkRowWriter {
+            descs: &self.descs,
+            builders: &mut self.builders,
+            op_builder: &mut self.op_builder,
+            offset_builder: &mut self.offset_builder,
+            row_offset: Some(offset),
         }
     }
 
     pub fn finish(self) -> StreamChunk {
-        StreamChunk::new(
+        let mut chunk = StreamChunk::new(
             self.op_builder,
             self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
             None,
-        )
+        );
+        if !self.offset_builder.is_empty() {
+            chunk.set_meta(StreamChunkMeta::new(self.offset_builder));
+        }
+        chunk
     }
 
     pub fn op_num(&self) -> usize {
@@ -112,6 +132,8 @@ pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
+    offset_builder: &'a mut Vec<Offset>,
+    row_offset: Option<Offset>,
 }
 
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
@@ -151,7 +173,11 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Insert)
+        writer.op_builder.push(Op::Insert);
+        writer
+            .row_offset
+            .clone()
+            .map(|offset| writer.offset_builder.push(offset));
     }
 }
 
@@ -174,7 +200,11 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Delete)
+        writer.op_builder.push(Op::Delete);
+        writer
+            .row_offset
+            .clone()
+            .map(|offset| writer.offset_builder.push(offset));
     }
 }
 
@@ -201,6 +231,11 @@ impl OpAction for OpActionUpdate {
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::UpdateDelete);
         writer.op_builder.push(Op::UpdateInsert);
+        // use same offsets for update delete and update insert event
+        if let Some(offset) = &writer.row_offset {
+            writer.offset_builder.push(offset.clone());
+            writer.offset_builder.push(offset.clone());
+        }
     }
 }
 
@@ -355,12 +390,17 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 continue;
             }
 
-            split_offset_mapping.insert(msg.split_id, msg.offset);
+            let msg_offset = msg.offset;
+            split_offset_mapping.insert(msg.split_id, msg_offset.clone());
 
             let old_op_num = builder.op_num();
 
             if let Err(e) = parser
-                .parse_one(msg.key, msg.payload, builder.row_writer())
+                .parse_one(
+                    msg.key,
+                    msg.payload,
+                    builder.row_writer_with_offset(Offset::new(msg_offset)),
+                )
                 .await
             {
                 tracing::warn!("message parsing failed {}, skipping", e.to_string());
