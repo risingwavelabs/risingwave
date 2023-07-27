@@ -63,6 +63,9 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 /// Then only when building state table with watermark we will initialize it.
 /// Otherwise point it to a no-op implementation.
 /// TODO(kwannoel): Add tests for it.
+/// FIXME: Perhaps we should directly use bytes in our cache...
+/// It could help avoid cloning pk indices etc...
+/// Another thing we have to take note of are NULL values.
 #[derive(EstimateSize, Clone)]
 pub(crate) struct StateTableWatermarkCache {
     inner: TopNStateCache<WatermarkCacheKey, ()>,
@@ -103,6 +106,10 @@ impl StateTableWatermarkCache {
 
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.len() == self.capacity()
     }
 }
 

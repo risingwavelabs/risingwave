@@ -838,11 +838,11 @@ where
                     }
                     let merged_stream = merge_sort(streams);
                     pin_mut!(merged_stream);
-                    // FIXME: We should take top N pk rather than only the first.
+
                     // FIXME: Invariant should be enforced, that watermark is the first column of
                     // pk.
-                    if let Some((pk, _row)) = merged_stream.next().await.transpose()? {
-                        let pk = self.pk_serde.deserialize(&pk[..])?; // FIXME: Maybe have a pk iter here? We don't want to deser the value.
+                    while !self.watermark_cache.is_full() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
+                        let pk = self.pk_serde.deserialize(&pk[..])?;
                         pks.push(pk);
                     }
                 }
