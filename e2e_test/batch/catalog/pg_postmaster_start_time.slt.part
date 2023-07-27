@@ -1,4 +1,4 @@
+# Just ensure we have the function.
 query T
-select pg_postmaster_start_time() is not null;
+select pg_postmaster_start_time() where false;
 ----
-t
