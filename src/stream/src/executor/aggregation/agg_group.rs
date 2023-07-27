@@ -389,11 +389,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             &curr_outputs,
         );
 
-        tracing::debug!(
+        tracing::trace!(
             group = ?self.group_key_row(),
             prev_row_count,
             curr_row_count,
             change_type = ?change_type,
+            "build change"
         );
 
         Ok(change_type.map(|change_type| match change_type {
