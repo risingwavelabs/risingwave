@@ -48,9 +48,11 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///
 /// STATE TABLE COMMIT
 ///     A. Decide whether to do state cleaning:
-///        if `watermark_to_be_cleaned` < smallest val OR no value in cache + cache is synced: No need
-/// issue delete range.        if `watermark_to_be_cleaned` => smallest val OR cache not synced: Issue
-/// delete ranges.
+///        if `watermark_to_be_cleaned` < smallest val
+///           OR no value in cache + cache is synced:
+///        No need issue delete range.
+///        if `watermark_to_be_cleaned` => smallest val OR cache not synced:
+///        Issue delete ranges.
 ///
 ///     B. Refreshing the cache:
 ///        On barrier, do table scan from `[most_recently_cleaned_watermark, +inf)`.
@@ -90,14 +92,12 @@ impl StateTableWatermarkCache {
 
     /// Insert a new value.
     pub fn insert(&mut self, key: impl Row) -> Option<()> {
-        self.inner
-            .insert(DefaultOrdered(key.into_owned_row()), ())
+        self.inner.insert(DefaultOrdered(key.into_owned_row()), ())
     }
 
     /// Delete a value
     pub fn delete(&mut self, key: &impl Row) -> Option<()> {
-        self.inner
-            .delete(&DefaultOrdered(key.into_owned_row()))
+        self.inner.delete(&DefaultOrdered(key.into_owned_row()))
     }
 
     pub fn capacity(&self) -> usize {
@@ -155,17 +155,17 @@ impl StateCache for StateTableWatermarkCache {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::types::{Scalar, Timestamptz};
-    use crate::common::cache::StateCacheFiller;
 
     use super::*;
+    use crate::common::cache::StateCacheFiller;
 
     // TODO: Test out of sync -> sync
     /// With capacity 3, test the following sequence of inserts:
     /// Insert
     /// [1000, ...], should insert, cache is empty.
     /// [999, ...], should insert, smaller than 1000, should be lowest value.
-    /// [2000, ...], should insert, although larger than largest val (1000), cache rows still match state table rows.
-    /// [3000, ...], should be ignored
+    /// [2000, ...], should insert, although larger than largest val (1000), cache rows still match
+    /// state table rows. [3000, ...], should be ignored
     /// [900, ...], should evict 2000
     #[test]
     fn test_state_table_watermark_cache_inserts() {
@@ -202,7 +202,6 @@ mod tests {
         let old_v = cache.insert(&v3);
         assert!(old_v.is_none());
         assert_eq!(cache.len(), 3);
-
 
         let v4 = [
             Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
@@ -322,7 +321,10 @@ mod tests {
         // DELETEs
         cache.delete(&v5);
         assert_eq!(cache.len(), 1);
-        assert_eq!(cache.lowest_key().unwrap(), v1[0].clone().unwrap().as_scalar_ref_impl());
+        assert_eq!(
+            cache.lowest_key().unwrap(),
+            v1[0].clone().unwrap().as_scalar_ref_impl()
+        );
 
         // DELETEs
         cache.delete(&v1);
