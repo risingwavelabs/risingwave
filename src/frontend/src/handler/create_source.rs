@@ -21,6 +21,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
+    KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -55,7 +56,6 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, WithOptions};

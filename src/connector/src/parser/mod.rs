@@ -26,6 +26,7 @@ use itertools::Itertools;
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
+use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
@@ -380,7 +381,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             return None;
                         }
                         match desc.name.as_str() {
-                            "_rw_kafka_timestamp" => Some(kafka_meta.timestamp.map(|ts| {
+                            KAFKA_TIMESTAMP_COLUMN_NAME => Some(kafka_meta.timestamp.map(|ts| {
                                 risingwave_common::cast::i64_to_timestamptz(ts)
                                     .unwrap()
                                     .into()
