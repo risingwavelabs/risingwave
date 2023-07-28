@@ -71,6 +71,7 @@ pub struct StateTableInner<
     SD = BasicSerde,
     const IS_REPLICATED: bool = false,
     W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+    const USE_WATERMARK_CACHE: bool = false,
 > where
     S: StateStore,
     SD: ValueRowSerde,
