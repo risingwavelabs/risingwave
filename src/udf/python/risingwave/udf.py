@@ -360,7 +360,7 @@ class UdfServer(pa.flight.FlightServerBase):
         else:
             output_type = _data_type_to_string(udf._result_schema.types[-1])
 
-        sql = f"CREATE FUNCTION udf_{name}({input_types}) RETURNS {output_type} AS '{name}' USING LINK 'http://{self._location}';"
+        sql = f"CREATE FUNCTION {name}({input_types}) RETURNS {output_type} AS '{name}' USING LINK 'http://{self._location}';"
         print(f"added function: {name}, corresponding SQL:\n{sql}\n")
         self._functions[name] = udf
 
