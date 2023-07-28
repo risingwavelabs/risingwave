@@ -12,5 +12,5 @@ SELECT auction,
        avg(price)                                                 AS avg_price,
        sum(price)                                                 AS sum_price
 FROM bid
-GROUP BY to_char(date_time, 'YYYY-MM-DD'), auction 
+GROUP BY to_char(date_time, 'YYYY-MM-DD'), auction
 WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

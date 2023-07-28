@@ -70,7 +70,7 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-    
+
   flink-jobmanager:
     image: flink
     build: ./flink
@@ -80,7 +80,7 @@ services:
     environment:
       - |
         FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager        
+        jobmanager.rpc.address: flink-jobmanager
     container_name: flink-jobmanager
 
   flink-taskmanager:
@@ -107,7 +107,7 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
-        rest.address: flink-jobmanager        
+        rest.address: flink-jobmanager
     container_name: flink-sql-client
 
   connect:

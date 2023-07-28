@@ -337,9 +337,14 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
+    pub async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;
@@ -452,37 +457,40 @@ impl MetaClient {
         &self,
         source_id: Option<u32>,
         table_id: TableId,
+        cascade: bool,
     ) -> Result<CatalogVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_table(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_view(&self, view_id: u32) -> Result<CatalogVersion> {
-        let request = DropViewRequest { view_id };
+    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
-        let request = DropSourceRequest { source_id };
+    pub async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
-        let request = DropSinkRequest { sink_id };
+    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_index(&self, index_id: IndexId) -> Result<CatalogVersion> {
+    pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
+            cascade,
         };
         let resp = self.inner.drop_index(request).await?;
         Ok(resp.version)
