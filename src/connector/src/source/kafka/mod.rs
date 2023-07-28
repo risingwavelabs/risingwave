@@ -205,7 +205,7 @@ mod test {
             serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
 
         assert_eq!(props.scan_startup_mode, Some("earliest".to_string()));
-        assert_eq!(props.reject_unknown_fields().is_err(), true);
+        assert!(props.reject_unknown_fields().is_err());
         assert_eq!(
             props.common.rdkafka_properties.receive_message_max_bytes,
             Some(54321)

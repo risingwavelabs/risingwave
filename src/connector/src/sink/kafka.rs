@@ -653,7 +653,7 @@ mod test {
 
             "properties.enable.idempotence".to_string() => "True".to_string(), // can only be 'true' or 'false'
         };
-        assert_eq!(KafkaConfig::from_hashmap(props).is_err(), true);
+        assert!(KafkaConfig::from_hashmap(props).is_err());
 
         let props: HashMap<String, String> = hashmap! {
             // basic
@@ -663,7 +663,7 @@ mod test {
             "type".to_string() => "append-only".to_string(),
             "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
         };
-        assert_eq!(KafkaConfig::from_hashmap(props).is_err(), true);
+        assert!(KafkaConfig::from_hashmap(props).is_err());
     }
 
     #[test]
@@ -682,10 +682,10 @@ mod test {
             "properties.timeout".to_string() => "10s".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
-            "aaa".to_string() => "bbb".to_string().to_string(),
+            "aaa".to_string() => "bbb".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
-        assert_eq!(config.reject_unknown_fields().is_err(), true);
+        assert!(config.reject_unknown_fields().is_err());
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.r#type, "append-only");
