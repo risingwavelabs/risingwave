@@ -245,7 +245,7 @@ mod tests {
         "type": "int"
     }],
     "connect.name": "dbserver1.inventory.customers.Key"
-}        
+}
 "#;
         let key_schema = Schema::parse_str(key_schema_str).unwrap();
         let names: Vec<String> = avro_schema_to_column_descs(&key_schema)

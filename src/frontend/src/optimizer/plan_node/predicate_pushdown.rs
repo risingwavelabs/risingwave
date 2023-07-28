@@ -31,7 +31,7 @@ pub trait PredicatePushdown {
     ///
     /// 1. those can't be pushed down. We just create a `LogicalFilter` for them above the current
     /// `PlanNode`. i.e.,
-    ///   
+    ///
     ///     ```ignore
     ///     LogicalFilter::create(self.clone().into(), predicate)
     ///     ```
