@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
