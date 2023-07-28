@@ -340,7 +340,7 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  # The following jobs are triggerd only when PR has corresponding labels.
+  # The following jobs are triggered only when PR has corresponding labels.
 
   # Generates cpu flamegraph env
   - label: "flamegraph-env-build"
