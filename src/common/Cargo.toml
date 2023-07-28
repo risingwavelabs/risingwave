@@ -65,7 +65,7 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common_proc_macro = { path = "./proc_macro" }
-risingwave_pb = { path = "../prost" }
+risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
@@ -74,7 +74,7 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.6.1"
-speedate = "0.7.0"
+speedate = "0.11.0"
 static_assertions = "1"
 strum = "0.25"
 strum_macros = "0.24"
