@@ -17,7 +17,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
-use chrono::{Datelike, NaiveTime};
+use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
