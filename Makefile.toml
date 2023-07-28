@@ -969,7 +969,7 @@ script = """
 #!/usr/bin/env bash
 
 # This can trim trailing spaces in all git-managed text files, including .md, .toml, .sh, etc.
-scripts/check-trailing-spaces.sh --fix
+scripts/check/check-trailing-spaces.sh --fix
 """
 
 [tasks.check]
