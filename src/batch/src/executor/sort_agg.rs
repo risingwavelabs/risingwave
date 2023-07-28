@@ -176,7 +176,7 @@ impl SortAggExecutor {
 
                 let chunk = child_chunk
                     .with_visibility(Bitmap::from_range(child_chunk.capacity(), range).into());
-                for state in self.agg_states.iter_mut() {
+                for state in &mut self.agg_states {
                     state.update(&chunk).await?;
                 }
             }

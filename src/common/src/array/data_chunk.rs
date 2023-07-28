@@ -240,7 +240,7 @@ impl DataChunk {
                 let cardinality = visibility.count_ones();
                 let columns = self
                     .columns
-                    .into_iter()
+                    .iter()
                     .map(|col| {
                         let array = col;
                         array.compact(visibility, cardinality).into()
