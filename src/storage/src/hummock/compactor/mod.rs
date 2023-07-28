@@ -410,14 +410,21 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.get_object_id());
             }
         }
-        #[cfg(debug_assertions)]
-        if compact_task.input_ssts.iter().all(|level| {
-            level.table_infos.iter().all(|sst| {
-                sst.table_ids
-                    .iter()
-                    .all(|table_id| existing_table_ids.contains(table_id))
+        let has_tombstone = compact_task.input_ssts.iter().any(|level| {
+            level
+                .table_infos
+                .iter()
+                .any(|sst| sst.range_tombstone_count > 0)
+        });
+        if has_tombstone
+            && compact_task.input_ssts.iter().all(|level| {
+                level.table_infos.iter().all(|sst| {
+                    sst.table_ids
+                        .iter()
+                        .all(|table_id| existing_table_ids.contains(table_id))
+                })
             })
-        }) {
+        {
             use crate::hummock::iterator::{
                 ConcatIterator, ForwardMergeRangeIterator, UnorderedMergeIteratorInner,
                 UserIterator,
@@ -476,13 +483,13 @@ impl Compactor {
             iter1.rewind().await.unwrap();
             iter2.rewind().await.unwrap();
             while iter1.is_valid() && iter2.is_valid() {
-                debug_assert_eq!(iter1.key(), iter2.key());
-                debug_assert_eq!(iter1.value(), iter2.value());
+                assert_eq!(iter1.key(), iter2.key());
+                assert_eq!(iter1.value(), iter2.value());
                 iter1.next().await.unwrap();
                 iter2.next().await.unwrap();
             }
-            debug_assert!(!iter1.is_valid());
-            debug_assert!(!iter2.is_valid());
+            assert!(!iter1.is_valid());
+            assert!(!iter2.is_valid());
         }
         (compact_task, table_stats)
     }
