@@ -76,6 +76,12 @@ pub(crate) struct StateTableWatermarkCache {
 impl StateTableWatermarkCache {
     pub fn new(size: usize) -> Self {
         Self {
+            // Have to consider recovery.
+            // If table is non-empty, we can't init with table row count.
+            // NOTE: We can't know row count of state table, we don't have meta-data.
+            // Storage layer does not store this meta-data as well (to confirm it).
+            // When we refill the cache we insert from smallest to largest,
+            // even though row count is not known.
             inner: TopNStateCache::with_table_row_count(size, 0), // TODO: This number is arbitrary
         }
     }
@@ -164,9 +170,13 @@ mod tests {
     /// Insert
     /// [1000, ...], should insert, cache is empty.
     /// [999, ...], should insert, smaller than 1000, should be lowest value.
+    ///
+    /// NOTE: Expected if we don't know Row Count of state table.
     /// [2000, ...], should insert, although larger than largest val (1000), cache rows still match
     /// state table rows. [3000, ...], should be ignored
     /// [900, ...], should evict 2000
+    /// FIXME: Should not use the row count optimization first
+    /// So we should init w/o state table row count.
     #[test]
     fn test_state_table_watermark_cache_inserts() {
         let mut cache = StateTableWatermarkCache::new(3);
