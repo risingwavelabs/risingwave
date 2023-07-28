@@ -67,7 +67,8 @@ pub async fn validate_source(context: &CtlContext, props: String) -> anyhow::Res
         .rw_cloud_validate_source(source_type, with_props)
         .await?;
     if !resp.ok {
-        return Err(anyhow!(serde_json::to_string(&resp).unwrap()));
+        eprintln!("{}", serde_json::to_string(&resp).unwrap());
+        std::process::exit(1);
     }
     Ok(())
 }
