@@ -40,13 +40,8 @@ pub use self::def::*;
 pub trait Aggregator: Send + Sync + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
-    /// Update the aggregator with multiple rows with type checked at runtime.
+    /// Update the aggregator with visible rows in the chunk.
     async fn update(&mut self, input: &StreamChunk) -> Result<()>;
-
-    /// `update_single` update the aggregator with a single row with type checked at runtime.
-    async fn update_single(&mut self, input: &StreamChunk, row_id: usize) -> Result<()> {
-        todo!()
-    }
 
     /// Get the output value.
     fn get_output(&self) -> Result<Datum>;
