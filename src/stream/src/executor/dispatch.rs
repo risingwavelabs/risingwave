@@ -619,7 +619,7 @@ impl Dispatcher for HashDataDispatcher {
             // TODO: refactor with `Vis`.
 
             // TODO: handle chunk metadata
-            let (ops, columns, visibility) = chunk.into_inner();
+            let (ops, columns, visibility, meta) = chunk.into_inner_with_meta();
 
             let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
                 // Build visibility map for every output chunk.
@@ -680,8 +680,12 @@ impl Dispatcher for HashDataDispatcher {
             for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
-                let new_stream_chunk =
-                    StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
+                let new_stream_chunk = StreamChunk::new_with_meta(
+                    ops.clone(),
+                    columns.clone(),
+                    Some(vis_map),
+                    meta.clone(),
+                );
                 if new_stream_chunk.cardinality() > 0 {
                     event!(
                         tracing::Level::TRACE,

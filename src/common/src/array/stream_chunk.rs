@@ -76,12 +76,15 @@ pub struct StreamChunk {
     pub(super) meta: Option<StreamChunkMeta>,
 }
 
+/// Metadata of `StreamChunk`, for example offset, transaction id, etc.
+/// Currently we used it to forward offset from upstream system to the backfill executor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamChunkMeta {
     pub(super) offsets: Vec<Offset>,
 }
 
 /// Offset from upstream system
+/// TODO(siyuan): use a more compact representation to save memory and network bandwidth
 #[derive(Debug, Clone, PartialEq)]
 pub struct Offset(String);
 
@@ -224,8 +227,7 @@ impl StreamChunk {
             return self;
         }
 
-        let meta = self.meta.clone();
-        let (ops, columns, visibility) = self.into_inner();
+        let (ops, columns, visibility, meta) = self.into_inner_with_meta();
         let visibility = visibility.unwrap();
 
         let cardinality = visibility
@@ -239,7 +241,17 @@ impl StreamChunk {
         for idx in visibility.iter_ones() {
             new_ops.push(ops[idx]);
         }
-        StreamChunk::new_with_meta(new_ops, columns, None, meta)
+
+        if let Some(meta) = meta {
+            let mut offsets = Vec::with_capacity(cardinality);
+            for idx in visibility.iter_ones() {
+                offsets.push(meta.offsets[idx].clone());
+            }
+            let meta = StreamChunkMeta::new(offsets);
+            StreamChunk::new_with_meta(new_ops, columns, None, Some(meta))
+        } else {
+            StreamChunk::new(new_ops, columns, None)
+        }
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
