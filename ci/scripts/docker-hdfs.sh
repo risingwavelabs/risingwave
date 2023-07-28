@@ -11,7 +11,7 @@ BUILDKITE_COMMIT="HDFS_$(echo $RANDOM | md5sum | head -c 20;)"
 java_home_path=$(uname -m)
 if [ "$arch" = "arm64" ] || [ "$arch" = "aarch64" ]; then
     java_home_path="/usr/lib/jvm/java-11-openjdk-arm64"
-else 
+else
 # x86_64
     java_home_path="/usr/lib/jvm/java-11-openjdk-amd64"
 fi
