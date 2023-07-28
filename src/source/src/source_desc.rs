@@ -102,7 +102,7 @@ impl SourceDescBuilder {
     pub fn build(self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let source_struct = extract_format_encode(&self.source_info)?;
+        let source_struct = extract_source_struct(&self.source_info)?;
         let psrser_config =
             SpecificParserConfig::new(source_struct, &self.source_info, &self.properties)?;
 
@@ -126,7 +126,7 @@ impl SourceDescBuilder {
     }
 
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
-        let source_struct = extract_format_encode(&self.source_info)?;
+        let source_struct = extract_source_struct(&self.source_info)?;
         match (source_struct.format, source_struct.encode) {
             (SourceFormat::Plain, SourceEncode::Csv | SourceEncode::Json) => {}
             (format, encode) => {
@@ -162,7 +162,7 @@ impl SourceDescBuilder {
 }
 
 // Only return valid (format, encode)
-pub fn extract_format_encode(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
+pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
     // old version meta.
     if let Ok(format) = info.get_row_format() {
         let (format, encode) = match format {
