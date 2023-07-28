@@ -528,6 +528,7 @@ impl KafkaTransactionConductor {
         let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
+            config.set_client(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
             config.use_transaction = false;

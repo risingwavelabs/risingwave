@@ -71,6 +71,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("bootstrap.servers", bootstrap_servers);
 
         properties.common.set_security_properties(&mut config);
+        properties.set_client(&mut config);
 
         // rdkafka fetching config
         properties.rdkafka_properties.set_client(&mut config);
