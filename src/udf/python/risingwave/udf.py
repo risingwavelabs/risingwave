@@ -470,8 +470,6 @@ def _data_type_to_string(t: pa.DataType) -> str:
         return "FLOAT8"
     elif t.equals(pa.decimal128(38)):
         return "DECIMAL"
-    elif t.equals(pa.decimal128(38, 0)):
-        return "DECIMAL"
     elif t.equals(pa.date32()):
         return "DATE"
     elif t.equals(pa.time64("us")):
