@@ -14,7 +14,7 @@
 
 use either::Either;
 use risingwave_common::array::*;
-use risingwave_common::for_all_variants;
+use risingwave_common::for_all_array_variants;
 use risingwave_common::types::{Datum, Scalar};
 
 /// The type-erased return value of an expression.
@@ -72,4 +72,4 @@ macro_rules! impl_convert {
     };
 }
 
-for_all_variants! { impl_convert }
+for_all_array_variants! { impl_convert }
