@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::swap;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
@@ -25,9 +24,7 @@ use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
-use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_pb::stream_plan::FragmentTypeFlag::Source;
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
@@ -44,12 +41,9 @@ impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<PrivateLinkConsumerContext>,
-    // start_offset: Option<i64>,
-    // stop_offset: Option<i64>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     bytes_per_second: usize,
     max_num_messages: usize,
-
     split_id: SplitId,
     // split_ids: Vec<SplitId>,
     parser_config: ParserConfig,
@@ -105,22 +99,24 @@ impl SplitReader for KafkaSplitReader {
             .await
             .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 
-        let mut start_offset = None;
-
         let splits = splits
             .into_iter()
             .map(|split| split.into_kafka().unwrap())
             .collect::<Vec<KafkaSplit>>();
 
-        let split_ids: Vec<_> = splits.iter().map(|split| split.id().clone()).collect();
+        let split_ids: Vec<_> = splits.iter().map(|split| split.id()).collect();
 
-        let split_id = split_ids.iter().next().unwrap().clone();
+        // todo
+        let split_id = split_ids.first().unwrap().clone();
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
+        let mut offsets = HashMap::new();
+
         for split in splits {
+            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
+
             if let Some(offset) = split.start_offset {
-                start_offset = Some(offset);
                 tpl.add_partition_offset(
                     split.topic.as_str(),
                     split.partition,
@@ -150,7 +146,7 @@ impl SplitReader for KafkaSplitReader {
 
         Ok(Self {
             consumer,
-            offsets: Default::default(),
+            offsets,
             bytes_per_second,
             max_num_messages,
             split_id,
@@ -173,12 +169,12 @@ impl KafkaSplitReader {
                 // source name is not available here
                 &self.source_ctx.source_info.source_id.to_string(),
                 &self.source_ctx.source_info.actor_id.to_string(),
-                &split_id,
+                split_id,
             ])
             .set(offset);
     }
 
-    #[try_stream(boxed, ok = Vec < SourceMessage >, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
@@ -214,7 +210,7 @@ impl KafkaSplitReader {
             let mut split_msg_offsets = HashMap::new();
 
             for msg in &msgs {
-                split_msg_offsets.insert(msg.partition(), msg.offset() as i64);
+                split_msg_offsets.insert(msg.partition(), msg.offset());
             }
 
             for (partition, offset) in split_msg_offsets {
@@ -229,36 +225,30 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-
                 let source_message = SourceMessage::from_kafka_message(&msg);
-
                 let split_id = source_message.split_id.clone();
-
                 res.push(source_message);
 
-                match stop_offsets.entry(split_id) {
-                    Entry::Occupied(o) => {
-                        let stop_offset = *o.get();
+                if let Entry::Occupied(o) = stop_offsets.entry(split_id) {
+                    let stop_offset = *o.get();
 
-                        if cur_offset == stop_offset - 1 {
-                            tracing::debug!(
-                                "stop offset reached for split {}, stop reading, offset: {},
-                        stop offset: {}",
-                                o.key(),
-                                cur_offset,
-                                stop_offset
-                            );
+                    if cur_offset == stop_offset - 1 {
+                        tracing::debug!(
+                            "stop offset reached for split {}, stop reading, offset: {}, stop offset: {}",
+                            o.key(),
+                            cur_offset,
+                            stop_offset
+                        );
 
-                            o.remove();
-                            continue;
+                        o.remove();
+
+                        if stop_offsets.is_empty() {
+                            yield res;
+                            break 'for_outer_loop;
                         }
-                    }
-                    _ => {}
-                }
 
-                if stop_offsets.is_empty() {
-                    yield res;
-                    break 'for_outer_loop;
+                        continue;
+                    }
                 }
 
                 if bytes_current_second > self.bytes_per_second {
