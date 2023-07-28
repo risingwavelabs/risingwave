@@ -49,7 +49,7 @@ pub fn place_vnode(
     // evenly among workers.
     let mut selected_pu_ids = Vec::new();
     while !new_pus.is_empty() {
-        new_pus.drain_filter(|ps| {
+        let _ = new_pus.extract_if(|ps| {
             if let Some(p) = ps.next() {
                 selected_pu_ids.push(p.id);
                 false

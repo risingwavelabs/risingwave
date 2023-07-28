@@ -407,7 +407,7 @@ pub fn push_down_into_join(
         // Do not push now on to the on, it will be pulled up into a filter instead.
         let on = Condition {
             conjunctions: conjunctions
-                .drain_filter(|expr| expr.count_nows() == 0)
+                .extract_if(|expr| expr.count_nows() == 0)
                 .collect(),
         };
         predicate.conjunctions = conjunctions;

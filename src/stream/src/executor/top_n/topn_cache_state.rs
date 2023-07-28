@@ -109,11 +109,11 @@ impl TopNCacheState {
         self.inner.range(range)
     }
 
-    pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, CacheKey, CompactedRow, F, Global>
+    pub fn extract_if<F>(&mut self, pred: F) -> DrainFilter<'_, CacheKey, CompactedRow, F, Global>
     where
         F: FnMut(&CacheKey, &mut CompactedRow) -> bool,
     {
-        self.inner.drain_filter(pred)
+        self.inner.extract_if(pred)
     }
 
     pub fn retain<F>(&mut self, f: F)

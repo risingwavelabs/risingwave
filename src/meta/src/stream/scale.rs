@@ -1546,7 +1546,7 @@ where
                     {
                         dispatcher
                             .downstream_actor_id
-                            .drain_filter(|id| downstream_actors_to_remove.contains_key(id));
+                            .retain(|id| !downstream_actors_to_remove.contains_key(id));
                     }
 
                     if let Some(downstream_actors_to_create) = downstream_fragment_actors_to_create
@@ -1828,8 +1828,8 @@ where
             }
         }
 
-        target_plan.drain_filter(|_, plan| {
-            plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
+        target_plan.retain(|_, plan| {
+            !plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
         });
 
         Ok(target_plan)

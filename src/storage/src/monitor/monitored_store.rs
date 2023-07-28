@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -87,7 +88,7 @@ pub type MonitoredStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
 // `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
 impl<S> MonitoredStateStore<S> {
-    async fn monitored_iter<'a, 's, St: StateStoreIterItemStream + 's>(
+    async fn monitored_iter<'a, 's: 'a, St: StateStoreIterItemStream + 's>(
         &'a self,
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
@@ -122,6 +123,7 @@ impl<S> MonitoredStateStore<S> {
                 storage_metrics: self.storage_metrics.clone(),
                 table_id,
             },
+            _phantom: Default::default(),
         };
         Ok(monitored.into_stream())
     }
@@ -359,9 +361,10 @@ impl MonitoredStateStore<HummockStorage> {
 }
 
 /// A state store iterator wrapper for monitoring metrics.
-pub struct MonitoredStateStoreIter<S> {
+pub struct MonitoredStateStoreIter<'s, S: 's> {
     inner: S,
     stats: MonitoredStateStoreIterStats,
+    _phantom: PhantomData<&'s ()>,
 }
 
 struct MonitoredStateStoreIterStats {
@@ -373,7 +376,10 @@ struct MonitoredStateStoreIterStats {
     table_id: TableId,
 }
 
-impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
+impl<'s, S: StateStoreIterItemStream> MonitoredStateStoreIter<'s, S>
+where
+    S: 's,
+{
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
     async fn into_stream_inner(self) {
         let inner = self.inner;
@@ -392,7 +398,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
         drop(stats);
     }
 
-    fn into_stream(self) -> impl StateStoreIterItemStream {
+    fn into_stream(self) -> MonitoredStateStoreIterStream<'s, S> {
         Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }

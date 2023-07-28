@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]

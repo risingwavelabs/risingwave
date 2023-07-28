@@ -695,7 +695,7 @@ impl ClusterManagerCore {
         let mut streaming_worker_node = self.list_streaming_worker_node(Some(State::Running));
 
         let unschedulable_worker_node = streaming_worker_node
-            .drain_filter(|worker| {
+            .extract_if(|worker| {
                 worker
                     .property
                     .as_ref()

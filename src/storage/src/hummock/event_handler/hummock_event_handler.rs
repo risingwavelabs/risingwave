@@ -385,7 +385,7 @@ impl HummockEventHandler {
         );
         self.uploader.clear();
 
-        for (epoch, result_sender) in self.pending_sync_requests.drain_filter(|_, _| true) {
+        for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
             send_sync_result(
                 result_sender,
                 Err(HummockError::other(format!(

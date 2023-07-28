@@ -203,7 +203,7 @@ where
 
         self.heap = self
             .unused_iters
-            .drain_filter(|i| i.iter.is_valid())
+            .extract_if(|i| i.iter.is_valid())
             .collect();
     }
 }

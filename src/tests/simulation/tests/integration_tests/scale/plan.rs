@@ -129,7 +129,7 @@ async fn test_resize_single() -> Result<()> {
         .collect();
 
     let prev_workers = workers
-        .drain_filter(|worker| {
+        .extract_if(|worker| {
             worker
                 .parallel_units
                 .iter()

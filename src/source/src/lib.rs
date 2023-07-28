@@ -19,7 +19,7 @@
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
 

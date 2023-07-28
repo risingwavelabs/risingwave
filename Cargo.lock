@@ -411,9 +411,9 @@ dependencies = [
 
 [[package]]
 name = "auto_enums"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10143e1d6fc660ac7bfc268c6ec2f9699129a3cfbb241eed50393d1562e0a4ce"
+checksum = "faa44067eaa1097fc513fcdea6b9c42ea8a792f750a181937d52b315477e7b7a"
 dependencies = [
  "derive_utils",
  "proc-macro2",

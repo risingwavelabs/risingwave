@@ -401,7 +401,7 @@ impl PredicatePushdown for LogicalScan {
         }
         let non_pushable_predicate: Vec<_> = predicate
             .conjunctions
-            .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
+            .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),

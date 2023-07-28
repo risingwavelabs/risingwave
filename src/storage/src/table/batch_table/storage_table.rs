@@ -490,15 +490,16 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         }))
         .await?;
 
-        #[auto_enum(futures03::Stream)]
-        let iter = match iterators.len() {
-            0 => unreachable!(),
-            1 => iterators.into_iter().next().unwrap(),
-            // Concat all iterators if not to preserve order.
-            _ if !ordered => futures::stream::iter(iterators).flatten(),
-            // Merge all iterators if to preserve order.
-            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
-        };
+        // #[auto_enum(futures03::Stream)]
+        // let iter = match iterators.len() {
+        //     0 => unreachable!(),
+        //     1 => iterators.into_iter().next().unwrap(),
+        //     // Concat all iterators if not to preserve order.
+        //     _ if !ordered => futures::stream::iter(iterators).flatten(),
+        //     // Merge all iterators if to preserve order.
+        //     _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
+        // };
+        let iter = merge_sort(iterators.into_iter().map(Box::pin).collect());
 
         Ok(iter)
     }

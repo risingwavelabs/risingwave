@@ -736,7 +736,7 @@ where
                 assert!(actor_id_set.contains(actor_id));
             }
 
-            actors.drain_filter(|actor_id| to_remove.contains(actor_id));
+            actors.retain(|actor_id| !to_remove.contains(actor_id));
             actors.extend_from_slice(to_create);
         }
 
@@ -775,7 +775,7 @@ where
         for table_id in to_update_table_fragments {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
-                .drain_filter(|fragment_id, _| {
+                .extract_if(|fragment_id, _| {
                     table_fragments
                         .get(&table_id)
                         .unwrap()

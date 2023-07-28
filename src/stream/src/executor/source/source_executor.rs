@@ -301,7 +301,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
             let dropped_splits = core
                 .stream_source_splits
-                .drain_filter(|split_id, _| !target_split_ids.contains(split_id))
+                .extract_if(|split_id, _| !target_split_ids.contains(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 

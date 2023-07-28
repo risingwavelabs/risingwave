@@ -203,7 +203,7 @@ where
     async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
         for command in self
             .finished_commands
-            .drain_filter(|c| checkpoint || c.context.kind.is_barrier())
+            .extract_if(|c| checkpoint || c.context.kind.is_barrier())
         {
             // The command is ready to finish. We can now call `pre_finish`.
             command.context.pre_finish().await?;

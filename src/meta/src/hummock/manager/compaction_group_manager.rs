@@ -106,7 +106,7 @@ impl<S: MetaStore> HummockManager<S> {
             == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
-            if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
+            if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
