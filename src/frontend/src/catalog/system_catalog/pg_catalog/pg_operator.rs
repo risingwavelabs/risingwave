@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_operator` stores operator info.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-operator.html`]
-pub const PG_OPERATOR_TABLE_NAME: &str = "pg_operator";
 pub const PG_OPERATOR_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "oprname"),
@@ -39,8 +37,11 @@ pub const PG_OPERATOR_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oprjoin"),
 ];
 
-impl SysCatalogReaderImpl {
-    pub fn read_operator_info(&self) -> Result<Vec<OwnedRow>> {
-        Ok(vec![])
-    }
-}
+/// The catalog `pg_operator` stores operator info.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-operator.html`]
+pub static PG_OPERATOR: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_operator",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_OPERATOR_COLUMNS,
+    sql: infer_dummy_view_sql(PG_OPERATOR_COLUMNS),
+});

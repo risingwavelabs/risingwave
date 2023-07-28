@@ -15,17 +15,14 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
 use crate::user::user_authentication::encrypted_raw_password;
 
-/// The view `pg_shadow` exists for backwards compatibility: it emulates a catalog that existed in
-/// PostgreSQL before version 8.1. It shows properties of all roles that are marked as rolcanlogin
-/// in `pg_authid`. Ref: [`https://www.postgresql.org/docs/current/view-pg-shadow.html`]
-pub const PG_SHADOW_TABLE_NAME: &str = "pg_shadow";
 pub static PG_SHADOW_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
         (DataType::Varchar, "usename"),
@@ -42,6 +39,16 @@ pub static PG_SHADOW_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyL
         // Session defaults for run-time configuration variables
         (DataType::List(Box::new(DataType::Varchar)), "useconfig"),
     ]
+});
+
+/// The view `pg_shadow` exists for backwards compatibility: it emulates a catalog that existed in
+/// PostgreSQL before version 8.1. It shows properties of all roles that are marked as rolcanlogin
+/// in `pg_authid`. Ref: [`https://www.postgresql.org/docs/current/view-pg-shadow.html`]
+pub static PG_SHADOW: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "pg_shadow",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &PG_SHADOW_COLUMNS,
+    pk: &[1],
 });
 
 impl SysCatalogReaderImpl {

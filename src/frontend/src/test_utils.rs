@@ -26,7 +26,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -313,7 +313,19 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
@@ -323,7 +335,7 @@ impl CatalogWriter for MockCatalogWriter {
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id).await?;
+            self.drop_index(index.id, cascade).await?;
         }
         self.catalog
             .write()
@@ -336,18 +348,25 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_view(&self, _view_id: u32) -> Result<()> {
+    async fn drop_view(&self, _view_id: u32, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         let indexes =
             self.catalog
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id).await?;
+            self.drop_index(index.id, cascade).await?;
         }
         self.catalog
             .write()
@@ -355,7 +374,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_source(&self, source_id: u32) -> Result<()> {
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.catalog
             .write()
@@ -363,7 +389,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id);
         self.catalog
             .write()
@@ -371,7 +404,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let &schema_id = self
             .table_id_to_schema_id
             .read()

@@ -587,6 +587,12 @@ macro_rules! scalar_impl_enum {
 
 for_all_scalar_variants! { scalar_impl_enum }
 
+// We MUST NOT implement `Ord` for `ScalarImpl` because that will make `Datum` derive an incorrect
+// default `Ord`. To get a default-ordered `ScalarImpl`/`ScalarRefImpl`/`Datum`/`DatumRef`, you can
+// use `DefaultOrdered<T>`. If non-default order is needed, please refer to `sort_util`.
+impl !PartialOrd for ScalarImpl {}
+impl !PartialOrd for ScalarRefImpl<'_> {}
+
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
