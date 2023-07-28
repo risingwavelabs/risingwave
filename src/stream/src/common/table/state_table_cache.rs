@@ -96,7 +96,8 @@ impl StateTableWatermarkCache {
     /// NOTE(kwannoel): Unused. Requires row count from State Table.
     /// On first initialization, we can use row_count 0.
     /// But if state table is reconstructed after recovery, we need to obtain row count meta-data.
-    pub fn new_with_row_count(size: usize, row_count: usize) -> Self {
+    #[allow(dead_code)]
+    fn new_with_row_count(size: usize, row_count: usize) -> Self {
         Self {
             inner: TopNStateCache::with_table_row_count(size, row_count),
         }
@@ -119,8 +120,8 @@ impl StateTableWatermarkCache {
     }
 
     /// Delete a value
+    /// If the watermark col is NULL, it will just be ignored.
     pub fn delete(&mut self, key: &impl Row) -> Option<()> {
-        debug_assert!(!key.is_null_at(0));
         self.inner.delete(&DefaultOrdered(key.into_owned_row()))
     }
 
@@ -183,24 +184,68 @@ mod tests {
     use super::*;
     use crate::common::cache::StateCacheFiller;
 
-     /// With capacity 3, test the following sequence of inserts:
+    /// With capacity 3, test the following sequence of inserts:
     /// Insert
     /// [SYNC] an empty table first.
     /// [1000] should insert, cache is empty.
     /// [999] should insert, smaller than 1000, should be lowest value.
     /// [2000] should NOT insert.
     /// It is larger than 1000, and we don't know the state table size,
-     /// for instance if state table just recovered, and does not have row count meta data.
-     /// This means there could be a row like [1001] in the state table.
+    /// for instance if state table just recovered, and does not have row count meta data.
+    /// This means there could be a row like [1001] in the state table.
     /// [900, ...], should insert.
+    /// [800], should insert, smaller than 900, should be lowest value.
     #[test]
     fn test_state_table_watermark_cache_inserts() {
+        let v1 = [
+            Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v2 = [
+            Some(Timestamptz::from_secs(999).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v3 = [
+            Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v4 = [
+            Some(Timestamptz::from_secs(900).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let v5 = [
+            Some(Timestamptz::from_secs(800).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let mut cache = StateTableWatermarkCache::new(3);
+        assert_eq!(cache.capacity(), 3);
+        let filler = cache.begin_syncing();
+        filler.finish();
 
-    }
+        // Test 1000
+        cache.insert(&v1);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.lowest_key(), Some(v1[0].as_ref().unwrap().as_scalar_ref_impl()));
 
-    #[test]
-    fn test_state_table_watermark_cache_deletes() {
+        // Test 999
+        cache.insert(&v2);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.lowest_key(), Some(v2[0].as_ref().unwrap().as_scalar_ref_impl()));
 
+        // Test 2000
+        cache.insert(&v3);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.lowest_key(), Some(v2[0].as_ref().unwrap().as_scalar_ref_impl()));
+
+        // Test 900
+        cache.insert(&v4);
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.lowest_key(), Some(v4[0].as_ref().unwrap().as_scalar_ref_impl()));
+
+        // Test 800
+        cache.insert(&v5);
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.lowest_key(), Some(v5[0].as_ref().unwrap().as_scalar_ref_impl()));
     }
 
     #[test]
@@ -272,8 +317,7 @@ mod tests {
             Some(Timestamptz::from_secs(900).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
         ];
-        let old_v = cache.insert(&v5);
-        // assert_eq!(old_v.unwrap(), ()); // FIXME: Why this doesn't return evicted val?
+        cache.insert(&v5);
         assert_eq!(cache.len(), 3);
         let lowest = cache.lowest_key().unwrap();
         assert_eq!(lowest, v5[0].clone().unwrap().as_scalar_ref_impl());

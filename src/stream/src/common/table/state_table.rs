@@ -667,7 +667,9 @@ where
     pub fn insert(&mut self, value: impl Row) {
         let pk_indices = self.pk_indices.clone();
         let pk = (&value).project(&pk_indices);
-        self.watermark_cache.insert(pk);
+        if !pk.is_null_at(0) {
+            self.watermark_cache.insert(pk);
+        }
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
