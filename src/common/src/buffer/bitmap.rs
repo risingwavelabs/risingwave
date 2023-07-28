@@ -275,7 +275,9 @@ impl Bitmap {
         } else {
             bits[start] = !0 << start_offset;
             bits[start + 1..end].fill(!0);
-            bits[end] = (1 << end_offset) - 1;
+            if end_offset != 0 {
+                bits[end] = (1 << end_offset) - 1;
+            }
         }
         Self {
             bits: Some(bits.into()),
