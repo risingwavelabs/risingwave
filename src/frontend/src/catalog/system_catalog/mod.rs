@@ -359,6 +359,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&PG_TABLES), read_pg_tables_info },
     { BuiltinCatalog::Table(&PG_PROC), read_pg_proc_info },
     { BuiltinCatalog::Table(&PG_SHADOW), read_user_info_shadow },
+    { BuiltinCatalog::Table(&PG_LOCKS), read_locks_info },
     { BuiltinCatalog::Table(&INFORMATION_SCHEMA_COLUMNS), read_columns_info },
     { BuiltinCatalog::Table(&INFORMATION_SCHEMA_TABLES), read_tables_info },
     { BuiltinCatalog::Table(&RW_DATABASES), read_rw_database_info },
