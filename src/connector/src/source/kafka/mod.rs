@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -77,14 +79,6 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde(rename = "properties.fetch.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_max_bytes: Option<usize>,
-
-    /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
-    /// memory exhaustion in case of protocol hickups. This value must be at least
-    /// `fetch.max.bytes` + 512 to allow for protocol overhead; the value is adjusted automatically
-    /// unless the configuration property is explicitly set.
-    #[serde(rename = "properties.receive.message.max.bytes")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub receive_message_max_bytes: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -130,6 +124,9 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub rdkafka_properties: RdKafkaPropertiesConsumer,
+
+    #[serde(flatten)]
+    unknown_fields: HashMap<String, String>,
 }
 
 impl KafkaProperties {
@@ -138,6 +135,17 @@ impl KafkaProperties {
         self.rdkafka_properties.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
+    }
+
+    pub fn reject_unknown_fields(&self) -> anyhow::Result<()> {
+        if self.unknown_fields.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "got known fields: {:?}",
+                self.unknown_fields.keys()
+            ))
+        }
     }
 }
 
@@ -163,8 +171,55 @@ impl RdKafkaPropertiesConsumer {
         if let Some(v) = &self.fetch_max_bytes {
             c.set("fetch.max.bytes", v.to_string());
         }
-        if let Some(v) = &self.receive_message_max_bytes {
-            c.set("receive.message.max.bytes", v.to_string());
-        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashMap;
+
+    use maplit::hashmap;
+
+    use super::*;
+
+    #[test]
+    fn test_parse_config_consumer_common() {
+        let config: HashMap<String, String> = hashmap! {
+            // common
+            "properties.bootstrap.server".to_string() => "127.0.0.1:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            // kafka props
+            "scan.startup.mode".to_string() => "earliest".to_string(),
+            // RdKafkaPropertiesCommon
+            "properties.message.max.bytes".to_string() => "12345".to_string(),
+            "properties.receive.message.max.bytes".to_string() => "54321".to_string(),
+            // RdKafkaPropertiesConsumer
+            "properties.queued.min.messages".to_string() => "114514".to_string(),
+            "properties.queued.max.messages.kbytes".to_string() => "114514".to_string(),
+            "properties.fetch.wait.max.ms".to_string() => "114514".to_string(),
+            "properties.fetch.max.bytes".to_string() => "114514".to_string(),
+            "aaa".to_string() => "bbb".to_string(),
+        };
+
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+
+        assert_eq!(props.scan_startup_mode, Some("earliest".to_string()));
+        assert_eq!(props.reject_unknown_fields().is_err(), true);
+        assert_eq!(
+            props.common.rdkafka_properties.receive_message_max_bytes,
+            Some(54321)
+        );
+        assert_eq!(
+            props.common.rdkafka_properties.message_max_bytes,
+            Some(12345)
+        );
+        assert_eq!(props.rdkafka_properties.queued_min_messages, Some(114514));
+        assert_eq!(
+            props.rdkafka_properties.queued_max_messages_kbytes,
+            Some(114514)
+        );
+        assert_eq!(props.rdkafka_properties.fetch_wait_max_ms, Some(114514));
+        assert_eq!(props.rdkafka_properties.fetch_max_bytes, Some(114514));
     }
 }

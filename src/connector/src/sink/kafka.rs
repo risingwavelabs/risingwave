@@ -208,6 +208,9 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub rdkafka_properties: RdKafkaPropertiesProducer,
+
+    #[serde(flatten)]
+    unknown_fields: HashMap<String, String>,
 }
 
 impl KafkaConfig {
@@ -235,6 +238,17 @@ impl KafkaConfig {
         self.rdkafka_properties.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
+    }
+
+    pub fn reject_unknown_fields(&self) -> anyhow::Result<()> {
+        if self.unknown_fields.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "got known fields: {:?}",
+                self.unknown_fields.keys()
+            ))
+        }
     }
 }
 
@@ -527,6 +541,7 @@ impl KafkaTransactionConductor {
     async fn new(mut config: KafkaConfig, identifier: &String) -> Result<Self> {
         let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
+            config.reject_unknown_fields()?;
             config.common.set_security_properties(&mut c);
             config.set_client(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
@@ -603,6 +618,55 @@ mod test {
     use crate::sink::utils::*;
 
     #[test]
+    fn parse_rdkafka_props() {
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            // RdKafkaPropertiesCommon
+            "properties.message.max.bytes".to_string() => "12345".to_string(),
+            "properties.receive.message.max.bytes".to_string() => "54321".to_string(),
+            // RdKafkaPropertiesProducer
+            "properties.queue.buffering.max.messages".to_string() => "114514".to_string(),
+            "properties.queue.buffering.max.kbytes".to_string() => "114514".to_string(),
+            "properties.queue.buffering.max.ms".to_string() => "114.514".to_string(),
+            "properties.enable.idempotence".to_string() => "false".to_string(),
+            "properties.message.send.max.retries".to_string() => "114514".to_string(),
+            "properties.retry.backoff.ms".to_string() => "114514".to_string(),
+            "properties.batch.num.messages".to_string() => "114514".to_string(),
+            "properties.batch.size".to_string() => "114514".to_string(),
+        };
+        let c = KafkaConfig::from_hashmap(props).unwrap();
+        assert_eq!(
+            c.rdkafka_properties.queue_buffering_max_ms,
+            Some(114.514f64)
+        );
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+
+            "properties.enable.idempotence".to_string() => "True".to_string(), // can only be 'true' or 'false'
+        };
+        assert_eq!(KafkaConfig::from_hashmap(props).is_err(), true);
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+        };
+        assert_eq!(KafkaConfig::from_hashmap(props).is_err(), true);
+    }
+
+    #[test]
     fn parse_kafka_config() {
         let properties: HashMap<String, String> = hashmap! {
             "connector".to_string() => "kafka".to_string(),
@@ -618,8 +682,10 @@ mod test {
             "properties.timeout".to_string() => "10s".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
+            "aaa".to_string() => "bbb".to_string().to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
+        assert_eq!(config.reject_unknown_fields().is_err(), true);
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.r#type, "append-only");

@@ -106,7 +106,7 @@ pub struct KafkaCommon {
     sasl_oathbearer_config: Option<String>,
 
     #[serde(flatten)]
-    rdkafka_properties: RdKafkaPropertiesCommon,
+    pub rdkafka_properties: RdKafkaPropertiesCommon,
 }
 
 #[serde_as]

@@ -70,6 +70,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
 
+        properties.reject_unknown_fields()?;
         properties.common.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
