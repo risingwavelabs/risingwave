@@ -811,6 +811,8 @@ where
             .instrument(tracing::info_span!("state_table_commit"))
             .await?;
 
+        // TODO: Clean up cache after watermark state cleaning.
+
         // Refresh watermark cache if it is out of sync.
         if !self.watermark_cache.is_synced() {
             if let Some(ref watermark) = self.state_clean_watermark {
@@ -843,7 +845,9 @@ where
                     // pk.
                     while !self.watermark_cache.is_full() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
                         let pk = self.pk_serde.deserialize(&pk[..])?;
-                        pks.push(pk);
+                        if !pk.is_null_at(0) {
+                            pks.push(pk);
+                        }
                     }
                 }
 

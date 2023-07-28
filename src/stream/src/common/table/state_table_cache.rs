@@ -14,7 +14,7 @@
 
 use risingwave_common::array::Op;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DefaultOrdered, ScalarRefImpl};
 
 use crate::common::cache::{StateCache, TopNStateCache};
@@ -24,9 +24,21 @@ use crate::common::cache::{StateCache, TopNStateCache};
 /// The assumption is that the watermark column is the first column in the row.
 /// So it should automatically be ordered by the watermark column.
 /// We disregard the ordering of the remaining PK datums.
+///
+/// TODO(kwannoel):
+/// We can also store bytes from encoded pk.
+/// However, we need to ignore NULL values in their encoded form.
+/// Additionally, we need to encode pk w/o vnode, to make sure watermark stays as the prefix.
+/// The benefit is we avoid the clone of Arc of pk indices.
 type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 
-/// Updates to Cache:
+/// Cache Invariants
+/// -----------------
+/// - If cache is synced, it will ALWAYS contain TopN entries.
+/// NOTE: TopN here refers to the lowest N entries, where the first is the minimum and so on.
+/// - Cache will not contain NULL values, they are ignored in watermark state cleaning.
+///
+/// Updates to Cache
 /// -----------------
 /// INSERT
 ///    A. Cache evicted. Update cached value.
@@ -61,13 +73,14 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///        We don't need to store any values, just the keys.
 ///
 /// TODO(kwannoel): Optimization: We can use cache to do point delete rather than range delete.
+/// If cache is not full, we can do point delete, for each cache entry.
 /// FIXME(kwannoel): This should be a trait.
 /// Then only when building state table with watermark we will initialize it.
 /// Otherwise point it to a no-op implementation.
 /// TODO(kwannoel): Add tests for it.
-/// FIXME: Perhaps we should directly use bytes in our cache...
-/// It could help avoid cloning pk indices etc...
 /// Another thing we have to take note of are NULL values.
+/// FIXME(kwannoel): After issuing DELETE range, we need to do table scan also to refresh the cache.
+/// but excluding the DELETE range.
 #[derive(EstimateSize, Clone)]
 pub(crate) struct StateTableWatermarkCache {
     inner: TopNStateCache<WatermarkCacheKey, ()>,
@@ -76,13 +89,16 @@ pub(crate) struct StateTableWatermarkCache {
 impl StateTableWatermarkCache {
     pub fn new(size: usize) -> Self {
         Self {
-            // Have to consider recovery.
-            // If table is non-empty, we can't init with table row count.
-            // NOTE: We can't know row count of state table, we don't have meta-data.
-            // Storage layer does not store this meta-data as well (to confirm it).
-            // When we refill the cache we insert from smallest to largest,
-            // even though row count is not known.
-            inner: TopNStateCache::with_table_row_count(size, 0), // TODO: This number is arbitrary
+            inner: TopNStateCache::new(size), // TODO: This number is arbitrary
+        }
+    }
+
+    /// NOTE(kwannoel): Unused. Requires row count from State Table.
+    /// On first initialization, we can use row_count 0.
+    /// But if state table is reconstructed after recovery, we need to obtain row count meta-data.
+    pub fn new_with_row_count(size: usize, row_count: usize) -> Self {
+        Self {
+            inner: TopNStateCache::with_table_row_count(size, row_count),
         }
     }
 
@@ -98,11 +114,13 @@ impl StateTableWatermarkCache {
 
     /// Insert a new value.
     pub fn insert(&mut self, key: impl Row) -> Option<()> {
+        debug_assert!(!key.is_null_at(0));
         self.inner.insert(DefaultOrdered(key.into_owned_row()), ())
     }
 
     /// Delete a value
     pub fn delete(&mut self, key: &impl Row) -> Option<()> {
+        debug_assert!(!key.is_null_at(0));
         self.inner.delete(&DefaultOrdered(key.into_owned_row()))
     }
 
@@ -165,21 +183,50 @@ mod tests {
     use super::*;
     use crate::common::cache::StateCacheFiller;
 
-    // TODO: Test out of sync -> sync
+     /// With capacity 3, test the following sequence of inserts:
+    /// Insert
+    /// [SYNC] an empty table first.
+    /// [1000] should insert, cache is empty.
+    /// [999] should insert, smaller than 1000, should be lowest value.
+    /// [2000] should NOT insert.
+    /// It is larger than 1000, and we don't know the state table size,
+     /// for instance if state table just recovered, and does not have row count meta data.
+     /// This means there could be a row like [1001] in the state table.
+    /// [900, ...], should insert.
+    #[test]
+    fn test_state_table_watermark_cache_inserts() {
+
+    }
+
+    #[test]
+    fn test_state_table_watermark_cache_deletes() {
+
+    }
+
+    #[test]
+    fn test_state_table_watermark_cache_delete_non_existent_value() {
+         let mut cache = StateTableWatermarkCache::new(3);
+        assert_eq!(cache.capacity(), 3);
+        let filler = cache.begin_syncing();
+        filler.finish();
+        let v1 = [
+            Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+            Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
+        ];
+        let old_val = cache.delete(&v1);
+        assert!(old_val.is_none());
+    }
+
     /// With capacity 3, test the following sequence of inserts:
     /// Insert
     /// [1000, ...], should insert, cache is empty.
     /// [999, ...], should insert, smaller than 1000, should be lowest value.
-    ///
-    /// NOTE: Expected if we don't know Row Count of state table.
     /// [2000, ...], should insert, although larger than largest val (1000), cache rows still match
     /// state table rows. [3000, ...], should be ignored
     /// [900, ...], should evict 2000
-    /// FIXME: Should not use the row count optimization first
-    /// So we should init w/o state table row count.
     #[test]
-    fn test_state_table_watermark_cache_inserts() {
-        let mut cache = StateTableWatermarkCache::new(3);
+    fn test_state_table_watermark_cache_with_row_count_inserts() {
+        let mut cache = StateTableWatermarkCache::new_with_row_count(3, 0);
         assert_eq!(cache.capacity(), 3);
         let filler = cache.begin_syncing();
         filler.finish();
@@ -270,9 +317,9 @@ mod tests {
     /// Cache should be out of sync, should reject the insert.
     /// Cache len = 0.
     #[test]
-    fn test_state_table_watermark_cache_deletes() {
+    fn test_state_table_watermark_cache_with_row_count_deletes() {
         // Initial INSERTs
-        let mut cache = StateTableWatermarkCache::new(3);
+        let mut cache = StateTableWatermarkCache::new_with_row_count(3, 0);
         assert_eq!(cache.capacity(), 3);
         let filler = cache.begin_syncing();
         filler.finish();
