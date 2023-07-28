@@ -6529,6 +6529,7 @@ dependencies = [
  "more-asserts",
  "nix 0.25.1",
  "num-integer",
+ "num_cpus",
  "parking_lot 0.12.1",
  "procfs",
  "prometheus",

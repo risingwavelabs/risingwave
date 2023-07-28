@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
-use std::io;
 
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
@@ -178,12 +177,6 @@ impl From<ObjectError> for HummockError {
 impl From<RecvError> for HummockError {
     fn from(error: RecvError) -> Self {
         ObjectError::from(error).into()
-    }
-}
-
-impl From<io::Error> for HummockError {
-    fn from(error: io::Error) -> Self {
-        HummockErrorInner::Other(error.to_string()).into()
     }
 }
 

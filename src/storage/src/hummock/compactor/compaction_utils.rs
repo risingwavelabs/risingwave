@@ -16,9 +16,9 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::thread;
 
 use itertools::Itertools;
+use num_cpus;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -200,10 +200,10 @@ pub async fn generate_splits(
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
-        let cpu_core = thread::available_parallelism()?.get();
+        let worker_num = num_cpus::get();
 
         let parallelism = std::cmp::min(
-            cpu_core as u64,
+            worker_num as u64,
             std::cmp::min(
                 indexes.len() as u64,
                 context.storage_opts.max_sub_compaction as u64,
