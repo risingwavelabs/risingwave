@@ -41,11 +41,11 @@ where
     let result = if retract {
         state
             .checked_sub(&S::from(input))
-            .ok_or(ExprError::NumericOutOfRange)?
+            .ok_or_else(|| ExprError::NumericOutOfRange)?
     } else {
         state
             .checked_add(&S::from(input))
-            .ok_or(ExprError::NumericOutOfRange)?
+            .ok_or_else(|| ExprError::NumericOutOfRange)?
     };
     Ok(Some(result))
 }
