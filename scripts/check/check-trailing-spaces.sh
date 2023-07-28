@@ -3,8 +3,6 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.sh
-
 # Shell colors
 RED='\033[0;31m'
 BLUE='\033[0;34m'
@@ -53,7 +51,7 @@ if [[ $has_trailing_spaces == true ]]; then
     if [[ $fix == false ]]; then
         echo
         echo -e "${RED}${BOLD}Please clean all the trailing spaces.${NONE}"
-        echo -e "${BOLD}You can run 'ci/scripts/check-trailing-spaces.sh --fix' for convenience.${NONE}"
+        echo -e "${BOLD}You can run 'scripts/check-trailing-spaces.sh --fix' for convenience.${NONE}"
         exit 1
     else
         echo
