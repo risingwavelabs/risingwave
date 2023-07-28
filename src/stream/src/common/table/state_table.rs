@@ -813,8 +813,6 @@ where
             .instrument(tracing::info_span!("state_table_commit"))
             .await?;
 
-        // TODO: Clean up cache after watermark state cleaning.
-
         // Refresh watermark cache if it is out of sync.
         if !self.watermark_cache.is_synced() {
             if let Some(ref watermark) = self.state_clean_watermark {
@@ -947,6 +945,12 @@ where
                 }
             }
         }
+
+        // Clear the watermark cache and force a resync.
+        if !delete_ranges.is_empty() {
+            self.watermark_cache.clear();
+        }
+
         self.local_store.flush(delete_ranges).await?;
         self.local_store.seal_current_epoch(next_epoch);
         Ok(())
