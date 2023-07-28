@@ -24,9 +24,9 @@ opentelemetry = { version = "0.19", default-features = false, features = ["rt-to
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
-risingwave_common = { path = "../common" }
-risingwave_rt = { path = "../utils/runtime", optional = true }
-risingwave_storage = { path = "../storage" }
+risingwave_common = { workspace = true }
+risingwave_rt = { workspace = true, optional = true }
+risingwave_storage = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
