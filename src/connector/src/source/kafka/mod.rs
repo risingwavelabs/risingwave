@@ -124,9 +124,6 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub rdkafka_properties: RdKafkaPropertiesConsumer,
-
-    #[serde(flatten)]
-    unknown_fields: HashMap<String, String>,
 }
 
 impl KafkaProperties {
@@ -135,17 +132,6 @@ impl KafkaProperties {
         self.rdkafka_properties.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
-    }
-
-    pub fn reject_unknown_fields(&self) -> anyhow::Result<()> {
-        if self.unknown_fields.is_empty() {
-            Ok(())
-        } else {
-            Err(anyhow!(
-                "got known fields: {:?}",
-                self.unknown_fields.keys()
-            ))
-        }
     }
 }
 
@@ -198,14 +184,12 @@ mod test {
             "properties.queued.max.messages.kbytes".to_string() => "114514".to_string(),
             "properties.fetch.wait.max.ms".to_string() => "114514".to_string(),
             "properties.fetch.max.bytes".to_string() => "114514".to_string(),
-            "aaa".to_string() => "bbb".to_string(),
         };
 
         let props: KafkaProperties =
             serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
 
         assert_eq!(props.scan_startup_mode, Some("earliest".to_string()));
-        assert!(props.reject_unknown_fields().is_err());
         assert_eq!(
             props.common.rdkafka_properties.receive_message_max_bytes,
             Some(54321)

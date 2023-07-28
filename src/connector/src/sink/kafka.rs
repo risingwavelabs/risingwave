@@ -208,9 +208,6 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub rdkafka_properties: RdKafkaPropertiesProducer,
-
-    #[serde(flatten)]
-    unknown_fields: HashMap<String, String>,
 }
 
 impl KafkaConfig {
@@ -238,17 +235,6 @@ impl KafkaConfig {
         self.rdkafka_properties.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
-    }
-
-    pub fn reject_unknown_fields(&self) -> anyhow::Result<()> {
-        if self.unknown_fields.is_empty() {
-            Ok(())
-        } else {
-            Err(anyhow!(
-                "got known fields: {:?}",
-                self.unknown_fields.keys()
-            ))
-        }
     }
 }
 
@@ -541,7 +527,6 @@ impl KafkaTransactionConductor {
     async fn new(mut config: KafkaConfig, identifier: &String) -> Result<Self> {
         let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
-            config.reject_unknown_fields()?;
             config.common.set_security_properties(&mut c);
             config.set_client(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
@@ -682,10 +667,8 @@ mod test {
             "properties.timeout".to_string() => "10s".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
-            "aaa".to_string() => "bbb".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
-        assert!(config.reject_unknown_fields().is_err());
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.r#type, "append-only");
