@@ -70,9 +70,9 @@ rdkafka = { workspace = true, features = [
     "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
-risingwave_common = { path = "../common" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_common = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
