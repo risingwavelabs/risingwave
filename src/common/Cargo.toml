@@ -43,7 +43,7 @@ hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
 hytra = { workspace = true }
-itertools = "0.10"
+itertools = "0.11"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
