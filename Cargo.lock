@@ -6486,6 +6486,7 @@ dependencies = [
  "serde_json",
  "sqllogictest",
  "tempfile",
+ "tikv-jemallocator",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",

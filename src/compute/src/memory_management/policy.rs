@@ -100,6 +100,9 @@ impl JemallocMemoryControl {
     }
 
     fn dump_heap_prof(&self, cur_used_memory_bytes: usize, prev_used_memory_bytes: usize) {
+        if !self.auto_dump_heap_profile_config.enabled() {
+            return;
+        }
         if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
             && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
         {
