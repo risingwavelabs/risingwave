@@ -12,7 +12,7 @@ In this doc, we will take HashAgg with extreme state (`max`, `min`) or value sta
 ## Value State (Sum, Count)
 Query example:
 ```sql
-select sum(v2), count(v3) from t group by v1 
+select sum(v2), count(v3) from t group by v1
 ```
 
 This query will need to initiate 2 Relational Tables. The schema is `table_id/group_key`.
@@ -20,12 +20,12 @@ This query will need to initiate 2 Relational Tables. The schema is `table_id/gr
 ## Extreme State (Max, Min)
 Query example:
 ```sql
-select max(v2), min(v3) from t group by v1 
+select max(v2), min(v3) from t group by v1
 ```
 
-This query will need to initiate 2 Relational Tables. If the upstream is not append-only, the schema becomes `table_id/group_key/sort_key/upstream_pk`. 
+This query will need to initiate 2 Relational Tables. If the upstream is not append-only, the schema becomes `table_id/group_key/sort_key/upstream_pk`.
 
-The order of `sort_key` depends on the agg call kind. For example, if it's `max()`, `sort_key` will order with `Ascending`. if it's `min()`, `sort_key` will order with `Descending`. 
+The order of `sort_key` depends on the agg call kind. For example, if it's `max()`, `sort_key` will order with `Ascending`. if it's `min()`, `sort_key` will order with `Descending`.
 The `upstream_pk` is also appended to ensure the uniqueness of the key.
 This design allows the streaming executor not to read all the data from the storage when the cache fails, but only a part of it. The streaming executor will try to write all streaming data to storage, because there may be `update` or `delete` operations in the stream, it's impossible to always guarantee correct results without storing all data.
 

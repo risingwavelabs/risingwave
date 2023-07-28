@@ -19,7 +19,7 @@ with DAG(
 
     spark_sql_remove_files = SparkSubmitOperator(
         application=PYSPARK_APPLICATION_PATH,
-        task_id="spark_sql_remove_files", 
-        packages=SPARK_PACKAGES,  
+        task_id="spark_sql_remove_files",
+        packages=SPARK_PACKAGES,
         conn_id = "spark_local",
     )

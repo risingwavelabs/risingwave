@@ -83,7 +83,7 @@ services:
   citus-prepare:
     container_name: citus_prepare
     image: "citusdata/citus:10.2.5"
-    depends_on: 
+    depends_on:
       - citus-master
       - citus-manager
       - citus-worker-1

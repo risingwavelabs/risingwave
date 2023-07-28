@@ -348,8 +348,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let data_directory = system_params_reader.data_directory();
     if !is_correct_data_directory(data_directory) {
         return Err(MetaError::system_param(format!(
-            "The data directory {:?} is misconfigured. 
-            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            "The data directory {:?} is misconfigured.
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9].
             The string cannot start or end with '/', and consecutive '/' are not allowed.
             The data directory cannot be empty and its length should not exceed 800 characters.",
             data_directory
