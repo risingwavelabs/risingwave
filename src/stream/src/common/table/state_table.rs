@@ -853,11 +853,12 @@ where
                     }
                 }
 
+                let mut filler = self.watermark_cache.begin_syncing();
                 for pk in pks {
-                    let mut filler = self.watermark_cache.begin_syncing();
+                    println!("add pk to cache during resync: {:?}", pk);
                     filler.insert_unchecked(DefaultOrdered(pk), ());
-                    filler.finish();
                 }
+                filler.finish();
             }
         }
 

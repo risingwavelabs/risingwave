@@ -453,4 +453,28 @@ mod tests {
         cache.insert(&v1);
         assert_eq!(cache.len(), 0);
     }
+
+    #[test]
+    fn test_watermark_cache_syncing() {
+        let v1 = vec![
+                    Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+                    Some(1000i64.into()),
+                ];
+        let v2 = vec![
+                    Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
+                    Some(1000i64.into()),
+                ];
+        let v3 = vec![
+                    Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+                    Some(1000i64.into()),
+                ];
+        let mut cache = StateTableWatermarkCache::new(3);
+        let mut filler = cache.begin_syncing();
+        filler.insert_unchecked(DefaultOrdered(v1.into_owned_row()), ());
+        filler.insert_unchecked(DefaultOrdered(v2.into_owned_row()), ());
+        filler.insert_unchecked(DefaultOrdered(v3.into_owned_row()), ());
+        filler.finish();
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.lowest_key().unwrap(), v1[0].clone().unwrap().as_scalar_ref_impl());
+    }
 }
