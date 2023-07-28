@@ -24,7 +24,7 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::row_serde::*;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
 use risingwave_storage::row_serde::ColumnMapping;
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::StateStore;
 
 /// This struct represents an external table to be read during backfill
@@ -66,6 +66,39 @@ pub struct ExternalStorageTable {
 }
 
 impl ExternalStorageTable {
+    pub fn new(
+        table_id: TableId,
+        table_name: String,
+        schema_name: String,
+        table_reader: ExternalTableReaderImpl,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        output_indices: Vec<usize>,
+        Distribution {
+            dist_key_in_pk_indices,
+            vnodes,
+        }: Distribution,
+    ) -> Self {
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|i| schema.fields[*i].data_type.clone())
+            .collect();
+        let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
+
+        Self {
+            table_id,
+            table_name,
+            schema_name,
+            table_reader,
+            schema,
+            pk_serializer,
+            pk_indices,
+            output_indices,
+            dist_key_in_pk_indices,
+            vnodes,
+        }
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
