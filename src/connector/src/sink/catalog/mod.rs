@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkType};
 
@@ -145,6 +146,10 @@ pub struct SinkCatalog {
 
     /// Sink may use a privatelink connection to connect to the downstream system.
     pub connection_id: Option<ConnectionId>,
+
+    pub created_at_epoch: Option<Epoch>,
+
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 impl SinkCatalog {
@@ -176,6 +181,8 @@ impl SinkCatalog {
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
             connection_id: self.connection_id.map(|id| id.into()),
+            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
+            created_at_epoch: self.created_at_epoch.map(|e| e.0),
         }
     }
 
@@ -248,6 +255,8 @@ impl From<PbSink> for SinkCatalog {
                 .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
             connection_id: pb.connection_id.map(ConnectionId),
+            created_at_epoch: pb.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
         }
     }
 }

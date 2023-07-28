@@ -174,7 +174,7 @@ impl FrontendEnv {
     }
 
     pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
-        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        let config = load_config(&opts.config_path, &opts);
         info!("Starting frontend node");
         info!("> config: {:?}", config);
         info!(
@@ -458,7 +458,7 @@ pub struct SessionImpl {
     // Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: RwLock<ConfigMap>,
+    config_map: Arc<RwLock<ConfigMap>>,
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
@@ -551,18 +551,16 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
+    pub fn shared_config(&self) -> Arc<RwLock<ConfigMap>> {
+        Arc::clone(&self.config_map)
+    }
+
     pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
         self.config_map.read()
     }
 
     pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        struct Nop;
-
-        impl ConfigReporter for Nop {
-            fn report_status(&mut self, _key: &str, _new_val: String) {}
-        }
-
-        self.config_map.write().set(key, value, Nop)
+        self.config_map.write().set(key, value, ())
     }
 
     pub fn set_config_report(

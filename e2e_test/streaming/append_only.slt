@@ -66,7 +66,7 @@ select * from mv4;
 
 ## Group TopN
 statement ok
-create materialized view mv4_1 as 
+create materialized view mv4_1 as
 select v1, v3 from (
     select *, ROW_NUMBER() OVER (PARTITION BY v3 ORDER BY v1) as rank from t4
 )

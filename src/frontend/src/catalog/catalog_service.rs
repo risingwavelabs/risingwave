@@ -108,21 +108,26 @@ pub trait CatalogWriter: Send + Sync {
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()>;
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()>;
 
-    async fn drop_view(&self, view_id: u32) -> Result<()>;
+    async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_source(&self, source_id: u32) -> Result<()>;
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()>;
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()>;
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()>;
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()>;
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 
@@ -264,33 +269,44 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
-        let version = self.meta_client.drop_table(source_id, table_id).await?;
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_table(source_id, table_id, cascade)
+            .await?;
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let version = self.meta_client.drop_materialized_view(table_id).await?;
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_materialized_view(table_id, cascade)
+            .await?;
         self.wait_version(version).await
     }
 
-    async fn drop_view(&self, view_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_view(view_id).await?;
+    async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_view(view_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_source(&self, source_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_source(source_id).await?;
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_source(source_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_sink(sink_id).await?;
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_sink(sink_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
-        let version = self.meta_client.drop_index(index_id).await?;
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_index(index_id, cascade).await?;
         self.wait_version(version).await
     }
 

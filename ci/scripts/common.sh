@@ -40,7 +40,7 @@ export -f download-and-decompress-artifact
 # Arguments:
 #   $1: cargo build `profile` of the binaries
 #   $2: risedev-components `env` to use
-# 
+#
 # Download risingwave and risedev-dev, and put them in target/debug
 function download_and_prepare_rw() {
   echo "--- Download RisingWave binaries and prepare environment"

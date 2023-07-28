@@ -20,8 +20,9 @@ use parse_display::Display;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use super::iter_util::ZipEqDebug;
-use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
+use crate::dispatch_array_variants;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::estimate_size::EstimateSize;
@@ -448,15 +449,24 @@ pub fn compare_rows_in_chunk(
     for column_order in column_orders.iter() {
         let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
         let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
-        macro_rules! gen_match {
-            ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, column_order.order_type)),)*
-                    (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
-                }?
-            }
-        }
-        let res = for_all_variants! { gen_match };
+
+        let res = dispatch_array_variants!(&**lhs_array, lhs_inner, {
+            let rhs_inner = (&**rhs_array).try_into().map_err(|_| {
+                InternalError(format!(
+                    "Unmatched array types, lhs array is: {}, rhs array is: {}",
+                    lhs_array.get_ident(),
+                    rhs_array.get_ident(),
+                ))
+            })?;
+            compare_values_in_array(
+                lhs_inner,
+                lhs_idx,
+                rhs_inner,
+                rhs_idx,
+                column_order.order_type,
+            )
+        });
+
         if res != Ordering::Equal {
             return Ok(res);
         }

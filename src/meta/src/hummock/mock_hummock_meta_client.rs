@@ -181,6 +181,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _compaction_group_id: u64,
         _table_id: u32,
         _level: u32,
+        _sst_ids: Vec<u64>,
     ) -> Result<()> {
         todo!()
     }

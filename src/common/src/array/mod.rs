@@ -68,6 +68,7 @@ pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::types::*;
+use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -319,56 +320,6 @@ impl<A: Array> CompactableArray for A {
     }
 }
 
-/// `for_all_variants` includes all variants of our array types. If you added a new array
-/// type inside the project, be sure to add a variant here.
-///
-/// It is used to simplify the boilerplate code of repeating all array types, while each type
-/// has exactly the same code.
-///
-/// To use it, you need to provide a macro, whose input is `{ enum variant name, function suffix
-/// name, array type, builder type }` tuples. Refer to the following implementations as examples.
-#[macro_export]
-macro_rules! for_all_variants {
-    ($macro:ident $(, $x:tt)*) => {
-        $macro! {
-            $($x, )*
-            { Int16, int16, I16Array, I16ArrayBuilder },
-            { Int32, int32, I32Array, I32ArrayBuilder },
-            { Int64, int64, I64Array, I64ArrayBuilder },
-            { Int256, int256, Int256Array, Int256ArrayBuilder },
-            { Float32, float32, F32Array, F32ArrayBuilder },
-            { Float64, float64, F64Array, F64ArrayBuilder },
-            { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
-            { Bool, bool, BoolArray, BoolArrayBuilder },
-            { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
-            { Interval, interval, IntervalArray, IntervalArrayBuilder },
-            { Date, date, DateArray, DateArrayBuilder },
-            { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
-            { Timestamptz, timestamptz, TimestamptzArray, TimestamptzArrayBuilder },
-            { Time, time, TimeArray, TimeArrayBuilder },
-            { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
-            { Serial, serial, SerialArray, SerialArrayBuilder },
-            { Struct, struct, StructArray, StructArrayBuilder },
-            { List, list, ListArray, ListArrayBuilder },
-            { Bytea, bytea, BytesArray, BytesArrayBuilder}
-        }
-    };
-}
-
-macro_rules! do_dispatch {
-    ($impl:expr, $type:ident, $inner:ident, $body:tt, $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $impl {
-            $( $type::$variant_name($inner) => $body, )*
-        }
-    };
-}
-
-macro_rules! dispatch_all_variants {
-    ($impl:expr, $type:ident, $scalar:ident, $body:tt) => {{
-        for_all_variants! { do_dispatch, $impl, $type, $scalar, $body }
-    }};
-}
-
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {
     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -380,7 +331,7 @@ macro_rules! array_impl_enum {
     };
 }
 
-for_all_variants! { array_impl_enum }
+for_all_array_variants! { array_impl_enum }
 
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
@@ -484,7 +435,7 @@ macro_rules! impl_convert {
     };
 }
 
-for_all_variants! { impl_convert }
+for_all_array_variants! { impl_convert }
 
 /// Define `ArrayImplBuilder` with macro.
 macro_rules! array_builder_impl_enum {
@@ -497,228 +448,174 @@ macro_rules! array_builder_impl_enum {
     };
 }
 
-for_all_variants! { array_builder_impl_enum }
+for_all_array_variants! { array_builder_impl_enum }
 
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
-macro_rules! impl_array_builder {
-    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        impl ArrayBuilderImpl {
-            pub fn with_type(capacity: usize, ty: DataType) -> Self {
-                ty.create_array_builder(capacity)
-            }
+impl ArrayBuilderImpl {
+    pub fn with_type(capacity: usize, ty: DataType) -> Self {
+        ty.create_array_builder(capacity)
+    }
 
-            pub fn append_array(&mut self, other: &ArrayImpl) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
-                }
-            }
+    pub fn append_array(&mut self, other: &ArrayImpl) {
+        dispatch_array_builder_variants!(self, inner, { inner.append_array(other.into()) })
+    }
 
-            pub fn append_null(&mut self) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.append(None), )*
-                }
-            }
+    pub fn append_null(&mut self) {
+        dispatch_array_builder_variants!(self, inner, { inner.append(None) })
+    }
 
-            /// Append a [`Datum`] or [`DatumRef`] multiple times,
-            /// panicking if the datum's type does not match the array builder's type.
-            pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
-                match datum.to_datum_ref() {
-                    None => match self {
-                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
-                    }
-                    Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
-                        (this_builder, this_scalar_ref) => panic!(
-                            "Failed to append datum, array builder type: {}, scalar type: {}",
-                            this_builder.get_ident(),
-                            this_scalar_ref.get_ident()
-                        ),
-                    },
-                }
-            }
+    /// Append a [`Datum`] or [`DatumRef`] multiple times,
+    /// panicking if the datum's type does not match the array builder's type.
+    pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
+        match datum.to_datum_ref() {
+            None => dispatch_array_builder_variants!(self, inner, { inner.append_n(n, None) }),
 
-            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append(&mut self, datum: impl ToDatumRef) {
-                self.append_n(1, datum);
-            }
-
-            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
-                };
-            }
-
-            pub fn pop(&mut self) -> Option<()> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.pop(), )*
-                }
-            }
-
-            pub fn finish(self) -> ArrayImpl {
-                match self {
-                    $( Self::$variant_name(inner) => inner.finish().into(), )*
-                }
-            }
-
-            pub fn get_ident(&self) -> &'static str {
-                match self {
-                    $( Self::$variant_name(_) => stringify!($variant_name), )*
-                }
-            }
-
-            pub fn len(&self) -> usize {
-                match self {
-                    $( Self::$variant_name(inner) => inner.len(), )*
-                }
-            }
-
-            pub fn is_empty(&self) -> bool {
-                self.len() == 0
+            Some(scalar_ref) => {
+                dispatch_array_builder_variants!(self, inner, [I = VARIANT_NAME], {
+                    inner.append_n(
+                        n,
+                        Some(scalar_ref.try_into().unwrap_or_else(|_| {
+                            panic!(
+                                "type mismatch, array builder type: {}, scalar type: {}",
+                                I,
+                                scalar_ref.get_ident()
+                            )
+                        })),
+                    )
+                })
             }
         }
     }
-}
 
-for_all_variants! { impl_array_builder }
+    /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+    pub fn append(&mut self, datum: impl ToDatumRef) {
+        self.append_n(1, datum);
+    }
 
-/// Implements all `Array` functions with `for_all_variant`.
-macro_rules! impl_array {
-    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        impl ArrayImpl {
-            /// Number of items in array.
-            pub fn len(&self) -> usize {
-                match self {
-                    $( Self::$variant_name(inner) => inner.len(), )*
-                }
-            }
+    pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
+        dispatch_array_builder_variants!(self, inner, {
+            inner.append_array_element(other.into(), idx)
+        })
+    }
 
-            pub fn is_empty(&self) -> bool {
-                self.len() == 0
-            }
+    pub fn pop(&mut self) -> Option<()> {
+        dispatch_array_builder_variants!(self, inner, { inner.pop() })
+    }
 
-            /// Get the null `Bitmap` of the array.
-            pub fn null_bitmap(&self) -> &Bitmap {
-                match self {
-                    $( Self::$variant_name(inner) => inner.null_bitmap(), )*
-                }
-            }
+    pub fn finish(self) -> ArrayImpl {
+        dispatch_array_builder_variants!(self, inner, { inner.finish().into() })
+    }
 
-            pub fn into_null_bitmap(self) -> Bitmap {
-                match self {
-                    $( Self::$variant_name(inner) => inner.into_null_bitmap(), )*
-                }
-            }
+    pub fn get_ident(&self) -> &'static str {
+        dispatch_array_builder_variants!(self, [I = VARIANT_NAME], { I })
+    }
 
-            pub fn to_protobuf(&self) -> PbArray {
-                match self {
-                    $( Self::$variant_name(inner) => inner.to_protobuf(), )*
-                }
-            }
+    pub fn len(&self) -> usize {
+        dispatch_array_builder_variants!(self, inner, { inner.len() })
+    }
 
-            pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.hash_at(idx, state), )*
-                }
-            }
-
-            pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
-                }
-            }
-
-            /// Select some elements from `Array` based on `visibility` bitmap.
-            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-                match self {
-                    $( Self::$variant_name(inner) => inner.compact(visibility, cardinality).into(), )*
-                }
-            }
-
-            pub fn get_ident(&self) -> &'static str {
-                match self {
-                    $( Self::$variant_name(_) => stringify!($variant_name), )*
-                }
-            }
-
-            /// Get the enum-wrapped `Datum` out of the `Array`.
-            pub fn datum_at(&self, idx: usize) -> Datum {
-                match self {
-                    $( Self::$variant_name(inner) => inner
-                        .value_at(idx)
-                        .map(|item| item.to_owned_scalar().to_scalar_value()), )*
-                }
-            }
-
-            /// If the array only have one single element, convert it to `Datum`.
-            pub fn to_datum(&self) -> Datum {
-                assert_eq!(self.len(), 1);
-                self.datum_at(0)
-            }
-
-            /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
-            pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
-                }
-            }
-
-            /// # Safety
-            ///
-            /// This function is unsafe because it does not check the validity of `idx`. It is caller's
-            /// responsibility to ensure the validity of `idx`.
-            ///
-            /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
-            pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.value_at_unchecked(idx).map(ScalarRefImpl::$variant_name), )*
-                }
-            }
-
-            pub fn set_bitmap(&mut self, bitmap: Bitmap) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.set_bitmap(bitmap), )*
-                }
-            }
-
-            pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-                match self {
-                    $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
-                }
-            }
-
-            /// Returns the `DataType` of this array.
-            pub fn data_type(&self) -> DataType {
-                match self {
-                    $( Self::$variant_name(inner) => inner.data_type(), )*
-                }
-            }
-
-            pub fn into_ref(self) -> ArrayRef {
-                Arc::new(self)
-            }
-        }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
-
-for_all_variants! { impl_array }
-
-macro_rules! impl_array_estimate_size {
-    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        impl EstimateSize for ArrayImpl {
-            fn estimated_heap_size(&self) -> usize {
-                match self {
-                    $( Self::$variant_name(inner) => inner.estimated_heap_size(), )*
-                }
-            }
-        }
-    }
-}
-
-for_all_variants! { impl_array_estimate_size }
 
 impl ArrayImpl {
+    /// Number of items in array.
+    pub fn len(&self) -> usize {
+        dispatch_array_variants!(self, inner, { inner.len() })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get the null `Bitmap` of the array.
+    pub fn null_bitmap(&self) -> &Bitmap {
+        dispatch_array_variants!(self, inner, { inner.null_bitmap() })
+    }
+
+    pub fn into_null_bitmap(self) -> Bitmap {
+        dispatch_array_variants!(self, inner, { inner.into_null_bitmap() })
+    }
+
+    pub fn to_protobuf(&self) -> PbArray {
+        dispatch_array_variants!(self, inner, { inner.to_protobuf() })
+    }
+
+    pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        dispatch_array_variants!(self, inner, { inner.hash_at(idx, state) })
+    }
+
+    pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
+        dispatch_array_variants!(self, inner, { inner.hash_vec(hashers) })
+    }
+
+    /// Select some elements from `Array` based on `visibility` bitmap.
+    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+        dispatch_array_variants!(self, inner, {
+            inner.compact(visibility, cardinality).into()
+        })
+    }
+
+    pub fn get_ident(&self) -> &'static str {
+        dispatch_array_variants!(self, [I = VARIANT_NAME], { I })
+    }
+
+    /// Get the enum-wrapped `Datum` out of the `Array`.
+    pub fn datum_at(&self, idx: usize) -> Datum {
+        self.value_at(idx).to_owned_datum()
+    }
+
+    /// If the array only have one single element, convert it to `Datum`.
+    pub fn to_datum(&self) -> Datum {
+        assert_eq!(self.len(), 1);
+        self.datum_at(0)
+    }
+
+    /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
+    pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
+        dispatch_array_variants!(self, inner, {
+            inner.value_at(idx).map(ScalarRefImpl::from)
+        })
+    }
+
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not check the validity of `idx`. It is caller's
+    /// responsibility to ensure the validity of `idx`.
+    ///
+    /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
+    pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
+        dispatch_array_variants!(self, inner, {
+            inner.value_at_unchecked(idx).map(ScalarRefImpl::from)
+        })
+    }
+
+    pub fn set_bitmap(&mut self, bitmap: Bitmap) {
+        dispatch_array_variants!(self, inner, { inner.set_bitmap(bitmap) })
+    }
+
+    pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
+        dispatch_array_variants!(self, inner, { inner.create_builder(capacity).into() })
+    }
+
+    /// Returns the `DataType` of this array.
+    pub fn data_type(&self) -> DataType {
+        dispatch_array_variants!(self, inner, { inner.data_type() })
+    }
+
+    pub fn into_ref(self) -> ArrayRef {
+        Arc::new(self)
+    }
+
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
+    }
+}
+
+impl EstimateSize for ArrayImpl {
+    fn estimated_heap_size(&self) -> usize {
+        dispatch_array_variants!(self, inner, { inner.estimated_heap_size() })
     }
 }
 

@@ -14,49 +14,84 @@
 
 use bae::FromAttributes;
 use proc_macro2::TokenStream;
-use proc_macro_error::ResultExt;
+use proc_macro_error::{abort, ResultExt};
 use quote::quote;
 use syn::DeriveInput;
 
 #[derive(FromAttributes)]
 pub struct OverrideOpts {
-    pub path: Option<syn::Expr>,
-    pub optional_in_config: Option<()>,
+    /// The path to the field to override.
+    pub path: syn::Expr,
+
+    /// Whether to override the field only if it is absent in the config.
+    ///
+    /// This requires the field to be an `Option`.
+    pub if_absent: Option<()>,
+}
+
+// TODO(bugen): the implementation is not robust but it works for now.
+fn type_is_option(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
+        if let Some(segment) = path.segments.last() {
+            if segment.ident == "Option" {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg_attr(coverage, no_coverage)]
 pub fn produce_override_config(input: DeriveInput) -> TokenStream {
-    let struct_ident = input.ident;
+    let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data else {
+        abort!(input, "Only struct is supported");
+    };
+
     let mut override_stmts = Vec::new();
 
-    if let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data {
-        for field in fields {
-            let override_opts = OverrideOpts::from_attributes(&field.attrs)
-                .expect_or_abort("Failed to parse `override_opts` attribute");
-            let path = override_opts.path.expect("`path` must exist");
-            let field_ident = field.ident;
+    for field in fields {
+        let field_type_is_option = type_is_option(&field.ty);
+        let field_ident = field.ident;
 
-            let override_stmt = if override_opts.optional_in_config.is_some() {
+        // Allow multiple `override_opts` attributes on a field.
+        for attr in &field.attrs {
+            let attributes = OverrideOpts::try_from_attributes(std::slice::from_ref(attr))
+                .expect_or_abort("Failed to parse attribute");
+            let Some(OverrideOpts { path, if_absent }) = attributes else {
+                // Ignore attributes that are not `override_opts`.
+                continue;
+            };
+
+            // Use `into` to support `Option` target fields.
+            let mut override_stmt = if field_type_is_option {
                 quote! {
-                    if self.#field_ident.is_some() {
-                        config.#path = self.#field_ident;
+                    if let Some(v) = self.#field_ident.clone() {
+                        config.#path = v.into();
                     }
                 }
             } else {
                 quote! {
-                    if let Some(v) = self.#field_ident {
-                        config.#path = v;
-                    }
+                    config.#path = self.#field_ident.clone().into();
                 }
             };
+
+            if if_absent.is_some() {
+                override_stmt = quote! {
+                    if config.#path.is_none() {
+                        #override_stmt
+                    }
+                }
+            }
 
             override_stmts.push(override_stmt);
         }
     }
 
+    let struct_ident = input.ident;
+
     quote! {
-        impl risingwave_common::config::OverrideConfig for #struct_ident {
-            fn r#override(self, config: &mut risingwave_common::config::RwConfig) {
+        impl ::risingwave_common::config::OverrideConfig for #struct_ident {
+            fn r#override(&self, config: &mut ::risingwave_common::config::RwConfig) {
                 #(#override_stmts)*
             }
         }
