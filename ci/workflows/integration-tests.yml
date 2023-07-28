@@ -24,6 +24,7 @@ steps:
           - "postgres-sink"
           - "iceberg-sink"
           - "debezium-mysql"
+          - "kinesis-s3-source"
         format:
           - "json"
           - "protobuf"
@@ -74,6 +75,10 @@ steps:
           skip: true
         - with:
             testcase: "debezium-mysql"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "kinesis-s3-source"
             format: "protobuf"
           skip: true
 
