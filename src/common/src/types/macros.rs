@@ -161,7 +161,7 @@ macro_rules! do_dispatch_variants {
 /// ```ignore
 /// fn do_stuff<A: Array>(array: &A) { .. }
 ///
-/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+/// fn do_stuff_dispatch(array_impl: &ArrayImpl) {
 ///     dispatch_array_variants!(array_impl, array, {
 ///         do_stuff(array)
 ///     })
@@ -173,7 +173,7 @@ macro_rules! do_dispatch_variants {
 /// ```ignore
 /// fn do_stuff<A: Array>() { .. }
 ///
-/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+/// fn do_stuff_dispatch(array_impl: &ArrayImpl) {
 ///     dispatch_array_variants!(array_impl, [A = Array], {
 ///         do_stuff::<A>()
 ///     })
@@ -186,7 +186,7 @@ macro_rules! do_dispatch_variants {
 /// the order of the bindings matters.
 ///
 /// ```ignore
-/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+/// fn do_stuff_dispatch(array_impl: &ArrayImpl) {
 ///     dispatch_array_variants!(
 ///         array_impl,
 ///         [A = Array, B = ArrayBuilder, S = Scalar, R = ScalarRef, N = VARIANT_NAME],
@@ -200,7 +200,7 @@ macro_rules! do_dispatch_variants {
 /// ```ignore
 /// fn do_stuff<A: Array>(array: &A) { .. }
 ///
-/// fn do_stuff_impl(array_impl: &ArrayImpl) {
+/// fn do_stuff_dispatch(array_impl: &ArrayImpl) {
 ///     dispatch_array_variants!(array_impl, array, [A = Array], {
 ///         do_stuff::<A>(array)
 ///     })
