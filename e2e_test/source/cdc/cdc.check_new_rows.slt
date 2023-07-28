@@ -14,10 +14,15 @@ select cnt from shipments_cnt;
 ----
 4
 
-query I
-select cnt from person_cnt;
+query ITTTT
+select * from person_rw;
 ----
-5
+1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
+1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
+1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
+1003 张三 kedmrpz@xiauh.com 5536 1959 5460 2096 北京
+1004 李四 egpemle@lrhcg.com 0052 8113 1582 4430 上海
+
 
 query III
 select order_id, product_id, shipment_id from enriched_orders order by order_id;
