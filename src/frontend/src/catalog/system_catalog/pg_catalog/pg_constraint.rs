@@ -15,11 +15,9 @@
 use std::sync::LazyLock;
 
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
 pub static PG_CONSTRAINT_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
     LazyLock::new(|| {
@@ -54,17 +52,9 @@ pub static PG_CONSTRAINT_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
 /// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]
 /// This is introduced only for pg compatibility and is not used in our system.
-pub static PG_CONSTRAINT: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+pub static PG_CONSTRAINT: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     name: "pg_constraint",
     schema: PG_CATALOG_SCHEMA_NAME,
     columns: &PG_CONSTRAINT_COLUMNS,
-    pk: &[0],
+    sql: infer_dummy_view_sql(&PG_CONSTRAINT_COLUMNS),
 });
-
-pub static PG_CONSTRAINT_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
-
-impl SysCatalogReaderImpl {
-    pub fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
-        Ok(PG_CONSTRAINT_DATA_ROWS.clone())
-    }
-}
