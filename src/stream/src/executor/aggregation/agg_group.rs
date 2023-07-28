@@ -259,7 +259,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     }
 
     /// Get current row count of this group.
-    fn curr_row_count(&self) -> StreamExecutorResult<usize> {
+    fn curr_row_count(&self) -> usize {
         let row_count_state = must_match!(
             self.states[self.row_count_index],
             AggState::Value(ref state) => state
@@ -268,9 +268,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             .get_output()
             .expect("row count should never output NULL")
             .into_int64();
-        Ok(row_count
-            .try_into()
-            .map_err(|_| anyhow!("row count should be non-negative, but got {}", row_count))?)
+        if row_count < 0 {
+            tracing::error!(group = ?self.group_key_row(), "bad row count");
+            panic!("row count should be non-negative")
+        }
+        row_count.try_into().unwrap()
     }
 
     pub(crate) fn is_uninitialized(&self) -> bool {
@@ -287,8 +289,8 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         visibilities: Vec<Option<Bitmap>>,
         materialized: &Bitmap,
     ) -> StreamExecutorResult<()> {
-        if self.curr_row_count()? == 0 {
-            tracing::debug!(group = ?self.group_key_row(), "first time see this group");
+        if self.curr_row_count() == 0 {
+            tracing::trace!(group = ?self.group_key_row(), "first time see this group");
         }
 
         for (((state, storage), visibility), materialized) in self
@@ -301,20 +303,8 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             state.apply_chunk(ops, visibility.as_ref(), columns, storage, materialized)?;
         }
 
-        // check row count to prevent from bad things happening
-        if let Err(err) = self.curr_row_count() {
-            let chunk = StreamChunk::new(
-                ops.to_vec(),
-                columns.to_vec(),
-                visibilities[self.row_count_index].clone(),
-            );
-            tracing::error!(
-                group = ?self.group_key_row(),
-                chunk = chunk.to_pretty_string(),
-                err = ?err,
-                "bad row count"
-            );
-            return Err(err);
+        if self.curr_row_count() == 0 {
+            tracing::trace!(group = ?self.group_key_row(), "last time see this group");
         }
 
         Ok(())
@@ -354,7 +344,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         &mut self,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<(usize, OwnedRow)> {
-        let row_count = self.curr_row_count()?;
+        let row_count = self.curr_row_count();
         if row_count == 0 {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
