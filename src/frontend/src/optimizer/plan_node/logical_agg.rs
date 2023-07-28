@@ -335,6 +335,15 @@ impl LogicalAggBuilder {
                     .collect_vec();
                 gen_group_key_and_grouping_sets(grouping_sets)?
             }
+            GroupBy::Cube(cube) => {
+                // Convert cube to grouping sets.
+                let grouping_sets = cube
+                    .into_iter()
+                    .powerset()
+                    .map(|x| x.into_iter().flatten().collect_vec())
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
+            }
         };
 
         Ok(LogicalAggBuilder {
