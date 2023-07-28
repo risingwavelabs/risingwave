@@ -22,7 +22,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{ScalarRefImpl, Serial};
+use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::ConnectorClient;
 use serde::ser::{SerializeSeq, SerializeStruct};
@@ -35,7 +35,6 @@ use crate::common::ClickHouseCommon;
 use crate::sink::{
     Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::source::DataType;
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 const BUFFER_SIZE: usize = 1024;
@@ -91,22 +90,23 @@ impl ClickHouseSink {
 
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
-        let fields = self.schema.fields().clone();
+        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?;
         assert_eq!(
-            fields.len(),
+            ck_fields_name.len(),
             clickhouse_column.len(),
             "Schema len not match"
         );
-        fields
+
+        ck_fields_name
             .iter()
             .zip_eq_fast(clickhouse_column)
             .try_for_each(|(key, value)| {
                 assert_eq!(
-                    key.name, value.name,
+                    key.0, value.name,
                     "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
-                    key.name, value.name
+                    key.0, value.name
                 );
-                Self::check_and_correct_column_type(&key.data_type, &value)
+                Self::check_and_correct_column_type(&key.1, &value)
             })?;
         Ok(())
     }
@@ -144,7 +144,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Interval => Err(SinkError::ClickHouse(
                 "clickhouse can not support Interval".to_string(),
             )),
-            risingwave_common::types::DataType::Struct(_) => todo!(),
+            risingwave_common::types::DataType::Struct(_) => Err(SinkError::ClickHouse(
+                "struct needs to be converted into a list".to_string(),
+            )),
             risingwave_common::types::DataType::List(list) => {
                 Self::check_and_correct_column_type(list.as_ref(), ck_column)?;
                 Ok(ck_column.r#type.contains("Array"))
@@ -284,10 +286,13 @@ impl ClickHouseSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let fields_name = self.schema.names();
+        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?
+            .iter()
+            .map(|(a, _)| a.clone())
+            .collect_vec();
         let mut insert = self.client.insert_with_fields_name::<ClickHouseColumn>(
             &self.config.common.table,
-            Some(fields_name),
+            Some(ck_fields_name),
         )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
@@ -295,11 +300,10 @@ impl ClickHouseSinkWriter {
             }
             let mut clickhouse_filed_vec = vec![];
             for (index, data) in row.iter().enumerate() {
-                let clickhouse_schema_feature = self.column_correct_vec.get(index).unwrap();
-
-                clickhouse_filed_vec.push(ClickHouseFieldWithNull::from_scalar_ref(
+                clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
                     data,
-                    clickhouse_schema_feature,
+                    &self.column_correct_vec,
+                    index,
                     true,
                 )?);
             }
@@ -313,33 +317,36 @@ impl ClickHouseSinkWriter {
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        // Get field names from schema.
-        let fields_name = self.schema.names();
-        let pk_index = *self.pk_indices.first().unwrap();
-        let pk_name_0 = fields_name.get(pk_index).unwrap();
-
-        // Get the names of the columns excluding pk, and use them to update.
-        let fields_name_update = fields_name
+        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?
             .iter()
-            .enumerate()
-            .filter(|(index, _)| !self.pk_indices.contains(index))
-            .map(|(_, value)| value.clone())
+            .map(|(a, _)| a.clone())
             .collect_vec();
+        let pk_names = self
+            .schema
+            .names()
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter(|(index, _)| self.pk_indices.contains(index))
+            .map(|(_, b)| b)
+            .collect_vec();
+
+        let pk_index_0 = self.pk_indices.first().unwrap();
+        let pk_name_0 = pk_names.first().unwrap();
+
         for (index, (op, row)) in chunk.rows().enumerate() {
-            let clickhouse_schema_feature = self.column_correct_vec.get(index).unwrap();
             match op {
                 Op::Insert => {
                     let mut insert = self.client.insert_with_fields_name::<ClickHouseColumn>(
                         &self.config.common.table,
-                        Some(fields_name.clone()),
+                        Some(ck_fields_name.clone()),
                     )?;
                     let mut clickhouse_filed_vec = vec![];
                     for (index, data) in row.iter().enumerate() {
-                        let clickhouse_schema_feature = self.column_correct_vec.get(index).unwrap();
-
-                        clickhouse_filed_vec.push(ClickHouseFieldWithNull::from_scalar_ref(
+                        clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
                             data,
-                            clickhouse_schema_feature,
+                            &self.column_correct_vec,
+                            index,
                             true,
                         )?);
                     }
@@ -352,10 +359,13 @@ impl ClickHouseSinkWriter {
                 Op::Delete => {
                     if let ClickHouseFieldWithNull::WithoutSome(v) =
                         ClickHouseFieldWithNull::from_scalar_ref(
-                            row.datum_at(pk_index),
-                            clickhouse_schema_feature,
+                            row.datum_at(*pk_index_0),
+                            &self.column_correct_vec,
+                            index,
                             false,
                         )?
+                        .get(0)
+                        .unwrap()
                     {
                         self.client
                             .delete(&self.config.common.table, pk_name_0, 1)
@@ -367,29 +377,47 @@ impl ClickHouseSinkWriter {
                 }
                 Op::UpdateDelete => continue,
                 Op::UpdateInsert => {
-                    let pk = ClickHouseFieldWithNull::from_scalar_ref(
-                        row.datum_at(pk_index),
-                        clickhouse_schema_feature,
-                        false,
-                    )?;
-                    let mut clickhouse_filed_vec = vec![];
-                    for (index, data) in row.iter().enumerate() {
-                        if !self.pk_indices.contains(&index) {
-                            let clickhouse_schema_feature =
-                                self.column_correct_vec.get(index).unwrap();
-                            clickhouse_filed_vec.push(ClickHouseFieldWithNull::from_scalar_ref(
-                                data,
-                                clickhouse_schema_feature,
-                                false,
-                            )?);
+                    if let ClickHouseFieldWithNull::WithoutSome(pk) =
+                        ClickHouseFieldWithNull::from_scalar_ref(
+                            row.datum_at(*pk_index_0),
+                            &self.column_correct_vec,
+                            index,
+                            false,
+                        )?
+                        .get(0)
+                        .unwrap()
+                    {
+                        let mut clickhouse_update_filed_vec = vec![];
+                        for (index, data) in row.iter().enumerate() {
+                            if !self.pk_indices.contains(&index) {
+                                clickhouse_update_filed_vec.extend(
+                                    ClickHouseFieldWithNull::from_scalar_ref(
+                                        data,
+                                        &self.column_correct_vec,
+                                        index,
+                                        false,
+                                    )?,
+                                );
+                            }
                         }
+                        // Get the names of the columns excluding pk, and use them to update.
+                        let fields_name_update = ck_fields_name
+                            .iter()
+                            .filter(|n| !pk_names.contains(n))
+                            .map(|s| format!("{}", s))
+                            .collect_vec();
+
+                        let update = self.client.update(
+                            &self.config.common.table,
+                            pk_name_0,
+                            fields_name_update.clone(),
+                        );
+                        update
+                            .update_fields(clickhouse_update_filed_vec, pk)
+                            .await?;
+                    } else {
+                        return Err(SinkError::ClickHouse("pk can not be null".to_string()));
                     }
-                    let update = self.client.update(
-                        &self.config.common.table,
-                        pk_name_0,
-                        fields_name_update.clone(),
-                    );
-                    update.update_fields(clickhouse_filed_vec, pk).await?;
                 }
             }
         }
@@ -464,16 +492,20 @@ enum ClickHouseFieldWithNull {
 impl ClickHouseFieldWithNull {
     pub fn from_scalar_ref(
         data: Option<ScalarRefImpl<'_>>,
-        clickhouse_schema_feature: &ClickHouseSchemaFeature,
+        clickhouse_schema_feature_vec: &Vec<ClickHouseSchemaFeature>,
+        clickhouse_schema_feature_index: usize,
         is_insert: bool,
-    ) -> Result<ClickHouseFieldWithNull> {
+    ) -> Result<Vec<ClickHouseFieldWithNull>> {
+        let clickhouse_schema_feature = clickhouse_schema_feature_vec
+            .get(clickhouse_schema_feature_index)
+            .unwrap();
         if data.is_none() {
             if !clickhouse_schema_feature.can_null {
                 return Err(SinkError::ClickHouse(
                     "clickhouse column can not insert null".to_string(),
                 ));
             } else {
-                return Ok(ClickHouseFieldWithNull::None);
+                return Ok(vec![ClickHouseFieldWithNull::None]);
             }
         }
         let data = match data.unwrap() {
@@ -521,19 +553,34 @@ impl ClickHouseFieldWithNull {
                 ))
             }
             ScalarRefImpl::Jsonb(_) => todo!(),
-            ScalarRefImpl::Struct(_) => todo!(),
+            ScalarRefImpl::Struct(v) => {
+                let mut struct_vec = vec![];
+                for (index, field) in v.iter_fields_ref().enumerate() {
+                    let a = Self::from_scalar_ref(
+                        field,
+                        clickhouse_schema_feature_vec,
+                        clickhouse_schema_feature_index + index,
+                        is_insert,
+                    )?;
+                    struct_vec.push(ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(
+                        a,
+                    )));
+                }
+                return Ok(struct_vec);
+            }
             ScalarRefImpl::List(v) => {
                 let mut vec = vec![];
                 for i in v.iter() {
-                    vec.push(Self::from_scalar_ref(
+                    vec.extend(Self::from_scalar_ref(
                         i,
-                        clickhouse_schema_feature,
+                        clickhouse_schema_feature_vec,
+                        clickhouse_schema_feature_index,
                         is_insert,
                     )?)
                 }
-                return Ok(ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(
-                    vec,
-                )));
+                return Ok(vec![ClickHouseFieldWithNull::WithoutSome(
+                    ClickHouseField::List(vec),
+                )]);
             }
             ScalarRefImpl::Bytea(_) => {
                 return Err(SinkError::ClickHouse(
@@ -544,9 +591,9 @@ impl ClickHouseFieldWithNull {
         // Insert needs to be serialized with `Some`, update doesn't need to be serialized with
         // `Some`
         let data = if is_insert && clickhouse_schema_feature.can_null {
-            ClickHouseFieldWithNull::WithSome(data)
+            vec![ClickHouseFieldWithNull::WithSome(data)]
         } else {
-            ClickHouseFieldWithNull::WithoutSome(data)
+            vec![ClickHouseFieldWithNull::WithoutSome(data)]
         };
         Ok(data)
     }
@@ -599,4 +646,29 @@ impl Serialize for ClickHouseColumn {
         }
         s.end()
     }
+}
+
+/// 'Struct'(clickhouse type name is nested) will be converted into some arrays by clickhouse. So we
+/// need to make some conversions
+pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String, DataType)>> {
+    let mut vec = vec![];
+    for field in schema.fields() {
+        if matches!(field.data_type, DataType::Struct(_)) {
+            for i in &field.sub_fields {
+                if matches!(i.data_type, DataType::Struct(_)) {
+                    return Err(SinkError::ClickHouse(
+                        "Only one level of nesting is supported for sturct".to_string(),
+                    ));
+                } else {
+                    vec.push((
+                        format!("{}.{}", field.name, i.name),
+                        DataType::List(Box::new(i.data_type())),
+                    ))
+                }
+            }
+        } else {
+            vec.push((field.name.clone(), field.data_type()));
+        }
+    }
+    Ok(vec)
 }
