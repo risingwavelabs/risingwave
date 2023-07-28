@@ -44,8 +44,6 @@ pub struct KafkaSplitReader {
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     bytes_per_second: usize,
     max_num_messages: usize,
-    split_id: SplitId,
-    // split_ids: Vec<SplitId>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
@@ -104,11 +102,6 @@ impl SplitReader for KafkaSplitReader {
             .map(|split| split.into_kafka().unwrap())
             .collect::<Vec<KafkaSplit>>();
 
-        let split_ids: Vec<_> = splits.iter().map(|split| split.id()).collect();
-
-        // todo
-        let split_id = split_ids.first().unwrap().clone();
-
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
         let mut offsets = HashMap::new();
@@ -149,7 +142,6 @@ impl SplitReader for KafkaSplitReader {
             offsets,
             bytes_per_second,
             max_num_messages,
-            split_id,
             parser_config,
             source_ctx,
         })
