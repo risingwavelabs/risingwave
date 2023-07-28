@@ -762,7 +762,9 @@ where
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => {
-                                key.as_ref().map(|key| self.watermark_cache.insert(key));
+                                if let Some(pk) = key && !pk.is_null_at(0) {
+                                    self.watermark_cache.insert(pk);
+                                }
                                 self.insert_inner(key_bytes, value);
                             }
                             Op::Delete | Op::UpdateDelete => {
@@ -778,7 +780,9 @@ where
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             println!("insert pk: {:?}", key);
-                            key.as_ref().map(|key| self.watermark_cache.insert(key));
+                            if let Some(pk) = key && !pk.is_null_at(0) {
+                                    self.watermark_cache.insert(pk);
+                                }
                             self.insert_inner(key_bytes, value);
                         }
                         Op::Delete | Op::UpdateDelete => {
@@ -859,6 +863,11 @@ where
                     filler.insert_unchecked(DefaultOrdered(pk), ());
                 }
                 filler.finish();
+
+                let n_cache_entries = self.watermark_cache.len();
+                if n_cache_entries < self.watermark_cache.capacity() {
+                    self.watermark_cache.set_table_row_count(n_cache_entries);
+                }
             }
         }
 

@@ -34,9 +34,10 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 
 /// Cache Invariants
 /// -----------------
-/// - If cache is synced, it will ALWAYS contain TopN entries.
-/// NOTE: TopN here refers to the lowest N entries, where the first is the minimum and so on.
-/// - Cache will not contain NULL values, they are ignored in watermark state cleaning.
+/// - If cache is synced, it will ALWAYS contain TopN entries. NOTE: TopN here refers to the lowest
+///   N entries, where the first is the minimum and so on.
+/// - Cache will not contain NULL values, they are ignored in watermark state cleaning. They will
+///   not be included in the cache's table row count either, since they are treated as invisible.
 ///
 /// Updates to Cache
 /// -----------------
@@ -137,6 +138,10 @@ impl StateTableWatermarkCache {
 
     pub fn is_full(&self) -> bool {
         self.len() == self.capacity()
+    }
+
+    pub fn set_table_row_count(&mut self, table_row_count: usize) {
+        self.inner.set_table_row_count(table_row_count)
     }
 }
 
@@ -457,17 +462,17 @@ mod tests {
     #[test]
     fn test_watermark_cache_syncing() {
         let v1 = vec![
-                    Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
-                    Some(1000i64.into()),
-                ];
+            Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+            Some(1000i64.into()),
+        ];
         let v2 = vec![
-                    Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
-                    Some(1000i64.into()),
-                ];
+            Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
+            Some(1000i64.into()),
+        ];
         let v3 = vec![
-                    Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
-                    Some(1000i64.into()),
-                ];
+            Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+            Some(1000i64.into()),
+        ];
         let mut cache = StateTableWatermarkCache::new(3);
         let mut filler = cache.begin_syncing();
         filler.insert_unchecked(DefaultOrdered(v1.into_owned_row()), ());
@@ -475,6 +480,9 @@ mod tests {
         filler.insert_unchecked(DefaultOrdered(v3.into_owned_row()), ());
         filler.finish();
         assert_eq!(cache.len(), 3);
-        assert_eq!(cache.lowest_key().unwrap(), v1[0].clone().unwrap().as_scalar_ref_impl());
+        assert_eq!(
+            cache.lowest_key().unwrap(),
+            v1[0].clone().unwrap().as_scalar_ref_impl()
+        );
     }
 }
