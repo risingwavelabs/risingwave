@@ -33,9 +33,9 @@ CREATE TABLE orders (
 ) AUTO_INCREMENT = 10001;
 
 INSERT INTO orders
-VALUES (default, '2020-07-30 10:08:22', 'Jark', 50.50, 102, false),
-       (default, '2020-07-30 10:11:09', 'Sally', 15.00, 105, false),
-       (default, '2020-07-30 12:00:30', 'Edward', 25.25, 106, false);
+VALUES (default, '2020-07-30 10:08:22', '张三', 50.50, 102, false),
+       (default, '2020-07-30 10:11:09', '李四', 15.00, 105, false),
+       (default, '2020-07-30 12:00:30', '王五', 25.25, 106, false);
 
 CREATE TABLE mytable (
     v1 INTEGER NOT NULL PRIMARY KEY,
