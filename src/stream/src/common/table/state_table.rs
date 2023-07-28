@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -123,6 +124,9 @@ pub struct StateTableInner<
     watermark_buffer_strategy: W,
     /// State cleaning watermark. Old states will be cleaned under this watermark when committing.
     state_clean_watermark: Option<ScalarImpl>,
+
+    /// Watermark of the last committed state cleaning.
+    prev_cleaned_watermark: Option<ScalarImpl>,
 
     /// Watermark cache
     watermark_cache: StateTableWatermarkCache,
@@ -247,9 +251,7 @@ where
             table_catalog.version.is_some()
         );
 
-        let mut watermark_cache = StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES);
-        let filler = watermark_cache.begin_syncing();
-        filler.finish();
+        let watermark_cache = StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES);
 
         Self {
             table_id,
@@ -265,6 +267,7 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
+            prev_cleaned_watermark: None,
             watermark_cache,
         }
     }
@@ -427,6 +430,7 @@ where
             value_indices,
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
+            prev_cleaned_watermark: None,
             watermark_cache: StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES),
         }
     }
@@ -773,6 +777,7 @@ where
                 for (op, (key, key_bytes), value) in izip!(op, vnode_and_pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
+                            println!("insert pk: {:?}", key);
                             key.as_ref().map(|key| self.watermark_cache.insert(key));
                             self.insert_inner(key_bytes, value);
                         }
@@ -815,7 +820,7 @@ where
 
         // Refresh watermark cache if it is out of sync.
         if !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.state_clean_watermark {
+            if let Some(ref watermark) = self.prev_cleaned_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
                 // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
@@ -826,9 +831,6 @@ where
                 {
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
-                        // TODO(kwannoel): Is it possible to have a state_table interface to read
-                        // the 1st value per vnode? Since that's all we
-                        // need.
                         let stream = self
                             .iter_key_and_val_with_pk_range(
                                 &range,
@@ -844,7 +846,7 @@ where
                     // FIXME: Invariant should be enforced, that watermark is the first column of
                     // pk.
                     while !self.watermark_cache.is_full() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
-                        let pk = self.pk_serde.deserialize(&pk[..])?;
+                        let (_, pk) = deserialize_pk_with_vnode(&pk[..], &self.pk_serde)?;
                         if !pk.is_null_at(0) {
                             pks.push(pk);
                         }
@@ -891,18 +893,19 @@ where
 
         let should_clean_watermark = match watermark {
             Some(ref watermark) => {
-                if let Some(key) = self.watermark_cache.lowest_key() {
+                if self.watermark_cache.is_synced()
+                    && let Some(key) = self.watermark_cache.lowest_key() {
                     watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
                 } else {
-                    false
+                    true
                 }
             }
-            _ => false,
+            None => false,
         };
 
-        let watermark_suffix = watermark.map(|watermark| {
+        let watermark_suffix = watermark.as_ref().map(|watermark| {
             serialize_pk(
-                row::once(Some(watermark)),
+                row::once(Some(watermark.clone())),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
@@ -945,6 +948,7 @@ where
                 }
             }
         }
+        self.prev_cleaned_watermark = watermark;
 
         // Clear the watermark cache and force a resync.
         if !delete_ranges.is_empty() {
@@ -1161,6 +1165,11 @@ where
             .may_exist(encoded_key_range_with_vnode, read_options)
             .await
             .map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
+        &self.watermark_cache
     }
 }
 

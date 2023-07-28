@@ -17,7 +17,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Scalar, Timestamptz};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -1451,4 +1451,118 @@ async fn test_state_table_may_exist() {
 
     // test may_exist with data in committed ssts (e1, e2, e3, e4)
     check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
+}
+
+#[tokio::test]
+async fn test_state_table_watermark_cache_ignore_null() {
+
+}
+
+#[tokio::test]
+async fn test_state_table_watermark_cache_apply_batch() {
+
+}
+
+// Insert some values into the state table.
+// Bump watermark, watermark value should partition the state table.
+// Commit state table to trigger watermark state cleaning.
+// Check the partitioned values (larger than watermark) should be retained in cache.
+#[tokio::test]
+async fn test_state_table_watermark_cache_refill() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Timestamptz),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int64),
+    ];
+    let data_types = column_descs
+        .iter()
+        .map(|c| c.data_type.clone())
+        .collect::<Vec<_>>();
+
+    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let pk_index = vec![0_usize, 1_usize];
+    let read_prefix_len_hint = 0;
+    let table = gen_prost_table(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let mut epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    let rows = vec![
+            (
+                Op::Insert,
+                OwnedRow::new(vec![
+                    Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+                    Some(456i64.into()),
+                ]),
+            ),
+            (
+                Op::Insert, // mark 1
+                OwnedRow::new(vec![
+                    Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+                    Some(4888i64.into()),
+                ]),
+            ),
+            // Watermark Partition here later.
+            (
+                Op::Insert, // mark 2
+                OwnedRow::new(vec![
+                    Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
+                    Some(1000i64.into()),
+                ]),
+            ),
+            (
+                Op::Insert, // update the row with `mark 1`
+                OwnedRow::new(vec![
+                    Some(Timestamptz::from_secs(4000).unwrap().to_scalar_value()),
+                    Some(4888i64.into()),
+                ]),
+            ),
+        ];
+
+    let chunk = StreamChunk::from_rows(&rows, &data_types);
+
+    state_table.write_chunk(chunk);
+
+    let inserted_rows: Vec<_> = state_table
+        .iter(PrefetchOptions::new_for_exhaust_iter())
+        .await
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|row| row.unwrap())
+        .collect();
+
+    assert_eq!(inserted_rows.len(), 4);
+    assert_eq!(inserted_rows[0], rows[0].1);
+    assert_eq!(inserted_rows[1], rows[1].1);
+    assert_eq!(inserted_rows[2], rows[2].1);
+    assert_eq!(inserted_rows[3], rows[3].1);
+    let cache = state_table.get_watermark_cache();
+    // Before the first barrier, watermark cache won't be filled.
+    assert_eq!(cache.len(), 0);
+
+    let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
+    state_table.update_watermark(watermark, true);
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+
+    // After the first barrier, watermark cache won't be filled.
+    let cache = state_table.get_watermark_cache();
+    assert_eq!(cache.len(), 2);
+    assert_eq!(cache.lowest_key().unwrap(), Timestamptz::from_secs(3000).unwrap().to_scalar_value().as_scalar_ref_impl())
 }

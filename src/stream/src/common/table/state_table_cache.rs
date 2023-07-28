@@ -79,10 +79,11 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 /// Otherwise point it to a no-op implementation.
 /// TODO(kwannoel): Add tests for it.
 /// Another thing we have to take note of are NULL values.
-/// FIXME(kwannoel): After issuing DELETE range, we need to do table scan also to refresh the cache.
-/// but excluding the DELETE range.
+/// TODO(kwannoel): After issuing DELETE range,
+/// we need to do table scan also to refresh the cache.
+/// We can optimize it by only scanning the rows larger than the last cleaned watermark value.
 #[derive(EstimateSize, Clone)]
-pub(crate) struct StateTableWatermarkCache {
+pub struct StateTableWatermarkCache {
     inner: TopNStateCache<WatermarkCacheKey, ()>,
 }
 
@@ -115,6 +116,7 @@ impl StateTableWatermarkCache {
 
     /// Insert a new value.
     pub fn insert(&mut self, key: impl Row) -> Option<()> {
+        println!("insert watermark key: {:?}", key);
         debug_assert!(!key.is_null_at(0));
         self.inner.insert(DefaultOrdered(key.into_owned_row()), ())
     }
@@ -225,32 +227,47 @@ mod tests {
         // Test 1000
         cache.insert(&v1);
         assert_eq!(cache.len(), 1);
-        assert_eq!(cache.lowest_key(), Some(v1[0].as_ref().unwrap().as_scalar_ref_impl()));
+        assert_eq!(
+            cache.lowest_key(),
+            Some(v1[0].as_ref().unwrap().as_scalar_ref_impl())
+        );
 
         // Test 999
         cache.insert(&v2);
         assert_eq!(cache.len(), 2);
-        assert_eq!(cache.lowest_key(), Some(v2[0].as_ref().unwrap().as_scalar_ref_impl()));
+        assert_eq!(
+            cache.lowest_key(),
+            Some(v2[0].as_ref().unwrap().as_scalar_ref_impl())
+        );
 
         // Test 2000
         cache.insert(&v3);
         assert_eq!(cache.len(), 2);
-        assert_eq!(cache.lowest_key(), Some(v2[0].as_ref().unwrap().as_scalar_ref_impl()));
+        assert_eq!(
+            cache.lowest_key(),
+            Some(v2[0].as_ref().unwrap().as_scalar_ref_impl())
+        );
 
         // Test 900
         cache.insert(&v4);
         assert_eq!(cache.len(), 3);
-        assert_eq!(cache.lowest_key(), Some(v4[0].as_ref().unwrap().as_scalar_ref_impl()));
+        assert_eq!(
+            cache.lowest_key(),
+            Some(v4[0].as_ref().unwrap().as_scalar_ref_impl())
+        );
 
         // Test 800
         cache.insert(&v5);
         assert_eq!(cache.len(), 3);
-        assert_eq!(cache.lowest_key(), Some(v5[0].as_ref().unwrap().as_scalar_ref_impl()));
+        assert_eq!(
+            cache.lowest_key(),
+            Some(v5[0].as_ref().unwrap().as_scalar_ref_impl())
+        );
     }
 
     #[test]
     fn test_state_table_watermark_cache_delete_non_existent_value() {
-         let mut cache = StateTableWatermarkCache::new(3);
+        let mut cache = StateTableWatermarkCache::new(3);
         assert_eq!(cache.capacity(), 3);
         let filler = cache.begin_syncing();
         filler.finish();
@@ -349,7 +366,7 @@ mod tests {
     /// [950].
     /// This should be accepted. It is smaller than the largest val in the cache (1000).
     ///
-    /// Then run DELETEs.
+    /// Then run DELETE.
     /// [900].
     /// Lowest val: 1000.
     ///
@@ -362,7 +379,7 @@ mod tests {
     /// Cache len = 0.
     #[test]
     fn test_state_table_watermark_cache_with_row_count_deletes() {
-        // Initial INSERTs
+        // Initial INSERT
         let mut cache = StateTableWatermarkCache::new_with_row_count(3, 0);
         assert_eq!(cache.capacity(), 3);
         let filler = cache.begin_syncing();
@@ -419,7 +436,7 @@ mod tests {
         cache.delete(&v7);
         assert_eq!(cache.len(), 2);
 
-        // DELETEs
+        // DELETE
         cache.delete(&v5);
         assert_eq!(cache.len(), 1);
         assert_eq!(
@@ -427,7 +444,7 @@ mod tests {
             v1[0].clone().unwrap().as_scalar_ref_impl()
         );
 
-        // DELETEs
+        // DELETE
         cache.delete(&v1);
         assert_eq!(cache.len(), 0);
         assert!(!cache.is_synced());
