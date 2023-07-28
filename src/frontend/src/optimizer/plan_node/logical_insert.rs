@@ -26,7 +26,6 @@ use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
@@ -41,10 +40,7 @@ pub struct LogicalInsert {
 
 impl LogicalInsert {
     pub fn new(core: generic::Insert<PlanRef>) -> Self {
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 

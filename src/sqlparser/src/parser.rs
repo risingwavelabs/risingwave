@@ -2303,13 +2303,7 @@ impl Parser {
 
         let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
-            if cfg!(debug_assertions) {
-                true
-            } else {
-                return Err(ParserError::ParserError(
-                    "APPEND ONLY is only allowed in debug model".to_string(),
-                ));
-            }
+            true
         } else {
             false
         };

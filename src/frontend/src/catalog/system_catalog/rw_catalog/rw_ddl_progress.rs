@@ -13,19 +13,23 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_DDL_PROGRESS_TABLE_NAME: &str = "rw_ddl_progress";
-
-pub const RW_DDL_PROGRESS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int64, "ddl_id"),
-    (DataType::Varchar, "ddl_statement"),
-    (DataType::Varchar, "progress"),
-];
+pub const RW_DDL_PROGRESS: BuiltinTable = BuiltinTable {
+    name: "rw_ddl_progress",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int64, "ddl_id"),
+        (DataType::Varchar, "ddl_statement"),
+        (DataType::Varchar, "progress"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub async fn read_ddl_progress(&self) -> Result<Vec<OwnedRow>> {
