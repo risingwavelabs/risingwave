@@ -28,7 +28,7 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, StorageConfig, NO_OVERRIDE,
+    extract_storage_memory_config, load_config, NoOverride, StorageConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -83,7 +83,7 @@ async fn run_replay(args: Args) -> Result<()> {
 }
 
 async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
-    let config = load_config(&args.config, NO_OVERRIDE);
+    let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
     let system = config.system.clone();
     let system_params_reader = SystemParamsReader::from(system.into_init_system_params());

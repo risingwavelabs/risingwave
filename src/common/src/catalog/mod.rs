@@ -55,7 +55,7 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
+pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,

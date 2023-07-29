@@ -760,7 +760,7 @@ pub fn validate_compatibility(
         ))));
     }
 
-    if connector == POSTGRES_CDC_CONNECTOR {
+    if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
         if !props.contains_key("slot.name") {
             // Build a random slot name with UUID
             // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"

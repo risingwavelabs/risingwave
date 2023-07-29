@@ -101,7 +101,7 @@ impl Binder {
         // FIXME: The type of `CTID` should be `tid`.
         // FIXME: The `CTID` column should be unique, so literal may break something.
         // FIXME: At least we should add a notice here.
-        if let ErrorCode::ItemNotFound(_) = err && column_name.eq_ignore_ascii_case("ctid") {
+        if let ErrorCode::ItemNotFound(_) = err && column_name == "ctid" {
             return Ok(Literal::new(Some("".into()), DataType::Varchar).into())
         }
         Err(err.into())

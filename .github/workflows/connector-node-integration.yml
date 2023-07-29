@@ -36,9 +36,9 @@ jobs:
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
           set -ex
-          
+
           RISINGWAVE_ROOT=${PWD}
-          
+
           echo "--- build connector node"
           cd ${RISINGWAVE_ROOT}/java
           # run unit test

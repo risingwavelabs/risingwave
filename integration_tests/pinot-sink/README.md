@@ -139,15 +139,15 @@ pinot-broker -brokerPort 8099 -query "SELECT * FROM orders"
     ]
 }
 ```
-From the query result, we can see that the update on RisingWave table 
+From the query result, we can see that the update on RisingWave table
 has been reflected on the pinot table.
 
 
-By now, the demo has finished. 
+By now, the demo has finished.
 
 ## Kafka Payload Format
 
-In the demo, there will be 4 upsert events in the kafka topic. 
+In the demo, there will be 4 upsert events in the kafka topic.
 The payload is like the following:
 ```json
 {"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}

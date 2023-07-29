@@ -1140,7 +1140,7 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
                             "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
-           
+
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
@@ -1192,7 +1192,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_temporal_join_cached_entry_count')}",
                                       "Temporal Join cached count | table {{table_id}} actor {{actor_id}}"),
-                       
+
                     ],
                 ),
 
@@ -1202,7 +1202,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_lookup_cached_entry_count')}",
                                       "lookup cached count | table {{table_id}} actor {{actor_id}}"),
-                       
+
                     ],
                 ),
             ],
@@ -2318,7 +2318,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
 
-        
+
                 panels.timeseries_count(
                     "Table KV Count",
                     "",

@@ -2741,7 +2741,7 @@ async fn write_exclusive_cluster_id(
         Ok(metadata) => metadata,
         Err(_) => {
             return Err(ObjectError::internal(
-                "Fail to access remote object storage, 
+                "Fail to access remote object storage,
             please check if your Access Key and Secret Key are configured correctly. ",
             )
             .into())

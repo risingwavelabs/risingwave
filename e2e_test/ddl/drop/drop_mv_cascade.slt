@@ -1,0 +1,16 @@
+statement ok
+create materialized view mv as select 1 a
+
+statement ok
+CREATE view v AS select * from mv;
+
+statement ok
+CREATE view mv2 AS select * from v;
+
+statement ok
+CREATE SINK my_sink AS select * from mv2 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+drop materialized view mv cascade;
