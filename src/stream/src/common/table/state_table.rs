@@ -92,7 +92,7 @@ pub struct StateTableInner<
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    pk_indices: Arc<Vec<usize>>,
+    pk_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -259,7 +259,7 @@ where
             local_store: local_state_store,
             pk_serde,
             row_serde,
-            pk_indices: pk_indices.into(),
+            pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -422,7 +422,7 @@ where
                 ),
                 Arc::from(table_columns.into_boxed_slice()),
             ),
-            pk_indices: pk_indices.into(),
+            pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
             vnodes,
@@ -670,8 +670,8 @@ where
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: impl Row) {
-        let pk_indices = self.pk_indices.clone();
-        let pk = (&value).project(&pk_indices);
+        let pk_indices = &self.pk_indices;
+        let pk = (&value).project(pk_indices);
         if !pk.is_null_at(0) {
             self.watermark_cache.insert(pk);
         }
@@ -684,8 +684,8 @@ where
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
     pub fn delete(&mut self, old_value: impl Row) {
-        let pk_indices = self.pk_indices.clone();
-        let pk = (&old_value).project(&pk_indices);
+        let pk_indices = &self.pk_indices;
+        let pk = (&old_value).project(pk_indices);
         self.watermark_cache.delete(&pk);
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
