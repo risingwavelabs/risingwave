@@ -18,7 +18,7 @@ bytesize = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hdrhistogram = "7"
-itertools = "0.10"
+itertools = "0.11"
 libc = "0.2"
 opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"], optional = true }
 parking_lot = "0.12"

@@ -46,7 +46,7 @@ futures-async-stream = { workspace = true }
 glob = "0.3"
 google-cloud-pubsub = "0.17"
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "671c001d2c61fa3edb59bbfb6a73919328c1777a" }
-itertools = "0.10"
+itertools = "0.11"
 maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }
 nexmark = { version = "0.2", features = ["serde"] }
