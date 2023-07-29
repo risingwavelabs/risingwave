@@ -19,7 +19,7 @@ anyhow = { version = "1.0", default-features = false }
 byteorder = "1.4"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.10"
+itertools = "0.11"
 openssl = "0.10.48"
 panic-message = "0.3"
 risingwave_common = { workspace = true }

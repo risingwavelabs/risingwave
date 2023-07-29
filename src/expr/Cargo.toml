@@ -32,7 +32,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4.3"
-itertools = "0.10"
+itertools = "0.11"
 md5 = "0.7.0"
 num-traits = "0.2"
 parse-display = "0.6"
