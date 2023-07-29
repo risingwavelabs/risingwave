@@ -10,6 +10,24 @@ create table t_kafka (
     v_timestamp timestamp
 );
 
+statement error sink to non-exist kafka broker
+create sink sink_non_exist_broker from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'make no sense',
+    topic = 'test-rw-sink-append-only',
+    force_append_only = 'true',
+    type = 'append-only',
+);
+
+statement error sink to non-exist kafka topic
+create sink sink_non_exist_broker from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'make no sense',
+    force_append_only = 'true',
+    type = 'append-only',
+);
+
 # Test create sink with connection
 # Create a mock connection
 statement ok
