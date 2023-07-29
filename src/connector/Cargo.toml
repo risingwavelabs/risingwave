@@ -57,7 +57,7 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11.0", features = ["no-recursion-limit"] }
 prost-reflect = "0.11.4"
 protobuf-native = "0.2.1"
-pulsar = { version = "4.2", default-features = false, features = [
+pulsar = { version = "6.0", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
