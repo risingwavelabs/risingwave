@@ -2443,7 +2443,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=68d761d#68d761d3b5ee25dcba5f9581a89dcbb71c036f79"
+source = "git+https://github.com/mrcroxx/foyer?rev=5109637#5109637f51e9674057f35833b4d7e0d428fadd5d"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2452,6 +2452,7 @@ dependencies = [
  "foyer-common",
  "foyer-intrusive",
  "foyer-storage",
+ "foyer-workspace-hack",
  "futures",
  "itertools 0.10.5",
  "libc",
@@ -2470,22 +2471,26 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=68d761d#68d761d3b5ee25dcba5f9581a89dcbb71c036f79"
+source = "git+https://github.com/mrcroxx/foyer?rev=5109637#5109637f51e9674057f35833b4d7e0d428fadd5d"
 dependencies = [
  "bytes",
+ "foyer-workspace-hack",
  "parking_lot 0.12.1",
  "paste",
+ "rand",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=68d761d#68d761d3b5ee25dcba5f9581a89dcbb71c036f79"
+source = "git+https://github.com/mrcroxx/foyer?rev=5109637#5109637f51e9674057f35833b4d7e0d428fadd5d"
 dependencies = [
  "bytes",
  "cmsketch",
  "foyer-common",
+ "foyer-workspace-hack",
  "itertools 0.10.5",
  "memoffset 0.8.0",
  "parking_lot 0.12.1",
@@ -2498,7 +2503,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=68d761d#68d761d3b5ee25dcba5f9581a89dcbb71c036f79"
+source = "git+https://github.com/mrcroxx/foyer?rev=5109637#5109637f51e9674057f35833b4d7e0d428fadd5d"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2509,6 +2514,7 @@ dependencies = [
  "cmsketch",
  "foyer-common",
  "foyer-intrusive",
+ "foyer-workspace-hack",
  "futures",
  "itertools 0.10.5",
  "libc",
@@ -2523,6 +2529,31 @@ dependencies = [
  "tokio",
  "tracing",
  "twox-hash",
+]
+
+[[package]]
+name = "foyer-workspace-hack"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=5109637#5109637f51e9674057f35833b4d7e0d428fadd5d"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "either",
+ "futures-channel",
+ "futures-core",
+ "futures-sink",
+ "itertools 0.10.5",
+ "libc",
+ "memchr",
+ "miniz_oxide 0.7.1",
+ "parking_lot 0.12.1",
+ "parking_lot_core 0.9.7",
+ "proc-macro2",
+ "quote",
+ "rand",
+ "syn 2.0.26",
+ "tokio",
+ "tracing-core",
 ]
 
 [[package]]

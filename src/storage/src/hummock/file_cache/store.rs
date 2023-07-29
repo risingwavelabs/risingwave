@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
-use foyer::storage::admission::rated_random::RatedRandom;
+use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
 use foyer::storage::event::EventListener;
 use foyer::storage::store::{FetchValueFuture, PrometheusConfig};
@@ -185,7 +185,10 @@ where
 
         let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
         if config.rated_random_rate > 0 {
-            let rr = RatedRandom::new(config.rated_random_rate, Duration::from_millis(100));
+            let rr = RatedRandomAdmissionPolicy::new(
+                config.rated_random_rate,
+                Duration::from_millis(100),
+            );
             admissions.push(Arc::new(rr));
         }
 
@@ -216,6 +219,7 @@ where
                 registry: config.prometheus_registry,
                 namespace: config.prometheus_namespace,
             },
+            clean_region_threshold: config.reclaimers + config.reclaimers / 2,
         };
         let store = FoyerStore::open(c).await.map_err(FileCacheError::foyer)?;
         Ok(Self::Foyer {
@@ -247,7 +251,7 @@ where
 
                 let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
                 if foyer_store_config.rated_random_rate > 0 {
-                    let rr = RatedRandom::new(
+                    let rr = RatedRandomAdmissionPolicy::new(
                         foyer_store_config.rated_random_rate,
                         Duration::from_millis(100),
                     );
@@ -280,6 +284,8 @@ where
                         registry: foyer_store_config.prometheus_registry,
                         namespace: foyer_store_config.prometheus_namespace,
                     },
+                    clean_region_threshold: foyer_store_config.reclaimers
+                        + foyer_store_config.reclaimers / 2,
                 };
 
                 FoyerStore::open(c).await.map_err(FileCacheError::foyer)
