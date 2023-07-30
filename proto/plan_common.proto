@@ -64,6 +64,7 @@ message StorageTableDesc {
   // Whether the table is versioned. If `true`, column-aware row encoding will
   // be used to be compatible with schema changes.
   bool versioned = 8;
+  repeated uint32 stream_key = 9;
 }
 
 enum JoinType {
@@ -104,4 +105,11 @@ message IndexAndExpr {
 
 message DefaultColumns {
   repeated IndexAndExpr default_columns = 1;
+}
+
+// The cardinality of the output rows of a plan node. Bounds are inclusive.
+message Cardinality {
+  uint64 lo = 1;
+  // Unbounded if not set.
+  optional uint64 hi = 2;
 }

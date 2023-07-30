@@ -260,8 +260,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .await?;
 
             // Retrieve modified states and put the changes into the builders.
-            let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            match vars.agg_group.build_change(curr_outputs) {
+            match vars.agg_group.build_change(&this.storages).await? {
                 Some(change) => {
                     this.result_table.write_record(change.as_ref());
                     this.result_table.commit(epoch).await?;

@@ -216,7 +216,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                     }
 
-                    if barrier.checkpoint && last_checkpoint_watermark != current_watermark {
+                    if barrier.kind.is_checkpoint()
+                        && last_checkpoint_watermark != current_watermark
+                    {
                         last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
                         let vnodes = table.get_vnodes();

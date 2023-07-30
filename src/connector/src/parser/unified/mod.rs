@@ -17,11 +17,17 @@
 use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
 
+use self::avro::AvroAccess;
+use self::bytes::BytesAccess;
+use self::json::JsonAccess;
+use self::protobuf::ProtobufAccess;
+
 pub mod avro;
 pub mod bytes;
 pub mod debezium;
 pub mod json;
 pub mod maxwell;
+pub mod protobuf;
 pub mod upsert;
 pub mod util;
 
@@ -30,6 +36,24 @@ pub type AccessResult = std::result::Result<Datum, AccessError>;
 /// Access a certain field in an object according to the path
 pub trait Access {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult;
+}
+
+pub enum AccessImpl<'a, 'b> {
+    Avro(AvroAccess<'a, 'b>),
+    Bytes(BytesAccess<'a>),
+    Protobuf(ProtobufAccess),
+    Json(JsonAccess<'a, 'b>),
+}
+
+impl Access for AccessImpl<'_, '_> {
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+        match self {
+            Self::Avro(accessor) => accessor.access(path, type_expected),
+            Self::Bytes(accessor) => accessor.access(path, type_expected),
+            Self::Protobuf(accessor) => accessor.access(path, type_expected),
+            Self::Json(accessor) => accessor.access(path, type_expected),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

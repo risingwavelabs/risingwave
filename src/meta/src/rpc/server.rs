@@ -58,7 +58,7 @@ use super::service::serving_service::ServingServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::hummock::{CompactionScheduler, HummockManager};
+use crate::hummock::HummockManager;
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
@@ -350,8 +350,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let data_directory = system_params_reader.data_directory();
     if !is_correct_data_directory(data_directory) {
         return Err(MetaError::system_param(format!(
-            "The data directory {:?} is misconfigured. 
-            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            "The data directory {:?} is misconfigured.
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9].
             The string cannot start or end with '/', and consecutive '/' are not allowed.
             The data directory cannot be empty and its length should not exceed 800 characters.",
             data_directory
@@ -380,6 +380,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+    let (compactor_streams_change_tx, compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
@@ -387,6 +390,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         meta_metrics.clone(),
         compactor_manager.clone(),
         catalog_manager.clone(),
+        compactor_streams_change_tx,
     )
     .await
     .unwrap();
@@ -422,7 +426,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let source_manager = Arc::new(
         SourceManager::new(
-            env.opts.connector_rpc_endpoint.clone(),
+            env.clone(),
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
@@ -556,17 +560,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
     }
 
-    let compaction_scheduler = Arc::new(CompactionScheduler::new(
-        env.clone(),
-        hummock_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     let mut sub_tasks = hummock::start_hummock_workers(
         hummock_manager.clone(),
         vacuum_manager,
-        compaction_scheduler,
+        // compaction_scheduler,
         &env.opts,
     );
     sub_tasks.push(
@@ -587,7 +585,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await,
     );
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
-    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager).await);
+    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()).await);
+    sub_tasks.push(
+        HummockManager::compaction_event_loop(hummock_manager, compactor_streams_change_rx).await,
+    );
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),

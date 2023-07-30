@@ -203,6 +203,16 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 40
 
+  - label: "backfill integration test (deterministic simulation)"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh backfill_tests::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
@@ -248,7 +258,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
-  
+
   - label: "connector node integration test Java {{matrix.java_version}}"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
     depends_on:

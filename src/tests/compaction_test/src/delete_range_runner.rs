@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,9 +27,7 @@ use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{
-    extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
-};
+use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -86,7 +85,7 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
     })
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let config = load_config(&opts.config_path, NO_OVERRIDE);
+    let config = load_config(&opts.config_path, NoOverride);
     let compaction_config = CompactionConfigBuilder::new().build();
     compaction_test(compaction_config, config, &opts.state_store, 1000000, 800).await
 }
@@ -122,6 +121,7 @@ async fn compaction_test(
         )]),
         fragment_id: 0,
         dml_fragment_id: None,
+        initialized_at_epoch: None,
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
@@ -134,6 +134,8 @@ async fn compaction_test(
         version: None,
         watermark_indices: vec![],
         dist_key_in_pk: vec![],
+        cardinality: None,
+        created_at_epoch: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -257,6 +259,7 @@ async fn compaction_test(
                 .sum::<usize>()
         );
     }
+
     compactor_shutdown_tx.send(()).unwrap();
     compactor_thrd.await.unwrap();
     Ok(())
@@ -562,10 +565,12 @@ fn run_compactor_thread(
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
+        running_task_count: Arc::new(AtomicU32::new(0)),
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,
         meta_client,
+        2.0, // max_compactor_task_multiplier
     )
 }
 

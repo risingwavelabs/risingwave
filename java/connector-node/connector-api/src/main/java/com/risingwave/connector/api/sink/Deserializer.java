@@ -18,5 +18,5 @@ import com.risingwave.proto.ConnectorServiceProto;
 
 public interface Deserializer {
     CloseableIterator<SinkRow> deserialize(
-            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch);
+            ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch);
 }

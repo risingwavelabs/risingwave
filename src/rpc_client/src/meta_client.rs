@@ -33,7 +33,6 @@ use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -52,6 +51,7 @@ use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -75,17 +75,18 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
-use tonic::{Code, Streaming};
+use tonic::{Code, Request, Streaming};
 
 use crate::error::{Result, RpcError};
-use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
@@ -338,9 +339,14 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
+    pub async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;
@@ -453,37 +459,40 @@ impl MetaClient {
         &self,
         source_id: Option<u32>,
         table_id: TableId,
+        cascade: bool,
     ) -> Result<CatalogVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_table(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_view(&self, view_id: u32) -> Result<CatalogVersion> {
-        let request = DropViewRequest { view_id };
+    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
-        let request = DropSourceRequest { source_id };
+    pub async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
-        let request = DropSinkRequest { sink_id };
+    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_index(&self, index_id: IndexId) -> Result<CatalogVersion> {
+    pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
+            cascade,
         };
         let resp = self.inner.drop_index(request).await?;
         Ok(resp.version)
@@ -737,10 +746,12 @@ impl MetaClient {
         &self,
         reschedules: HashMap<u32, PbReschedule>,
         revision: u64,
+        resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
             reschedules,
             revision,
+            resolve_no_shuffle_upstream,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
@@ -1072,7 +1083,7 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
         Ok(resp.snapshot.unwrap())
@@ -1107,20 +1118,6 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        table_stats_change: HashMap<u32, risingwave_hummock_sdk::table_stats::TableStats>,
-    ) -> Result<()> {
-        let req = ReportCompactionTasksRequest {
-            context_id: self.worker_id(),
-            compact_task: Some(compact_task),
-            table_stats_change: to_prost_table_stats_map(table_stats_change),
-        };
-        self.inner.report_compaction_tasks(req).await?;
-        Ok(())
-    }
-
     async fn commit_epoch(
         &self,
         _epoch: HummockEpoch,
@@ -1131,32 +1128,6 @@ impl HummockMetaClient for MetaClient {
 
     async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
         panic!("Only meta service can update_current_epoch in production.")
-    }
-
-    async fn subscribe_compact_tasks(
-        &self,
-        cpu_core_num: u32,
-    ) -> Result<BoxStream<'static, CompactTaskItem>> {
-        let req = SubscribeCompactTasksRequest {
-            context_id: self.worker_id(),
-            cpu_core_num,
-        };
-        let stream = self.inner.subscribe_compact_tasks(req).await?;
-        Ok(Box::pin(stream))
-    }
-
-    async fn compactor_heartbeat(
-        &self,
-        progress: Vec<CompactTaskProgress>,
-        workload: CompactorWorkload,
-    ) -> Result<()> {
-        let req = CompactorHeartbeatRequest {
-            context_id: self.worker_id(),
-            progress,
-            workload: Some(workload),
-        };
-        self.inner.compactor_heartbeat(req).await?;
-        Ok(())
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
@@ -1178,6 +1149,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: u64,
         table_id: u32,
         level: u32,
+        sst_ids: Vec<u64>,
     ) -> Result<()> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
@@ -1186,6 +1158,7 @@ impl HummockMetaClient for MetaClient {
             // if table_id not exist, manual_compaction will include all the sst
             // without check internal_table_id
             level,
+            sst_ids,
             ..Default::default()
         };
 
@@ -1200,6 +1173,34 @@ impl HummockMetaClient for MetaClient {
             })
             .await?;
         Ok(())
+    }
+
+    async fn subscribe_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeCompactionEventRequest>,
+        BoxStream<'static, CompactionEventItem>,
+    )> {
+        let (request_sender, request_receiver) =
+            unbounded_channel::<SubscribeCompactionEventRequest>();
+        request_sender
+            .send(SubscribeCompactionEventRequest {
+                event: Some(subscribe_compaction_event_request::Event::Register(
+                    Register {
+                        context_id: self.worker_id(),
+                    },
+                )),
+            })
+            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+
+        let stream = self
+            .inner
+            .subscribe_compaction_event(Request::new(UnboundedReceiverStream::new(
+                request_receiver,
+            )))
+            .await?;
+
+        Ok((request_sender, Box::pin(stream)))
     }
 }
 
@@ -1653,10 +1654,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
-            ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
-            ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
-            ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
@@ -1671,6 +1669,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
+            ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
