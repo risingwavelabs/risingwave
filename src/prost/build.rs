@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "backup_service",
         "batch_plan",
         "catalog",
+        "cloud_service",
         "common",
         "compactor",
         "compute",
