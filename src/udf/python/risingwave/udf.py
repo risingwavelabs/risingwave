@@ -342,7 +342,26 @@ class UdfServer(pa.flight.FlightServerBase):
         name = udf._name
         if name in self._functions:
             raise ValueError("Function already exists: " + name)
-        print("added function:", name)
+
+        input_types = ",".join(
+            [_data_type_to_string(t) for t in udf._input_schema.types]
+        )
+        if isinstance(udf, TableFunction):
+            output_type = udf._result_schema.types[-1]
+            if isinstance(output_type, pa.StructType):
+                output_type = ",".join(
+                    f"field_{i} {_data_type_to_string(field.type)}"
+                    for i, field in enumerate(output_type)
+                )
+                output_type = f"TABLE({output_type})"
+            else:
+                output_type = _data_type_to_string(output_type)
+                output_type = f"TABLE(output {output_type})"
+        else:
+            output_type = _data_type_to_string(udf._result_schema.types[-1])
+
+        sql = f"CREATE FUNCTION {name}({input_types}) RETURNS {output_type} AS '{name}' USING LINK 'http://{self._location}';"
+        print(f"added function: {name}, corresponding SQL:\n{sql}\n")
         self._functions[name] = udf
 
     def do_exchange(self, context, descriptor, reader, writer):
@@ -360,13 +379,16 @@ class UdfServer(pa.flight.FlightServerBase):
 
     def serve(self):
         """Start the server."""
-        print(f"listening on {self._location}")
+        print(
+            "Note: You can use arbitrary function names and struct field names in CREATE FUNCTION statements."
+            f"\n\nlistening on {self._location}"
+        )
         super(UdfServer, self).serve()
 
 
 def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
     """
-    Convert a string or pyarrow.DataType to pyarrow.DataType.
+    Convert a SQL data type string or `pyarrow.DataType` to `pyarrow.DataType`.
     """
     if isinstance(t, str):
         return _string_to_data_type(t)
@@ -375,6 +397,9 @@ def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
 
 
 def _string_to_data_type(type_str: str):
+    """
+    Convert a SQL data type string to `pyarrow.DataType`.
+    """
     type_str = type_str.upper()
     if type_str.endswith("[]"):
         return pa.list_(_string_to_data_type(type_str[:-2]))
@@ -423,3 +448,50 @@ def _string_to_data_type(type_str: str):
         return pa.struct(fields)
 
     raise ValueError(f"Unsupported type: {type_str}")
+
+
+def _data_type_to_string(t: pa.DataType) -> str:
+    """
+    Convert a `pyarrow.DataType` to a SQL data type string.
+    """
+    if isinstance(t, pa.ListType):
+        return _data_type_to_string(t.value_type) + "[]"
+    elif t.equals(pa.bool_()):
+        return "BOOLEAN"
+    elif t.equals(pa.int16()):
+        return "SMALLINT"
+    elif t.equals(pa.int32()):
+        return "INT"
+    elif t.equals(pa.int64()):
+        return "BIGINT"
+    elif t.equals(pa.float32()):
+        return "FLOAT4"
+    elif t.equals(pa.float64()):
+        return "FLOAT8"
+    elif t.equals(pa.decimal128(38)):
+        return "DECIMAL"
+    elif t.equals(pa.date32()):
+        return "DATE"
+    elif t.equals(pa.time64("us")):
+        return "TIME"
+    elif t.equals(pa.timestamp("us")):
+        return "TIMESTAMP"
+    elif t.equals(pa.month_day_nano_interval()):
+        return "INTERVAL"
+    elif t.equals(pa.string()):
+        return "VARCHAR"
+    elif t.equals(pa.large_string()):
+        return "JSONB"
+    elif t.equals(pa.binary()):
+        return "BYTEA"
+    elif isinstance(t, pa.StructType):
+        return (
+            "STRUCT<"
+            + ",".join(
+                f"field_{i} {_data_type_to_string(field.type)}"
+                for i, field in enumerate(t)
+            )
+            + ">"
+        )
+    else:
+        raise ValueError(f"Unsupported type: {t}")
