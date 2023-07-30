@@ -35,7 +35,9 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
+};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -508,6 +510,7 @@ impl TestCase {
                         handler_args,
                         drop_statement.object_name,
                         drop_statement.if_exists,
+                        matches!(drop_statement.drop_mode, AstOption::Some(DropMode::Cascade)),
                     )
                     .await?;
                 }

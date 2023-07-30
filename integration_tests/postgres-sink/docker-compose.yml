@@ -70,14 +70,14 @@ services:
       service: connector-node
   prepare_postgres:
     image: postgres
-    depends_on: 
+    depends_on:
       - postgres
     command:
       - /bin/sh
       - -c
       - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql"
     volumes:
-      - "./postgres_prepare.sql:/postgres_prepare.sql"      
+      - "./postgres_prepare.sql:/postgres_prepare.sql"
     container_name: prepare_postgres
     restart: on-failure
 volumes:

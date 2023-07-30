@@ -9,7 +9,7 @@ Record samples:
 nperf record -p `pidof compute-node` -o perf.data
 ```
 
-Generate flamegraph: 
+Generate flamegraph:
 
 ```shell
 nperf flamegraph --merge-threads perf.data > perf.svg

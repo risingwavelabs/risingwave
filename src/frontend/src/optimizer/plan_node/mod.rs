@@ -219,8 +219,8 @@ impl RewriteExprsRecursive for PlanRef {
     }
 }
 
-impl ColPrunable for PlanRef {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+impl PlanRef {
+    fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
             // column pruning.
@@ -306,10 +306,8 @@ impl ColPrunable for PlanRef {
             dyn_t.prune_col(required_cols, ctx)
         }
     }
-}
 
-impl PredicatePushdown for PlanRef {
-    fn predicate_pushdown(
+    fn predicate_pushdown_inner(
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
@@ -343,6 +341,42 @@ impl PredicatePushdown for PlanRef {
             let dyn_t = self.deref();
             dyn_t.predicate_pushdown(predicate, ctx)
         }
+    }
+}
+
+impl ColPrunable for PlanRef {
+    #[allow(clippy::let_and_return)]
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let res = self.prune_col_inner(required_cols, ctx);
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+            "column pruning",
+            &LogicalProject::with_out_col_idx(self.clone(), required_cols.iter().cloned()).into(),
+            &res,
+        );
+        res
+    }
+}
+
+impl PredicatePushdown for PlanRef {
+    #[allow(clippy::let_and_return)]
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        #[cfg(debug_assertions)]
+        let predicate_clone = predicate.clone();
+
+        let res = self.predicate_pushdown_inner(predicate, ctx);
+
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+            "predicate push down",
+            &LogicalFilter::new(self.clone(), predicate_clone).into(),
+            &res,
+        );
+        res
     }
 }
 
