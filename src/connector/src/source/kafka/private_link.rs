@@ -25,11 +25,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
-use crate::common::AwsPrivateLinkItem;
-use crate::source::kafka::{
-    BROKER_REWRITE_MAP_KEY, KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS,
-    PRIVATE_LINK_TARGETS_KEY,
-};
+use crate::common::{AwsPrivateLinkItem, BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY};
+use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use crate::source::KAFKA_CONNECTOR;
 
 #[derive(Debug)]
