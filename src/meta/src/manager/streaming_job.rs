@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
@@ -27,6 +28,44 @@ pub enum StreamingJob {
     Sink(Sink),
     Table(Option<Source>, Table),
     Index(Index, Table),
+}
+
+impl StreamingJob {
+    pub(crate) fn mark_created(&mut self) {
+        let created_at_epoch = Some(Epoch::now().0);
+        match self {
+            StreamingJob::MaterializedView(table) => table.created_at_epoch = created_at_epoch,
+            StreamingJob::Sink(table) => table.created_at_epoch = created_at_epoch,
+            StreamingJob::Table(source, table) => {
+                table.created_at_epoch = created_at_epoch;
+                if let Some(source) = source {
+                    source.created_at_epoch = created_at_epoch;
+                }
+            }
+            StreamingJob::Index(index, _) => {
+                index.created_at_epoch = created_at_epoch;
+            }
+        }
+    }
+
+    pub(crate) fn mark_initialized(&mut self) {
+        let initialized_at_epoch = Some(Epoch::now().0);
+        match self {
+            StreamingJob::MaterializedView(table) => {
+                table.initialized_at_epoch = initialized_at_epoch
+            }
+            StreamingJob::Sink(table) => table.initialized_at_epoch = initialized_at_epoch,
+            StreamingJob::Table(source, table) => {
+                table.initialized_at_epoch = initialized_at_epoch;
+                if let Some(source) = source {
+                    source.initialized_at_epoch = initialized_at_epoch;
+                }
+            }
+            StreamingJob::Index(index, _) => {
+                index.initialized_at_epoch = initialized_at_epoch;
+            }
+        }
+    }
 }
 
 impl StreamingJob {

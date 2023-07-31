@@ -426,6 +426,10 @@
     WHERE rank_number <= 10;
   expected_outputs:
   - logical_plan
+  - stream_plan
+  - stream_dist_plan
+  - eowc_stream_error
+  - batch_plan
 - id: nexmark_q20
   before:
   - create_sources

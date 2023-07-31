@@ -98,9 +98,11 @@ impl PlanTreeNodeUnary for LogicalExpand {
         });
         mapping.push(Some(2 * new_input_col_num));
 
+        let expand = Self::new(input, column_subsets);
+        let output_col_num = expand.schema().len();
         (
-            Self::new(input, column_subsets),
-            ColIndexMapping::new(mapping),
+            expand,
+            ColIndexMapping::with_target_size(mapping, output_col_num),
         )
     }
 }

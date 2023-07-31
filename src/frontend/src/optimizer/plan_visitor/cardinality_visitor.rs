@@ -20,12 +20,49 @@ use risingwave_pb::plan_common::JoinType;
 use super::{DefaultBehavior, DefaultValue, PlanVisitor};
 use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::generic::TopNLimit;
-use crate::optimizer::plan_node::{self, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    self, PlanNode, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
+};
 use crate::optimizer::plan_visitor::PlanRef;
 use crate::optimizer::property::Cardinality;
 
 /// A visitor that computes the cardinality of a plan node.
 pub struct CardinalityVisitor;
+
+impl CardinalityVisitor {
+    /// Used for `Filter` and `Scan` with predicate.
+    fn visit_predicate(
+        input: &dyn PlanNode,
+        input_card: Cardinality,
+        eq_set: HashSet<usize>,
+    ) -> Cardinality {
+        let mut unique_keys: Vec<HashSet<_>> = vec![input.logical_pk().iter().copied().collect()];
+
+        // We don't have UNIQUE key now. So we hack here to support some complex queries on
+        // system tables.
+        // TODO(card): remove this after we have UNIQUE key.
+        if let Some(scan) = input.as_logical_scan()
+            && scan.is_sys_table()
+            && scan.table_name() == PG_NAMESPACE_TABLE_NAME
+        {
+            if let Some(nspname) = scan
+                .output_col_idx()
+                .iter()
+                .find(|i| scan.table_desc().columns[**i].name == "nspname") {
+                unique_keys.push([*nspname].into_iter().collect());
+            }
+        }
+
+        if unique_keys
+            .iter()
+            .any(|unique_key| eq_set.is_superset(unique_key))
+        {
+            input_card.min(0..=1)
+        } else {
+            input_card.min(0..)
+        }
+    }
+}
 
 impl PlanVisitor<Cardinality> for CardinalityVisitor {
     type DefaultBehavior = impl DefaultBehavior<Cardinality>;
@@ -70,38 +107,21 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
     }
 
     fn visit_logical_filter(&mut self, plan: &plan_node::LogicalFilter) -> Cardinality {
-        let input = plan.input();
-        let eq_set: HashSet<_> = plan
+        let eq_set = plan
             .predicate()
-            .collect_input_refs(input.schema().len())
+            .collect_input_refs(plan.input().schema().len())
             .ones()
             .collect();
+        Self::visit_predicate(&*plan.input(), self.visit(plan.input()), eq_set)
+    }
 
-        let mut unique_keys: Vec<HashSet<_>> = vec![input.logical_pk().iter().copied().collect()];
-
-        // We don't have UNIQUE key now. So we hack here to support some complex queries on
-        // system tables.
-        if let Some(scan) = input.as_logical_scan()
-            && scan.is_sys_table()
-            && scan.table_name() == PG_NAMESPACE_TABLE_NAME
-        {
-            let nspname = scan
-                .output_col_idx()
-                .iter()
-                .find(|i| scan.table_desc().columns[**i].name == "nspname")
-                .unwrap();
-            unique_keys.push([*nspname].into_iter().collect());
-        }
-
-        let input = self.visit(input);
-        if unique_keys
-            .iter()
-            .any(|unique_key| eq_set.is_superset(unique_key))
-        {
-            input.min(0..=1)
-        } else {
-            input.min(0..)
-        }
+    fn visit_logical_scan(&mut self, plan: &plan_node::LogicalScan) -> Cardinality {
+        let eq_set = plan
+            .predicate()
+            .collect_input_refs(plan.table_desc().columns.len())
+            .ones()
+            .collect();
+        Self::visit_predicate(plan, plan.table_cardinality(), eq_set)
     }
 
     fn visit_logical_union(&mut self, plan: &plan_node::LogicalUnion) -> Cardinality {
@@ -109,7 +129,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             .inputs()
             .into_iter()
             .map(|input| self.visit(input))
-            .fold(Cardinality::default(), std::ops::Add::add);
+            .fold(Cardinality::unknown(), std::ops::Add::add);
 
         if plan.all() {
             all
@@ -138,7 +158,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
             JoinType::RightSemi | JoinType::RightAnti => right.min(0..),
 
             // TODO: refine the cardinality of full outer join
-            JoinType::FullOuter => Cardinality::default(),
+            JoinType::FullOuter => Cardinality::unknown(),
         }
     }
 

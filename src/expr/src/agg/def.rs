@@ -236,6 +236,7 @@ pub enum AggKind {
     PercentileCont,
     PercentileDisc,
     Mode,
+    Grouping,
 }
 
 impl AggKind {
@@ -266,6 +267,7 @@ impl AggKind {
             PbType::PercentileCont => Ok(AggKind::PercentileCont),
             PbType::PercentileDisc => Ok(AggKind::PercentileDisc),
             PbType::Mode => Ok(AggKind::Mode),
+            PbType::Grouping => Ok(AggKind::Grouping),
             PbType::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -296,6 +298,7 @@ impl AggKind {
             Self::VarSamp => PbType::VarSamp,
             Self::PercentileCont => PbType::PercentileCont,
             Self::PercentileDisc => PbType::PercentileDisc,
+            Self::Grouping => PbType::Grouping,
             Self::Mode => PbType::Mode,
         }
     }
@@ -332,6 +335,7 @@ pub mod agg_kinds {
                 | AggKind::StddevSamp
                 | AggKind::VarPop
                 | AggKind::VarSamp
+                | AggKind::Grouping
         };
     }
     pub use rewritten;

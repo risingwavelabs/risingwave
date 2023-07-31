@@ -25,4 +25,7 @@ statement ok
 drop view v_a_b_c;
 
 statement ok
+drop view v_expr;
+
+statement ok
 drop table t;

@@ -495,7 +495,7 @@ impl<'a> BeMessage<'a> {
             // https://www.postgresql.org/docs/current/protocol-error-fields.html
             BeMessage::NoticeResponse(notice) => {
                 buf.put_u8(b'N');
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice));
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice))?;
             }
 
             // DataRow
@@ -630,7 +630,7 @@ impl<'a> BeMessage<'a> {
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
                 let msg = error.to_string();
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg));
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
@@ -700,7 +700,7 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
 }
 
 /// Safe write error or notice message.
-fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
+fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Result<()> {
     write_body(buf, |buf| {
         buf.put_u8(b'S'); // severity
         write_cstr(buf, msg.severity.as_str().as_bytes())?;
@@ -714,7 +714,6 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
         buf.put_u8(0); // terminator
         Ok(())
     })
-    .unwrap();
 }
 
 #[cfg(test)]

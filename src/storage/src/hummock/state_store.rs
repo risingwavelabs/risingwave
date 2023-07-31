@@ -19,13 +19,12 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
-use tracing::log::warn;
 
 use super::store::state_store::HummockStorageIterator;
 use super::store::version::CommittedVersion;
@@ -226,13 +225,6 @@ impl StateStore for HummockStorage {
     }
 
     async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-        if epoch == INVALID_EPOCH {
-            warn!("syncing invalid epoch");
-            return Ok(SyncResult {
-                sync_size: 0,
-                uncommitted_ssts: vec![],
-            });
-        }
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
             .send(HummockEvent::AwaitSyncEpoch {
@@ -244,14 +236,11 @@ impl StateStore for HummockStorage {
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        if epoch == INVALID_EPOCH {
-            warn!("sealing invalid epoch");
-            return;
-        }
         // Update `seal_epoch` synchronously,
         // as `HummockEvent::SealEpoch` is handled asynchronously.
-        assert!(epoch > self.seal_epoch.load(MemOrdering::SeqCst));
-        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+        let prev_epoch = self.seal_epoch.swap(epoch, MemOrdering::SeqCst);
+        assert_gt!(epoch, prev_epoch);
+
         if is_checkpoint {
             let _ = self.min_current_epoch.compare_exchange(
                 HummockEpoch::MAX,
@@ -269,17 +258,19 @@ impl StateStore for HummockStorage {
         StoreLocalStatistic::flush_all();
     }
 
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::Clear(tx))
+            .expect("should send success");
+        rx.await.expect("should wait success");
+
+        let epoch = self.pinned_version.load().max_committed_epoch();
         self.min_current_epoch
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
-        async move {
-            let (tx, rx) = oneshot::channel();
-            self.hummock_event_sender
-                .send(HummockEvent::Clear(tx))
-                .expect("should send success");
-            rx.await.expect("should wait success");
-            Ok(())
-        }
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+
+        Ok(())
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {

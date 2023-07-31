@@ -27,7 +27,7 @@ pub async fn validate_sink(
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
     let param = SinkParam::from(sink_catalog);
 
-    let sink = build_sink(param)?;
+    let sink = build_sink(param).await?;
 
     dispatch_sink!(sink, sink, { Ok(sink.validate(connector_client).await?) })
 }

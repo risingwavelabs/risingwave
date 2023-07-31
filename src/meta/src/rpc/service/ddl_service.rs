@@ -37,7 +37,7 @@ use crate::manager::{
     IdCategoryType, MetaSrvEnv, StreamingJob,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
+use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -194,10 +194,12 @@ where
         &self,
         request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
-        let source_id = request.into_inner().source_id;
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id))
+            .run_command(DdlCommand::DropSource(source_id, drop_mode))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -241,11 +243,15 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
-        let sink_id = request.into_inner().sink_id;
-
+        let request = request.into_inner();
+        let sink_id = request.sink_id;
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Sink(sink_id)))
+            .run_command(DdlCommand::DropStreamingJob(
+                StreamingJobId::Sink(sink_id),
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropSinkResponse {
@@ -288,11 +294,13 @@ where
 
         let request = request.into_inner();
         let table_id = request.table_id;
+        let drop_mode = DropMode::from_request_setting(request.cascade);
 
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::MaterializedView(table_id),
+                drop_mode,
             ))
             .await?;
 
@@ -335,12 +343,15 @@ where
     ) -> Result<Response<DropIndexResponse>, Status> {
         self.env.idle_manager().record_activity();
 
-        let index_id = request.into_inner().index_id;
+        let request = request.into_inner();
+        let index_id = request.index_id;
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Index(
-                index_id,
-            )))
+            .run_command(DdlCommand::DropStreamingJob(
+                StreamingJobId::Index(index_id),
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropIndexResponse {
@@ -449,12 +460,13 @@ where
         let source_id = request.source_id;
         let table_id = request.table_id;
 
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Table(
-                source_id.map(|PbSourceId::Id(id)| id),
-                table_id,
-            )))
+            .run_command(DdlCommand::DropStreamingJob(
+                StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropTableResponse {
@@ -488,11 +500,12 @@ where
         &self,
         request: Request<DropViewRequest>,
     ) -> Result<Response<DropViewResponse>, Status> {
-        let req = request.into_inner();
-        let view_id = req.get_view_id();
+        let request = request.into_inner();
+        let view_id = request.get_view_id();
+        let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropView(view_id))
+            .run_command(DdlCommand::DropView(view_id, drop_mode))
             .await?;
         Ok(Response::new(DropViewResponse {
             status: None,

@@ -74,7 +74,7 @@ statement error Use `DROP TABLE`
 drop source t;
 
 # FIXME: improve the error message
-statement error not found 
+statement error not found
 drop sink t;
 
 # FIXME: improve the error message
@@ -182,7 +182,7 @@ drop sink src;
 statement error not found
 drop view src;
 
-# 4.6 sink 
+# 4.6 sink
 statement ok
 CREATE SINK sink FROM mv WITH (connector='blackhole');
 
@@ -362,7 +362,7 @@ statement error view.*exists
 create table v(v int);
 
 # 8. create with unsupport format
-statement error connector datagen does not support row format DebeziumJson
+statement error connector datagen does not support format Debezium
 create table err_t1 (v int) with (
     connector = 'datagen',
     fields.v.kind = 'sequence',

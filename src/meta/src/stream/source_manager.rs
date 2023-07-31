@@ -27,8 +27,9 @@ use risingwave_connector::source::{
     SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::TableSchema;
+use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -36,7 +37,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, SourceId};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -47,9 +48,9 @@ pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>
 
 pub struct SourceManager<S: MetaStore> {
     pub(crate) paused: Mutex<()>,
+    env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
     core: Mutex<SourceManagerCore<S>>,
-    connector_rpc_endpoint: Option<String>,
     metrics: Arc<MetaMetrics>,
 }
 
@@ -70,6 +71,7 @@ struct ConnectorSourceWorker {
     period: Duration,
     metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
+    connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
 }
 
@@ -82,6 +84,7 @@ impl ConnectorSourceWorker {
                 info: SourceEnumeratorInfo {
                     source_id: self.source_id,
                 },
+                connector_client: self.connector_client.clone(),
             }),
         )
         .await?;
@@ -92,16 +95,15 @@ impl ConnectorSourceWorker {
     }
 
     pub async fn create(
-        connector_rpc_endpoint: &Option<String>,
+        connector_client: Option<ConnectorClient>,
         source: &Source,
         period: Duration,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        // init cdc properties
-        if let Some(endpoint) = connector_rpc_endpoint {
+        if properties.is_cdc_connector() {
             let table_schema = Self::extract_source_schema(source);
-            properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
+            properties.init_cdc_properties(Some(table_schema));
         }
         let enumerator = SplitEnumeratorImpl::create(
             properties.clone(),
@@ -110,6 +112,7 @@ impl ConnectorSourceWorker {
                 info: SourceEnumeratorInfo {
                     source_id: source.id,
                 },
+                connector_client: connector_client.clone(),
             }),
         )
         .await?;
@@ -122,6 +125,7 @@ impl ConnectorSourceWorker {
             period,
             metrics,
             connector_properties: properties,
+            connector_client,
             fail_cnt: 0,
         })
     }
@@ -179,7 +183,7 @@ impl ConnectorSourceWorker {
         Ok(())
     }
 
-    fn extract_source_schema(source: &Source) -> TableSchema {
+    fn extract_source_schema(source: &Source) -> PbTableSchema {
         let pk_indices = source
             .pk_column_ids
             .iter()
@@ -192,7 +196,7 @@ impl ConnectorSourceWorker {
             })
             .collect_vec();
 
-        TableSchema {
+        PbTableSchema {
             columns: source
                 .columns
                 .iter()
@@ -512,7 +516,7 @@ where
     const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        connector_rpc_endpoint: Option<String>,
+        env: MetaSrvEnv<S>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
@@ -521,10 +525,9 @@ where
         let mut managed_sources = HashMap::new();
         {
             let sources = catalog_manager.list_sources().await;
-
             for source in sources {
                 Self::create_source_worker(
-                    &connector_rpc_endpoint,
+                    env.connector_client(),
                     &source,
                     &mut managed_sources,
                     false,
@@ -549,10 +552,10 @@ where
         ));
 
         Ok(Self {
+            env,
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
-            connector_rpc_endpoint,
             metrics,
         })
     }
@@ -690,7 +693,7 @@ where
             tracing::warn!("source {} already registered", source.get_id());
         } else {
             Self::create_source_worker(
-                &self.connector_rpc_endpoint,
+                self.env.connector_client(),
                 source,
                 &mut core.managed_sources,
                 true,
@@ -702,14 +705,14 @@ where
     }
 
     async fn create_source_worker(
-        connector_rpc_endpoint: &Option<String>,
+        connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         force_tick: bool,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(
-            connector_rpc_endpoint,
+            connector_client,
             source,
             Duration::from_secs(10),
             metrics,

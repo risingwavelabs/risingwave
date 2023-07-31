@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use aws_config::timeout::TimeoutConfig;
+use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -104,6 +105,7 @@ pub fn s3_client(
         s3_config::Builder::from(&sdk_config.clone())
             .retry_config(retry_conf)
             .timeout_config(timeout_conf)
+            .force_path_style(true)
             .build()
     } else {
         s3_config::Config::new(sdk_config)
@@ -117,12 +119,9 @@ pub async fn load_file_descriptor_from_s3(
     location: &Url,
     config: &AwsAuthProps,
 ) -> Result<Vec<u8>> {
-    let bucket = location.domain().ok_or_else(|| {
-        RwError::from(InternalError(format!(
-            "Illegal Protobuf schema path {}",
-            location
-        )))
-    })?;
+    let bucket = location
+        .domain()
+        .ok_or_else(|| RwError::from(InternalError(format!("Illegal file path {}", location))))?;
     let key = location.path().replace('/', "");
     let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
@@ -132,13 +131,18 @@ pub async fn load_file_descriptor_from_s3(
         .key(&key)
         .send()
         .await
-        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        .map_err(|e| {
+            RwError::from(InternalError(format!(
+                "get file {} err:{}",
+                location,
+                DisplayErrorContext(e)
+            )))
+        })?;
 
-    let body = response.body.collect().await.map_err(|e| {
-        RwError::from(InternalError(format!(
-            "Read Protobuf schema file from s3 {}",
-            e
-        )))
-    })?;
+    let body = response
+        .body
+        .collect()
+        .await
+        .map_err(|e| RwError::from(InternalError(format!("Read file from s3 {}", e))))?;
     Ok(body.into_bytes().to_vec())
 }
