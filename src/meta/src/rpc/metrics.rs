@@ -28,6 +28,7 @@ use prometheus::{
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -161,6 +162,8 @@ pub struct MetaMetrics {
     /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
     /// id.
     pub mv_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
+    pub sink_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -514,6 +517,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let sink_info = register_int_gauge_vec_with_registry!(
+            "sink_info",
+            "Mapping from actor id to (actor id, sink name)",
+            &["actor_id", "sink_name",],
+            registry
+        )
+        .unwrap();
+
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
@@ -639,6 +650,7 @@ impl MetaMetrics {
             actor_info,
             table_info,
             mv_info,
+            sink_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -770,6 +782,19 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                         ])
                                         .set(1);
                                 }
+                            }
+                        }
+
+                        if let Some(stream_node) = &actor.nodes {
+                            if let Some(Sink(sink_node)) = &stream_node.node_body {
+                                let sink_name = match &sink_node.sink_desc {
+                                    Some(sink_desc) => &sink_desc.name,
+                                    _ => "unknown",
+                                };
+                                meta_metrics
+                                    .sink_info
+                                    .with_label_values(&[&actor_id_str, sink_name])
+                                    .set(1);
                             }
                         }
 
