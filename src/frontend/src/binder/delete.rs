@@ -93,7 +93,9 @@ impl Binder {
             table_name,
             owner,
             table,
-            selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
+            selection: selection
+                .map(|expr| self.bind_expr(expr)?.enforce_bool_clause("WHERE"))
+                .transpose()?,
             returning_list,
             returning_schema: if returning {
                 Some(Schema { fields })

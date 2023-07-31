@@ -18,8 +18,9 @@ mod election_client;
 mod intercept;
 pub mod metrics;
 pub mod server;
-mod service;
+pub mod service;
 
+pub use election_client::{ElectionClient, ElectionMember, EtcdElectionClient};
 pub use service::cluster_service::ClusterServiceImpl;
 pub use service::ddl_service::DdlServiceImpl;
 pub use service::heartbeat_service::HeartbeatServiceImpl;

@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "backup_service",
         "batch_plan",
         "catalog",
+        "cloud_service",
         "common",
         "compactor",
         "compute",
@@ -57,7 +58,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
         .type_attribute("node_body", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
+        .type_attribute(
+            "stream_plan.Barrier.BarrierKind",
+            "#[derive(::enum_as_inner::EnumAsInner)]",
+        )
+        // Eq + Hash are for plan nodes to do common sub-plan detection.
+        // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
@@ -66,13 +74,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
-        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",
             "#[derive(Eq, Hash)]",
         )
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
+        // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])
         .expect("Failed to compile grpc!");

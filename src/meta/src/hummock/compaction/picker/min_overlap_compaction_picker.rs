@@ -206,18 +206,6 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
-            if ret.total_file_size >= self.max_compaction_bytes
-                || ret.total_file_count >= self.max_file_count as usize
-                || ret
-                    .sstable_infos
-                    .iter()
-                    .filter(|ssts| !ssts.is_empty())
-                    .count()
-                    > MAX_LEVEL_COUNT
-            {
-                break;
-            }
-
             let mut overlap_files_range =
                 overlap_info.check_multiple_include(&target_level.table_infos);
             if overlap_files_range.is_empty() {
@@ -296,6 +284,21 @@ impl NonOverlapSubLevelPicker {
                     .iter()
                     .map(|(_, files)| files.len())
                     .sum::<usize>();
+
+            // more than 1 sub_level
+            if ret.total_file_count > 1
+                && ret.total_file_size + (add_files_size + current_level_size)
+                    >= self.max_compaction_bytes
+                || ret.total_file_count + add_files_count >= self.max_file_count as usize
+                 || ret
+                    .sstable_infos
+                    .iter()
+                    .filter(|ssts| !ssts.is_empty())
+                    .count()
+                    > MAX_LEVEL_COUNT
+            {
+                break;
+            }
 
             ret.total_file_count += add_files_count;
             ret.total_file_size += add_files_size + current_level_size;

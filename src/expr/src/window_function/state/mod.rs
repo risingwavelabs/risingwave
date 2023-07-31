@@ -109,7 +109,7 @@ pub trait WindowState: EstimateSize {
     fn slide_forward(&mut self) -> StateEvictHint;
 }
 
-pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState + Send>> {
+pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState + Send + Sync>> {
     assert!(call.frame.bounds.is_valid());
 
     use WindowFuncKind::*;
@@ -126,7 +126,8 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
                     func: kind,
                     inputs_type: &args,
                     ret_type: call.return_type.clone().into(),
-                    set_returning: false
+                    set_returning: false,
+                    deprecated: false,
                 }
             )));
         }

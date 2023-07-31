@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
     command:
       - compactor-node
       - "--listen-addr"
@@ -35,7 +35,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
     command:
       - compute-node
       - "--listen-addr"
@@ -95,6 +95,8 @@ services:
       - 1m
       - "--snapshot-count"
       - "10000"
+      - "--data-dir"
+      - /etcd-data
     expose:
       - "2388"
     ports:
@@ -116,7 +118,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
     command:
       - frontend-node
       - "--listen-addr"
@@ -173,7 +175,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
     command:
       - meta-node
       - "--listen-addr"
@@ -243,7 +245,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:latest
+    image: ghcr.io/risingwavelabs/risingwave:v1.0.0
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051

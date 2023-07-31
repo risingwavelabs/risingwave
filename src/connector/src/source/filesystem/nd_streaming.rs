@@ -74,6 +74,7 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
             let len = line.as_bytes().len();
 
             msgs.push(SourceMessage {
+                key: None,
                 payload: Some(line.into()),
                 offset: (offset + len).to_string(),
                 split_id: split_id.clone(),
@@ -124,6 +125,7 @@ mod tests {
                 Ok(e.chunks(N3)
                     .enumerate()
                     .map(|(j, buf)| SourceMessage {
+                        key: None,
                         payload: Some(buf.to_owned()),
                         offset: (i * N2 + j * N3).to_string(),
                         split_id: split_id.clone(),

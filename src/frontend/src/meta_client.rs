@@ -35,7 +35,7 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 pub trait FrontendMetaClient: Send + Sync {
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot>;
+    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
@@ -60,7 +60,11 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_system_params(&self) -> Result<SystemParamsReader>;
 
-    async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()>;
+    async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>>;
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 }
@@ -73,8 +77,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.pin_snapshot().await
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
-        self.0.get_epoch().await
+    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
+        self.0.get_snapshot().await
     }
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
@@ -121,7 +125,11 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_system_params().await
     }
 
-    async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+    async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>> {
         self.0.set_system_param(param, value).await
     }
 

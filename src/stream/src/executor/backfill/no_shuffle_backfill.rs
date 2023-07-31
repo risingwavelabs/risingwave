@@ -84,9 +84,9 @@ pub struct BackfillExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     metrics: Arc<StreamingMetrics>,
-}
 
-const CHUNK_SIZE: usize = 1024;
+    chunk_size: usize,
+}
 
 impl<S> BackfillExecutor<S>
 where
@@ -102,6 +102,7 @@ where
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -116,6 +117,7 @@ where
             actor_id: progress.actor_id(),
             progress,
             metrics,
+            chunk_size,
         }
     }
 
@@ -139,7 +141,7 @@ where
         }
 
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {
-            let is_finished = check_all_vnode_finished(state_table, state_len).await?;
+            let is_finished = check_all_vnode_finished(state_table).await?;
             if is_finished {
                 assert!(!first_barrier.is_newly_added(self.actor_id));
             }
@@ -158,7 +160,13 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
+                let snapshot = Self::snapshot_read(
+                    &self.upstream_table,
+                    init_epoch,
+                    None,
+                    false,
+                    self.chunk_size,
+                );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
             }
@@ -234,7 +242,8 @@ where
                     &self.upstream_table,
                     snapshot_read_epoch,
                     current_pos.clone(),
-                    true
+                    true,
+                    self.chunk_size,
                 )
                 .map(Either::Right),);
 
@@ -432,6 +441,7 @@ where
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
+        chunk_size: usize,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
@@ -458,7 +468,7 @@ where
         pin_mut!(iter);
 
         #[for_await]
-        for chunk in iter_chunks(iter, upstream_table.schema(), CHUNK_SIZE) {
+        for chunk in iter_chunks(iter, upstream_table.schema(), chunk_size) {
             yield chunk?;
         }
     }

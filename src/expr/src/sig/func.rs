@@ -16,7 +16,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use risingwave_common::types::{DataType, DataTypeName};
@@ -53,6 +52,7 @@ impl FuncSigMap {
     }
 
     /// Returns a function signature with the same type, argument types and return type.
+    /// Deprecated functions are included.
     pub fn get(&self, ty: PbType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
         let v = self.0.get(&(ty, args.len()))?;
         v.iter()
@@ -60,8 +60,12 @@ impl FuncSigMap {
     }
 
     /// Returns all function signatures with the same type and number of arguments.
-    pub fn get_with_arg_nums(&self, ty: PbType, nargs: usize) -> &[FuncSign] {
-        self.0.get(&(ty, nargs)).map_or(&[], Deref::deref)
+    /// Deprecated functions are excluded.
+    pub fn get_with_arg_nums(&self, ty: PbType, nargs: usize) -> Vec<&FuncSign> {
+        match self.0.get(&(ty, nargs)) {
+            Some(v) => v.iter().filter(|d| !d.deprecated).collect(),
+            None => vec![],
+        }
     }
 }
 
@@ -72,6 +76,9 @@ pub struct FuncSign {
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
     pub build: fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>,
+    /// Whether the function is deprecated and should not be used in the frontend.
+    /// For backward compatibility, it is still available in the backend.
+    pub deprecated: bool,
 }
 
 impl fmt::Debug for FuncSign {
@@ -81,6 +88,7 @@ impl fmt::Debug for FuncSign {
             inputs_type: self.inputs_type,
             ret_type: self.ret_type,
             set_returning: false,
+            deprecated: self.deprecated,
         }
         .fmt(f)
     }
@@ -124,6 +132,10 @@ mod tests {
                 // validate the FUNC_SIG_MAP is consistent
                 assert_eq!(func, &sig.func);
                 assert_eq!(num_args, &sig.inputs_type.len());
+                // exclude deprecated functions
+                if sig.deprecated {
+                    continue;
+                }
 
                 new_map
                     .entry(*func)
@@ -186,12 +198,6 @@ mod tests {
                 ],
                 ArrayAccess: [
                     "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
-                ],
-                ArrayLength: [
-                    "array_length(list) -> int64/int32",
-                ],
-                Cardinality: [
-                    "cardinality(list) -> int64/int32",
                 ],
             }
         "#]];

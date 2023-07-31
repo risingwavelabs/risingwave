@@ -98,9 +98,11 @@ impl PlanTreeNodeUnary for LogicalExpand {
         });
         mapping.push(Some(2 * new_input_col_num));
 
+        let expand = Self::new(input, column_subsets);
+        let output_col_num = expand.schema().len();
         (
-            Self::new(input, column_subsets),
-            ColIndexMapping::new(mapping),
+            expand,
+            ColIndexMapping::with_target_size(mapping, output_col_num),
         )
     }
 }
@@ -109,10 +111,12 @@ impl_plan_tree_node_for_unary! {LogicalExpand}
 impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         // No pruning.
+        let input_required_cols = (0..self.input().schema().len()).collect_vec();
         LogicalProject::with_out_col_idx(
-            self.clone_with_input(self.input()).into(),
+            self.clone_with_input(self.input().prune_col(&input_required_cols, ctx))
+                .into(),
             required_cols.iter().cloned(),
         )
         .into()

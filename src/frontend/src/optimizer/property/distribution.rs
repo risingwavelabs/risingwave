@@ -245,13 +245,13 @@ impl DistributionDisplay<'_> {
                 } else {
                     f.write_str("UpstreamHashShard(")?;
                 }
-                for key in vec.iter().copied().with_position() {
+                for (pos, key) in vec.iter().copied().with_position() {
                     std::fmt::Debug::fmt(
-                        &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),
+                        &FieldDisplay(self.input_schema.fields.get(key).unwrap()),
                         f,
                     )?;
-                    match key {
-                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
+                    match pos {
+                        itertools::Position::First | itertools::Position::Middle => {
                             f.write_str(", ")?;
                         }
                         _ => {}
@@ -299,6 +299,7 @@ impl RequiredDist {
         plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
+        let plan = required_order.enforce_if_not_satisfies(plan)?;
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {

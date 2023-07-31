@@ -33,8 +33,8 @@ pub struct ColIndexMapping {
 
 impl ColIndexMapping {
     /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
-    /// corresponding element.
-    pub fn new(map: Vec<Option<usize>>) -> Self {
+    /// corresponding element. **This method is not recommended**, please use `with_target_size` instead, see <https://github.com/risingwavelabs/risingwave/issues/7234> for more information**
+    pub fn without_target_size(map: Vec<Option<usize>>) -> Self {
         let target_size = match map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
             Some(target_max) => target_max + 1,
             None => 0,
@@ -69,7 +69,21 @@ impl ColIndexMapping {
 
     pub fn identity(size: usize) -> Self {
         let map = (0..size).map(Some).collect();
-        Self::new(map)
+        Self::without_target_size(map)
+    }
+
+    pub fn is_identity(&self) -> bool {
+        if self.map.len() != self.target_size {
+            return false;
+        }
+        for (src, tar) in self.map.iter().enumerate() {
+            if let Some(tar_value) = tar && src == *tar_value {
+                continue
+            } else {
+                return false;
+            }
+        }
+        true
     }
 
     pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
@@ -145,7 +159,7 @@ impl ColIndexMapping {
         for (tar, &src) in cols.iter().enumerate() {
             map[src] = Some(tar);
         }
-        Self::new(map)
+        Self::without_target_size(map)
     }
 
     // TODO(yuchao): isn't this the same as `with_remaining_columns`?
@@ -156,7 +170,7 @@ impl ColIndexMapping {
                 map[src] = Some(tar);
             }
         }
-        Self::new(map)
+        Self::without_target_size(map)
     }
 
     /// Remove the given columns, and maps the remaining columns to a consecutive range starting
@@ -376,5 +390,11 @@ mod tests {
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);
         assert_eq!(composite.map(2), 1); // 2+3 = 5, 5 -> 1
+    }
+
+    #[test]
+    fn test_identity() {
+        let mapping = ColIndexMapping::identity(10);
+        assert!(mapping.is_identity());
     }
 }

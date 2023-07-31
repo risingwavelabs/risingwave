@@ -91,6 +91,26 @@ impl RewriteExprsRecursive for BoundSelect {
                     })
                     .collect::<Vec<_>>(),
             ),
+            GroupBy::Rollup(rollup) => GroupBy::Rollup(
+                std::mem::take(rollup)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            GroupBy::Cube(cube) => GroupBy::Cube(
+                std::mem::take(cube)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         };
         self.group_by = new_group_by;
 
@@ -208,9 +228,13 @@ impl Binder {
 
         // Only support one grouping item in group by clause
         let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
-            GroupBy::GroupingSets(self.bind_grouping_sets_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
+            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
+        } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
+            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
+        } else if select.group_by.len() == 1 && let Expr::Cube(cube) = &select.group_by[0] {
+            GroupBy::Cube(self.bind_grouping_items_expr_in_select(cube.clone(), &out_name_to_index, &select_items)?)
         } else {
-            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_))) {
+            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_)) || matches!(expr, Expr::Cube(_))) {
                 return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
             }
             GroupBy::GroupKey(select
@@ -275,15 +299,16 @@ impl Binder {
                     select_list.push(expr);
                     aliases.push(Some(alias.real_value()));
                 }
-                SelectItem::QualifiedWildcard(obj_name) => {
+                SelectItem::QualifiedWildcard(obj_name, except) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
+                    let except_indices = self.generate_except_indices(except)?;
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[*begin..*end]
                             .iter()
-                            .filter(|c| !c.is_hidden),
+                            .filter(|c| !c.is_hidden && !except_indices.contains(&c.index)),
                     );
                     select_list.extend(exprs);
                     aliases.extend(names);
@@ -293,7 +318,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::WildcardOrWithExcept(w) => {
+                SelectItem::Wildcard(except) => {
                     if self.context.range_of.is_empty() {
                         return Err(ErrorCode::BindError(
                             "SELECT * with no tables specified is not valid".into(),
@@ -308,25 +333,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
 
-                    let mut except_indices: HashSet<usize> = HashSet::new();
-                    if let Some(exprs) = w {
-                        for expr in exprs {
-                            let bound = self.bind_expr(expr)?;
-                            if let ExprImpl::InputRef(inner) = bound {
-                                if !except_indices.insert(inner.index) {
-                                    return Err(ErrorCode::BindError(
-                                        "Duplicate entry in except list".into(),
-                                    )
-                                    .into());
-                                }
-                            } else {
-                                return Err(ErrorCode::BindError(
-                                    "Need column name in except list".into(),
-                                )
-                                .into());
-                            }
-                        }
-                    }
+                    let except_indices = self.generate_except_indices(except)?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -417,14 +424,14 @@ impl Binder {
         }
     }
 
-    fn bind_grouping_sets_expr_in_select(
+    fn bind_grouping_items_expr_in_select(
         &mut self,
-        grouping_sets: Vec<Vec<Expr>>,
+        grouping_items: Vec<Vec<Expr>>,
         name_to_index: &HashMap<String, usize>,
         select_items: &[ExprImpl],
     ) -> Result<Vec<Vec<ExprImpl>>> {
         let mut result = vec![];
-        for set in grouping_sets {
+        for set in grouping_items {
             let mut set_exprs = vec![];
             for expr in set {
                 let name = match &expr {
@@ -774,6 +781,32 @@ impl Binder {
                 BoundDistinct::DistinctOn(bound_exprs)
             }
         })
+    }
+
+    fn generate_except_indices(&mut self, except: Option<Vec<Expr>>) -> Result<HashSet<usize>> {
+        let mut except_indices: HashSet<usize> = HashSet::new();
+        if let Some(exprs) = except {
+            for expr in exprs {
+                let bound = self.bind_expr(expr)?;
+                match bound {
+                    ExprImpl::InputRef(inner) => {
+                        if !except_indices.insert(inner.index) {
+                            return Err(ErrorCode::BindError(
+                                "Duplicate entry in except list".into(),
+                            )
+                            .into());
+                        }
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "Only support column name in except list".into(),
+                        )
+                        .into())
+                    }
+                }
+            }
+        }
+        Ok(except_indices)
     }
 }
 
