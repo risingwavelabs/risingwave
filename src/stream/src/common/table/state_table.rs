@@ -620,7 +620,9 @@ where
 
         if cache_may_stale {
             self.state_clean_watermark = None;
-            self.watermark_cache.clear();
+            if USE_WATERMARK_CACHE {
+                self.watermark_cache.clear();
+            }
         }
 
         (
@@ -631,7 +633,13 @@ where
 }
 
 // write
-impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -689,8 +697,8 @@ where
     pub fn insert(&mut self, value: impl Row) {
         let pk_indices = &self.pk_indices;
         let pk = (&value).project(pk_indices);
-        if !pk.is_null_at(0) {
-            self.watermark_cache.insert(pk);
+        if USE_WATERMARK_CACHE {
+            self.watermark_cache.insert(&pk);
         }
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
@@ -703,7 +711,9 @@ where
     pub fn delete(&mut self, old_value: impl Row) {
         let pk_indices = &self.pk_indices;
         let pk = (&old_value).project(pk_indices);
-        self.watermark_cache.delete(&pk);
+        if USE_WATERMARK_CACHE {
+            self.watermark_cache.delete(&pk);
+        }
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(old_value);
@@ -757,6 +767,10 @@ where
         let values = value_chunk.serialize_with(&self.row_serde);
 
         let key_chunk = chunk.reorder_columns(self.pk_indices());
+        // TODO(kwannoel): Seems like we are doing vis check twice here.
+        // Once below, when using vis, and once here,
+        // when using vis to set rows empty or not.
+        // If we are to use the vis optimization, we should skip this.
         let vnode_and_pks = key_chunk
             .rows_with_holes()
             .zip_eq_fast(vnodes.iter())
@@ -780,13 +794,15 @@ where
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => {
-                                if let Some(pk) = key && !pk.is_null_at(0) {
+                                if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                     self.watermark_cache.insert(pk);
                                 }
                                 self.insert_inner(key_bytes, value);
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                key.as_ref().map(|key| self.watermark_cache.delete(key));
+                                if USE_WATERMARK_CACHE && let Some(ref pk) = key {
+                                    self.watermark_cache.delete(pk);
+                                }
                                 self.delete_inner(key_bytes, value);
                             }
                         }
@@ -798,13 +814,15 @@ where
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             println!("insert pk: {:?}", key);
-                            if let Some(pk) = key && !pk.is_null_at(0) {
-                                    self.watermark_cache.insert(pk);
-                                }
+                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
+                                self.watermark_cache.insert(pk);
+                            }
                             self.insert_inner(key_bytes, value);
                         }
                         Op::Delete | Op::UpdateDelete => {
-                            key.as_ref().map(|key| self.watermark_cache.delete(key));
+                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
+                                self.watermark_cache.delete(pk);
+                            }
                             self.delete_inner(key_bytes, value);
                         }
                     }
@@ -841,14 +859,17 @@ where
             .await?;
 
         // Refresh watermark cache if it is out of sync.
-        if !self.watermark_cache.is_synced() {
+        if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
             if let Some(ref watermark) = self.prev_cleaned_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
                 // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
                 // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
                 // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-                // We can optimize it with `RefCell` if needed.
+                // TODO(kwannoel): We can optimize it with:
+                // 1. `RefCell` if needed.
+                // 2. Pass in a direct reference to LocalStateStore,
+                //    Similar to how we do for pk_indices.
                 let mut pks = vec![];
                 {
                     let mut streams = vec![];
@@ -990,11 +1011,16 @@ where
 }
 
 // Iterator functions
-impl<S, SD, const IS_REPLICATED: bool, W> StateTableInner<S, SD, IS_REPLICATED, W>
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
 {
     /// This function scans rows from the relational table.
     pub async fn iter(

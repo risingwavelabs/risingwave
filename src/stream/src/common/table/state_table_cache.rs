@@ -118,10 +118,10 @@ impl StateTableWatermarkCache {
     }
 
     /// Insert a new value.
-    pub fn insert(&mut self, key: impl Row) -> Option<()> {
-        println!("insert watermark key: {:?}", key);
-        debug_assert!(!key.is_null_at(0));
-        self.inner.insert(DefaultOrdered(key.into_owned_row()), ())
+    pub fn insert(&mut self, key: &impl Row) {
+        if !key.is_null_at(0) {
+            self.inner.insert(DefaultOrdered(key.into_owned_row()), ());
+        }
     }
 
     /// Delete a value
@@ -306,8 +306,7 @@ mod tests {
             Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
         ];
-        let old_v = cache.insert(&v1);
-        assert!(old_v.is_none());
+        cache.insert(&v1);
         let lowest = cache.lowest_key().unwrap();
         assert_eq!(lowest, v1[0].clone().unwrap().as_scalar_ref_impl());
 
@@ -315,9 +314,8 @@ mod tests {
             Some(Timestamptz::from_secs(999).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
         ];
-        let old_v = cache.insert(&v2);
+        cache.insert(&v2);
         assert_eq!(cache.len(), 2);
-        assert!(old_v.is_none());
         let lowest = cache.lowest_key().unwrap();
         assert_eq!(lowest, v2[0].clone().unwrap().as_scalar_ref_impl());
 
@@ -325,16 +323,14 @@ mod tests {
             Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
         ];
-        let old_v = cache.insert(&v3);
-        assert!(old_v.is_none());
+        cache.insert(&v3);
         assert_eq!(cache.len(), 3);
 
         let v4 = [
             Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
         ];
-        let old_v = cache.insert(&v4);
-        assert!(old_v.is_none());
+        cache.insert(&v4);
         assert_eq!(cache.len(), 3);
 
         let v5 = [
