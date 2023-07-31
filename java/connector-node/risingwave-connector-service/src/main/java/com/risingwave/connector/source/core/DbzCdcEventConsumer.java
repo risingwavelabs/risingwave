@@ -102,9 +102,9 @@ public class DbzCdcEventConsumer
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
                             .setPartition(String.valueOf(sourceId))
-                            .setPayload(new String(payload))
+                            .setPayload(new String(payload, StandardCharsets.UTF_8))
                             .build();
-            LOG.debug("record => {}", message.getPayload());
+            LOG.info("record => {}", message.getPayload());
             builder.addEvents(message);
             committer.markProcessed(event);
         }
