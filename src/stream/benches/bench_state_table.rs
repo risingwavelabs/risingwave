@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use futures::executor::block_on;
 use risingwave_common::array::{DataChunk, DataChunkTestExt, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::field_generator::VarcharProperty;
@@ -21,19 +22,13 @@ use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_test::test_utils::{prepare_hummock_test_env, HummockTestEnv};
-use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::common::table::state_table::StateTable;
-use risingwave_stream::common::table::test_utils::gen_prost_table;
 use tokio::runtime::Runtime;
 
-type TestStateTable = StateTable<HummockStorage>;
+type TestStateTable = StateTable<MemoryStateStore>;
 
-async fn create_test_env() -> HummockTestEnv {
-    prepare_hummock_test_env().await
-}
-
-async fn create_state_table(test_env: &mut HummockTestEnv) -> TestStateTable {
+async fn create_state_table() -> TestStateTable {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
     let column_descs = vec![
@@ -43,18 +38,17 @@ async fn create_state_table(test_env: &mut HummockTestEnv) -> TestStateTable {
         ColumnDesc::unnamed(ColumnId::from(3), DataType::Int64),
     ];
     let order_types = vec![OrderType::ascending(), OrderType::ascending()];
-    let pk_index = vec![0_usize, 1_usize];
-    let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let pk_indices = vec![0_usize, 1_usize];
+
+    let store = MemoryStateStore::new();
+    StateTable::new_without_distribution_inconsistent_op(
+        store,
         TEST_TABLE_ID,
         column_descs,
         order_types,
-        pk_index,
-        read_prefix_len_hint,
-    );
-
-    test_env.register_table(table.clone()).await;
-    StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None).await
+        pk_indices,
+    )
+    .await
 }
 
 fn gen_inserts(n: usize, data_types: &[DataType]) -> Vec<OwnedRow> {
@@ -66,18 +60,11 @@ fn gen_stream_chunks(n: usize, data_types: &[DataType]) -> Vec<StreamChunk> {
     StreamChunk::gen_stream_chunks(n, 1024, data_types, &VarcharProperty::Constant)
 }
 
-fn setup_bench_state_table() -> (HummockTestEnv, TestStateTable) {
-    let rt = Runtime::new().unwrap();
-    let mut test_env = rt.block_on(create_test_env());
-    let state_table = rt.block_on(create_state_table(&mut test_env));
-    (test_env, state_table)
+fn setup_bench_state_table() -> TestStateTable {
+    block_on(create_state_table())
 }
 
-async fn run_bench_state_table_inserts(
-    _test_env: HummockTestEnv,
-    mut state_table: TestStateTable,
-    rows: Vec<OwnedRow>,
-) {
+async fn run_bench_state_table_inserts(mut state_table: TestStateTable, rows: Vec<OwnedRow>) {
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
     for row in rows {
@@ -92,27 +79,21 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     group.sample_size(10);
 
     let rt = Runtime::new().unwrap();
-    group.bench_function("benchmark_hash_agg", |b| {
+    group.bench_function("benchmark_inserts", |b| {
         b.to_async(&rt).iter_batched(
             || {
                 (
                     setup_bench_state_table(),
-                    gen_inserts(10000, &[DataType::Int32, DataType::Int64, DataType::Int64]),
+                    gen_inserts(1, &[DataType::Int32, DataType::Int64, DataType::Int64]),
                 )
             },
-            |((test_env, state_table), rows)| {
-                run_bench_state_table_inserts(test_env, state_table, rows)
-            },
+            |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
             BatchSize::SmallInput,
         )
     });
 }
 
-async fn run_bench_state_table_chunks(
-    _test_env: HummockTestEnv,
-    mut state_table: TestStateTable,
-    chunks: Vec<StreamChunk>,
-) {
+async fn run_bench_state_table_chunks(mut state_table: TestStateTable, chunks: Vec<StreamChunk>) {
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
     for chunk in chunks {
@@ -127,7 +108,7 @@ fn bench_state_table_insert_chunks(c: &mut Criterion) {
     group.sample_size(10);
 
     let rt = Runtime::new().unwrap();
-    group.bench_function("benchmark_hash_agg", |b| {
+    group.bench_function("benchmark_insert_chunks", |b| {
         b.to_async(&rt).iter_batched(
             || {
                 (
@@ -135,9 +116,7 @@ fn bench_state_table_insert_chunks(c: &mut Criterion) {
                     gen_stream_chunks(100, &[DataType::Int32, DataType::Int64, DataType::Int64]),
                 )
             },
-            |((test_env, state_table), chunks)| {
-                run_bench_state_table_chunks(test_env, state_table, chunks)
-            },
+            |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
             BatchSize::SmallInput,
         )
     });
