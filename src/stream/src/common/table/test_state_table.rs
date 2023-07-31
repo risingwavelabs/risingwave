@@ -26,8 +26,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::DEFAULT_VNODE;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
+use crate::executor::Message::Watermark;
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
@@ -1482,7 +1483,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+        WatermarkCacheStateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -1594,9 +1595,12 @@ async fn test_state_table_watermark_cache_refill() {
     );
 
     test_env.register_table(table.clone()).await;
-    let mut state_table =
-        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
-            .await;
+    let mut state_table = WatermarkCacheStateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        None,
+    )
+    .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);

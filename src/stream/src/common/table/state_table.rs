@@ -63,6 +63,8 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 /// This num is arbitrary and we may want to improve this choice in the future.
 const WATERMARK_CACHE_ENTRIES: usize = 1024;
 
+type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
+
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
@@ -70,7 +72,7 @@ pub struct StateTableInner<
     S,
     SD = BasicSerde,
     const IS_REPLICATED: bool = false,
-    W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+    W = DefaultWatermarkBufferStrategy,
     const USE_WATERMARK_CACHE: bool = false,
 > where
     S: StateStore,
@@ -135,7 +137,13 @@ pub struct StateTableInner<
 
 /// `StateTable` will use `BasicSerde` as default
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
+/// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
+/// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
+/// `WatermarkCacheStateTable` caches the watermark column.
+/// It will reduce state cleaning overhead.
+pub type WatermarkCacheStateTable<S> =
+    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
