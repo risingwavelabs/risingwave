@@ -147,8 +147,8 @@ mod tests {
 
     use crate::parser::upsert_parser::UpsertParser;
     use crate::parser::{
-        EncodingProperties, JsonParser, JsonProperties, ParserProperties, ProtocolProperties,
-        SourceColumnDesc, SourceStreamChunkBuilder,
+        EncodingProperties, JsonParser, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -333,6 +333,8 @@ mod tests {
                     ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
                 ],
             ),
+            ColumnDesc::new_atomic(DataType::Varchar, "I64CastToVarchar", 10),
+            ColumnDesc::new_atomic(DataType::Int64, "VarcharCastToI64", 11),
         ]
         .iter()
         .map(SourceColumnDesc::from)
@@ -352,7 +354,9 @@ mod tests {
                 "id": "7772634297",
                 "name": "Lily Frami yet",
                 "username": "Dooley5659"
-            }
+            },
+            "I64CastToVarchar": 1598197865760800768,
+            "VarcharCastToI64": "1598197865760800768"
         }
         "#.to_vec();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
@@ -381,7 +385,9 @@ mod tests {
                 Some(ScalarImpl::Utf8("7772634297".into())),
                 Some(ScalarImpl::Utf8("Lily Frami yet".into())),
                 Some(ScalarImpl::Utf8("Dooley5659".into())),
-            ]) ))
+            ]) )),
+            Some(ScalarImpl::Utf8("1598197865760800768".into())),
+            Some(ScalarImpl::Int64(1598197865760800768)),
         ];
         assert_eq!(row, expected.into());
     }
@@ -398,7 +404,7 @@ mod tests {
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
         ];
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Upsert,

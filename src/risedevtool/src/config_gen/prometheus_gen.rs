@@ -130,7 +130,7 @@ scrape_configs:
   - job_name: meta
     static_configs:
       - targets: [{meta_node_targets}]
-  
+
   - job_name: minio
     metrics_path: /minio/v2/metrics/cluster
     static_configs:

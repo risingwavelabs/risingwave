@@ -113,8 +113,8 @@ where
                     .worker_node
                     .property
                     .as_ref()
-                    .unwrap()
-                    .is_unschedulable;
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or_default();
             }
 
             worker.update_ttl(self.max_heartbeat_interval);

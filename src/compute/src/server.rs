@@ -86,7 +86,7 @@ pub async fn compute_node_serve(
     registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
+    let config = load_config(&opts.config_path, &opts);
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -398,7 +398,8 @@ pub async fn compute_node_serve(
             .tcp_nodelay(true)
             .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
             .layer(TracingExtractLayer::new())
-            .add_service(TaskServiceServer::new(batch_srv))
+            // XXX: unlimit the max message size to allow arbitrary large SQL input.
+            .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))

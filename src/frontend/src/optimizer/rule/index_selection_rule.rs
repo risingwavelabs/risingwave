@@ -226,6 +226,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            index.index_table.cardinality,
         );
 
         let primary_table_scan = LogicalScan::create(
@@ -235,6 +236,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            index.primary_table.cardinality,
         );
 
         let conjunctions = index
@@ -334,6 +336,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            logical_scan.table_cardinality(),
         );
 
         let conjunctions = primary_table_desc
@@ -569,6 +572,7 @@ impl IndexSelectionRule {
                 conjunctions: conjunctions.to_vec(),
             },
             false,
+            logical_scan.table_cardinality(),
         );
 
         result.push(primary_access.into());
@@ -609,6 +613,7 @@ impl IndexSelectionRule {
                 ctx,
                 new_predicate,
                 false,
+                index.index_table.cardinality,
             )
             .into(),
         )

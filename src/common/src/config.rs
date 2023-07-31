@@ -36,8 +36,6 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-/// For non-user-facing components where the CLI arguments do not override the config file.
-pub const NO_OVERRIDE: Option<NoOverride> = None;
 
 /// Unrecognized fields in a config section. Generic over the config section type to provide better
 /// error messages.
@@ -92,7 +90,7 @@ impl<T> Serialize for Unrecognized<T> {
     }
 }
 
-pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
+pub fn load_config(path: &str, cli_override: impl OverrideConfig) -> RwConfig
 where
 {
     let mut config = if path.is_empty() {
@@ -103,22 +101,26 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
-    if let Some(cli_override) = cli_override {
-        cli_override.r#override(&mut config);
-    }
+    cli_override.r#override(&mut config);
     config
 }
 
 pub trait OverrideConfig {
-    fn r#override(self, config: &mut RwConfig);
+    fn r#override(&self, config: &mut RwConfig);
 }
 
-/// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
+impl<'a, T: OverrideConfig> OverrideConfig for &'a T {
+    fn r#override(&self, config: &mut RwConfig) {
+        T::r#override(self, config)
+    }
+}
+
+/// For non-user-facing components where the CLI arguments do not override the config file.
 #[derive(Clone, Copy)]
-pub struct NoOverride {}
+pub struct NoOverride;
 
 impl OverrideConfig for NoOverride {
-    fn r#override(self, _config: &mut RwConfig) {}
+    fn r#override(&self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
@@ -262,6 +264,9 @@ pub struct MetaConfig {
     // If the compaction task does not change in progress beyond the
     // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
     pub compaction_task_max_heartbeat_interval_secs: u64,
+
+    #[serde(default)]
+    pub compaction_config: CompactionConfig,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -650,7 +655,7 @@ impl SystemConfig {
     }
 }
 
-mod default {
+pub mod default {
     pub mod meta {
         use crate::config::{DefaultParallelism, MetaBackend};
 
@@ -975,6 +980,65 @@ mod default {
             true
         }
     }
+
+    pub mod compaction_config {
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+
+        // decrease this configure when the generation of checkpoint barrier is not frequent.
+        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+        const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
+        const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
+        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
+        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+
+        use crate::catalog::hummock::CompactionFilterFlag;
+
+        pub fn max_bytes_for_level_base() -> u64 {
+            DEFAULT_MAX_BYTES_FOR_LEVEL_BASE
+        }
+        pub fn max_bytes_for_level_multiplier() -> u64 {
+            DEFAULT_LEVEL_MULTIPLIER
+        }
+        pub fn max_compaction_bytes() -> u64 {
+            DEFAULT_MAX_COMPACTION_BYTES
+        }
+        pub fn sub_level_max_compaction_bytes() -> u64 {
+            DEFAULT_MIN_COMPACTION_BYTES
+        }
+        pub fn level0_tier_compact_file_number() -> u64 {
+            DEFAULT_TIER_COMPACT_TRIGGER_NUMBER
+        }
+        pub fn target_file_size_base() -> u64 {
+            DEFAULT_TARGET_FILE_SIZE_BASE
+        }
+        pub fn compaction_filter_mask() -> u32 {
+            (CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL).into()
+        }
+        pub fn max_sub_compaction() -> u32 {
+            DEFAULT_MAX_SUB_COMPACTION
+        }
+        pub fn level0_stop_write_threshold_sub_level_number() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER
+        }
+        pub fn level0_sub_level_compact_level_count() -> u32 {
+            DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT
+        }
+        pub fn level0_overlapping_sub_level_compact_level_count() -> u32 {
+            DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT
+        }
+        pub fn max_space_reclaim_bytes() -> u64 {
+            DEFAULT_MAX_SPACE_RECLAIM_BYTES
+        }
+        pub fn level0_max_compact_file_number() -> u64 {
+            DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+    }
 }
 
 pub struct StorageMemoryConfig {
@@ -1021,6 +1085,38 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct CompactionConfig {
+    #[serde(default = "default::compaction_config::max_bytes_for_level_base")]
+    pub max_bytes_for_level_base: u64,
+    #[serde(default = "default::compaction_config::max_bytes_for_level_multiplier")]
+    pub max_bytes_for_level_multiplier: u64,
+    #[serde(default = "default::compaction_config::max_compaction_bytes")]
+    pub max_compaction_bytes: u64,
+    #[serde(default = "default::compaction_config::sub_level_max_compaction_bytes")]
+    pub sub_level_max_compaction_bytes: u64,
+    #[serde(default = "default::compaction_config::level0_tier_compact_file_number")]
+    pub level0_tier_compact_file_number: u64,
+    #[serde(default = "default::compaction_config::target_file_size_base")]
+    pub target_file_size_base: u64,
+    #[serde(default = "default::compaction_config::compaction_filter_mask")]
+    pub compaction_filter_mask: u32,
+    #[serde(default = "default::compaction_config::max_sub_compaction")]
+    pub max_sub_compaction: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_sub_level_number")]
+    pub level0_stop_write_threshold_sub_level_number: u64,
+    #[serde(default = "default::compaction_config::level0_sub_level_compact_level_count")]
+    pub level0_sub_level_compact_level_count: u32,
+    #[serde(
+        default = "default::compaction_config::level0_overlapping_sub_level_compact_level_count"
+    )]
+    pub level0_overlapping_sub_level_compact_level_count: u32,
+    #[serde(default = "default::compaction_config::max_space_reclaim_bytes")]
+    pub max_space_reclaim_bytes: u64,
+    #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
+    pub level0_max_compact_file_number: u64,
 }
 
 #[cfg(test)]

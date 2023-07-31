@@ -186,6 +186,7 @@
     select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
   expected_outputs:
     - logical_plan
+    - optimized_logical_plan_for_stream
     - stream_error
     - batch_error
 - id: row_number with valid over clause
@@ -351,6 +352,24 @@
     - optimized_logical_plan_for_batch
     - batch_plan
     - stream_dist_plan
+- id: TopN among multiple window function calls
+  sql: |
+    create table t (x int, y int, z int);
+    select r1
+    from (
+      select
+        *,
+        row_number() over (partition by x order by y) r1,
+        row_number() over (partition by x, y order by z) r2,
+        rank() over (partition by x, y order by z) r3
+      from t
+    ) Q
+    where Q.r1 < 10 and Q.r2 < 10 and Q.r3 < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
 
 # TopN on nexmark schema
 - id: create_bid

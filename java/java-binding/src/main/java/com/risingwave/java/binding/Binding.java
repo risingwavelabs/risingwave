@@ -82,4 +82,6 @@ public class Binding {
     static native long streamChunkIteratorNext(long pointer);
 
     static native void streamChunkIteratorClose(long pointer);
+
+    static native long streamChunkIteratorFromPretty(String str);
 }

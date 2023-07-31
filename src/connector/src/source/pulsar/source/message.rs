@@ -21,7 +21,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
         let message_id = msg.message_id.id;
 
         SourceMessage {
-            key: None,
+            key: msg.payload.metadata.partition_key.clone().map(|k| k.into()),
             payload: Some(msg.payload.data),
             offset: format!(
                 "{}:{}:{}:{}",

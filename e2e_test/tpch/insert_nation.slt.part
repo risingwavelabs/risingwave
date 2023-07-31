@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO nation (n_nationkey, n_name, n_regionkey, n_comment) VALUES 
+INSERT INTO nation (n_nationkey, n_name, n_regionkey, n_comment) VALUES
 (0,'ALGERIA',0,' haggle. carefully final deposits detect slyly agai'),
 (1,'ARGENTINA',1,'al foxes promise slyly according to the regular accounts. bold requests alon'),
 (2,'BRAZIL',1,'y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special '),
