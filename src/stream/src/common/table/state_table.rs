@@ -942,7 +942,7 @@ where
 
         let should_clean_watermark = match watermark {
             Some(ref watermark) => {
-                if self.watermark_cache.is_synced()
+                if USE_WATERMARK_CACHE && self.watermark_cache.is_synced()
                     && let Some(key) = self.watermark_cache.lowest_key() {
                     watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
                 } else {
@@ -1000,7 +1000,7 @@ where
         self.prev_cleaned_watermark = watermark;
 
         // Clear the watermark cache and force a resync.
-        if !delete_ranges.is_empty() {
+        if USE_WATERMARK_CACHE && !delete_ranges.is_empty() {
             self.watermark_cache.clear();
         }
 
