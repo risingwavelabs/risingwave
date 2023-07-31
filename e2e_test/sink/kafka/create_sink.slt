@@ -85,7 +85,7 @@ create sink si_kafka_upsert from t_kafka with (
     properties.bootstrap.server = '127.0.0.1:29092',
     topic = 'test-rw-sink-upsert',
     type = 'upsert',
-    primary_key = 'id',
+    key = 'id',
 );
 
 statement ok
@@ -94,7 +94,7 @@ create sink si_kafka_debezium from t_kafka with (
     properties.bootstrap.server = '127.0.0.1:29092',
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
-    primary_key = 'id',
+    key = 'id',
 );
 
 statement error primary key not defined for debezium kafka sink
