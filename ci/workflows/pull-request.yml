@@ -346,7 +346,11 @@ steps:
   - label: "flamegraph-env-build"
     key: "flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
-    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "heap_flamegraph"
+    if: |
+      build.pull_request.labels includes "cpu_flamegraph"
+      || build.pull_request.labels includes "ci/run-cpu-flamegraph"
+      || build.pull_request.labels includes "heap_flamegraph"
+      || build.pull_request.labels includes "ci/run-heap-flamegraph"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -363,9 +367,7 @@ steps:
   - label: "Generate CPU flamegraph"
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh cpu"
     depends_on: "flamegraph-env-build"
-
-    if: build.pull_request.labels includes "cpu_flamegraph"
-
+    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "ci/run-cpu-flamegraph"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -387,7 +389,7 @@ steps:
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh heap"
     depends_on: "flamegraph-env-build"
 
-    if: build.pull_request.labels includes "heap_flamegraph"
+    if: build.pull_request.labels includes "heap_flamegraph" || build.pull_request.labels includes "ci/run-heap-flamegraph"
 
     plugins:
       - seek-oss/aws-sm#v2.3.1:

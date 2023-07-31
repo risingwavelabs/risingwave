@@ -147,8 +147,8 @@ mod tests {
 
     use crate::parser::upsert_parser::UpsertParser;
     use crate::parser::{
-        EncodingProperties, JsonParser, JsonProperties, ParserProperties, ProtocolProperties,
-        SourceColumnDesc, SourceStreamChunkBuilder,
+        EncodingProperties, JsonParser, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -404,7 +404,7 @@ mod tests {
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
         ];
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Upsert,

@@ -250,7 +250,7 @@ pub fn estimate_task_memory_capacity(
         .sum::<u64>();
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
-    let total_file_size = (total_input_file_size as f64 * 1.2).round() as usize;
+    let total_file_size = (total_input_file_size as f64 * 1.4).round() as usize;
 
     let c = match task.compression_algorithm {
         0 => std::cmp::min(capacity, total_file_size),
