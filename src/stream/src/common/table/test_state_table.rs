@@ -1469,7 +1469,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
         .map(|c| c.data_type.clone())
         .collect::<Vec<_>>();
 
-    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
@@ -1583,7 +1583,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
         .map(|c| c.data_type.clone())
         .collect::<Vec<_>>();
 
-    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
@@ -1749,7 +1749,7 @@ async fn test_state_table_watermark_cache_refill() {
         .map(|c| c.data_type.clone())
         .collect::<Vec<_>>();
 
-    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
