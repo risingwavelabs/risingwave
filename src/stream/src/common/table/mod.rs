@@ -19,5 +19,5 @@ mod watermark;
 pub mod test_state_table;
 #[cfg(test)]
 pub mod test_storage_table;
-#[cfg(test)]
+// Expose it for benchmarking.
 pub mod test_utils;
