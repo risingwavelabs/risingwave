@@ -7644,12 +7644,11 @@ dependencies = [
 
 [[package]]
 name = "smallbitset"
-version = "0.6.1"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d93fb6dc506bf9247d497b1cd9748015f444b9b16da6da79484f54b20df49a7c"
+checksum = "e0b6c16e2970706b96c16d72f6d835d4758ddb2a0c471c9a7de8be4b1dde049b"
 dependencies = [
- "num",
- "paste",
+ "num-traits",
 ]
 
 [[package]]
