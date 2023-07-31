@@ -237,6 +237,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "arrow"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022f3a3f389ac02a971427acafeab9b74c81c49ee5fb94fe781a2956cbca3aa6"
+dependencies = [
+ "ahash 0.8.3",
+ "arrow-arith",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-csv",
+ "arrow-data",
+ "arrow-ipc",
+ "arrow-json",
+ "arrow-ord",
+ "arrow-row",
+ "arrow-schema",
+ "arrow-select",
+ "arrow-string",
+]
+
+[[package]]
+name = "arrow-arith"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81b94d8e21d4d195fa371dba4d6684a7e3196ca5696278812e3ceefca9559a8f"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "chrono",
+ "half 2.2.1",
+ "num",
+]
+
+[[package]]
 name = "arrow-array"
 version = "44.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -278,6 +315,25 @@ dependencies = [
  "half 2.2.1",
  "lexical-core",
  "num",
+]
+
+[[package]]
+name = "arrow-csv"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13a5e99b4852cc8c85c2274093ba20f4f490266bdecd2fa7c3663c956a5089b5"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-data",
+ "arrow-schema",
+ "chrono",
+ "csv",
+ "csv-core",
+ "lazy_static",
+ "lexical-core",
+ "regex",
 ]
 
 [[package]]
@@ -327,6 +383,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-json"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041e8616f7b1b86ebd66dc472b6edb0284dfec80d15ab8e7573934093317662"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-data",
+ "arrow-schema",
+ "chrono",
+ "half 2.2.1",
+ "indexmap 2.0.0",
+ "lexical-core",
+ "num",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arrow-ord"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66226fbe71670fa7f95bd4734379a9b14096b4498ed48935d69b5d3c27f96a7f"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "arrow-select",
+ "half 2.2.1",
+ "num",
+]
+
+[[package]]
+name = "arrow-row"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f41b69153013b7594edf4a1e6318d36ad539e0be66a7f62ae872f51dea507ac"
+dependencies = [
+ "ahash 0.8.3",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "half 2.2.1",
+ "hashbrown 0.14.0",
+]
+
+[[package]]
 name = "arrow-schema"
 version = "44.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -343,6 +449,22 @@ dependencies = [
  "arrow-data",
  "arrow-schema",
  "num",
+]
+
+[[package]]
+name = "arrow-string"
+version = "44.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deb780faf7995b2f4f6273109520435262e10fbaba047ebcf13347770bd79d28"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "arrow-select",
+ "num",
+ "regex",
+ "regex-syntax 0.7.4",
 ]
 
 [[package]]
@@ -1081,6 +1203,18 @@ name = "bitmaps"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703642b98a00b3b90513279a8ede3fcfa479c126c5fb46e78f3051522f021403"
+
+[[package]]
+name = "bitvec"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
+dependencies = [
+ "funty",
+ "radium",
+ "tap",
+ "wyz",
+]
 
 [[package]]
 name = "bk-tree"
@@ -2688,6 +2822,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673464e1e314dd67a0fd9544abc99e8eb28d0c7e3b69b033bcff9b2d00b87333"
 
 [[package]]
+name = "funty"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
+
+[[package]]
 name = "futures"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3277,26 +3417,30 @@ dependencies = [
 
 [[package]]
 name = "icelake"
-version = "0.0.8"
-source = "git+https://github.com/icelake-io/icelake?rev=671c001d2c61fa3edb59bbfb6a73919328c1777a#671c001d2c61fa3edb59bbfb6a73919328c1777a"
+version = "0.0.9"
+source = "git+https://github.com/icelake-io/icelake?rev=26b7a0c99c690b1e8ed57a5fc5a29c8ef0caacb3#26b7a0c99c690b1e8ed57a5fc5a29c8ef0caacb3"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "arrow-array",
- "arrow-schema",
+ "arrow",
  "async-trait",
+ "bitvec",
  "bytes",
  "chrono",
  "faster-hex",
  "futures",
+ "log",
  "once_cell",
  "opendal",
+ "ordered-float 3.7.0",
  "parquet",
+ "regex",
  "rust_decimal",
  "serde",
  "serde_json",
  "serde_with 3.1.0",
  "tokio",
+ "url",
  "uuid",
 ]
 
@@ -5591,6 +5735,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "radium"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
+
+[[package]]
 name = "rand"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6273,6 +6423,7 @@ version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema)",
+ "arrow-array",
  "async-trait",
  "auto_enums",
  "aws-config",
@@ -8121,6 +8272,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
+name = "tap"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
 name = "task_stats_alloc"
 version = "0.1.11"
 dependencies = [
@@ -9428,6 +9585,15 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "wyz"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
+dependencies = [
+ "tap",
 ]
 
 [[package]]
