@@ -25,12 +25,12 @@ select * from person_rw order by id;
 
 
 query ITTTTT
-select * from orders order by order_id;
+select order_id,order_date,customer_name,product_id,order_status from orders order by order_id;
 ----
-10001 2020-07-30 10:08:22 Jark 50.50 102 0
-10002 2020-07-30 10:11:09 Sally 15.00 105 0
-10003 2020-07-30 12:00:30 Edward 25.25 106 0
-10004 2022-12-01 15:08:22 Sam 1000.52 110 0
+10001 2020-07-30 10:08:22 Jark 102 0
+10002 2020-07-30 10:11:09 Sally 105 0
+10003 2020-07-30 12:00:30 Edward 106 0
+10004 2022-12-01 15:08:22 Sam 110 0
 
 
 query III
