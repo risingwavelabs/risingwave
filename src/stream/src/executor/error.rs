@@ -14,7 +14,6 @@
 
 use std::backtrace::Backtrace;
 
-use either::Either;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, TrackingIssue};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -56,20 +55,23 @@ enum ErrorKind {
     ),
 
     #[error("Log store error: {0}")]
-    LogStoreError(LogStoreError),
+    LogStoreError(#[source] LogStoreError),
 
     #[error("Chunk operation error: {0}")]
-    EvalError(Either<ArrayError, ExprError>),
+    ArrayError(#[source] ArrayError),
+
+    #[error("Chunk operation error: {0}")]
+    ExprError(#[source] ExprError),
 
     // TODO: remove this after state table is fully used
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(BoxedError),
+    SerdeError(#[source] BoxedError),
 
     #[error("Sink error: {0}")]
-    SinkError(SinkError),
+    SinkError(#[source] SinkError),
 
     #[error("RPC error: {0}")]
-    RpcError(RpcError),
+    RpcError(#[source] RpcError),
 
     #[error("Channel closed: {0}")]
     ChannelClosed(String),
@@ -78,10 +80,10 @@ enum ErrorKind {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(BoxedError),
+    ConnectorError(#[source] BoxedError),
 
     #[error("Dml error: {0}")]
-    DmlError(BoxedError),
+    DmlError(#[source] BoxedError),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
@@ -160,13 +162,13 @@ impl From<LogStoreError> for StreamExecutorError {
 /// Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
     fn from(e: ArrayError) -> Self {
-        ErrorKind::EvalError(Either::Left(e)).into()
+        ErrorKind::ArrayError(e).into()
     }
 }
 
 impl From<ExprError> for StreamExecutorError {
     fn from(e: ExprError) -> Self {
-        ErrorKind::EvalError(Either::Right(e)).into()
+        ErrorKind::ExprError(e).into()
     }
 }
 

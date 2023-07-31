@@ -49,13 +49,13 @@ enum ErrorKind {
     ),
 
     #[error("Expression error: {0}")]
-    Expression(ExprError),
+    Expression(#[source] ExprError),
 
     #[error("Array/Chunk error: {0}")]
-    Array(ArrayError),
+    Array(#[source] ArrayError),
 
     #[error("Executor error: {0:?}")]
-    Executor(Box<StreamExecutorError>),
+    Executor(#[source] StreamExecutorError),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -108,7 +108,7 @@ impl From<ArrayError> for StreamError {
 // Executor runtime error; ...
 impl From<StreamExecutorError> for StreamError {
     fn from(error: StreamExecutorError) -> Self {
-        ErrorKind::Executor(Box::new(error)).into()
+        ErrorKind::Executor(error).into()
     }
 }
 

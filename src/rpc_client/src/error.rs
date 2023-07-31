@@ -16,15 +16,15 @@ pub use anyhow::anyhow;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, RpcError>;
+pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Transport error: {0}")]
-    TransportError(Box<tonic::transport::Error>),
+    TransportError(#[source] Box<tonic::transport::Error>),
 
     #[error("gRPC error ({}): {}", .0.code(), .0.message())]
-    GrpcStatus(Box<tonic::Status>),
+    GrpcStatus(#[source] Box<tonic::Status>),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),

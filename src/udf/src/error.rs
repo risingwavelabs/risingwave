@@ -15,7 +15,7 @@
 use arrow_flight::error::FlightError;
 
 /// A specialized `Result` type for UDF operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The error type for UDF operations.
 #[derive(thiserror::Error, Debug)]
@@ -24,10 +24,10 @@ pub enum Error {
     Connect(#[from] tonic::transport::Error),
 
     #[error("failed to check UDF: {0}")]
-    Tonic(Box<tonic::Status>),
+    Tonic(#[from] Box<tonic::Status>),
 
     #[error("failed to call UDF: {0}")]
-    Flight(Box<FlightError>),
+    Flight(#[from] Box<FlightError>),
 
     #[error("type mismatch: {0}")]
     TypeMismatch(String),
@@ -46,12 +46,12 @@ static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 32);
 
 impl From<tonic::Status> for Error {
     fn from(status: tonic::Status) -> Self {
-        Error::Tonic(Box::new(status))
+        Error::from(Box::new(status))
     }
 }
 
 impl From<FlightError> for Error {
     fn from(error: FlightError) -> Self {
-        Error::Flight(Box::new(error))
+        Error::from(Box::new(error))
     }
 }
