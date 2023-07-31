@@ -303,8 +303,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| {
-                mock_executor
-                    .add(x.with_visibility((x.column_at(1).as_bool()).iter().collect::<Bitmap>()))
+                mock_executor.add(x.with_visibility((x.column_at(1).as_bool()).iter().collect()))
             });
 
         let limit_executor = Box::new(LimitExecutor {

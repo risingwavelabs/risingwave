@@ -148,8 +148,14 @@ mod tests {
             + 1",
         );
 
-        agg.update(&chunk).await?;
-        assert_eq!(agg_count.load(Ordering::Relaxed), 4);
+        agg.update_single(&chunk, 0).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 1);
+
+        agg.update_multi(&chunk, 2, 4).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 3);
+
+        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 7);
 
         Ok(())
     }
@@ -173,8 +179,17 @@ mod tests {
             + 1",
         );
 
-        agg.update(&chunk).await?;
+        agg.update_single(&chunk, 0).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 1);
+
+        agg.update_single(&chunk, 1).await?; // should be filtered out
+        assert_eq!(agg_count.load(Ordering::Relaxed), 1);
+
+        agg.update_multi(&chunk, 2, 4).await?; // only 6 should be applied
         assert_eq!(agg_count.load(Ordering::Relaxed), 2);
+
+        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 4);
 
         Ok(())
     }
@@ -198,7 +213,13 @@ mod tests {
             + 1",
         );
 
-        agg.update(&chunk).await?;
+        agg.update_single(&chunk, 0).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 0);
+
+        agg.update_multi(&chunk, 2, 4).await?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 0);
+
+        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 0);
 
         Ok(())

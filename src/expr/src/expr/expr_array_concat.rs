@@ -379,7 +379,6 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::DataChunk;
-    use risingwave_common::buffer::Bitmap;
     use risingwave_common::types::ScalarImpl;
     use risingwave_pb::data::PbDatum;
     use risingwave_pb::expr::expr_node::{PbType, RexNode};
@@ -521,7 +520,7 @@ mod tests {
         );
 
         let chunk = DataChunk::new_dummy(4)
-            .with_visibility([true, false, true, true].into_iter().collect::<Bitmap>());
+            .with_visibility([true, false, true, true].into_iter().collect());
         let expected_array = Some(ScalarImpl::List(ListValue::new(vec![
             Some(42i64.into()),
             Some(43i64.into()),

@@ -17,7 +17,6 @@ use std::ops::Range;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, StreamChunk};
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -138,11 +137,11 @@ impl SortAggExecutor {
                 EqGroups::intersect(&groups)
             };
 
-            for range in groups.ranges() {
+            for Range { start, end } in groups.ranges() {
                 self.shutdown_rx.check()?;
                 let group: Vec<_> = group_columns
                     .iter()
-                    .map(|col| col.datum_at(range.start))
+                    .map(|col| col.datum_at(start))
                     .collect();
 
                 if curr_group.as_ref() != Some(&group) {
@@ -174,11 +173,7 @@ impl SortAggExecutor {
                     }
                 }
 
-                let chunk = child_chunk
-                    .with_visibility(Bitmap::from_range(child_chunk.capacity(), range).into());
-                for state in &mut self.agg_states {
-                    state.update(&chunk).await?;
-                }
+                Self::update_agg_states(&mut self.agg_states, &child_chunk, start, end).await?;
             }
         }
 
@@ -202,6 +197,20 @@ impl SortAggExecutor {
             );
             yield output;
         }
+    }
+
+    async fn update_agg_states(
+        agg_states: &mut [BoxedAggState],
+        child_chunk: &StreamChunk,
+        start_row_idx: usize,
+        end_row_idx: usize,
+    ) -> Result<()> {
+        for state in agg_states.iter_mut() {
+            state
+                .update_multi(child_chunk, start_row_idx, end_row_idx)
+                .await?;
+        }
+        Ok(())
     }
 
     fn output_agg_states(

@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, StreamChunk, Vis};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
@@ -226,22 +224,20 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         for chunk in self.child.execute() {
             let chunk = StreamChunk::from(chunk?.compact());
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
-            let group_visibilities = Self::get_group_visibilities(keys, chunk.vis());
-
             let mut memory_usage_diff = 0;
-            for (key, visibility) in group_visibilities {
+            for (row_id, key) in keys.into_iter().enumerate() {
                 let mut new_group = false;
                 let states = groups.entry(key).or_insert_with(|| {
                     new_group = true;
                     self.agg_init_states.clone()
                 });
-                let masked_chunk = chunk.with_visibility(visibility.into());
 
+                // TODO: currently not a vectorized implementation
                 for state in states {
                     if !new_group {
                         memory_usage_diff -= state.estimated_size() as i64;
                     }
-                    state.update(&masked_chunk).await?;
+                    state.update_single(&chunk, row_id).await?;
                     memory_usage_diff += state.estimated_size() as i64;
                 }
             }
@@ -289,32 +285,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let output = DataChunk::new(columns, array_len);
             yield output;
         }
-    }
-
-    /// Get visibilities that mask rows in the chunk for each group. The returned visibility
-    /// is a `Bitmap` rather than `Option<Bitmap>` because it's likely to have multiple groups
-    /// in one chunk.
-    ///
-    /// * `keys`: Hash Keys of rows.
-    /// * `base_visibility`: Visibility of rows.
-    fn get_group_visibilities(keys: Vec<K>, base_visibility: &Vis) -> Vec<(K, Bitmap)> {
-        let n_rows = keys.len();
-        let mut vis_builders =
-            HashMap::with_capacity_and_hasher(keys.len(), PrecomputedBuildHasher);
-        for (row_idx, key) in keys
-            .into_iter()
-            .enumerate()
-            .filter(|(row_idx, _)| base_visibility.is_set(*row_idx))
-        {
-            vis_builders
-                .entry(key)
-                .or_insert_with(|| BitmapBuilder::zeroed(n_rows))
-                .set(row_idx, true);
-        }
-        vis_builders
-            .into_iter()
-            .map(|(key, vis_builder)| (key, vis_builder.finish()))
-            .collect()
     }
 }
 
