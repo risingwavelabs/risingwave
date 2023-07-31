@@ -258,6 +258,10 @@ impl StreamChunk {
         (self.data, self.ops)
     }
 
+    pub fn into_parts_with_meta(self) -> (DataChunk, Vec<Op>, Option<StreamChunkMeta>) {
+        (self.data, self.ops, self.meta)
+    }
+
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
         let (columns, vis) = data_chunk.into_parts();
         Self::new(ops, columns, vis.into_visibility())

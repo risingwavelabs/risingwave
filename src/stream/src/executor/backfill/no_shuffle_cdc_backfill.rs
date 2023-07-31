@@ -26,6 +26,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::source::external::BinlogOffset;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -35,7 +36,7 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
-    SnapshotReadArgs, UpstreamSnapshotRead, UpstreamTableReader,
+    SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
@@ -83,6 +84,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     state_table: Option<StateTable<S>>,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
+    /// User may select a subset of columns from the upstream table.
     output_indices: Vec<usize>,
 
     actor_id: ActorId,
@@ -126,7 +128,7 @@ where
         }
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -145,7 +147,7 @@ where
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
-        let mut current_pos: Option<OwnedRow> = None;
+        let mut current_pk_pos: Option<OwnedRow> = None;
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -162,6 +164,8 @@ where
         } else {
             (None, false)
         };
+
+        current_pk_pos = backfill_offset;
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -212,6 +216,9 @@ where
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
 
+        let mut last_binlog_offset: Option<BinlogOffset> = None;
+        let mut current_binlog_offset: Option<BinlogOffset> = None;
+
         // Backfill Algorithm:
         //
         //   backfill_stream
@@ -221,32 +228,38 @@ where
         // We construct a backfill stream with upstream as its left input and mv snapshot read
         // stream as its right input. When a chunk comes from upstream, we will buffer it.
         //
-        // When a barrier comes from upstream:
-        //  - Update the `snapshot_read_epoch`.
-        //  - For each row of the upstream chunk buffer, forward it to downstream if its pk <=
-        //    `current_pos`, otherwise ignore it.
-        //  - reconstruct the whole backfill stream with upstream and new mv snapshot read stream
-        //    with the `snapshot_read_epoch`.
+        // When the first barrier comes from upstream:
+        //  - read the current binlog offset as `binlog_low`
+        //  - start a snapshot read upon upstream table and iterate over the snapshot read stream
+        //  - buffer the changelog event from upstream
+        //
+        // When a new barrier comes from upstream:
+        //  - read the current binlog offset as `binlog_high`
+        //  - for each row of the upstream change log, forward it to downstream if it in the range
+        //    of [binlog_low, binlog_high] and its pk <= `current_pos`, otherwise ignore it
+        //  - reconstruct the whole backfill stream with upstream changelog and a new table snapshot
         //
         // When a chunk comes from snapshot, we forward it to the downstream and raise
         // `current_pos`.
-        //
         // When we reach the end of the snapshot read stream, it means backfill has been
         // finished.
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
+            // init the last binlog offset
+            last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
+            current_binlog_offset = last_binlog_offset.clone();
+
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
-                let args = SnapshotReadArgs::new_for_cdc(current_pos.clone(), self.chunk_size);
+                let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
                 let right_snapshot =
                     pin!(upstream_table_reader.snapshot_read(args).map(Either::Right));
 
-                // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
-                // comes.
+                // Prefer to select upstream, so we can stop snapshot stream when barrier comes.
                 let backfill_stream =
                     select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                         stream::PollNext::Left
@@ -262,13 +275,16 @@ where
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    current_binlog_offset =
+                                        upstream_table_reader.current_binlog_offset().await?;
+
                                     // If it is a barrier, switch snapshot and consume
                                     // upstream buffer chunk
 
                                     // Consume upstream buffer chunk
                                     // If no current_pos, means we did not process any snapshot yet.
                                     // In that case we can just ignore the upstream buffer chunk.
-                                    if let Some(current_pos) = &current_pos {
+                                    if let Some(current_pos) = &current_pk_pos {
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
@@ -308,7 +324,7 @@ where
                                         barrier.epoch,
                                         &mut self.state_table,
                                         false,
-                                        &current_pos,
+                                        &current_pk_pos,
                                         &mut old_state,
                                         &mut current_state,
                                     )
@@ -331,6 +347,7 @@ where
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
+                                    // TODO(siyuan): handle the case when snapshot read stream ends.
                                     // End of the snapshot read stream.
                                     // We should not mark the chunk anymore,
                                     // otherwise, we will ignore some rows
@@ -352,7 +369,8 @@ where
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
-                                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+                                    current_pk_pos =
+                                        Some(get_new_pos(&chunk, &pk_in_output_indices));
 
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -387,20 +405,20 @@ where
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
                     if is_snapshot_empty {
-                        current_pos =
+                        current_pk_pos =
                             Some(construct_initial_finished_state(pk_in_output_indices.len()))
                     }
 
                     // We will update current_pos at least once,
                     // since snapshot read has to be non-empty,
                     // Or snapshot was empty and we construct a placeholder state.
-                    debug_assert_ne!(current_pos, None);
+                    debug_assert_ne!(current_pk_pos, None);
 
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
                         true,
-                        &current_pos,
+                        &current_pk_pos,
                         &mut old_state,
                         &mut current_state,
                     )

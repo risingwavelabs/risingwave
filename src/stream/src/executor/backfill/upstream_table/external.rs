@@ -22,6 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::row_serde::*;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
 use risingwave_storage::row_serde::ColumnMapping;
 use risingwave_storage::table::{Distribution, TableIter};
@@ -72,6 +73,7 @@ impl ExternalStorageTable {
         schema_name: String,
         table_reader: ExternalTableReaderImpl,
         schema: Schema,
+        order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         output_indices: Vec<usize>,
         Distribution {

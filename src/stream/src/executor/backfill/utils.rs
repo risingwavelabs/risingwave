@@ -20,6 +20,7 @@ use await_tree::InstrumentAwait;
 use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
+use risingwave_common::array::stream_chunk::{BinlogOffset, StreamChunkMeta};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -29,9 +30,10 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqDebug};
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_connector::source::external::BinlogOffset;
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
@@ -107,9 +109,18 @@ pub(crate) fn mark_chunk(
     current_pos: &OwnedRow,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
+    binlog_low: &Option<BinlogOffset>,
+    binlog_high: &Option<BinlogOffset>,
 ) -> StreamChunk {
     let chunk = chunk.compact();
-    mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
+    mark_chunk_inner(
+        chunk,
+        current_pos,
+        binlog_low,
+        binlog_high,
+        pk_in_output_indices,
+        pk_order,
+    )
 }
 
 /// Mark chunk:
@@ -159,11 +170,30 @@ pub(crate) fn mark_chunk_ref_by_vnode(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
+    binlog_low: &Option<BinlogOffset>,
+    binlog_high: &Option<BinlogOffset>,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamChunk {
-    let (data, ops) = chunk.into_parts();
+    let (data, ops, meta) = chunk.into_parts_with_meta();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+
+    if let Some(StreamChunkMeta { offsets }) = meta {
+        for v in zip_eq_fast(data.rows(), offsets.iter()).map(|(row, offset)| {
+            // if row in the range of binlog_low and binlog_high
+
+            let lhs = row.project(pk_in_output_indices);
+            let rhs = current_pos.project(pk_in_output_indices);
+            let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+            match order {
+                Ordering::Less | Ordering::Equal => true,
+                Ordering::Greater => false,
+            }
+        }) {
+            new_visibility.append(v);
+        }
+    }
+
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
         let lhs = row.project(pk_in_output_indices);
@@ -270,7 +300,7 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 pub(crate) async fn restore_backfill_progress<S: StateStore>(
     state_table: &StateTable<S>,
     state_len: usize,
-) -> StreamExecutorResult<(Option<String>, bool)> {
+) -> StreamExecutorResult<(Option<OwnedRow>, bool)> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     todo!("restore_backfill_progress");
     // TODO

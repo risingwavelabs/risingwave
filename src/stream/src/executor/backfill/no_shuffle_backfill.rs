@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::upstream_table::snapshot::{
-    SnapshotReadArgs, UpstreamSnapshotRead, UpstreamTableReader,
+    SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
@@ -125,7 +125,7 @@ where
         }
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();

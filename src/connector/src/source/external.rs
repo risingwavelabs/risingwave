@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 
 use anyhow::anyhow;
@@ -35,10 +36,27 @@ pub struct SchemaTableName {
     pub table_name: String,
 }
 
-#[derive(Debug, Clone, Default)]
+// TODO(siyuan): replace string offset with BinlogOffset
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
 pub struct BinlogOffset {
     pub filename: String,
     pub position: u64,
+}
+
+impl BinlogOffset {
+    pub fn from_str(s: &str) -> Self {
+        // s must be json string
+        // deserialize it to BinlogOffset
+
+        // TODO:
+        let value: HashMap<String, HashMap<_, _>> = serde_json::from_str(s).unwrap();
+        let offset = value.get("sourceOffset").unwrap();
+
+        Self {
+            filename: offset.get("file").unwrap().to_string(),
+            position: offset.get("pos").unwrap().parse().unwrap(),
+        }
+    }
 }
 
 pub trait ExternalTableReader {
@@ -65,7 +83,6 @@ pub enum ExternalTableReaderImpl {
     MYSQL(MySqlExternalTableReader),
 }
 
-// todo(siyuan): embeded db client in the reader
 #[derive(Debug)]
 pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,

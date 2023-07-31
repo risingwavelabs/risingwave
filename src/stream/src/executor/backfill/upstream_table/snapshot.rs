@@ -1,10 +1,12 @@
+use std::future::Future;
+
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
-use risingwave_connector::source::external::ExternalTableReader;
+use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -12,16 +14,22 @@ use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
-use crate::executor::backfill::upstream_table::UpstreamTable;
 use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
 use crate::executor::{StreamExecutorResult, INVALID_EPOCH};
 
-pub trait UpstreamSnapshotRead {
+pub trait UpstreamTableRead {
+    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<BinlogOffset>>>
+        + Send
+        + 'a
+    where
+        Self: 'a;
     type SnapshotStream<'a>: Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + 'a
     where
         Self: 'a;
 
     fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_>;
+
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_>;
 }
 
 #[derive(Debug, Default)]
@@ -60,7 +68,7 @@ impl SnapshotReadArgs {
 /// A wrapper of upstream table for snapshot read
 /// becasue we need to customize the snapshot read for managed upsream table (e.g. mv, index)
 /// and external upstream table.
-pub struct UpstreamTableReader<T: UpstreamTable> {
+pub struct UpstreamTableReader<T> {
     inner: T,
 }
 
@@ -74,7 +82,9 @@ impl<T: UpstreamTable> UpstreamTableReader<T> {
     }
 }
 
-impl<S: StateStore> UpstreamSnapshotRead for UpstreamTableReader<StorageTable<S>> {
+impl<S: StateStore> UpstreamTableRead for UpstreamTableReader<StorageTable<S>> {
+    type BinlogOffsetFuture<'a> =
+        impl Future<Output = StreamExecutorResult<Option<BinlogOffset>>> + 'a;
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
@@ -111,9 +121,15 @@ impl<S: StateStore> UpstreamSnapshotRead for UpstreamTableReader<StorageTable<S>
             }
         }
     }
+
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+        async move { Ok(None) }
+    }
 }
 
-impl UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable> {
+impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
+    type BinlogOffsetFuture<'a> =
+        impl Future<Output = StreamExecutorResult<Option<BinlogOffset>>> + 'a;
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn snapshot_read(&self, _args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
@@ -140,6 +156,13 @@ impl UpstreamSnapshotRead for UpstreamTableReader<ExternalStorageTable> {
             for chunk in chunk_stream {
                 yield chunk?;
             }
+        }
+    }
+
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+        async move {
+            let binlog = self.inner.table_reader().current_binlog_offset();
+            Ok(Some(binlog.await?))
         }
     }
 }
