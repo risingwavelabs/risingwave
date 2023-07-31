@@ -778,7 +778,7 @@ where
 
         if !diff.is_empty() {
             let command = Command::SourceSplitAssignment(diff);
-            tracing::debug!("pushing down command {:#?}", command);
+            tracing::info!(command = ?command, "pushing down split assignment command");
             self.barrier_scheduler.run_command(command).await?;
         }
 
