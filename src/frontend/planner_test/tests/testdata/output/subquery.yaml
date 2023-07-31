@@ -464,3 +464,13 @@
           │   └─LogicalProject { exprs: [a1] }
           │     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: (Unbounded, Unbounded) }
           └─LogicalSource { source: c, columns: [c1, c2, _row_id], time_range: (Unbounded, Unbounded) }
+- name: test subquery in table function
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from unnest(x) i) as sum_x from t;
+  batch_error: 'internal error: Subquery can not be unnested.'
+- name: test subquery in project set
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i ) i) as sum_x from t;
+  batch_error: 'internal error: Subquery can not be unnested.'
