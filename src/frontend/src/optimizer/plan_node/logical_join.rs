@@ -941,7 +941,7 @@ impl LogicalJoin {
                         self.internal_column_num(),
                     ),
                 );
-                Ok(StreamProject::create(logical_project).into())
+                Ok(StreamProject::new(logical_project).into())
             } else {
                 Ok(plan)
             }
@@ -1255,7 +1255,7 @@ impl LogicalJoin {
                     self.left().schema().len(),
                 ),
             );
-            Ok(Some(StreamProject::create(logical_project).into()))
+            Ok(Some(StreamProject::new(logical_project).into()))
         } else {
             Ok(Some(plan))
         }

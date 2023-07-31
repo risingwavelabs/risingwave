@@ -51,7 +51,7 @@ impl Distill for StreamProject {
 }
 
 impl StreamProject {
-    fn new(logical: generic::Project<PlanRef>, merge_chunk: Option<bool>) -> Self {
+    fn new_inner(logical: generic::Project<PlanRef>, merge_chunk: Option<bool>) -> Self {
         let input = logical.input.clone();
         let distribution = logical
             .i2o_col_mapping()
@@ -84,12 +84,12 @@ impl StreamProject {
         }
     }
 
-    pub fn create(logical: generic::Project<PlanRef>) -> Self {
-        Self::new(logical, None)
+    pub fn new(logical: generic::Project<PlanRef>) -> Self {
+        Self::new_inner(logical, None)
     }
 
-    pub fn create_with_merge_chunk(logical: generic::Project<PlanRef>, merge_chunk: bool) -> Self {
-        Self::new(logical, Some(merge_chunk))
+    pub fn with_merge_chunk(logical: generic::Project<PlanRef>, merge_chunk: bool) -> Self {
+        Self::new_inner(logical, Some(merge_chunk))
     }
 
     pub fn as_logical(&self) -> &generic::Project<PlanRef> {
@@ -109,7 +109,7 @@ impl PlanTreeNodeUnary for StreamProject {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut logical = self.logical.clone();
         logical.input = input;
-        Self::create_with_merge_chunk(logical, self.merge_chunk)
+        Self::with_merge_chunk(logical, self.merge_chunk)
     }
 }
 impl_plan_tree_node_for_unary! {StreamProject}
@@ -147,6 +147,6 @@ impl ExprRewritable for StreamProject {
         let mut logical = self.logical.clone();
         let merge_chunk = self.merge_chunk;
         logical.rewrite_exprs(r);
-        Self::create_with_merge_chunk(logical, merge_chunk).into()
+        Self::with_merge_chunk(logical, merge_chunk).into()
     }
 }

@@ -35,7 +35,7 @@ impl Rule for StreamProjectMergeRule {
             .map(|expr| subst.rewrite_expr(expr))
             .collect();
         let logical_project = generic::Project::new(exprs, inner_project.input());
-        Some(StreamProject::create(logical_project).into())
+        Some(StreamProject::new(logical_project).into())
     }
 }
 

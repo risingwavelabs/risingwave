@@ -210,7 +210,7 @@ impl LogicalSource {
         if let Some(exprs) = &self.output_exprs {
             let source = StreamSource::new(self.rewrite_to_stream_batch_source());
             let logical_project = generic::Project::new(exprs.to_vec(), source.into());
-            Ok(StreamProject::create(logical_project).into())
+            Ok(StreamProject::new(logical_project).into())
         } else {
             let source = StreamSource::new(self.core.clone());
             Ok(source.into())
