@@ -35,6 +35,7 @@ use super::{
     Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
+use crate::deserialize_duration_from_string;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
@@ -43,9 +44,6 @@ use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
 use crate::source::kafka::PrivateLinkProducerContext;
-use crate::{
-    deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
-};
 
 pub const KAFKA_SINK: &str = "kafka";
 
@@ -168,10 +166,8 @@ pub struct KafkaConfig {
 
     pub r#type: String, // accept "append-only", "debezium", or "upsert"
 
-    #[serde(
-        default = "_default_force_append_only",
-        deserialize_with = "deserialize_bool_from_string"
-    )]
+    #[serde(default = "_default_force_append_only")]
+    #[serde_as(as = "DisplayFromStr")]
     pub force_append_only: bool,
 
     #[serde(
@@ -181,11 +177,8 @@ pub struct KafkaConfig {
     )]
     pub timeout: Duration,
 
-    #[serde(
-        rename = "properties.retry.max",
-        default = "_default_max_retries",
-        deserialize_with = "deserialize_u32_from_string"
-    )]
+    #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
+    #[serde_as(as = "DisplayFromStr")]
     pub max_retry_num: u32,
 
     #[serde(
@@ -195,15 +188,14 @@ pub struct KafkaConfig {
     )]
     pub retry_interval: Duration,
 
-    #[serde(
-        default = "_default_use_transaction",
-        deserialize_with = "deserialize_bool_from_string"
-    )]
+    #[serde(default = "_default_use_transaction")]
+    #[serde_as(as = "DisplayFromStr")]
     pub use_transaction: bool,
 
     /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
+    #[serde(rename = "key")]
     pub primary_key: Option<String>,
 
     #[serde(flatten)]
