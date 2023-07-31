@@ -55,7 +55,7 @@ compute-node.266187.119.i119.heap
 
 Currently, some testing pipelines such as longevity tests have enabled memory profiling by default, but some are not, such as performance benchmarks. 
 
-To enable heap profiling of compute nodes in benchmark pipelines, set environment vairable when starting a job:
+To enable heap profiling of compute nodes in benchmark pipelines, set environment variable when starting a job:
 
 ```
 ENABLE_MEMORY_PROFILING=true
