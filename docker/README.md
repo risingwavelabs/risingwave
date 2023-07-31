@@ -2,7 +2,7 @@
 
 ## Published images
 
-- `latest` on GHCR (latest nightly build): `ghcr.io/risingwavelabs/risingwave:latest` 
+- `latest` on GHCR (latest nightly build): `ghcr.io/risingwavelabs/risingwave:latest`
 - `latest` on Docker Hub (latest release): `risingwavelabs/risingwave:latest`
 - Other tags available on both GHCR and Docker Hub:
   - `nightly-yyyyMMdd`, e.g., `nightly-20230108`
@@ -20,7 +20,7 @@ docker build . -f docker/Dockerfile
 
 from the project root.
 
-To build the images without SIMD vector extensions, run 
+To build the images without SIMD vector extensions, run
 
 ```
 docker build . -f docker/Dockerfile --build-arg simd_disabled=true

@@ -22,7 +22,7 @@ use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 
 use super::generator::DatagenEventGenerator;
 use crate::impl_common_split_reader_logic;
-use crate::parser::{ParserConfig, SpecificParserConfig};
+use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
@@ -126,7 +126,7 @@ impl SplitReader for DatagenSplitReader {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             field_names,
-            parser_config.specific.get_source_format(),
+            parser_config.specific.get_source_struct(),
             data_types,
             rows_per_second,
             events_so_far,
@@ -148,8 +148,11 @@ impl SplitReader for DatagenSplitReader {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
-        match self.parser_config.specific {
-            SpecificParserConfig::Native => {
+        match (
+            &self.parser_config.specific.protocol_config,
+            &self.parser_config.specific.encoding_config,
+        ) {
+            (ProtocolProperties::Native, EncodingProperties::Native) => {
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
                 let split_id = self.split_id.to_string();
@@ -313,6 +316,7 @@ mod tests {
     use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
+    use crate::parser::SpecificParserConfig;
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -371,7 +375,14 @@ mod tests {
         let mut reader = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
+            ParserConfig {
+                specific: SpecificParserConfig {
+                    key_encoding_config: None,
+                    encoding_config: EncodingProperties::Native,
+                    protocol_config: ProtocolProperties::Native,
+                },
+                ..Default::default()
+            },
             Default::default(),
             Some(mock_datum),
         )
@@ -422,10 +433,18 @@ mod tests {
             rows_per_second: 10,
             fields: HashMap::new(),
         };
+        let parser_config = ParserConfig {
+            specific: SpecificParserConfig {
+                key_encoding_config: None,
+                encoding_config: EncodingProperties::Native,
+                protocol_config: ProtocolProperties::Native,
+            },
+            ..Default::default()
+        };
         let stream = DatagenSplitReader::new(
             properties.clone(),
             state,
-            Default::default(),
+            parser_config.clone(),
             Default::default(),
             Some(mock_datum.clone()),
         )
@@ -442,7 +461,7 @@ mod tests {
         let mut stream = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
+            parser_config,
             Default::default(),
             Some(mock_datum),
         )

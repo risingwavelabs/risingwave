@@ -583,11 +583,12 @@ impl SourceSchemaV2 {
             .iter()
             .cloned()
             .map(|x| match x.value {
+                Value::CstyleEscapesString(s) => Ok((x.name.real_value(), s)),
                 Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
                 _ => Err(ParserError::ParserError(
-                    "`row format options` only support single quoted string value".to_owned(),
+                    "`row format options` only support single quoted string value and C style escaped string".to_owned(),
                 )),
             })
             .try_collect()
@@ -670,14 +671,8 @@ impl SourceSchemaV2 {
                 RowFormat::Maxwell => SourceSchema::Maxwell,
                 RowFormat::CanalJson => SourceSchema::CanalJson,
                 RowFormat::Csv => {
-                    let mut chars = consume_string_from_options(&options, "delimiter")?.0;
-                    if chars.len() != 1 {
-                        return Err(ParserError::ParserError(format!(
-                            "The delimiter should be a char, but got {:?}",
-                            chars
-                        )));
-                    }
-                    let delimiter = chars.remove(0) as u8;
+                    let chars = consume_string_from_options(&options, "delimiter")?.0;
+                    let delimiter = get_delimiter(chars.as_str())?;
                     let has_header = try_consume_string_from_options(&options, "without_header")
                         .map(|s| s.0 == "false")
                         .unwrap_or(true);
@@ -847,19 +842,23 @@ pub struct CsvInfo {
     pub has_header: bool,
 }
 
+pub fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
+    match chars {
+        "," => Ok(b','),    // comma
+        "\\t" => Ok(b'\t'), // tab
+        other => Err(ParserError::ParserError(format!(
+            "The delimiter should be one of ',', E'\\t', but got {:?}",
+            other
+        ))),
+    }
+}
+
 impl ParseTo for CsvInfo {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
         impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
         impl_parse_to!(delimiter: AstString, p);
-        let mut chars = delimiter.0.chars().collect_vec();
-        if chars.len() != 1 {
-            return Err(ParserError::ParserError(format!(
-                "The delimiter should be a char, but got {:?}",
-                chars
-            )));
-        }
-        let delimiter = chars.remove(0) as u8;
+        let delimiter = get_delimiter(delimiter.0.as_str())?;
         Ok(Self {
             delimiter,
             has_header: !without_header,

@@ -593,6 +593,8 @@ fn gen_table_plan_inner(
         watermark_descs: watermark_descs.clone(),
         definition: "".to_string(),
         connection_id,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
@@ -667,6 +669,10 @@ pub async fn handle_create_table(
     // TODO(st1page): refactor it
     if let Some(notice) = notice {
         session.notice_to_user(notice)
+    }
+
+    if append_only {
+        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
     match session.check_relation_name_duplicated(table_name.clone()) {

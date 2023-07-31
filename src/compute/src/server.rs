@@ -86,7 +86,7 @@ pub async fn compute_node_serve(
     registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
+    let config = load_config(&opts.config_path, &opts);
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
