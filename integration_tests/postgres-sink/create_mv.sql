@@ -13,7 +13,8 @@ FROM
         connector = 'jdbc',
         jdbc.url = 'jdbc:postgresql://postgres:5432/mydb?user=myuser&password=123456',
         table.name = 'target_count',
-        type = 'upsert'
+        type = 'upsert',
+        primary_key='target_id'
     );
 
 -- ingest back to RW
