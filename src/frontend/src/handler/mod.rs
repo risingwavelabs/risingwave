@@ -35,6 +35,7 @@ use crate::utils::WithOptions;
 mod alter_relation_rename;
 mod alter_system;
 mod alter_table_column;
+mod alter_source_column;
 pub mod alter_user;
 pub mod create_connection;
 mod create_database;
@@ -470,6 +471,8 @@ pub async fn handle(
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
         } => alter_relation_rename::handle_rename_source(handler_args, name, source_name).await,
+        Statement::AlterSource { name, operation: AlterSourceOperation::AddColumn { .. } } =>
+        alter_source_column::handle_alter_source_column(handler_args, name, operation).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
