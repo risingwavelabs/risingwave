@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;

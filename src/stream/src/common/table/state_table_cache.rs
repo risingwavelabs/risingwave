@@ -98,7 +98,7 @@ impl StateTableWatermarkCache {
     }
 
     /// NOTE(kwannoel): Unused. Requires row count from State Table.
-    /// On first initialization, we can use row_count 0.
+    /// On first initialization, we can use `row_count` 0.
     /// But if state table is reconstructed after recovery, we need to obtain row count meta-data.
     #[allow(dead_code)]
     fn new_with_row_count(size: usize, row_count: usize) -> Self {
@@ -192,7 +192,7 @@ impl StateCache for StateTableWatermarkCache {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
+
     use risingwave_common::types::{Scalar, Timestamptz};
 
     use super::*;

@@ -28,7 +28,6 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
-use crate::executor::Message::Watermark;
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
@@ -1483,8 +1482,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None)
-            .await;
+        WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -1597,12 +1595,8 @@ async fn test_state_table_watermark_cache_write_chunk() {
     );
 
     test_env.register_table(table.clone()).await;
-    let mut state_table = WatermarkCacheStateTable::from_table_catalog(
-        &table,
-        test_env.storage.clone(),
-        None,
-    )
-    .await;
+    let mut state_table =
+        WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -1750,7 +1744,7 @@ async fn test_state_table_watermark_cache_refill() {
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Timestamptz),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int64),
     ];
-    let data_types = column_descs
+    let _data_types = column_descs
         .iter()
         .map(|c| c.data_type.clone())
         .collect::<Vec<_>>();
@@ -1767,37 +1761,33 @@ async fn test_state_table_watermark_cache_refill() {
     );
 
     test_env.register_table(table.clone()).await;
-    let mut state_table = WatermarkCacheStateTable::from_table_catalog(
-        &table,
-        test_env.storage.clone(),
-        None,
-    )
-    .await;
+    let mut state_table =
+        WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
 
     let rows = vec![
-            OwnedRow::new(vec![
-                Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
-                Some(456i64.into()),
-            ]),
-            OwnedRow::new(vec![
-                Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
-                Some(4888i64.into()),
-            ]),
+        OwnedRow::new(vec![
+            Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
+            Some(456i64.into()),
+        ]),
+        OwnedRow::new(vec![
+            Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
+            Some(4888i64.into()),
+        ]),
         // Watermark Partition here later.
-            OwnedRow::new(vec![
-                Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
-                Some(1000i64.into()),
-            ]),
-            OwnedRow::new(vec![
-                Some(Timestamptz::from_secs(4000).unwrap().to_scalar_value()),
-                Some(4888i64.into()),
-            ]),
+        OwnedRow::new(vec![
+            Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
+            Some(1000i64.into()),
+        ]),
+        OwnedRow::new(vec![
+            Some(Timestamptz::from_secs(4000).unwrap().to_scalar_value()),
+            Some(4888i64.into()),
+        ]),
     ];
 
-    for row in rows.iter() {
+    for row in &rows {
         state_table.insert(row);
     }
 

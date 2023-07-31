@@ -94,6 +94,10 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
     pub fn len(&self) -> usize {
         self.cache.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
 }
 
 impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for TopNStateCache<K, V> {
