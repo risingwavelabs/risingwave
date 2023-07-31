@@ -30,6 +30,9 @@ use crate::deserialize_duration_from_string;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
+pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
