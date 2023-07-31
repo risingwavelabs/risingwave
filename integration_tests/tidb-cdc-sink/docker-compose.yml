@@ -3,45 +3,44 @@ version: '3'
 services:
   compactor-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: meta-node-0
   minio-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: prometheus-0
   connector-node:
     extends:
-      file: ../../docker/docker-compose-nightly.yml
+      file: ../../docker/docker-compose.yml
       service: connector-node
 
   #=================== TiDB & TiCDC components ==================
   ticdc-controller:
     image: pingcap/ticdc:v6.6.0
-    container_name: ticdc-controller
     entrypoint: "/cdc cli"
     command:
       - changefeed
@@ -196,7 +195,7 @@ services:
   #===================== Others ===================
   datagen:
     build: ../datagen
-    depends_on:
+    depends_on: 
       - tidb
     command:
       - /bin/sh
@@ -207,17 +206,14 @@ services:
 
   init_tidb:
     image: mysql:8.0
-    depends_on:
+    depends_on: 
       - tidb
     command:
       - /bin/sh
       - -c
-      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql && 
-         sleep 10 &&
-         mysql --password= -h tidb --port 4000 -u root test < tidb_prepare.sql"
+      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql"
     volumes:
-      - "./tidb_create_tables.sql:/tidb_create_tables.sql"
-      - "./tidb_prepare.sql:/tidb_prepare.sql"
+      - "./tidb_create_tables.sql:/tidb_create_tables.sql"      
     container_name: init_tidb
     restart: on-failure
 

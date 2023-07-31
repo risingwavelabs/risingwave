@@ -206,13 +206,11 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
-
             if ret.total_file_size >= self.max_compaction_bytes
                 || ret.total_file_count >= self.max_file_count as usize
             {
                 break;
             }
-
 
             let mut overlap_files_range =
                 overlap_info.check_multiple_include(&target_level.table_infos);
