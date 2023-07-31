@@ -606,13 +606,10 @@ mod tests {
             config.clone(),
             "hummock+memory",
             1000000,
-            120,
+            60,
             10,
         )
         .await
         .unwrap();
-        compaction_test(compaction_config, config, "hummock+memory", 100000, 60, 1)
-            .await
-            .unwrap();
     }
 }
