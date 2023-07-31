@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use risingwave_common::array::*;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
@@ -105,6 +107,13 @@ impl Aggregator for Mode {
 
     async fn update(&mut self, input: &StreamChunk) -> Result<()> {
         for (_, row) in input.rows() {
+            self.add_datum(row.datum_at(0));
+        }
+        Ok(())
+    }
+
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+        for (_, row) in input.rows_in(range) {
             self.add_datum(row.datum_at(0));
         }
         Ok(())

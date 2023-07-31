@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::agg::{Aggregator, BoxedAggState};
@@ -37,6 +39,12 @@ impl Aggregator for Projection {
 
     async fn update(&mut self, input: &StreamChunk) -> Result<()> {
         self.inner.update(&input.project(&self.indices)).await
+    }
+
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+        self.inner
+            .update_range(&input.project(&self.indices), range)
+            .await
     }
 
     fn get_output(&self) -> Result<Datum> {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
@@ -42,6 +43,10 @@ impl Aggregator for Filter {
     }
 
     async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        self.update_range(input, 0..input.capacity()).await
+    }
+
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
         let bitmap = self
             .condition
             .eval(input.data_chunk())
@@ -50,7 +55,7 @@ impl Aggregator for Filter {
             .to_bitmap();
         let mut input1 = input.clone();
         input1.set_vis(input.vis() & &bitmap);
-        self.inner.update(&input1).await
+        self.inner.update_range(&input1, range).await
     }
 
     fn get_output(&self) -> Result<Datum> {
@@ -104,6 +109,12 @@ mod tests {
             Ok(())
         }
 
+        async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+            let count = range.filter(|i| input.vis().is_set(*i)).count();
+            self.count.fetch_add(count, Ordering::Relaxed);
+            Ok(())
+        }
+
         fn get_output(&self) -> Result<Datum> {
             unimplemented!()
         }
@@ -148,13 +159,13 @@ mod tests {
             + 1",
         );
 
-        agg.update_single(&chunk, 0).await?;
+        agg.update_range(&chunk, 0..1).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 1);
 
-        agg.update_multi(&chunk, 2, 4).await?;
+        agg.update_range(&chunk, 2..4).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 3);
 
-        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 7);
 
         Ok(())
@@ -179,16 +190,16 @@ mod tests {
             + 1",
         );
 
-        agg.update_single(&chunk, 0).await?;
+        agg.update_range(&chunk, 0..1).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 1);
 
-        agg.update_single(&chunk, 1).await?; // should be filtered out
+        agg.update_range(&chunk, 1..2).await?; // should be filtered out
         assert_eq!(agg_count.load(Ordering::Relaxed), 1);
 
-        agg.update_multi(&chunk, 2, 4).await?; // only 6 should be applied
+        agg.update_range(&chunk, 2..4).await?; // only 6 should be applied
         assert_eq!(agg_count.load(Ordering::Relaxed), 2);
 
-        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 4);
 
         Ok(())
@@ -213,13 +224,13 @@ mod tests {
             + 1",
         );
 
-        agg.update_single(&chunk, 0).await?;
+        agg.update_range(&chunk, 0..1).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 0);
 
-        agg.update_multi(&chunk, 2, 4).await?;
+        agg.update_range(&chunk, 2..4).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 0);
 
-        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 0);
 
         Ok(())

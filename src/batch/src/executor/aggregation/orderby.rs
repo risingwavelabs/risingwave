@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use anyhow::anyhow;
 use futures_util::FutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
@@ -83,6 +85,15 @@ impl Aggregator for ProjectionOrderBy {
     async fn update(&mut self, input: &StreamChunk) -> Result<()> {
         self.unordered_values.reserve(input.cardinality());
         for (op, row) in input.rows() {
+            assert_eq!(op, Op::Insert, "only support append");
+            self.push_row(row)?;
+        }
+        Ok(())
+    }
+
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+        self.unordered_values.reserve(range.len());
+        for (op, row) in input.rows_in(range) {
             assert_eq!(op, Op::Insert, "only support append");
             self.push_row(row)?;
         }

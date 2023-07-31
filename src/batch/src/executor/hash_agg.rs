@@ -237,7 +237,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     if !new_group {
                         memory_usage_diff -= state.estimated_size() as i64;
                     }
-                    state.update_single(&chunk, row_id).await?;
+                    state.update_range(&chunk, row_id..row_id + 1).await?;
                     memory_usage_diff += state.estimated_size() as i64;
                 }
             }

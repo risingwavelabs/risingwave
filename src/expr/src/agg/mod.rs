@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use dyn_clone::DynClone;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
@@ -40,13 +42,15 @@ pub use self::def::*;
 pub trait Aggregator: Send + Sync + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
-    /// Update the aggregator with multiple rows with type checked at runtime.
+    /// Update the aggregator with multiple rows.
+    ///
+    /// This is used in streaming aggregation.
     async fn update(&mut self, input: &StreamChunk) -> Result<()>;
 
-    /// `update_single` update the aggregator with a single row with type checked at runtime.
-    async fn update_single(&mut self, input: &StreamChunk, row_id: usize) -> Result<()> {
-        todo!()
-    }
+    /// Update the aggregator with a range of rows.
+    ///
+    /// This is used in batch aggregation.
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()>;
 
     /// Get the output value.
     fn get_output(&self) -> Result<Datum>;

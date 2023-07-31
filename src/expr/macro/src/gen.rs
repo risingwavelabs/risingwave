@@ -318,15 +318,20 @@ impl FunctionAttr {
             Some(state) if state != "ref" => state.parse().unwrap(),
             _ => types::owned_type(&self.ret).parse().unwrap(),
         };
-        let let_arrays = self.args.iter().enumerate().map(|(i, arg)| {
-            let array = format_ident!("a{i}");
-            let variant: TokenStream2 = types::variant(arg).parse().unwrap();
-            quote! {
-                let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
-                    bail!("input type mismatch. expect: {}", stringify!(#variant));
-                };
-            }
-        });
+        let let_arrays = self
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                let array = format_ident!("a{i}");
+                let variant: TokenStream2 = types::variant(arg).parse().unwrap();
+                quote! {
+                    let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
+                        bail!("input type mismatch. expect: {}", stringify!(#variant));
+                    };
+                }
+            })
+            .collect_vec();
         let let_values = (0..self.args.len())
             .map(|i| {
                 let v = format_ident!("v{i}");
@@ -397,6 +402,7 @@ impl FunctionAttr {
         Ok(quote! {
             |agg| {
                 use std::collections::HashSet;
+                use std::ops::Range;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
@@ -430,6 +436,36 @@ impl FunctionAttr {
                             }
                             Vis::Compact(_) => {
                                 for row_id in 0..input.capacity() {
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
+                            }
+                        }
+                        self.state = #assign_state;
+                        Ok(())
+                    }
+                    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+                        assert!(range.end <= input.capacity());
+                        #(#let_arrays)*
+                        let mut state = #let_state;
+                        match input.vis() {
+                            Vis::Bitmap(bitmap) => {
+                                for row_id in bitmap.iter_ones() {
+                                    if row_id < range.start {
+                                        continue;
+                                    } else if row_id >= range.end {
+                                        break;
+                                    }
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
+                            }
+                            Vis::Compact(_) => {
+                                for row_id in range {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
                                     #check_retract
                                     #(#let_values)*

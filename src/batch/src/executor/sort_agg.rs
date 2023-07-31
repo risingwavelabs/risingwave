@@ -137,11 +137,11 @@ impl SortAggExecutor {
                 EqGroups::intersect(&groups)
             };
 
-            for Range { start, end } in groups.ranges() {
+            for range in groups.ranges() {
                 self.shutdown_rx.check()?;
                 let group: Vec<_> = group_columns
                     .iter()
-                    .map(|col| col.datum_at(start))
+                    .map(|col| col.datum_at(range.start))
                     .collect();
 
                 if curr_group.as_ref() != Some(&group) {
@@ -173,7 +173,7 @@ impl SortAggExecutor {
                     }
                 }
 
-                Self::update_agg_states(&mut self.agg_states, &child_chunk, start, end).await?;
+                Self::update_agg_states(&mut self.agg_states, &child_chunk, range).await?;
             }
         }
 
@@ -202,13 +202,10 @@ impl SortAggExecutor {
     async fn update_agg_states(
         agg_states: &mut [BoxedAggState],
         child_chunk: &StreamChunk,
-        start_row_idx: usize,
-        end_row_idx: usize,
+        range: Range<usize>,
     ) -> Result<()> {
         for state in agg_states.iter_mut() {
-            state
-                .update_multi(child_chunk, start_row_idx, end_row_idx)
-                .await?;
+            state.update_range(child_chunk, range.clone()).await?;
         }
         Ok(())
     }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::BitmapBuilder;
@@ -47,9 +48,13 @@ impl Aggregator for Distinct {
     }
 
     async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        self.update_range(input, 0..input.capacity()).await
+    }
+
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
         let mut bitmap_builder = BitmapBuilder::with_capacity(input.capacity());
         bitmap_builder.append_bitmap(&input.data_chunk().vis().to_bitmap());
-        for row_id in 0..input.capacity() {
+        for row_id in range.clone() {
             let (row_ref, vis) = input.data_chunk().row_at(row_id);
             let row = row_ref.to_owned_row();
             let row_size = row.estimated_heap_size();
@@ -60,7 +65,7 @@ impl Aggregator for Distinct {
             bitmap_builder.set(row_id, b);
         }
         let input = input.with_visibility(bitmap_builder.finish().into());
-        self.inner.update(&input).await
+        self.inner.update_range(&input, range).await
     }
 
     fn get_output(&self) -> Result<Datum> {
