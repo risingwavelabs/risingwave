@@ -22,6 +22,14 @@ GROUP BY
 ORDER BY
     hashtag_occurrences;
 
+CREATE MATERIALIZED VIEW datatype_c0_boolean AS
+SELECT
+    c0_boolean,
+    COUNT(*) as c0_count
+FROM
+    datatype
+GROUP BY
+    c0_boolean;
 
 CREATE SINK hot_hashtags_sink FROM hot_hashtags
 WITH (
