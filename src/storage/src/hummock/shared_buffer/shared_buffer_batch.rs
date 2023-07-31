@@ -375,6 +375,24 @@ impl SharedBufferBatch {
         }
     }
 
+    pub fn measure_delete_range_size(batch_items: &[(Bound<Bytes>, Bound<Bytes>)]) -> usize {
+        batch_items
+            .iter()
+            .map(|(left, right)| {
+                // is_exclude_left_key(bool) + table_id + epoch
+                let l1 = match left {
+                    Bound::Excluded(x) | Bound::Included(x) => x.len() + 13,
+                    Bound::Unbounded => 13,
+                };
+                let l2 = match right {
+                    Bound::Excluded(x) | Bound::Included(x) => x.len() + 13,
+                    Bound::Unbounded => 13,
+                };
+                l1 + l2
+            })
+            .sum()
+    }
+
     pub fn measure_batch_size(batch_items: &[SharedBufferItem]) -> usize {
         // size = Sum(length of full key + length of user value)
         batch_items
