@@ -145,6 +145,11 @@ impl StateTableWatermarkCache {
     pub fn set_table_row_count(&mut self, table_row_count: usize) {
         self.inner.set_table_row_count(table_row_count)
     }
+
+    #[cfg(test)]
+    pub fn get_table_row_count(&self) -> &Option<usize> {
+        self.inner.get_table_row_count()
+    }
 }
 
 impl StateCache for StateTableWatermarkCache {

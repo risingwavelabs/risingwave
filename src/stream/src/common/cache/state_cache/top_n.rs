@@ -48,6 +48,11 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
         self.table_row_count = Some(table_row_count);
     }
 
+    #[cfg(test)]
+    pub fn get_table_row_count(&self) -> &Option<usize> {
+        &self.table_row_count
+    }
+
     fn row_count_matched(&self) -> bool {
         self.table_row_count
             .map(|n| n == self.cache.len())
