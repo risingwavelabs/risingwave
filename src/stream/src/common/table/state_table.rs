@@ -138,7 +138,8 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
 
 // initialize
-impl<S, SD, const IS_REPLICATED: bool, W> StateTableInner<S, SD, IS_REPLICATED, W>
+impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -252,7 +253,11 @@ where
             table_catalog.version.is_some()
         );
 
-        let watermark_cache = StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES);
+        let watermark_cache = if USE_WATERMARK_CACHE {
+            StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
+        } else {
+            StateTableWatermarkCache::new(0)
+        };
 
         Self {
             table_id,
@@ -409,6 +414,12 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
+        let watermark_cache = if USE_WATERMARK_CACHE {
+            StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
+        } else {
+            StateTableWatermarkCache::new(0)
+        };
+
         Self {
             table_id,
             local_store: local_state_store,
@@ -432,7 +443,7 @@ where
             watermark_buffer_strategy: W::default(),
             state_clean_watermark: None,
             prev_cleaned_watermark: None,
-            watermark_cache: StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES),
+            watermark_cache,
         }
     }
 
@@ -515,7 +526,13 @@ where
 }
 
 // point get
-impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
