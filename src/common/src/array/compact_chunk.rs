@@ -14,28 +14,53 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasherDefault;
+
+use itertools::Itertools;
+use prehash::{new_prehashed_map, Passthru, Prehashed};
 
 use crate::array::{Op, RowRef, StreamChunk};
 use crate::buffer::BitmapBuilder;
 use crate::row::Project;
 use crate::util::chunk_coalesce::DataChunkBuilder;
+use crate::util::hash_util::Crc32FastBuilder;
 
 /// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT and
 /// UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to certain rules
 /// (see `merge_insert` and `merge_delete` for more details).
 pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> StreamChunk {
-    let mut chunk_cache = HashMap::new();
+    // let mut chunk_cache = HashMap::new();
+    let mut chunk_cache = new_prehashed_map();
     let mut bitmap_builder = None;
     let mut ops = None;
+
+    let hash_values = stream_chunk
+        .data_chunk()
+        .get_hash_values(pk_indices, Crc32FastBuilder)
+        .into_iter()
+        .map(|hash| hash.value())
+        .collect_vec();
 
     for (op, row) in stream_chunk.rows() {
         let pk = Project::new(row, pk_indices);
         match op {
             Op::Insert => {
-                merge_insert(&stream_chunk, pk, &mut chunk_cache, &mut bitmap_builder);
+                merge_insert(
+                    &stream_chunk,
+                    pk,
+                    &mut chunk_cache,
+                    &mut bitmap_builder,
+                    &hash_values,
+                );
             }
             Op::Delete => {
-                merge_delete(&stream_chunk, pk, &mut chunk_cache, &mut bitmap_builder);
+                merge_delete(
+                    &stream_chunk,
+                    pk,
+                    &mut chunk_cache,
+                    &mut bitmap_builder,
+                    &hash_values,
+                );
             }
             Op::UpdateDelete => {
                 if ops.is_none() {
@@ -43,14 +68,26 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
                     ops = Some(stream_chunk.ops().to_vec());
                 };
                 ops.as_mut().unwrap()[row.index()] = Op::Delete;
-                merge_delete(&stream_chunk, pk, &mut chunk_cache, &mut bitmap_builder);
+                merge_delete(
+                    &stream_chunk,
+                    pk,
+                    &mut chunk_cache,
+                    &mut bitmap_builder,
+                    &hash_values,
+                );
             }
             Op::UpdateInsert => {
                 if ops.is_none() {
                     ops = Some(stream_chunk.ops().to_vec());
                 };
                 ops.as_mut().unwrap()[row.index()] = Op::Insert;
-                merge_insert(&stream_chunk, pk, &mut chunk_cache, &mut bitmap_builder);
+                merge_insert(
+                    &stream_chunk,
+                    pk,
+                    &mut chunk_cache,
+                    &mut bitmap_builder,
+                    &hash_values,
+                );
             }
         }
     }
@@ -75,10 +112,12 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
 fn merge_insert<'a, 'b>(
     chunk: &StreamChunk,
     pk: Project<'a, RowRef<'b>>,
-    chunk_cache: &mut HashMap<Project<'a, RowRef<'b>>, Op>,
+    chunk_cache: &mut HashMap<Prehashed<Project<'a, RowRef<'b>>>, Op, BuildHasherDefault<Passthru>>,
     bitmap_builder: &mut Option<BitmapBuilder>,
+    hash_values: &[u64],
 ) {
-    match chunk_cache.entry(pk) {
+    let row_idx = pk.row().index();
+    match chunk_cache.entry(Prehashed::new(pk, hash_values[row_idx])) {
         Entry::Vacant(v) => {
             v.insert(Op::Insert);
         }
@@ -132,10 +171,12 @@ fn merge_insert<'a, 'b>(
 fn merge_delete<'a, 'b>(
     chunk: &StreamChunk,
     pk: Project<'a, RowRef<'b>>,
-    chunk_cache: &mut HashMap<Project<'a, RowRef<'b>>, Op>,
+    chunk_cache: &mut HashMap<Prehashed<Project<'a, RowRef<'b>>>, Op, BuildHasherDefault<Passthru>>,
     bitmap_builder: &mut Option<BitmapBuilder>,
+    hash_values: &[u64],
 ) {
-    match chunk_cache.entry(pk) {
+    let row_idx = pk.row().index();
+    match chunk_cache.entry(Prehashed::new(pk, hash_values[row_idx])) {
         Entry::Vacant(v) => {
             v.insert(Op::Delete);
         }
