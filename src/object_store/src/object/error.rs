@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 use std::io;
 use std::marker::{Send, Sync};
 
+use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStreamError;
@@ -27,7 +28,7 @@ use crate::object::Error;
 
 #[derive(Error, Debug)]
 enum ObjectErrorInner {
-    #[error(transparent)]
+    #[error("s3 error: {}", DisplayErrorContext(&**.0))]
     S3(BoxedError),
     #[error("disk error: {msg}")]
     Disk {
