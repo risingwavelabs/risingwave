@@ -20,7 +20,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::ColumnCatalog;
 
-pub fn gen_prost_table(
+pub(crate) fn gen_prost_table(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
