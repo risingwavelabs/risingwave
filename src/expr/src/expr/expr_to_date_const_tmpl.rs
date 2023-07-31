@@ -69,7 +69,7 @@ impl Expression for ExprToDateConstTmpl {
     }
 }
 
-#[build_function("to_date(varchar, varchar) -> date")]
+#[build_function("char_to_date(varchar, varchar) -> date")]
 fn build_to_date_expr(
     return_type: DataType,
     children: Vec<BoxedExpression>,
