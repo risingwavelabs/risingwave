@@ -67,8 +67,8 @@ mod tests {
     use serde_json::Value;
 
     use crate::parser::{
-        DebeziumParser, EncodingProperties, JsonProperties, ParserProperties, ProtocolProperties,
-        SourceColumnDesc, SourceStreamChunkBuilder,
+        DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceContextRef;
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
@@ -88,7 +88,7 @@ mod tests {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> DebeziumParser {
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Debezium,
