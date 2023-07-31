@@ -15,7 +15,7 @@ select cnt from shipments_cnt;
 4
 
 query ITTTT
-select * from person_rw;
+select * from person_rw order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
 1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
