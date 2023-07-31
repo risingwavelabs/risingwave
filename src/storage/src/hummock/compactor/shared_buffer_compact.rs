@@ -217,7 +217,7 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let agg = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
+    let agg = builder.build_for_compaction();
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -341,7 +341,7 @@ pub async fn merge_imms_in_memory(
 
         imm_iters.push(imm.into_forward_iter());
     }
-    let compaction_delete_ranges = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
+    let compaction_delete_ranges = builder.build_for_compaction();
     let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
     epochs.sort();

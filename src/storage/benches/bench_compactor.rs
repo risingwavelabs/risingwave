@@ -38,8 +38,9 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, SstableBuilder, SstableBuilderOptions, SstableIterator,
-    SstableStore, SstableWriterOptions, TieredCache, Xor16FilterBuilder,
+    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, SstableBuilder,
+    SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, TieredCache,
+    Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -197,6 +198,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
     };
     Compactor::compact_and_build_sst(
         &mut builder,
+        Arc::new(CompactionDeleteRanges::default()),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,
