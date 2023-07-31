@@ -41,6 +41,10 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct RdKafkaPropertiesConsumer {
+    #[serde(rename = "properties.statistics.interval.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub statistics_interval_ms: Option<usize>,
+
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
     #[serde(rename = "properties.queued.min.messages")]
@@ -140,6 +144,9 @@ const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
 
 impl RdKafkaPropertiesConsumer {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = &self.statistics_interval_ms {
+            c.set("statistics.interval.ms", v.to_string());
+        }
         if let Some(v) = &self.queued_min_messages {
             c.set("queued.min.messages", v.to_string());
         }
