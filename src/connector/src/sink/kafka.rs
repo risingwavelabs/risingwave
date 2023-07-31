@@ -308,6 +308,7 @@ impl Sink for KafkaSink {
 
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection
+        // use enumerator to validate broker reachability and existence of topic
         let mut ticker = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
             Arc::new(SourceEnumeratorContext::default()),

@@ -10,7 +10,7 @@ create table t_kafka (
     v_timestamp timestamp
 );
 
-statement error sink to non-exist kafka broker
+statement error failed to fetch metadata from kafka
 create sink sink_non_exist_broker from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'make no sense',
@@ -19,11 +19,11 @@ create sink sink_non_exist_broker from t_kafka with (
     type = 'append-only',
 );
 
-statement error sink to non-exist kafka topic
+statement error topic invalid_topic not found
 create sink sink_non_exist_broker from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = '127.0.0.1:29092',
-    topic = 'make no sense',
+    topic = 'invalid_topic',
     force_append_only = 'true',
     type = 'append-only',
 );
