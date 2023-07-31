@@ -19,14 +19,22 @@ type orderEvent struct {
 	OrderTimestamp string `json:"order_timestamp"`
 }
 
+func (r *orderEvent) Topic() string {
+	return "delivery_orders"
+}
+
+func (r *orderEvent) Key() string {
+	return fmt.Sprint(r.OrderId)
+}
+
 func (r *orderEvent) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO %s (order_id, restaurant_id, order_state, order_timestamp) values ('%d', '%d', '%s', '%s')",
 		"delivery_orders_source", r.OrderId, r.RestaurantId, r.OrderState, r.OrderTimestamp)
 }
 
-func (r *orderEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "delivery_orders", fmt.Sprint(r.OrderId), data
+func (r *orderEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type orderEventGen struct {

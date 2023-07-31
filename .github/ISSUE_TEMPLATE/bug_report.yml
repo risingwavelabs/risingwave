@@ -17,12 +17,12 @@ body:
       description: Steps to reproduce the behavior, including the SQLs you run and/or the operations you have done to trigger the bug.
       placeholder: |
         First create the tables/sources and materialized views with
-        
+
         ```sql
         CREATE TABLE ...
         CREATE MATERIALIZED VIEW ...
         ```
-        
+
         Then the bug is triggered after ...
   - type: textarea
     attributes:
@@ -30,7 +30,7 @@ body:
       description: A clear and concise description of what you expected to happen.
       placeholder: |
         I expected to see this happen: *explanation*
-        
+
         Instead, this happened: *explanation*
   - type: textarea
     attributes:
@@ -58,4 +58,4 @@ body:
     attributes:
       label: Additional context
       description: Add any other context about the problem here. e.g., the full log files.
- 
+

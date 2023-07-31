@@ -886,12 +886,12 @@ impl Parser {
             Ok(Expr::GroupingSets(result))
         } else if self.parse_keyword(Keyword::CUBE) {
             self.expect_token(&Token::LParen)?;
-            let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
+            let result = self.parse_comma_separated(|p| p.parse_tuple(true, false))?;
             self.expect_token(&Token::RParen)?;
             Ok(Expr::Cube(result))
         } else if self.parse_keyword(Keyword::ROLLUP) {
             self.expect_token(&Token::LParen)?;
-            let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
+            let result = self.parse_comma_separated(|p| p.parse_tuple(true, false))?;
             self.expect_token(&Token::RParen)?;
             Ok(Expr::Rollup(result))
         } else {
@@ -2303,13 +2303,7 @@ impl Parser {
 
         let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
-            if cfg!(debug_assertions) {
-                true
-            } else {
-                return Err(ParserError::ParserError(
-                    "APPEND ONLY is only allowed in debug model".to_string(),
-                ));
-            }
+            true
         } else {
             false
         };

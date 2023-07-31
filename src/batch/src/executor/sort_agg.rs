@@ -268,16 +268,7 @@ impl EqGroups {
 
     /// Detect the equality groups in the given array.
     fn detect(array: &ArrayImpl) -> Result<EqGroups> {
-        macro_rules! gen_match_detect_inner {
-            ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match array {
-                    $(
-                        ArrayImpl::$variant_name(array) => Ok(Self::detect_inner(array))
-                    ),*
-                }
-            };
-        }
-        for_all_variants! { gen_match_detect_inner }
+        dispatch_array_variants!(array, array, { Ok(Self::detect_inner(array)) })
     }
 
     fn detect_inner<T>(array: &T) -> EqGroups

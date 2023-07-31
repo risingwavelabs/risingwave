@@ -320,7 +320,7 @@ mod test {
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
-        let input_data = Some(writer.into_inner().unwrap());
+        let input_data = writer.into_inner().unwrap();
         let columns = build_rw_columns();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {

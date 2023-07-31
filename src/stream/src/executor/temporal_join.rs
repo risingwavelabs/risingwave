@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::alloc::Global;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::pin::pin;
@@ -83,8 +84,12 @@ impl EstimateSize for JoinEntry {
 impl JoinEntry {
     /// Insert into the cache.
     pub fn insert(&mut self, key: OwnedRow, value: OwnedRow) {
-        self.kv_heap_size.add(&key, &value);
-        self.cached.try_insert(key, value).unwrap();
+        // Lookup might refill the cache before the `insert` messages from the temporal side
+        // upstream.
+        if let Entry::Vacant(e) = self.cached.entry(key) {
+            self.kv_heap_size.add(e.key(), &value);
+            e.insert(value);
+        }
     }
 
     /// Delete from the cache.

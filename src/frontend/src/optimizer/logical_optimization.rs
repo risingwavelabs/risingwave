@@ -268,16 +268,23 @@ static PROJECT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static SPLIT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Split Over Window",
+        vec![OverWindowSplitRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
 // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
 // 2. should be after merge the multiple projects
-static CONVERT_WINDOW_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
+static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Convert Window Function",
+        "Convert Over Window",
         vec![
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
-            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
             OverWindowToAggAndJoinRule::create(),
@@ -509,13 +516,11 @@ impl LogicalOptimizer {
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
 
-        // Prune Columns
-        plan = Self::column_pruning(plan, explain_trace, &ctx);
-
+        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW);
+        // Must push down predicates again after split over window so that OverWindow can be
+        // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
-
-        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
 
         let force_split_distinct_agg = ctx.session_ctx().config().get_force_split_distinct_agg();
         // TODO: better naming of the OptimizationStage
@@ -527,6 +532,10 @@ impl LogicalOptimizer {
         };
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
+
+        // Do a final column pruning and predicate pushing down to clean up the plan.
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
@@ -583,18 +592,20 @@ impl LogicalOptimizer {
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
 
-        // Prune Columns
-        plan = Self::column_pruning(plan, explain_trace, &ctx);
-
+        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW);
+        // Must push down predicates again after split over window so that OverWindow can be
+        // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
-
-        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
+
+        // Do a final column pruning and predicate pushing down to clean up the plan.
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 

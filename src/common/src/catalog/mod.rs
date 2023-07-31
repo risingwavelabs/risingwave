@@ -55,13 +55,17 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
+pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
     INFORMATION_SCHEMA_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME,
 ];
+
+// When there is no primary key specified while creating source, will use the
+// the message key as primary key in `BYTEA` type with this name.
+pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";
 
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)

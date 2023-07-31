@@ -19,14 +19,22 @@ type clickEvent struct {
 	ImpressionTimestamp string `json:"impression_timestamp"`
 }
 
+func (r *clickEvent) Topic() string {
+	return "ad_clicks"
+}
+
+func (r *clickEvent) Key() string {
+	return fmt.Sprint(r.UserId)
+}
+
 func (r *clickEvent) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO %s (user_id, ad_id, click_timestamp, impression_timestamp) values ('%d', '%d', '%s', '%s')",
 		"ad_source", r.UserId, r.AdId, r.ClickTimestamp, r.ImpressionTimestamp)
 }
 
-func (r *clickEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "ad_clicks", fmt.Sprint(r.UserId), data
+func (r *clickEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type adClickGen struct {

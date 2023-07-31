@@ -13,7 +13,8 @@ FROM
         connector = 'jdbc',
         jdbc.url = 'jdbc:postgresql://postgres:5432/mydb?user=myuser&password=123456',
         table.name = 'target_count',
-        type = 'upsert'
+        type = 'upsert',
+        primary_key = 'target_id'
     );
 
 -- ingest back to RW
@@ -37,13 +38,13 @@ CREATE table rw_types (
     bytea_column BYTEA,
     array_column VARCHAR[]
 ) WITH (
-      connector = 'postgres-cdc',
-      hostname = 'postgres',
-      port = '5432',
-      username = 'myuser',
-      password = '123456',
-      database.name = 'mydb',
-      schema.name = 'public',
-      table.name = 'data_types',
-      slot.name = 'data_types'
+    connector = 'postgres-cdc',
+    hostname = 'postgres',
+    port = '5432',
+    username = 'myuser',
+    password = '123456',
+    database.name = 'mydb',
+    schema.name = 'public',
+    table.name = 'data_types',
+    slot.name = 'data_types'
 );
