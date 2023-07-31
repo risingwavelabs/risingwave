@@ -96,7 +96,7 @@ pub struct SstableBlockIndex {
 
 impl Key for SstableBlockIndex {
     fn serialized_len(&self) -> usize {
-        8 + 8
+        8 + 8 // sst_id (8B) + block_idx (8B)
     }
 
     fn write(&self, mut buf: &mut [u8]) {
@@ -133,7 +133,7 @@ impl Value for Box<Sstable> {
     }
 
     fn serialized_len(&self) -> usize {
-        8 + self.meta.encoded_size()
+        8 + self.meta.encoded_size() // id (8B) + meta size
     }
 
     fn write(&self, mut buf: &mut [u8]) {

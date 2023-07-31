@@ -74,13 +74,11 @@ impl CacheRefillPolicy {
                 let mut levels = vec![];
                 let mut removed_sst_object_ids = vec![];
                 for group_delta in delta.group_deltas.values() {
-                    let mut is_bottommost_level = false;
                     for d in &group_delta.group_deltas {
                         if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
                             d.delta_type.as_ref()
                         {
                             if level_delta.level_idx >= max_level {
-                                is_bottommost_level = true;
                                 break;
                             }
                             if level_delta.inserted_table_infos.is_empty() {
@@ -96,11 +94,6 @@ impl CacheRefillPolicy {
                             preload_count += level_delta.inserted_table_infos.len();
                             reqs.push(level_reqs);
                         }
-                    }
-                    if is_bottommost_level {
-                        reqs.pop();
-                        levels.pop();
-                        removed_sst_object_ids.pop();
                     }
                 }
                 policy.metrics.preload_io_count.inc_by(preload_count as u64);
@@ -200,7 +193,7 @@ impl CacheRefillPolicy {
                             self.metrics
                                 .refill_data_file_cache_count
                                 .with_label_values(&["timeout"])
-                                .inc_by(blocks as f64);
+                                .inc();
                             continue;
                         }
 
