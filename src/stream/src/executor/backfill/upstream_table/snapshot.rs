@@ -6,7 +6,9 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
-use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
+use risingwave_connector::source::external::{
+    BinlogOffset, ConnectorResult, ExternalTableReader, MySqlOffset,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -15,10 +17,10 @@ use risingwave_storage::StateStore;
 
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
-use crate::executor::{StreamExecutorResult, INVALID_EPOCH};
+use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamTableRead {
-    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<BinlogOffset>>>
+    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<MySqlOffset>>>
         + Send
         + 'a
     where
@@ -79,6 +81,13 @@ impl<T: UpstreamTable> UpstreamTableReader<T> {
 
     pub fn new(table: T) -> Self {
         Self { inner: table }
+    }
+}
+
+impl UpstreamTableReader<ExternalStorageTable> {
+    pub fn deserialize_bin_offset(&self, offset: &str) -> StreamExecutorResult<BinlogOffset> {
+        let ret = self.inner.table_reader().deserialize_bin_offset(offset);
+        Ok(ret.map_err(StreamExecutorError::from)?)
     }
 }
 

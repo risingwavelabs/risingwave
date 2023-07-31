@@ -123,7 +123,6 @@ pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
-    pub direct_cdc: bool,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
@@ -134,7 +133,6 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
-        direct_cdc: bool,
     ) -> Self {
         Self {
             connector_client,
@@ -145,7 +143,6 @@ impl SourceContext {
             },
             metrics,
             source_ctrl_opts,
-            direct_cdc,
             error_suppressor: None,
         }
     }

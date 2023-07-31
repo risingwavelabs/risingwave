@@ -26,7 +26,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::BinlogOffset;
+use risingwave_connector::source::external::{BinlogOffset, MySqlOffset};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -40,8 +40,9 @@ use crate::executor::backfill::upstream_table::snapshot::{
 };
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk, restore_backfill_progress,
+    check_all_vnode_finished, compute_bounds, construct_initial_finished_state,
+    get_consumed_binlog_offset, get_new_pos, iter_chunks, mapping_chunk, mapping_message,
+    mark_cdc_chunk, restore_backfill_progress,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -128,7 +129,7 @@ where
         }
     }
 
-    // #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -210,14 +211,12 @@ where
         // We also can't update state_table in first epoch, since state_table
         // expects to have been initialized in previous epoch.
 
-        // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch = init_epoch;
-
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
 
         let mut last_binlog_offset: Option<BinlogOffset> = None;
-        let mut current_binlog_offset: Option<BinlogOffset> = None;
+
+        let mut consumed_binlog_offset: Option<BinlogOffset> = None;
 
         // Backfill Algorithm:
         //
@@ -248,7 +247,6 @@ where
         if to_backfill {
             // init the last binlog offset
             last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
-            current_binlog_offset = last_binlog_offset.clone();
 
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
@@ -275,12 +273,8 @@ where
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
-                                    current_binlog_offset =
-                                        upstream_table_reader.current_binlog_offset().await?;
-
                                     // If it is a barrier, switch snapshot and consume
                                     // upstream buffer chunk
-
                                     // Consume upstream buffer chunk
                                     // If no current_pos, means we did not process any snapshot yet.
                                     // In that case we can just ignore the upstream buffer chunk.
@@ -288,13 +282,22 @@ where
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
+
+                                            // record the consumed binlog offset which will be
+                                            // persisted later
+                                            consumed_binlog_offset = get_consumed_binlog_offset(
+                                                upstream_table_reader.inner().table_reader(),
+                                                &chunk,
+                                            )?;
                                             yield Message::Chunk(mapping_chunk(
-                                                mark_chunk(
+                                                mark_cdc_chunk(
+                                                    upstream_table_reader.inner().table_reader(),
                                                     chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
                                                     &pk_order,
-                                                ),
+                                                    last_binlog_offset.clone(),
+                                                )?,
                                                 &self.output_indices,
                                             ));
                                         }
@@ -316,10 +319,12 @@ where
                                         ])
                                         .inc_by(cur_barrier_upstream_processed_rows);
 
-                                    // Update snapshot read epoch.
-                                    snapshot_read_epoch = barrier.epoch.prev;
+                                    // Update last seen binlog offset
+                                    last_binlog_offset = consumed_binlog_offset.clone();
 
                                     // Persist state on barrier
+                                    // TODO(siyuan): persist the `last_binlog_offset` wihch will
+                                    // be a starting point upon recovery
                                     Self::persist_state(
                                         barrier.epoch,
                                         &mut self.state_table,

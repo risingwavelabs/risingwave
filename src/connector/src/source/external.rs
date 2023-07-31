@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::future::Future;
 
@@ -22,7 +23,7 @@ use itertools::Itertools;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 
 use crate::error::ConnectorError;
 use crate::parser::mysql_row_to_datums;
@@ -38,24 +39,85 @@ pub struct SchemaTableName {
 
 // TODO(siyuan): replace string offset with BinlogOffset
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
-pub struct BinlogOffset {
+pub struct MySqlOffset {
     pub filename: String,
     pub position: u64,
 }
 
-impl BinlogOffset {
-    pub fn from_str(s: &str) -> Self {
-        // s must be json string
-        // deserialize it to BinlogOffset
-
-        // TODO:
-        let value: HashMap<String, HashMap<_, _>> = serde_json::from_str(s).unwrap();
-        let offset = value.get("sourceOffset").unwrap();
-
+impl MySqlOffset {
+    pub fn min() -> Self {
         Self {
-            filename: offset.get("file").unwrap().to_string(),
-            position: offset.get("pos").unwrap().parse().unwrap(),
+            filename: "".to_string(),
+            position: u64::MIN,
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+pub struct PostgresOffset {
+    pub txid: u64,
+    pub lsn: u64,
+    pub tx_usec: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+pub enum BinlogOffset {
+    MySQL(MySqlOffset),
+    Postgres(PostgresOffset),
+}
+
+// Example debezium offset for Postgres:
+// {
+//     "sourcePartition":
+//     {
+//         "server": "RW_CDC_public.te"
+//     },
+//     "sourceOffset":
+//     {
+//         "last_snapshot_record": false,
+//         "lsn": 29973552,
+//         "txId": 1046,
+//         "ts_usec": 1670826189008456,
+//         "snapshot": true
+//     }
+// }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebeziumOffset {
+    #[serde(rename = "sourcePartition")]
+    source_partition: HashMap<String, String>,
+    #[serde(rename = "sourceOffset")]
+    pub(crate) source_offset: DebeziumSourceOffset,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebeziumSourceOffset {
+    // postgres snapshot progress
+    last_snapshot_record: Option<bool>,
+    // mysql snapshot progress
+    pub(crate) snapshot: Option<bool>,
+    file: Option<String>,
+    pos: Option<u64>,
+    lsn: Option<u64>,
+    #[serde(rename = "txId")]
+    txid: Option<u64>,
+    tx_usec: Option<u64>,
+}
+
+impl MySqlOffset {
+    pub fn from_str(offset: &str) -> ConnectorResult<Self> {
+        let dbz_offset: DebeziumOffset = serde_json::from_str(&offset)
+            .unwrap_or_else(|e| panic!("invalid upstream offset: {}, error: {}", offset, e));
+
+        Ok(Self {
+            filename: dbz_offset
+                .source_offset
+                .file
+                .ok_or_else(|| anyhow!("binlog file not found in offset"))?,
+            position: dbz_offset
+                .source_offset
+                .pos
+                .ok_or_else(|| anyhow!("binlog position not found in offset"))?,
+        })
     }
 }
 
@@ -81,6 +143,19 @@ pub trait ExternalTableReader {
 #[derive(Debug)]
 pub enum ExternalTableReaderImpl {
     MYSQL(MySqlExternalTableReader),
+}
+
+impl ExternalTableReaderImpl {
+    pub fn deserialize_bin_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
+        match self {
+            ExternalTableReaderImpl::MYSQL(_) => {
+                Ok(BinlogOffset::MySQL(MySqlOffset::from_str(offset)?))
+            }
+            _ => {
+                unreachable!("unexpected external table reader")
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -155,10 +230,10 @@ impl ExternalTableReader for MySqlExternalTableReader {
                 .exactly_one()
                 .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
 
-            Ok(BinlogOffset {
+            Ok(BinlogOffset::MySQL(MySqlOffset {
                 filename: row.take("File").unwrap(),
                 position: row.take("Position").unwrap(),
-            })
+            }))
         }
     }
 
@@ -210,7 +285,12 @@ impl ExternalTableReader for ExternalTableReaderImpl {
     }
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
-        async move { Ok(BinlogOffset::default()) }
+        async move {
+            match self {
+                ExternalTableReaderImpl::MYSQL(mysql) => mysql.current_binlog_offset().await,
+                _ => Ok(BinlogOffset::default()),
+            }
+        }
     }
 
     fn snapshot_read(

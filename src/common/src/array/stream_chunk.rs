@@ -80,7 +80,7 @@ pub struct StreamChunk {
 /// Currently we used it to forward offset from upstream system to the backfill executor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamChunkMeta {
-    pub(super) offsets: Vec<Offset>,
+    pub offsets: Vec<Offset>,
 }
 
 /// Offset from upstream system
@@ -91,6 +91,10 @@ pub struct Offset(String);
 impl Offset {
     pub fn new(value: String) -> Self {
         Self(value)
+    }
+
+    pub fn value(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -242,13 +246,13 @@ impl StreamChunk {
             new_ops.push(ops[idx]);
         }
 
-        if let Some(meta) = meta {
-            let mut offsets = Vec::with_capacity(cardinality);
+        if let Some(StreamChunkMeta { offsets }) = meta {
+            let mut new_offsets = Vec::with_capacity(cardinality);
             for idx in visibility.iter_ones() {
-                offsets.push(meta.offsets[idx].clone());
+                new_offsets.push(offsets[idx].clone());
             }
-            let meta = StreamChunkMeta::new(offsets);
-            StreamChunk::new_with_meta(new_ops, columns, None, Some(meta))
+            let new_meta = StreamChunkMeta::new(new_offsets);
+            StreamChunk::new_with_meta(new_ops, columns, None, Some(new_meta))
         } else {
             StreamChunk::new(new_ops, columns, None)
         }

@@ -376,12 +376,8 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-// #[try_stream(ok = StreamChunkWithState, error = RwError)]
+#[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
-    let direct_cdc = parser.source_ctx().cdc.is_some();
-
-    // TODO(siyuan): parse the debezium offset into a struct in Parser
-
     #[for_await]
     for batch in data_stream {
         let batch = batch?;

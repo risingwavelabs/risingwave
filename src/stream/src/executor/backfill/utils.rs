@@ -33,11 +33,13 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqDebug};
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_connector::source::external::BinlogOffset;
+use risingwave_connector::source::external::{BinlogOffset, ExternalTableReaderImpl, MySqlOffset};
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, StateTableInner};
+use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::upstream_table::snapshot::UpstreamTableReader;
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -109,15 +111,25 @@ pub(crate) fn mark_chunk(
     current_pos: &OwnedRow,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
-    binlog_low: &Option<BinlogOffset>,
-    binlog_high: &Option<BinlogOffset>,
 ) -> StreamChunk {
     let chunk = chunk.compact();
-    mark_chunk_inner(
+    mark_chunk_inner(chunk, current_pos, None, pk_in_output_indices, pk_order).unwrap()
+}
+
+pub(crate) fn mark_cdc_chunk(
+    table_reader: &ExternalTableReaderImpl,
+    chunk: StreamChunk,
+    current_pos: &OwnedRow,
+    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_order: &[OrderType],
+    last_binlog_offset: Option<BinlogOffset>,
+) -> StreamExecutorResult<StreamChunk> {
+    let chunk = chunk.compact();
+    mark_cdc_chunk_inner(
+        table_reader,
         chunk,
         current_pos,
-        binlog_low,
-        binlog_high,
+        last_binlog_offset,
         pk_in_output_indices,
         pk_order,
     )
@@ -170,18 +182,40 @@ pub(crate) fn mark_chunk_ref_by_vnode(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    binlog_low: &Option<BinlogOffset>,
-    binlog_high: &Option<BinlogOffset>,
+    last_binlog_offset: Option<BinlogOffset>,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
-) -> StreamChunk {
+) -> StreamExecutorResult<StreamChunk> {
     let (data, ops, meta) = chunk.into_parts_with_meta();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
 
     if let Some(StreamChunkMeta { offsets }) = meta {
         for v in zip_eq_fast(data.rows(), offsets.iter()).map(|(row, offset)| {
-            // if row in the range of binlog_low and binlog_high
+            // filter changelog events with binlog range
+            let in_binlog_range = if let Some(binlog_low) = last_binlog_offset {
+                let event_offset = MySqlOffset::from_str(offset.value())?;
+                binlog_low <= event_offset
+            } else {
+                true
+            };
 
+            if !in_binlog_range {
+                false
+            } else {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos.project(pk_in_output_indices);
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                let visible = match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
+                };
+            }
+        }) {
+            new_visibility.append(v);
+        }
+    } else {
+        // Use project to avoid allocation.
+        for v in data.rows().map(|row| {
             let lhs = row.project(pk_in_output_indices);
             let rhs = current_pos.project(pk_in_output_indices);
             let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
@@ -194,20 +228,70 @@ fn mark_chunk_inner(
         }
     }
 
-    // Use project to avoid allocation.
-    for v in data.rows().map(|row| {
-        let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos.project(pk_in_output_indices);
-        let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-        match order {
-            Ordering::Less | Ordering::Equal => true,
-            Ordering::Greater => false,
-        }
-    }) {
-        new_visibility.append(v);
-    }
     let (columns, _) = data.into_parts();
-    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+    Ok(StreamChunk::new(
+        ops,
+        columns,
+        Some(new_visibility.finish()),
+    ))
+}
+
+fn mark_cdc_chunk_inner(
+    table_reader: &ExternalTableReaderImpl,
+    chunk: StreamChunk,
+    current_pos: &OwnedRow,
+    last_binlog_offset: Option<BinlogOffset>,
+    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_order: &[OrderType],
+) -> StreamExecutorResult<StreamChunk> {
+    let (data, ops, meta) = chunk.into_parts_with_meta();
+    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+
+    if let Some(StreamChunkMeta { offsets }) = meta {
+        for v in zip_eq_fast(data.rows(), offsets.iter()).map(|(row, offset)| {
+            // filter changelog events with binlog range
+            let in_binlog_range = if let Some(binlog_low) = last_binlog_offset {
+                let event_offset = table_reader.deserialize_bin_offset(offset.value())?;
+                binlog_low <= event_offset
+            } else {
+                true
+            };
+
+            if !in_binlog_range {
+                false
+            } else {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos.project(pk_in_output_indices);
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                let visible = match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
+                };
+            }
+        }) {
+            new_visibility.append(v);
+        }
+    } else {
+        // Use project to avoid allocation.
+        for v in data.rows().map(|row| {
+            let lhs = row.project(pk_in_output_indices);
+            let rhs = current_pos.project(pk_in_output_indices);
+            let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+            match order {
+                Ordering::Less | Ordering::Equal => true,
+                Ordering::Greater => false,
+            }
+        }) {
+            new_visibility.append(v);
+        }
+    }
+
+    let (columns, _) = data.into_parts();
+    Ok(StreamChunk::new(
+        ops,
+        columns,
+        Some(new_visibility.finish()),
+    ))
 }
 
 /// Builds a new stream chunk with `output_indices`.
@@ -390,6 +474,18 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
         .1
         .project(pk_in_output_indices)
         .into_owned_row()
+}
+
+pub(crate) fn get_consumed_binlog_offset(
+    table_reader: &ExternalTableReaderImpl,
+    chunk: &StreamChunk,
+) -> StreamExecutorResult<Option<BinlogOffset>> {
+    if let Some(meta) = chunk.meta() {
+        let off = meta.offsets.last().unwrap();
+        Ok(Some(table_reader.deserialize_bin_offset(off.value())?))
+    } else {
+        Ok(None)
+    }
 }
 
 // NOTE(kwannoel): ["None" ..] encoding should be appropriate to mark
