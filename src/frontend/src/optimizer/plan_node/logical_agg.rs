@@ -105,7 +105,7 @@ impl LogicalAgg {
         );
         let vnode_col_idx = exprs.len() - 1;
         // TODO(kwannoel): We should apply Project optimization rules here.
-        let project = StreamProject::new(generic::Project::new(exprs, stream_input));
+        let project = StreamProject::create(generic::Project::new(exprs, stream_input));
 
         // Generate local agg step
         let mut local_group_key = self.group_key().clone();
@@ -1146,7 +1146,7 @@ impl ToStream for LogicalAgg {
             Ok(plan)
         } else {
             // a `count(*)` is appended, should project the output
-            Ok(StreamProject::new(generic::Project::with_out_col_idx(
+            Ok(StreamProject::create(generic::Project::with_out_col_idx(
                 plan,
                 0..self.schema().len(),
             ))

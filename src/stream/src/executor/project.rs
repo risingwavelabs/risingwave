@@ -43,6 +43,9 @@ struct Inner {
     /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
+
+    /// Whether the project executor will merge a chunk on the stream key.
+    merge_chunk: bool,
 }
 
 impl ProjectExecutor {
@@ -54,6 +57,7 @@ impl ProjectExecutor {
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
         materialize_selectivity_threshold: f64,
+        merge_chunk: bool,
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
@@ -79,6 +83,7 @@ impl ProjectExecutor {
                 exprs,
                 watermark_derivations,
                 materialize_selectivity_threshold,
+                merge_chunk,
             },
         }
     }
@@ -133,10 +138,15 @@ impl Inner {
         }
         let (_, vis) = data_chunk.into_parts();
         let vis = vis.into_visibility();
-        let new_chunk = merge_chunk_row(
-            StreamChunk::new(ops, projected_columns, vis),
-            &self.info.pk_indices,
-        );
+        let new_chunk = if self.merge_chunk {
+            merge_chunk_row(
+                StreamChunk::new(ops, projected_columns, vis),
+                &self.info.pk_indices,
+            )
+        } else {
+            StreamChunk::new(ops, projected_columns, vis)
+        };
+
         Ok(Some(new_chunk))
     }
 
@@ -236,6 +246,7 @@ mod tests {
             1,
             MultiMap::new(),
             0.0,
+            true,
         ));
         let mut project = project.execute();
 
@@ -291,6 +302,7 @@ mod tests {
             1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             0.0,
+            false,
         ));
         let mut project = project.execute();
 

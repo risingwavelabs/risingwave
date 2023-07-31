@@ -65,6 +65,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             params.executor_id,
             watermark_derivations,
             materialize_selectivity_threshold,
+            node.merge_chunk,
         )
         .boxed())
     }

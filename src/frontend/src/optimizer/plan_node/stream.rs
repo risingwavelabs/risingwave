@@ -364,6 +364,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 pub struct Project {
     pub core: generic::Project<PlanRef>,
     watermark_derivations: Vec<(usize, usize)>,
+    merge_chunk: bool,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
@@ -731,6 +732,7 @@ pub fn to_stream_prost_body(
                 .iter()
                 .map(|(_, y)| *y as u32)
                 .collect(),
+            merge_chunk: me.merge_chunk,
         }),
         Node::Sink(me) => PbNodeBody::Sink(SinkNode {
             sink_desc: Some(me.sink_desc.to_proto()),

@@ -153,7 +153,7 @@ impl LogicalTopN {
             .into(),
         );
         let vnode_col_idx = exprs.len() - 1;
-        let project = StreamProject::new(generic::Project::new(exprs.clone(), stream_input));
+        let project = StreamProject::create(generic::Project::new(exprs.clone(), stream_input));
         let limit_attr = TopNLimit::new(
             self.limit_attr().limit() + self.offset(),
             self.limit_attr().with_ties(),
@@ -174,7 +174,7 @@ impl LogicalTopN {
 
         // use another projection to remove the column we added before.
         exprs.pop();
-        let project = StreamProject::new(generic::Project::new(exprs, global_top_n.into()));
+        let project = StreamProject::create(generic::Project::new(exprs, global_top_n.into()));
         Ok(project.into())
     }
 }

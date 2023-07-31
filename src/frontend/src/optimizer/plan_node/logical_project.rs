@@ -275,9 +275,9 @@ impl ToStream for LogicalProject {
                 .cloned()
                 .map(|expr| subst.rewrite_expr(expr))
                 .collect();
-            StreamProject::new(generic::Project::new(exprs, inner_project.input.clone()))
+            StreamProject::create(generic::Project::new(exprs, inner_project.input.clone()))
         } else {
-            StreamProject::new(new_logical)
+            StreamProject::create(new_logical)
         };
         required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
     }

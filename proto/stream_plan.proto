@@ -182,6 +182,7 @@ message ProjectNode {
   // with `watermark_output_key[i]`th expression
   repeated uint32 watermark_input_key = 2;
   repeated uint32 watermark_output_key = 3;
+  bool merge_chunk = 4;
 }
 
 message FilterNode {

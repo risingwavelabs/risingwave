@@ -428,7 +428,10 @@ impl PlanRoot {
         let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
-            stream_plan = StreamProject::new(logical_project).into();
+            // The project node merges a chunk if it has an ungenerated row id as stream key.
+            stream_plan =
+                StreamProject::create_with_merge_chunk(logical_project, row_id_index.is_none())
+                    .into();
         }
 
         // Add WatermarkFilter node.
