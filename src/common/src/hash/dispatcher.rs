@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::HashKey;
+use crate::dispatch_data_types;
 use crate::hash::{
-    self, exact_size_of_scalar_in_array, HeapNullBitmap, NullBitmap, StackNullBitmap,
-    MAX_GROUP_KEYS_ON_STACK,
+    self, HashKeySer, HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK,
 };
 use crate::types::DataType;
 
@@ -95,15 +95,9 @@ pub trait HashKeyDispatcher: Sized {
 }
 
 fn hash_key_size(data_type: &DataType) -> HashKeySize {
-    use crate::array::ArrayImpl;
+    let exact_size = dispatch_data_types!(data_type, [S = ScalarRef], { S::exact_size() });
 
-    // TODO: avoid creating array builder as the workaround to get the array type
-    match dispatch_all_variants!(
-        data_type.create_array_builder(0).finish(),
-        ArrayImpl,
-        array,
-        { exact_size_of_scalar_in_array(&array) }
-    ) {
+    match exact_size {
         Some(size) => HashKeySize::Fixed(size),
         None => HashKeySize::Variable,
     }

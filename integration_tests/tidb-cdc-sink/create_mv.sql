@@ -36,5 +36,6 @@ WITH (
    connector='jdbc',
    jdbc.url='jdbc:mysql://tidb:4000/test?user=root&password=',
    table.name='hot_hashtags',
-   type='upsert'
+   type='upsert',
+   primary_key='window_start,hashtag'
 );

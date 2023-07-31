@@ -32,7 +32,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-  
+
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:

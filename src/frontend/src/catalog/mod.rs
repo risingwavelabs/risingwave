@@ -53,14 +53,20 @@ pub(crate) type FragmentId = u32;
 /// Check if the column name does not conflict with the internally reserved column name.
 pub fn check_valid_column_name(column_name: &str) -> Result<()> {
     if is_row_id_column_name(column_name) {
-        Err(ErrorCode::InternalError(format!(
+        return Err(ErrorCode::InternalError(format!(
             "column name prefixed with {:?} are reserved word.",
             ROWID_PREFIX
         ))
-        .into())
-    } else {
-        Ok(())
+        .into());
     }
+    if ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"].contains(&column_name) {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "column name \"{column_name}\" conflicts with a system column name"
+        ))
+        .into());
+    }
+
+    Ok(())
 }
 
 /// Check if modifications happen to system catalog.

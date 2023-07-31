@@ -19,17 +19,17 @@ cargo bench json_parser
     ```shell
     cargo install flamegraph
     ```
-   
+
 2. Install `perf`. If on ubuntu:
    ```shell
    sudo apt install linux-tools
    ```
-   
+
    If using EC2, you may need this instead:
    ```shell
    sudo apt install linux-tools-aws
    ```
-   
+
    On an EC2 instance you may also need to set `paranoid` level to 1,
    to give the profiler necessary permissions.
    ```shell
@@ -40,13 +40,13 @@ cargo bench json_parser
     ```shell
     cargo flamegraph --bench json_parser -- --bench
     ```
-   
+
     Within a benchmark, there are also typically multiple benchmark groups.
     For instance, within the `json_parser` bench, there's `json_parser`, `debezium_json_parser_(create/read/update/delete)`
     To filter you can just append a regex. For instance to only bench `json_parser`:
     ```shell
     cargo flamegraph --bench json_parser -- --bench ^json_parser
     ```
-   
+
     You can take a look at [Criterion Docs](https://bheisler.github.io/criterion.rs/book/user_guide/command_line_options.html)
     for more information.
