@@ -137,8 +137,6 @@ impl CdcSplitReader {
                     if events.is_empty() {
                         continue;
                     }
-
-                    tracing::info!("upstream events: {:?}", events);
                     let mut msgs = Vec::with_capacity(events.len());
                     for event in events {
                         msgs.push(SourceMessage::from(event));

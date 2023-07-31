@@ -104,7 +104,7 @@ public class DbzCdcEventConsumer
                             .setPartition(String.valueOf(sourceId))
                             .setPayload(new String(payload, StandardCharsets.UTF_8))
                             .build();
-            LOG.info("record => {}", message.getPayload());
+            LOG.debug("record => {}", message.getPayload());
             builder.addEvents(message);
             committer.markProcessed(event);
         }
