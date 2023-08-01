@@ -14,10 +14,10 @@
 
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::try_match_expand;
-use risingwave_pb::plan_common::{ColumnCatalog, PbColumnDesc, PbColumnCatalog};
+
+use risingwave_common::error::{ErrorCode, Result};
+
+
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName, Statement, CreateSourceStatement};
 use risingwave_sqlparser::parser::Parser;
 
