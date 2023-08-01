@@ -92,6 +92,5 @@ RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop_classpath_273.t
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
-
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
