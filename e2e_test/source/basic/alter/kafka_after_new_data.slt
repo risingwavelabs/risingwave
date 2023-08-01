@@ -1,3 +1,8 @@
+sleep 5s
+
+statement ok
+flush;
+
 query IT rowsort
 select * from s1
 ----
