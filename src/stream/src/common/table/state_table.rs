@@ -820,7 +820,6 @@ where
                 for (op, (key, key_bytes), value) in izip!(op, vnode_and_pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
-                            println!("insert pk: {:?}", key);
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                 self.watermark_cache.insert(pk);
                             }
@@ -905,7 +904,6 @@ where
 
                 let mut filler = self.watermark_cache.begin_syncing();
                 for pk in pks {
-                    println!("add pk to cache during resync: {:?}", pk);
                     filler.insert_unchecked(DefaultOrdered(pk), ());
                 }
                 filler.finish();
