@@ -12,46 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use std::sync::LazyLock;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::types::DataType;
+
+use crate::catalog::system_catalog::BuiltinView;
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
 /// publicly readable view of `pg_authid` that blanks out the password field.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-roles.html`]
-pub const PG_ROLES_TABLE_NAME: &str = "pg_roles";
-pub const PG_ROLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "rolname"),
-    (DataType::Boolean, "rolsuper"),
-    (DataType::Boolean, "rolinherit"),
-    (DataType::Boolean, "rolcreaterole"),
-    (DataType::Boolean, "rolcreatedb"),
-    (DataType::Boolean, "rolcanlogin"),
-    (DataType::Varchar, "rolpassword"),
-];
-
-impl SysCatalogReaderImpl {
-    pub fn read_roles_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.user_info_reader.read_guard();
-        let users = reader.get_all_users();
-        Ok(users
-            .iter()
-            .map(|user| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(user.id as i32)),
-                    Some(ScalarImpl::Utf8(user.name.clone().into())),
-                    Some(ScalarImpl::Bool(user.is_super)),
-                    Some(ScalarImpl::Bool(true)),
-                    Some(ScalarImpl::Bool(user.can_create_user)),
-                    Some(ScalarImpl::Bool(user.can_create_db)),
-                    Some(ScalarImpl::Bool(user.can_login)),
-                    Some(ScalarImpl::Utf8("********".into())),
-                ])
-            })
-            .collect_vec())
-    }
-}
+pub static PG_ROLES: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_roles",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "rolname"),
+        (DataType::Boolean, "rolsuper"),
+        (DataType::Boolean, "rolinherit"),
+        (DataType::Boolean, "rolcreaterole"),
+        (DataType::Boolean, "rolcreatedb"),
+        (DataType::Boolean, "rolcanlogin"),
+        (DataType::Boolean, "rolreplication"),
+        (DataType::Timestamptz, "rolvaliduntil"),
+        (DataType::Boolean, "rolbypassrls"),
+        (DataType::Varchar, "rolpassword"),
+    ],
+    sql: "SELECT id AS oid, \
+                name AS rolname, \
+                is_super AS rolsuper, \
+                true AS rolinherit, \
+                create_user AS rolcreaterole, \
+                create_db AS rolcreatedb, \
+                can_login AS rolcanlogin, \
+                true AS rolreplication, \
+                NULL::timestamptz AS rolvaliduntil, \
+                true AS rolbypassrls, \
+                '********' AS rolpassword \
+            FROM rw_catalog.rw_users"
+        .into(),
+});

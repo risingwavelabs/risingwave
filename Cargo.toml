@@ -44,6 +44,7 @@ members = [
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/sync-point",
+  "src/utils/variables",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
@@ -77,6 +78,34 @@ hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"]
 criterion = "0.5"
 tonic = { package = "madsim-tonic", version = "0.3.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
+
+risingwave_backup = { path = "./src/storage/backup" }
+risingwave_batch = { path = "./src/batch" }
+risingwave_cmd = { path = "./src/cmd" }
+risingwave_common = { path = "./src/common" }
+risingwave_common_service = { path = "./src/common/common_service" }
+risingwave_compactor = { path = "./src/storage/compactor" }
+risingwave_compute = { path = "./src/compute" }
+risingwave_ctl = { path = "./src/ctl" }
+risingwave_connector = { path = "./src/connector" }
+risingwave_expr = { path = "./src/expr" }
+risingwave_frontend = { path = "./src/frontend" }
+risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
+risingwave_hummock_test = { path = "./src/storage/hummock_test" }
+risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
+risingwave_meta = { path = "./src/meta" }
+risingwave_object_store = { path = "./src/object_store" }
+risingwave_pb = { path = "./src/prost" }
+risingwave_rpc_client = { path = "./src/rpc_client" }
+risingwave_rt = { path = "./src/utils/runtime" }
+risingwave_source = { path = "./src/source" }
+risingwave_sqlparser = { path = "./src/sqlparser" }
+risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
+risingwave_storage = { path = "./src/storage" }
+risingwave_stream = { path = "./src/stream" }
+risingwave_test_runner = { path = "./src/test_runner" }
+risingwave_udf = { path = "./src/udf" }
+risingwave_variables = { path = "./src/utils/variables" }
 
 [profile.dev]
 lto = 'off'
@@ -128,3 +157,5 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }
+# patch: unlimit 4MB message size for grpc client
+etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }

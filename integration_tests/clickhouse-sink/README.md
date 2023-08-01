@@ -14,7 +14,7 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 2. Create the ClickHouse table:
 
 ```sh
-docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sql-file.sh create_clickhouse_table 
+docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sql-file.sh create_clickhouse_table
 ```
 
 3. Execute the SQL queries in sequence:
@@ -26,7 +26,7 @@ docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sq
 4. Execute a simple query:
 
 ```sh
-docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sql-file.sh clickhouse_query 
+docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sql-file.sh clickhouse_query
 
 ```
 

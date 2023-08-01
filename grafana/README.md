@@ -1,6 +1,6 @@
 # RisingWave Grafana Dashboard
 
-The Grafana dashboard is generated with grafanalib. You'll need 
+The Grafana dashboard is generated with grafanalib. You'll need
 
 - Python
 - grafanalib
@@ -31,7 +31,7 @@ And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in t
 
 ## Advanced Usage
 
-We can specify the source uid, dashboard uid, dashboard version, enable namespace filter and enable risingwave_name filter(used in multi-cluster deployment) via env variables. 
+We can specify the source uid, dashboard uid, dashboard version, enable namespace filter and enable risingwave_name filter(used in multi-cluster deployment) via env variables.
 
 For example, we can use the following query to generate dashboard json used in our benchmark cluster:
 

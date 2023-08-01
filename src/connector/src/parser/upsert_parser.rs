@@ -22,7 +22,7 @@ use super::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
 use super::unified::{AccessImpl, ChangeEventOperation};
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
-    ParserProperties, SourceStreamChunkRowWriter, WriteGuard,
+    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
 };
 use crate::extract_key_config;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -63,7 +63,7 @@ fn check_rw_default_key(columns: &Vec<SourceColumnDesc>) -> bool {
 
 impl UpsertParser {
     pub async fn new(
-        props: ParserProperties,
+        props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {

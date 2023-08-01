@@ -33,7 +33,7 @@ services:
 
   message_queue:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: message_queue
 
   debezium:
@@ -75,7 +75,7 @@ services:
       postgres: { condition: service_healthy }
     command:
       - /bin/sh
-      - -c 
+      - -c
       - psql "postgresql://postgresuser:postgrespw@postgres:5432/mydb" -f ./postgres_prepare.sql
     volumes:
       - "./postgres_prepare.sql:/postgres_prepare.sql"
@@ -90,7 +90,7 @@ services:
     environment:
       CONNECT_URL: http://debezium:8083
     container_name: kafka-connect-ui
-    depends_on: 
+    depends_on:
       message_queue: { condition: service_healthy }
 
 volumes:
@@ -98,4 +98,3 @@ volumes:
     external: false
 
 name: risingwave-compose
- 

@@ -301,7 +301,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
-    fn get_uploading_memory_usage_ratio(&self) -> f64;
+    fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 struct StateStoreCollector {
@@ -392,7 +392,7 @@ impl Collector for StateStoreCollector {
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
         self.uploading_memory_usage_ratio
-            .set(self.memory_collector.get_uploading_memory_usage_ratio());
+            .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());

@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO orders (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment) VALUES 
+INSERT INTO orders (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment) VALUES
 (1,37,'O',131251.81,'1996-01-02','5-LOW','Clerk#000000951',0,'nstructions sleep furiously among '),
 (2,79,'O',40183.29,'1996-12-01','1-URGENT','Clerk#000000880',0,' foxes. pending accounts at the pending, silent asymptot'),
 (3,124,'F',160882.76,'1993-10-14','5-LOW','Clerk#000000955',0,'sly final accounts boost. carefully regular ideas cajole carefully. depos'),

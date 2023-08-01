@@ -23,7 +23,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::{agg_kinds, AggKind};
 use risingwave_expr::function::window::{
@@ -954,6 +954,12 @@ impl Binder {
                         Ok(ExprImpl::literal_bool(false))
                 }))),
                 ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
+                ("pg_postmaster_start_time", guard_by_len(0, raw(|_binder, _inputs|{
+                    let server_start_time = risingwave_variables::get_server_start_time();
+                    let datum = server_start_time.map(Timestamptz::from).map(ScalarImpl::from);
+                    let literal = Literal::new(datum, DataType::Timestamptz);
+                    Ok(literal.into())
+                }))),
                 // TODO: really implement them.
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),

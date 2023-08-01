@@ -18,8 +18,8 @@ use crate::only_parse_payload;
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -32,7 +32,7 @@ pub struct MaxwellParser {
 
 impl MaxwellParser {
     pub async fn new(
-        props: ParserProperties,
+        props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
