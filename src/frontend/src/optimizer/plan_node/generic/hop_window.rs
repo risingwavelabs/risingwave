@@ -199,7 +199,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
         let window_size_expr: ExprImpl =
@@ -242,7 +243,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                             reason: format!(
                                 "window_slide {} cannot be multiplied by {}",
                                 window_slide, i
-                            ),
+                            )
+                            .into(),
                         })?;
                 let window_start_offset_expr =
                     Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
@@ -262,7 +264,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                                 "window_slide {} cannot be multiplied by {}",
                                 window_slide,
                                 i + units
-                            ),
+                            )
+                            .into(),
                         }
                     })?;
                 let window_end_offset_expr =
