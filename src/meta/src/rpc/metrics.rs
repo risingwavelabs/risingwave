@@ -716,7 +716,6 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let core = fragment_manager.get_fragment_read_guard().await;
             let workers: HashMap<u32, String> = cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
                 .await
@@ -727,6 +726,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 })
                 .collect();
             let table_name_mapping = catalog_manager.get_table_name_mapping().await;
+            let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {
                 let mv_id_str = table_fragments.table_id().to_string();
                 for (fragment_id, fragment) in &table_fragments.fragments {
