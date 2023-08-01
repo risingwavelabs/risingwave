@@ -780,16 +780,20 @@ impl SstableWriter for StreamingUploadWriter {
                     t
                 });
 
+            debug_assert!(
+                !meta.block_metas.is_empty() || !meta.monotonic_tombstone_events.is_empty()
+            );
+
             // Upload data to object store.
             self.object_uploader
                 .finish()
                 .await
                 .map_err(HummockError::object_io_error)?;
+            // Add meta cache.
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Add block cache.
-            if let CachePolicy::Fill(fill_high_priority_cache) = self.policy {
-                debug_assert!(!self.blocks.is_empty());
+            if let CachePolicy::Fill(fill_high_priority_cache) = self.policy && !self.blocks.is_empty() {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
                     self.sstable_store.block_cache.insert(
                         self.object_id,

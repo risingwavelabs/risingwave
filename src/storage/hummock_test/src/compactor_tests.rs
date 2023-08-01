@@ -1222,7 +1222,6 @@ pub(crate) mod tests {
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
 
-        // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()

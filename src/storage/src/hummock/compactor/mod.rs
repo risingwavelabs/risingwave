@@ -291,7 +291,7 @@ impl Compactor {
                 .object_store_recv_buffer_size
                 .unwrap_or(6 * 1024 * 1024) as u64,
             capacity as u64,
-            context.storage_opts.min_sst_size_for_streaming_upload,
+            context.sstable_store.store().support_streaming_upload(),
         ) * compact_task.splits.len() as u64;
 
         tracing::info!(
@@ -474,7 +474,6 @@ impl Compactor {
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        max_compactor_task_multiplier: f32,
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -488,8 +487,13 @@ impl Compactor {
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
 
-        assert_ge!(max_compactor_task_multiplier, 0.0);
-        let max_pull_task_count = (cpu_core_num as f32 * max_compactor_task_multiplier) as u32;
+        assert_ge!(
+            compactor_context.storage_opts.compactor_max_task_multiplier,
+            0.0
+        );
+        let max_pull_task_count = (cpu_core_num as f32
+            * compactor_context.storage_opts.compactor_max_task_multiplier)
+            as u32;
 
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();

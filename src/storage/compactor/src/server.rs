@@ -219,7 +219,6 @@ pub async fn compactor_serve(
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             compactor_context.clone(),
             hummock_meta_client,
-            config.storage.compactor_max_task_multiplier,
         ),
     ];
 
