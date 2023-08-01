@@ -68,10 +68,10 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///        Issue delete ranges.
 ///
 ///     B. Refreshing the cache:
-///        On barrier, do table scan from `[most_recently_cleaned_watermark, +inf)`.
+///        On barrier, do table scan from most_recently_cleaned_watermark (inclusive) to +inf.
 ///        Take the Top N rows and insert into cache.
-///        This has to be implemented in `state_table`.
-///        We don't need to store any values, just the keys.
+///        This has to be implemented in state_table.
+///        We do not need to store any values, just the keys.
 ///
 /// TODO(kwannoel): Optimization: We can use cache to do point delete rather than range delete.
 /// If cache is not full, we can do point delete, for each cache entry.
