@@ -425,6 +425,13 @@ CREATE TABLE dbz_ignore_case_json (
     topic = 'debezium_ignore_case_json'
 ) FORMAT DEBEZIUM ENCODE JSON
 
+statement ok 
+CREATE SOURCE s27 (v1 int)
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 flush;
@@ -512,6 +519,14 @@ select count(*) from s6
 ----
 20
 
+query I 
+select * from s27;
+----
+1
+2
+3
+4
+
 statement ok
 create materialized view source_mv1 as select * from s6;
 
@@ -520,6 +535,9 @@ create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as co
 
 statement ok 
 create materialized view source_mv3 as select * from s24;
+
+statement ok 
+create materialized view alter_mv1 as select * from s27;
 
 # Wait for source
 sleep 10s
@@ -556,6 +574,14 @@ query II
 select sum_v1, count_v2 from source_mv2;
 ----
 78 12
+
+query I 
+select * from alter_mv1;
+----
+1
+2
+3
+4
 
 query ITTT rowsort
 select id, first_name, last_name, email from s8;
@@ -698,6 +724,44 @@ SELECT * FROM source_mv3 ORDER BY id;
 \x6b6b
 \x776561776566776566
 
+# alter source 
+statement ok
+alter source s27 add column v2 varchar;
+
+statement ok 
+create materialized view alter_mv2 as select * from s27;
+
+# Wait for source
+sleep 10s
+
+# Flush into storage
+statement ok
+flush;
+
+query II 
+select * from s27
+----
+1 1
+2 22
+3 333
+4 4444
+
+query I
+select * from alter_mv1;
+----
+1 
+2 
+3 
+4
+
+query II 
+select * from alter_mv2;
+----
+1 1
+2 22
+3 333
+4 4444
+
 statement ok
 drop materialized view source_mv1
 
@@ -706,6 +770,12 @@ drop materialized view source_mv2
 
 statement ok 
 drop materialized view source_mv3
+
+statement ok
+drop materialized view alter_mv1
+
+statement ok 
+drop materialized view alter_mv2
 
 statement ok
 drop table s6
@@ -757,6 +827,9 @@ drop source s23
 
 statement ok
 drop source s24
+
+statement ok 
+drop source s27
 
 statement ok
 DROP TABLE mongo_customers;
