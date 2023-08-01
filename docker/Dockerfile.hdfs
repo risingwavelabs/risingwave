@@ -82,7 +82,12 @@ ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
 
 # set classpath
 RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop_classpath_273.txt -P /root/
-ENV CLASSPATH=/root/hadoop_classpath_273.txt:$HADOOP_CONF_DIR:$HADOOP_CLASSPATH:$CLASSPATH
+
+# Need to copy the content in the hadoop_classpath_273.txt file, and then set env. 
+# Since the env command can only be written but not read, The following line is deleted here, and then added manually when packaging.
+
+# ENV CLASSPATH=/root/hadoop_classpath_273.txt:$CLASSPATH
+
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
