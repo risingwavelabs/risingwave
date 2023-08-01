@@ -539,7 +539,12 @@ where
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager.list_table_fragments().await {
+        for table_fragments in fragment_manager
+            .get_fragment_read_guard()
+            .await
+            .table_fragments()
+            .values()
+        {
             source_fragments.extend(table_fragments.stream_source_fragments());
             actor_splits.extend(table_fragments.actor_splits.clone());
         }
