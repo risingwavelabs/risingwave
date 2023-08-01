@@ -1104,7 +1104,7 @@ pub mod default {
         }
 
         pub fn object_store_nodelay() -> Option<bool> {
-            None
+            Some(true)
         }
 
         pub fn object_store_req_retry_interval_ms() -> u64 {

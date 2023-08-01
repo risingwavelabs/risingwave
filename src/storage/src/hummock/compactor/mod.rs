@@ -999,13 +999,11 @@ impl Compactor {
                 .start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
-            > self.context.storage_opts.min_sst_size_for_streaming_upload
-            && self
-                .context
-                .sstable_store
-                .store()
-                .support_streaming_upload()
+        let (split_table_outputs, table_stats_map) = if self
+            .context
+            .sstable_store
+            .store()
+            .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
             self.compact_key_range_impl::<_, Xor16FilterBuilder>(
