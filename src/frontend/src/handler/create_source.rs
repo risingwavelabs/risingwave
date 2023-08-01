@@ -68,9 +68,10 @@ async fn extract_avro_table_schema(
     let conf = AvroParserConfig::new(
         with_properties,
         schema.row_schema_location.0.as_str(),
-        schema.use_schema_registry,
         false,
-        None,
+        true,
+        false,
+        None
     )
     .await?;
     let vec_column_desc = conf.map_to_columns()?;
@@ -93,7 +94,8 @@ async fn extract_upsert_avro_table_schema(
         schema.row_schema_location.0.as_str(),
         schema.use_schema_registry,
         true,
-        None,
+        false,
+        None
     )
     .await?;
     let vec_column_desc = conf.map_to_columns()?;

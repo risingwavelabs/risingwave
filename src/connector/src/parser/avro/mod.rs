@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod parser;
+mod envelope;
 pub mod schema_resolver;
 pub mod util;
 

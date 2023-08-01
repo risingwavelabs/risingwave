@@ -25,6 +25,7 @@ use url::Url;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::parser::schema_registry::{Client, ConfluentSchema};
+use crate::parser::schema_registry::schematizer_client::{SchematizerClient, SchematizerSchema};
 use crate::parser::util::download_from_http;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
@@ -83,6 +84,14 @@ pub(super) async fn read_schema_from_http(location: &Url) -> Result<String> {
     })
 }
 
+
+#[derive(Debug, Clone)]
+pub enum SchemaResolver {
+    ConfluentSchemaResolver(Arc<ConfluentSchemaResolver>),
+    SchematizerSchemaResolver(Arc<SchematizerSchemaResolver>),
+}
+
+
 #[derive(Debug)]
 pub struct ConfluentSchemaResolver {
     writer_schemas: Cache<i32, Arc<Schema>>,
@@ -122,6 +131,50 @@ impl ConfluentSchemaResolver {
             Ok(schema)
         } else {
             let raw_schema = self.confluent_client.get_schema_by_id(schema_id).await?;
+            self.parse_and_cache_schema(raw_schema).await
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SchematizerSchemaResolver {
+    writer_schemas: Cache<i32, Arc<Schema>>,
+    schematizer_client: SchematizerClient,
+}
+
+impl SchematizerSchemaResolver {
+    async fn parse_and_cache_schema(&self, raw_schema: SchematizerSchema) -> Result<Arc<Schema>> {
+        let schema = Schema::parse_str(&raw_schema.content)
+            .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
+        let schema = Arc::new(schema);
+        self.writer_schemas
+            .insert(raw_schema.id, Arc::clone(&schema))
+            .await;
+        Ok(schema)
+    }
+
+    /// Create a new `SChematizerSchemaResolver`
+    pub fn new(client: SchematizerClient) -> Self {
+        SchematizerSchemaResolver {
+            writer_schemas: Cache::new(u64::MAX),
+            schematizer_client: client,
+        }
+    }
+
+    pub async fn get_schema_by_alias(&self, namespace: &str, src: &str, alias: &str) -> Result<Arc<Schema>> {
+        let raw_schema = self
+            .schematizer_client
+            .get_schema_by_alias(namespace, src, alias)
+            .await?;
+        self.parse_and_cache_schema(raw_schema).await
+    }
+
+    // get the writer schema by id
+    pub async fn get(&self, schema_id: i32) -> Result<Arc<Schema>> {
+        if let Some(schema) = self.writer_schemas.get(&schema_id) {
+            Ok(schema)
+        } else {
+            let raw_schema = self.schematizer_client.get_schema_by_id(schema_id).await?;
             self.parse_and_cache_schema(raw_schema).await
         }
     }

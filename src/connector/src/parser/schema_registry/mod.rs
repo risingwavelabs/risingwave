@@ -14,5 +14,6 @@
 
 mod client;
 mod util;
+pub mod schematizer_client;
 pub use client::*;
 pub(crate) use util::*;

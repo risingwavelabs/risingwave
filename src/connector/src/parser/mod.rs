@@ -536,6 +536,7 @@ impl SpecificParserConfig {
                     props,
                     &info.row_schema_location,
                     info.use_schema_registry,
+                    true,
                     false,
                     None,
                 )
@@ -546,6 +547,7 @@ impl SpecificParserConfig {
                     props,
                     &info.row_schema_location,
                     info.use_schema_registry,
+                    false,
                     true,
                     if info.upsert_avro_primary_key.is_empty() {
                         None

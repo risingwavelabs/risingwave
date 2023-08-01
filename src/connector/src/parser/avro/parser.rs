@@ -24,9 +24,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
+use super::envelope::deserialize_envelope;
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
 use crate::common::UpsertMessage;
+use crate::parser::schema_registry::schematizer_client::SchematizerClient;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
@@ -35,11 +37,12 @@ use crate::parser::util::get_kafka_topic;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
+
 #[derive(Debug)]
 pub struct AvroParser {
     schema: Arc<Schema>,
     key_schema: Option<Arc<Schema>>,
-    schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    schema_resolver: Option<SchemaResolver>,
     rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
     upsert_primary_key_column_name: Option<String>,
@@ -49,7 +52,7 @@ pub struct AvroParser {
 pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
-    pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    pub schema_resolver: Option<SchemaResolver>,
     pub upsert_primary_key_column_name: Option<String>,
 }
 
@@ -58,16 +61,37 @@ impl AvroParserConfig {
         props: &HashMap<String, String>,
         schema_location: &str,
         use_schema_registry: bool,
+        // FIXME: refactor to use not duplicate flags
+        use_schematizer_registry: bool,
         enable_upsert: bool,
         upsert_primary_key_column_name: Option<String>,
     ) -> Result<Self> {
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
+
+        if use_schematizer_registry {
+            let client = SchematizerClient::new(url, props)?;
+
+            let namespace = &props["namespace"];
+            let source = &props["source"];
+            let alias = &props["alias"];
+
+            let schema_resolver = Arc::new(SchematizerSchemaResolver::new(client));
+            let avro_schema = schema_resolver.get_schema_by_alias(namespace, source, alias).await?;
+
+            return Ok(Self {
+                schema: avro_schema,
+                key_schema: None,
+                schema_resolver: Some(SchemaResolver::SchematizerSchemaResolver(schema_resolver)),
+                upsert_primary_key_column_name: None
+            });
+        }
+
         if use_schema_registry {
             let kafka_topic = get_kafka_topic(props)?;
             let client = Client::new(url, props)?;
-            let resolver = ConfluentSchemaResolver::new(client);
+            let resolver = Arc::new(ConfluentSchemaResolver::new(client));
 
             Ok(Self {
                 schema: resolver
@@ -82,7 +106,7 @@ impl AvroParserConfig {
                 } else {
                     None
                 },
-                schema_resolver: Some(Arc::new(resolver)),
+                schema_resolver: Some(SchemaResolver::ConfluentSchemaResolver(resolver)),
                 upsert_primary_key_column_name,
             })
         } else {
@@ -153,30 +177,51 @@ impl AvroParser {
         self.key_schema.is_some()
     }
 
+    // TODO: we would need to parse envelope here somehow, maybe check with avro con
     async fn parse_avro_value(
         &self,
         payload: &[u8],
         reader_schema: Option<&Schema>,
     ) -> anyhow::Result<Option<Value>> {
         // parse payload to avro value
+        // if use schematizer schema, get writer schema from schematizer
+        // check if resolver is equal to SchematizerSchemaResolver
         // if use confluent schema, get writer schema from confluent schema registry
+
         if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
-            Ok(Some(from_avro_datum(
-                writer_schema.as_ref(),
-                &mut raw_payload,
-                reader_schema,
-            )?))
-        } else if let Some(schema) = reader_schema {
-            let mut reader = Reader::with_schema(schema, payload)?;
-            match reader.next() {
-                Some(Ok(v)) => Ok(Some(v)),
-                Some(Err(e)) => Err(e)?,
-                None => {
-                    anyhow::bail!("avro parse unexpected eof")
+            match resolver {
+                // FIXME: parse envelope and extract schema_id
+                SchemaResolver::SchematizerSchemaResolver(resolver) => {
+                    let envelope = deserialize_envelope(payload).expect("failed to deserialize envelope");
+                    let schema_id = envelope.schema_id;
+                    let writer_schema = resolver.get(schema_id as i32).await?;
+                    Ok(Some(from_avro_datum(
+                        writer_schema.as_ref(),
+                        &mut envelope.payload.as_slice(),
+                        reader_schema,
+                    )?))
+
                 }
+                _ =>  unreachable!("confluence schema resolver disabled!"),
+                // SchemaResolver::ConfluentSchemaResolver(resolver) => {
+                //     let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+                //     let writer_schema = resolver.get(schema_id).await?;
+                //     Ok(Some(from_avro_datum(
+                //         writer_schema.as_ref(),
+                //         &mut raw_payload,
+                //         reader_schema,
+                //     )?))
+                // }
             }
+        // } else if let Some(schema) = reader_schema {
+        //     let mut reader = Reader::with_schema(schema, payload)?;
+        //     match reader.next() {
+        //         Some(Ok(v)) => Ok(Some(v)),
+        //         Some(Err(e)) => Err(e)?,
+        //         None => {
+        //             anyhow::bail!("avro parse unexpected eof")
+        //         }
+        //     }
         } else {
             unreachable!("both schema_resolver and reader_schema not exist");
         }
@@ -350,7 +395,7 @@ mod test {
 
     async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
-        AvroParserConfig::new(&HashMap::new(), schema_path.as_str(), false, false, None).await
+        AvroParserConfig::new(&HashMap::new(), schema_path.as_str(), false, false, false, None).await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
