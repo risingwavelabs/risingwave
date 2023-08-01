@@ -761,6 +761,12 @@ alter source s27 add column v2 varchar;
 statement ok 
 alter source s28 add column v3 int;
 
+statement error Feature is not yet implemented: Alter source with schema registry
+alter source s18 add column v10 int;
+
+statement error Feature is not yet implemented: Alter source with schema registry
+alter source s17 add column v10 int;
+
 statement ok 
 create materialized view alter_mv2 as select * from s27;
 

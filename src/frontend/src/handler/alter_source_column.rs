@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{
-    AlterSourceOperation, CreateSourceStatement, ObjectName, Statement,
-};
-use risingwave_sqlparser::parser::Parser;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_connector::source::{SourceEncode, SourceStruct};
+use risingwave_source::source_desc::extract_source_struct;
+use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
@@ -60,24 +58,31 @@ pub async fn handle_alter_source_column(
         source.clone()
     };
 
-    // Retrieve the original table definition and parse it to AST.
-    let [definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    // Currently only allow source without schema registry
+    let SourceStruct { encode, .. } = extract_source_struct(&original_catalog.info)?;
+    match encode {
+        SourceEncode::Avro | SourceEncode::Protobuf => {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "Alter source with schema registry".into(),
+                None.into(),
+            )));
+        }
+        SourceEncode::Invalid | SourceEncode::Native => {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                format!("Alter source with encode {:?}", encode),
+                "Alter source with encode JSON | BYTES | CSV".into(),
+            )));
+        }
+        _ => {}
+    }
 
-    // TODO: simplify
-    let Statement::CreateSource { ref stmt } = &definition else {
-        panic!("unexpected statement: {:?}", definition);
-    };
-    let CreateSourceStatement { columns, .. } = stmt;
-
+    let columns = &original_catalog.columns;
     let diff_column = match operation {
         AlterSourceOperation::AddColumn { column_def } => {
             let new_column_name = column_def.name.real_value();
             if columns
                 .iter()
-                .any(|c| c.name.real_value() == new_column_name)
+                .any(|c| c.column_desc.name.to_lowercase() == new_column_name)
             {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{new_column_name}\" of table \"{source_name}\" already exists"
