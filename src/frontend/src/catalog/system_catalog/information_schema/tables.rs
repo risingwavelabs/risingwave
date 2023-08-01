@@ -53,7 +53,6 @@ pub static INFORMATION_SCHEMA_TABLES: LazyLock<BuiltinView> = LazyLock::new(|| B
                 END AS is_insertable_into \
             FROM rw_catalog.rw_relations r \
             JOIN rw_catalog.rw_schemas s ON r.schema_id = s.id \
-        ORDER BY table_schema, table_name
-    "
-    .to_string(),
+        ORDER BY table_schema, table_name"
+        .to_string(),
 });

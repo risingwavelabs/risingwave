@@ -400,3 +400,24 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
     { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use crate::catalog::system_catalog::SYS_CATALOGS;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_builtin_view_definition() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let sqls = SYS_CATALOGS
+            .view_by_schema_name
+            .values()
+            .flat_map(|v| v.iter().map(|v| v.sql.clone()))
+            .collect_vec();
+        for sql in sqls {
+            frontend.query_formatted_result(sql).await;
+        }
+    }
+}
