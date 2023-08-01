@@ -500,12 +500,14 @@ where
     /// be ignored because the recovery process will take over it in cleaning part. Check
     /// [`Command::DropStreamingJobs`] for details.
     pub async fn drop_streaming_jobs(&self, streaming_job_ids: Vec<TableId>) {
-        let _ = self
-            .drop_streaming_jobs_impl(streaming_job_ids)
-            .await
-            .inspect_err(|err| {
-                tracing::error!(error = ?err, "Failed to drop streaming jobs");
-            });
+        if !streaming_job_ids.is_empty() {
+            let _ = self
+                .drop_streaming_jobs_impl(streaming_job_ids)
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
+                });
+        }
     }
 
     pub async fn drop_streaming_jobs_impl(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
@@ -579,9 +581,10 @@ mod tests {
     use crate::manager::sink_manager::SinkManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
-        StreamingClusterInfo,
+        RelationIdEnum, StreamingClusterInfo,
     };
     use crate::model::{ActorId, FragmentId};
+    use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
@@ -860,7 +863,7 @@ mod tests {
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
-                .finish_create_table_procedure(vec![], &table)
+                .finish_create_table_procedure(vec![], table)
                 .await?;
             Ok(())
         }
@@ -868,7 +871,11 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![], self.fragment_manager.clone())
+                    .drop_relation(
+                        RelationIdEnum::Table(table_id.table_id),
+                        self.fragment_manager.clone(),
+                        DropMode::Restrict,
+                    )
                     .await?;
             }
             self.global_stream_manager

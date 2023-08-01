@@ -29,6 +29,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
+use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -68,6 +69,7 @@ use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
+use crate::rpc::service::cloud_service::CloudServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
@@ -351,8 +353,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let data_directory = system_params_reader.data_directory();
     if !is_correct_data_directory(data_directory) {
         return Err(MetaError::system_param(format!(
-            "The data directory {:?} is misconfigured. 
-            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            "The data directory {:?} is misconfigured.
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9].
             The string cannot start or end with '/', and consecutive '/' are not allowed.
             The data directory cannot be empty and its length should not exceed 800 characters.",
             data_directory
@@ -508,7 +510,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
-        aws_cli,
+        aws_cli.clone(),
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
@@ -545,7 +547,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
-        catalog_manager,
+        catalog_manager.clone(),
         cluster_manager.clone(),
         hummock_manager.clone(),
         fragment_manager.clone(),
@@ -558,6 +560,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
+    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager, aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -705,6 +708,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
+        .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {

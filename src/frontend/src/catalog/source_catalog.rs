@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
@@ -40,6 +41,8 @@ pub struct SourceCatalog {
     pub associated_table_id: Option<TableId>,
     pub definition: String,
     pub connection_id: Option<ConnectionId>,
+    pub created_at_epoch: Option<Epoch>,
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 impl SourceCatalog {
@@ -91,6 +94,8 @@ impl From<&PbSource> for SourceCatalog {
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),
             connection_id,
+            created_at_epoch: prost.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
         }
     }
 }

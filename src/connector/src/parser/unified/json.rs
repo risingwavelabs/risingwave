@@ -69,12 +69,23 @@ pub enum BooleanHandling {
 }
 
 #[derive(Clone, Debug)]
+pub enum VarcharHandling {
+    // do not allow other types cast to varchar
+    Strict,
+    // allow Json Value (Null, Bool, I64, I128, U64, U128, F64) cast to varchar
+    OnlyPrimaryTypes,
+    // allow all type cast to varchar (inc. Array, Object)
+    AllTypes,
+}
+
+#[derive(Clone, Debug)]
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
     pub boolean_handing: BooleanHandling,
+    pub varchar_handing: VarcharHandling,
     pub ignoring_keycase: bool,
 }
 
@@ -96,6 +107,7 @@ impl JsonParseOptions {
             string_parsing: true,
             string_integer_parsing: true,
         },
+        varchar_handing: VarcharHandling::Strict,
         ignoring_keycase: true,
     };
     pub const DEBEZIUM: JsonParseOptions = JsonParseOptions {
@@ -109,6 +121,7 @@ impl JsonParseOptions {
             string_parsing: false,
             string_integer_parsing: false,
         },
+        varchar_handing: VarcharHandling::Strict,
         ignoring_keycase: true,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
@@ -116,9 +129,10 @@ impl JsonParseOptions {
         time_handling: TimeHandling::Micro,
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
-            string_parsing: false,
+            string_parsing: true,
         },
         boolean_handing: BooleanHandling::Strict,
+        varchar_handing: VarcharHandling::OnlyPrimaryTypes,
         ignoring_keycase: true,
     };
 
@@ -336,6 +350,30 @@ impl JsonParseOptions {
                 .into(),
             // ---- Varchar -----
             (Some(DataType::Varchar) | None, ValueType::String) => value.as_str().unwrap().into(),
+            (
+                Some(DataType::Varchar),
+                ValueType::Bool
+                | ValueType::I64
+                | ValueType::I128
+                | ValueType::U64
+                | ValueType::U128
+                | ValueType::F64,
+            ) if matches!(self.varchar_handing, VarcharHandling::OnlyPrimaryTypes) => {
+                value.to_string().into()
+            }
+            (
+                Some(DataType::Varchar),
+                ValueType::Bool
+                | ValueType::I64
+                | ValueType::I128
+                | ValueType::U64
+                | ValueType::U128
+                | ValueType::F64
+                | ValueType::Array
+                | ValueType::Object,
+            ) if matches!(self.varchar_handing, VarcharHandling::AllTypes) => {
+                value.to_string().into()
+            }
             // ---- Time -----
             (Some(DataType::Time), ValueType::String) => str_to_time(value.as_str().unwrap())
                 .map_err(|_| create_error())?

@@ -19,7 +19,7 @@ def do_test(config, N, n, prefix):
     cur = conn.cursor()
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE TABLE s3_test( 
+    cur.execute(f'''CREATE TABLE s3_test(
         id int,
         name TEXT,
         sex int,
@@ -103,7 +103,7 @@ if __name__ == "__main__":
                 config["S3_BUCKET"],
                    f"{run_id}_data_{i}.ndjson",
                 f"data_{i}.ndjson"
-             
+
             )
             print(f"Uploaded {run_id}_data_{i}.ndjson to S3")
             os.remove(f"data_{i}.ndjson")

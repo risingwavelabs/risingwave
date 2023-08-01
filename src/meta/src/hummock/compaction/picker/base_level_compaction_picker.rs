@@ -802,6 +802,55 @@ pub mod tests {
     }
 
     #[test]
+    fn test_issue_11154() {
+        let mut local_stats = LocalPickerStatistic::default();
+        let mut l0 = generate_l0_overlapping_sublevels(vec![
+            vec![
+                generate_table(4, 1, 1, 200, 1),
+                generate_table(5, 1, 400, 600, 1),
+            ],
+            vec![
+                generate_table(6, 1, 1, 200, 1),
+                generate_table(7, 1, 400, 600, 1),
+            ],
+            vec![
+                generate_table(8, 1, 1, 200, 1),
+                generate_table(9, 1, 400, 600, 1),
+            ],
+            vec![generate_table(10, 1, 1, 600, 1)],
+        ]);
+        // We can set level_type only because the input above is valid.
+        for s in &mut l0.sub_levels {
+            s.level_type = LevelType::Nonoverlapping as i32;
+        }
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            member_table_ids: vec![1],
+            ..Default::default()
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        // Pick with large max_compaction_bytes results all sub levels included in input.
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(800)
+                .sub_level_max_compaction_bytes(50000)
+                .max_bytes_for_level_base(500000)
+                .level0_sub_level_compact_level_count(1)
+                .build(),
+        );
+        // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
+        // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
+        let mut picker = LevelCompactionPicker::new(1, config);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        // avoid add sst_10 and cause a big task
+        assert_eq!(3, ret.input_levels.len());
+    }
+
+    #[test]
     fn test_l0_to_l1_break_on_pending_sub_level() {
         let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
             vec![

@@ -55,13 +55,25 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
+pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
     INFORMATION_SCHEMA_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME,
 ];
+
+pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";
+
+// When there is no primary key specified while creating source, will use the
+// the message key as primary key in `BYTEA` type with this name.
+pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";
+
+/// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
+/// can limit the timestamp range when querying it directly with batch query. The column type is
+/// [`DataType::Timestamptz`]. For more details, please refer to
+/// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
+pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)

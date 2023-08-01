@@ -1,14 +1,14 @@
 # Start with nosim to avoid running in deterministic test
 
 
-# key schema should be a subset of value schema
-statement error
-CREATE TABLE upsert_avro_json ()
+# If we cannot extract key schema, use message key as varchar primary key
+statement ok
+CREATE TABLE upsert_avro_json_default_key ()
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
@@ -19,7 +19,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
@@ -29,7 +29,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_student_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
@@ -41,7 +41,7 @@ WITH (
 connector = 'kafka',
  properties.bootstrap.server = 'message_queue:29092',
 topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 # Just ignore the kafka key, it works
@@ -53,7 +53,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
@@ -80,6 +80,18 @@ flush;
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 5s
 
+query II
+SELECT
+ *
+FROM
+ upsert_avro_json_default_key
+ORDER BY
+ "ID";
+----
+update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
+delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 
 query II
 SELECT
@@ -134,6 +146,9 @@ query I
 select count(*) from debezium_compact;
 ----
 2
+
+statement ok
+DROP TABLE upsert_avro_json_default_key;
 
 statement ok
 DROP TABLE upsert_avro_json;

@@ -353,7 +353,7 @@ impl SinkCoordinatorWorker {
     ) -> Option<SinkCoordinatorWorker> {
         let param = first_writer_request.param;
         let sink = {
-            match build_sink(param.clone()) {
+            match build_sink(param.clone()).await {
                 Ok(sink) => sink,
                 Err(e) => {
                     error!("failed to build sink with param {:?}: {:?}", param, e);

@@ -41,9 +41,10 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
-use crate::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
+use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -260,6 +261,7 @@ pub enum SinkConfig {
     Remote(RemoteConfig),
     Kinesis(Box<KinesisSinkConfig>),
     Iceberg(IcebergConfig),
+    RemoteIceberg(RemoteIcebergConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
 }
@@ -330,6 +332,9 @@ impl SinkConfig {
                 ClickHouseConfig::from_hashmap(properties)?,
             ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
+            REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
+                RemoteIcebergConfig::from_hashmap(properties)?,
+            )),
             ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
                 properties,
             )?)),
@@ -338,9 +343,9 @@ impl SinkConfig {
     }
 }
 
-pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+pub async fn build_sink(param: SinkParam) -> Result<SinkImpl> {
     let config = SinkConfig::from_hashmap(param.properties.clone())?;
-    SinkImpl::new(config, param)
+    SinkImpl::new(config, param).await
 }
 
 #[derive(Debug)]
@@ -351,7 +356,8 @@ pub enum SinkImpl {
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
-    Iceberg(CoordinatedRemoteSink),
+    Iceberg(IcebergSink),
+    RemoteIceberg(RemoteIcebergSink),
 }
 
 impl SinkImpl {
@@ -364,6 +370,7 @@ impl SinkImpl {
             SinkImpl::Kinesis(_) => "kinesis",
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
+            SinkImpl::RemoteIceberg(_) => "iceberg",
         }
     }
 }
@@ -381,12 +388,13 @@ macro_rules! dispatch_sink {
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
+            SinkImpl::RemoteIceberg($sink) => $body,
         }
     }};
 }
 
 impl SinkImpl {
-    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
+    pub async fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
@@ -410,7 +418,10 @@ impl SinkImpl {
                 param.sink_type.is_append_only(),
             )?),
             SinkConfig::Iceberg(cfg) => {
-                SinkImpl::Iceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
+                SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema()).await?)
+            }
+            SinkConfig::RemoteIceberg(cfg) => {
+                SinkImpl::RemoteIceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
             }
         })
     }
@@ -428,6 +439,8 @@ pub enum SinkError {
     Remote(anyhow::Error),
     #[error("Json parse error: {0}")]
     JsonParse(String),
+    #[error("Iceberg error: {0}")]
+    Iceberg(String),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]

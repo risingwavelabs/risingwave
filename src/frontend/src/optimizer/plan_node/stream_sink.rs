@@ -359,6 +359,11 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
+            log_store_type: if self.base.ctx.session_ctx().config().get_sink_decouple() {
+                SinkLogStoreType::KvLogStore as i32
+            } else {
+                SinkLogStoreType::InMemoryLogStore as i32
+            },
         })
     }
 }
