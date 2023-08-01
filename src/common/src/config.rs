@@ -36,8 +36,6 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-/// For non-user-facing components where the CLI arguments do not override the config file.
-pub const NO_OVERRIDE: Option<NoOverride> = None;
 
 /// Unrecognized fields in a config section. Generic over the config section type to provide better
 /// error messages.
@@ -92,7 +90,7 @@ impl<T> Serialize for Unrecognized<T> {
     }
 }
 
-pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
+pub fn load_config(path: &str, cli_override: impl OverrideConfig) -> RwConfig
 where
 {
     let mut config = if path.is_empty() {
@@ -103,22 +101,26 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
-    if let Some(cli_override) = cli_override {
-        cli_override.r#override(&mut config);
-    }
+    cli_override.r#override(&mut config);
     config
 }
 
 pub trait OverrideConfig {
-    fn r#override(self, config: &mut RwConfig);
+    fn r#override(&self, config: &mut RwConfig);
 }
 
-/// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
+impl<'a, T: OverrideConfig> OverrideConfig for &'a T {
+    fn r#override(&self, config: &mut RwConfig) {
+        T::r#override(self, config)
+    }
+}
+
+/// For non-user-facing components where the CLI arguments do not override the config file.
 #[derive(Clone, Copy)]
-pub struct NoOverride {}
+pub struct NoOverride;
 
 impl OverrideConfig for NoOverride {
-    fn r#override(self, _config: &mut RwConfig) {}
+    fn r#override(&self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
@@ -159,12 +161,16 @@ pub enum MetaBackend {
 /// The section `[meta]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct MetaConfig {
-    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
-    /// full SST GC.
+    /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
+    /// are dangling.
     #[serde(default = "default::meta::min_sst_retention_time_sec")]
     pub min_sst_retention_time_sec: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock
+    /// Interval of automatic hummock full GC.
+    #[serde(default = "default::meta::full_gc_interval_sec")]
+    pub full_gc_interval_sec: u64,
+
+    /// The spin interval when collecting global GC watermark in hummock.
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
 
@@ -658,7 +664,11 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            604800
+            86400
+        }
+
+        pub fn full_gc_interval_sec() -> u64 {
+            86400
         }
 
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {

@@ -37,4 +37,3 @@
       from t WITH (connector = 'blackhole');
   expected_outputs:
     - explain_output
-  
