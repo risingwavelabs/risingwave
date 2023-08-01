@@ -151,7 +151,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             .iter()
             .cloned()
             .map(|x| match x.value {
-                Value::CstyleEscapesString(s) => Ok((x.name.real_value(), s)),
+                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
                 Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),

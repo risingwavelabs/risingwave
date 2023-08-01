@@ -18,7 +18,9 @@
 //! structs. It is accessed via [`catalog_service::CatalogReader`] and
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
-use risingwave_common::catalog::{is_row_id_column_name, is_system_schema, ROWID_PREFIX};
+use risingwave_common::catalog::{
+    is_row_id_column_name, is_system_schema, ROWID_PREFIX, RW_RESERVED_COLUMN_NAME_PREFIX,
+};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
@@ -59,6 +61,15 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
         ))
         .into());
     }
+
+    if column_name.starts_with(RW_RESERVED_COLUMN_NAME_PREFIX) {
+        return Err(ErrorCode::InternalError(format!(
+            "column name prefixed with {:?} are reserved word.",
+            RW_RESERVED_COLUMN_NAME_PREFIX
+        ))
+        .into());
+    }
+
     if ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"].contains(&column_name) {
         return Err(ErrorCode::InvalidInputSyntax(format!(
             "column name \"{column_name}\" conflicts with a system column name"
