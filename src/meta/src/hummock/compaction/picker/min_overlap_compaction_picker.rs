@@ -286,9 +286,9 @@ impl NonOverlapSubLevelPicker {
 
             // more than 1 sub_level
             if ret.total_file_count > 1
-                && ret.total_file_size + (add_files_size + current_level_size)
+                && (ret.total_file_size + (add_files_size + current_level_size)
                     >= self.max_compaction_bytes
-                || ret.total_file_count + add_files_count >= self.max_file_count as usize
+                    || ret.total_file_count + add_files_count >= self.max_file_count as usize)
             {
                 break;
             }

@@ -57,11 +57,6 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
     type Writer = W::Writer;
 
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
-        // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
-        let tracker = self
-            .limiter
-            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
-            .await;
         let timer = Instant::now();
         let table_id = self
             .sstable_object_id_manager
@@ -71,7 +66,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {
             capacity_hint: Some(self.options.capacity + self.options.block_capacity),
-            tracker: Some(tracker),
+            tracker: None,
             policy: self.policy,
         };
         let writer = self
@@ -87,6 +82,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             ),
             self.options.clone(),
             self.filter_key_extractor.clone(),
+            Some(self.limiter.clone()),
         );
         Ok(builder)
     }
