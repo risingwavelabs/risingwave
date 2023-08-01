@@ -573,6 +573,20 @@ where
         }))
     }
 
+    async fn alter_source_column(
+        &self,
+        request: Request<AlterSourceColumnRequest>,
+    ) -> Result<Response<AlterSourceColumnResponse>, Status> {
+        let AlterSourceColumnRequest { source_id, added_column } = request.into_inner();
+        let version = self.ddl_controller.run_command(
+            DdlCommand::AlterSourceColumn(source_id, added_column.unwrap())
+        ).await?;
+        Ok(Response::new(AlterSourceColumnResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn get_ddl_progress(
         &self,
         _request: Request<GetDdlProgressRequest>,

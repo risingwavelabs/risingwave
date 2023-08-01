@@ -4,6 +4,7 @@ package ddl_service;
 
 import "catalog.proto";
 import "common.proto";
+import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
@@ -62,6 +63,16 @@ message DropSourceRequest {
 }
 
 message DropSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message AlterSourceColumnRequest {
+  uint32 source_id = 1;
+  plan_common.ColumnCatalog added_column = 2;
+}
+
+message AlterSourceColumnResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -310,6 +321,7 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
+  rpc AlterSourceColumn(AlterSourceColumnRequest) returns (AlterSourceColumnResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

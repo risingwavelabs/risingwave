@@ -69,6 +69,7 @@ use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{PbReschedule, *};
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -406,6 +407,20 @@ impl MetaClient {
             new_name: name.to_string(),
         };
         let resp = self.inner.alter_relation_name(request).await?;
+        Ok(resp.version)
+    }
+
+    // only adding columns is supported
+    pub async fn alter_source_column(
+        &self,
+        source_id: u32,
+        added_column: PbColumnCatalog,
+    ) -> Result<CatalogVersion> {
+        let request = AlterSourceColumnRequest {
+            source_id,
+            added_column: Some(added_column),
+        };
+        let resp = self.inner.alter_source_column(request).await?;
         Ok(resp.version)
     }
 
@@ -1610,6 +1625,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
+            ,{ ddl_client, alter_source_column, AlterSourceColumnRequest, AlterSourceColumnResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }

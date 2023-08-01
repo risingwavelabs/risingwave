@@ -41,6 +41,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -437,6 +438,10 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn alter_source_column(&self, _source_id: u32, _added_column: PbColumnCatalog) -> Result<()> {
         unreachable!()
     }
 }
