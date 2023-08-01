@@ -36,7 +36,7 @@ pub const RW_RELATION_INFO: BuiltinTable = BuiltinTable {
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
     ],
-    pk: &[],
+    pk: &[0, 1],
 };
 
 impl SysCatalogReaderImpl {

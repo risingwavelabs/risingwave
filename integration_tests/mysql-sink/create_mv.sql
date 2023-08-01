@@ -12,9 +12,9 @@ FROM
     target_count WITH (
         connector = 'jdbc',
         jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
-        table.name = 'target_count',
-        type = 'upsert',
-        primary_key='target_id'
+        TABLE.name = 'target_count',
+        TYPE = 'upsert',
+        primary_key = 'target_id'
     );
 
 -- ingest the table back to RW
@@ -39,8 +39,8 @@ CREATE TABLE rw_types (
     hostname = 'mysql',
     port = '3306',
     username = 'root',
-    password = '123456',
-    database.name = 'mydb',
-    table.name = 'data_types',
+    PASSWORD = '123456',
+    DATABASE.name = 'mydb',
+    TABLE.name = 'data_types',
     server.id = '3'
 );

@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::types::DataType;
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
@@ -61,7 +61,7 @@ impl SourceColumnDesc {
 
 impl From<&ColumnDesc> for SourceColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
-        let is_meta = c.name.starts_with("_rw_kafka_timestamp");
+        let is_meta = c.name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME);
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),

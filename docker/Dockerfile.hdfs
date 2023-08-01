@@ -1,10 +1,12 @@
-FROM ubuntu:22.04 as base
+FROM ubuntu:22.04 AS base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven unzip wget openjdk-11-jdk libsasl2-dev
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install build-essential pkg-config wget openjdk-11-jdk libsasl2-dev
 
-FROM base as builder
+FROM base AS builder
+
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld maven unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -29,18 +31,20 @@ RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
-  && rustup default $(cat "/risingwave/rust-toolchain") \
+  && rustup show \
   && rustup component add rustfmt
 
-RUN cargo fetch
 
 # java home for hdrs
 ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 
-RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
+RUN cargo fetch && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+  chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
 RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
