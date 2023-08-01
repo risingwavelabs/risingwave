@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::BuiltinTable;
 
 /// The view `columns` contains information about all table columns (or view columns) in the
 /// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
@@ -22,16 +23,22 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
 ///
 /// In RisingWave, `columns` also contains all materialized views' columns.
-pub const COLUMNS_TABLE_NAME: &str = "columns";
-pub const COLUMNS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "table_catalog"),
-    (DataType::Varchar, "table_schema"),
-    (DataType::Varchar, "table_name"),
-    (DataType::Varchar, "column_name"),
-    (DataType::Varchar, "column_default"),
-    (DataType::Int32, "character_maximum_length"),
-    (DataType::Int32, "ordinal_position"),
-    (DataType::Varchar, "is_nullable"),
-    (DataType::Varchar, "data_type"),
-    (DataType::Varchar, "udt_name"),
-];
+pub const INFORMATION_SCHEMA_COLUMNS: BuiltinTable = BuiltinTable {
+    name: "columns",
+    schema: INFORMATION_SCHEMA_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "table_catalog"),
+        (DataType::Varchar, "table_schema"),
+        (DataType::Varchar, "table_name"),
+        (DataType::Varchar, "column_name"),
+        (DataType::Varchar, "column_default"),
+        (DataType::Int32, "character_maximum_length"),
+        (DataType::Int32, "ordinal_position"),
+        (DataType::Varchar, "is_nullable"),
+        (DataType::Varchar, "collation_name"),
+        (DataType::Varchar, "udt_schema"),
+        (DataType::Varchar, "data_type"),
+        (DataType::Varchar, "udt_name"),
+    ],
+    pk: &[],
+};

@@ -68,7 +68,7 @@ The `--add-opens` flag must be added when running unit tests through Maven:
 
 ## Scalar Functions
 
-A user-defined scalar function maps zero, one, or multiple scalar values to a new scalar value. 
+A user-defined scalar function maps zero, one, or multiple scalar values to a new scalar value.
 
 In order to define a scalar function, one has to create a new class that implements the `ScalarFunction`
 interface in `com.risingwave.functions` and implement exactly one evaluation method named `eval(...)`.
@@ -101,10 +101,10 @@ public class Gcd implements ScalarFunction {
 ## Table Functions
 
 A user-defined table function maps zero, one, or multiple scalar values to one or multiple
-rows (structured types). 
+rows (structured types).
 
 In order to define a table function, one has to create a new class that implements the `TableFunction`
-interface in `com.risingwave.functions` and implement exactly one evaluation method named `eval(...)`. 
+interface in `com.risingwave.functions` and implement exactly one evaluation method named `eval(...)`.
 This method must be declared public and non-static.
 
 The return type must be an `Iterator` of any [data type](#data-types) listed in the data types section.

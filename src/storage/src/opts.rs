@@ -18,6 +18,8 @@ use risingwave_common::system_param::system_params_for_test;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
+    /// The size of parallel task for one compact/flush job.
+    pub parallel_compact_size_mb: u32,
     /// Target size of the Sstable.
     pub sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
@@ -95,6 +97,7 @@ impl Default for StorageOpts {
 impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
     fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
         Self {
+            parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),

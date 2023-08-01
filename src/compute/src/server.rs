@@ -86,7 +86,7 @@ pub async fn compute_node_serve(
     registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
+    let config = load_config(&opts.config_path, &opts);
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -235,10 +235,10 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 2.0);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let memory_limiter = storage.get_memory_limiter();
+        let flush_limiter = storage.get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            memory_limiter,
+            flush_limiter,
             storage_memory_config,
         ));
         monitor_cache(memory_collector, &registry).unwrap();

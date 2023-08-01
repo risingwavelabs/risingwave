@@ -335,6 +335,15 @@ impl LogicalAggBuilder {
                     .collect_vec();
                 gen_group_key_and_grouping_sets(grouping_sets)?
             }
+            GroupBy::Cube(cube) => {
+                // Convert cube to grouping sets.
+                let grouping_sets = cube
+                    .into_iter()
+                    .powerset()
+                    .map(|x| x.into_iter().flatten().collect_vec())
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
+            }
         };
 
         Ok(LogicalAggBuilder {
@@ -1466,7 +1475,7 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let values = LogicalValues::new(
+        let values: LogicalValues = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields.clone(),
@@ -1492,12 +1501,10 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0].into());
-        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

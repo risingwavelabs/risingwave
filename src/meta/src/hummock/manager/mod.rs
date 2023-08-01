@@ -470,7 +470,7 @@ where
             checkpoint_version
         } else {
             // Read checkpoint from object store.
-            versioning_guard.checkpoint = self.read_checkpoint().await?.expect("checkpoint exists");
+            versioning_guard.checkpoint = self.read_checkpoint().await?;
             versioning_guard
                 .checkpoint
                 .version
@@ -1956,6 +1956,8 @@ where
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
+
+                FullGc,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -2015,6 +2017,14 @@ where
             let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
                 .map(|_| HummockTimerEvent::TtlCompactionTrigger);
 
+            let mut full_gc_interval = tokio::time::interval(Duration::from_secs(
+                hummock_manager.env.opts.full_gc_interval_sec,
+            ));
+            full_gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            full_gc_interval.reset();
+            let full_gc_trigger =
+                IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
@@ -2022,6 +2032,7 @@ where
                 Box::pin(dynamic_tick_trigger),
                 Box::pin(space_reclaim_trigger),
                 Box::pin(ttl_reclaim_trigger),
+                Box::pin(full_gc_trigger),
             ];
 
             let periodic_check_split_group_interval_sec = hummock_manager
@@ -2206,6 +2217,15 @@ where
                                     hummock_manager
                                         .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
                                         .await;
+                                }
+
+                                HummockTimerEvent::FullGc => {
+                                    if hummock_manager
+                                        .start_full_gc(Duration::from_secs(3600))
+                                        .is_ok()
+                                    {
+                                        tracing::info!("Start full GC from meta node.");
+                                    }
                                 }
                             }
                         }
@@ -2746,8 +2766,8 @@ async fn write_exclusive_cluster_id(
     } else {
         let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
         Err(ObjectError::internal(format!(
-            "data directory is already used by another cluster with id {:?}",
-            String::from_utf8(cluster_id.to_vec()).unwrap()
+            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `{:?}`.",
+            String::from_utf8(cluster_id.to_vec()).unwrap(), cluster_id_full_path,
         ))
         .into())
     }

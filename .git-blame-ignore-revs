@@ -30,3 +30,6 @@ e7b7842826035b645bc4feddf5ef315d0935e35e
 
 # test: split input/output for planner test (#9902)
 f8266748dcb70541da944664552c1944ff8362e4
+
+# feat(risedev): add check for trailing spaces in `risedev check` (#11294)
+f2a3fd021059e680b35b24c63cff5f8dbe9f9d5f

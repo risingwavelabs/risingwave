@@ -39,27 +39,33 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub(crate) async fn read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
+    /// # Panics
+    /// if checkpoint is not found.
+    pub(crate) async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
         // We `list` then `read`. Because from `read`'s error, we cannot tell whether it's "object
         // not found" or other kind of error.
         use prost::Message;
+        let dir = version_checkpoint_dir(&self.version_checkpoint_path);
         let metadata = self
             .object_store
-            .list(&version_checkpoint_dir(&self.version_checkpoint_path))
+            .list(&dir)
             .await?
             .into_iter()
             .filter(|o| o.key == self.version_checkpoint_path)
             .collect_vec();
         assert!(metadata.len() <= 1);
         if metadata.is_empty() {
-            return Ok(None);
+            panic!(
+                "Hummock version checkpoints do not exist in object store, prefix: {}",
+                dir
+            );
         }
         let data = self
             .object_store
             .read(&self.version_checkpoint_path, None)
             .await?;
         let ckpt = HummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(Some(ckpt))
+        Ok(ckpt)
     }
 
     pub(super) async fn write_checkpoint(

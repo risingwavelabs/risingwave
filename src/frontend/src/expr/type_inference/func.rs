@@ -596,16 +596,6 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
-        ExprType::ArrayLength => {
-            ensure_arity!("array_length", 1 <= | inputs | <= 2);
-            inputs[0].ensure_array_type()?;
-
-            if let Some(arg1) = inputs.get_mut(1) {
-                arg1.cast_implicit_mut(DataType::Int32)?;
-            }
-
-            Ok(Some(DataType::Int32))
-        }
         ExprType::StringToArray => {
             ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
 
@@ -614,12 +604,6 @@ fn infer_type_for_special(
             }
 
             Ok(Some(DataType::List(Box::new(DataType::Varchar))))
-        }
-        ExprType::Cardinality => {
-            ensure_arity!("cardinality", | inputs | == 1);
-            inputs[0].ensure_array_type()?;
-
-            Ok(Some(DataType::Int32))
         }
         ExprType::TrimArray => {
             ensure_arity!("trim_array", | inputs | == 2);
@@ -683,7 +667,7 @@ fn infer_type_name<'a>(
         }
     }
 
-    let mut candidates = top_matches(candidates, inputs);
+    let mut candidates = top_matches(&candidates, inputs);
 
     if candidates.is_empty() {
         return Err(ErrorCode::NotImplemented(
@@ -706,7 +690,7 @@ fn infer_type_name<'a>(
 
     match &candidates[..] {
         [] => unreachable!(),
-        [sig] => Ok(sig),
+        [sig] => Ok(*sig),
         _ => Err(ErrorCode::BindError(format!(
             "function {:?}{:?} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
             func_type,
@@ -763,7 +747,7 @@ fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool 
 /// [rule 4c src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1062-L1104
 /// [rule 4d src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1106-L1153
 fn top_matches<'a>(
-    candidates: &'a [FuncSign],
+    candidates: &[&'a FuncSign],
     inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
@@ -795,7 +779,7 @@ fn top_matches<'a>(
             best_candidates.clear();
         }
         if n_exact == best_exact && n_preferred == best_preferred {
-            best_candidates.push(sig);
+            best_candidates.push(*sig);
         }
     }
     best_candidates
@@ -1226,6 +1210,7 @@ mod tests {
                     inputs_type: formals,
                     ret_type: DUMMY_RET,
                     build: |_, _| unreachable!(),
+                    deprecated: false,
                 });
             }
             let result = infer_type_name(&sig_map, DUMMY_FUNC, inputs);

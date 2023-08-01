@@ -1995,9 +1995,10 @@ fn parse_literal_string() {
         expr_from_projection(&select.projection[2])
     );
     assert_eq!(
-        &Expr::Value(Value::CstyleEscapesString(
-            r"c style escape string \x3f".to_string()
-        )),
+        &Expr::Value(Value::CstyleEscapedString(CstyleEscapedString {
+            value: "c style escape string \x3f".to_string(),
+            raw: r"c style escape string \x3f".to_string(),
+        })),
         expr_from_projection(&select.projection[3])
     );
 
