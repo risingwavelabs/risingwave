@@ -433,6 +433,13 @@ CREATE SOURCE s27 (v1 int)
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
+CREATE SOURCE s28 (v2 varchar)
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
 statement ok
 flush;
 
@@ -539,6 +546,9 @@ create materialized view source_mv3 as select * from s24;
 statement ok 
 create materialized view alter_mv1 as select * from s27;
 
+statement ok 
+create materialized view alter_mv3 as select * from s28;
+
 # Wait for source
 sleep 10s
 
@@ -582,6 +592,14 @@ select * from alter_mv1;
 2
 3
 4
+
+query I 
+select * from alter_mv3;
+----
+1
+22
+333
+4444
 
 query ITTT rowsort
 select id, first_name, last_name, email from s8;
@@ -724,12 +742,19 @@ SELECT * FROM source_mv3 ORDER BY id;
 \x6b6b
 \x776561776566776566
 
-# alter source 
+# alter source
 statement ok
 alter source s27 add column v2 varchar;
 
+# alter source with null column
+statement ok 
+alter source s28 add column v3 int;
+
 statement ok 
 create materialized view alter_mv2 as select * from s27;
+
+statement ok 
+create materialized view alter_mv4 as select * from s28;
 
 # Wait for source
 sleep 10s
@@ -746,6 +771,14 @@ select * from s27
 3 333
 4 4444
 
+query II 
+select * from s28 
+----
+1 NULL 
+22 NULL 
+333 NULL 
+4444 NULL
+
 query I
 select * from alter_mv1;
 ----
@@ -761,6 +794,23 @@ select * from alter_mv2;
 2 22
 3 333
 4 4444
+
+query II 
+select * from alter_mv3;
+----
+1 
+22 
+333
+4444
+
+query II 
+select * from alter_mv4;
+----
+1 NULL 
+22 NULL 
+333 NULL
+4444 NULL
+
 
 statement ok
 drop materialized view source_mv1
