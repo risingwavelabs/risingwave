@@ -6,6 +6,7 @@ CREATE SOURCE s1 (v1 int) with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
+statement ok
 CREATE SOURCE s2 (v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_alter',
@@ -19,10 +20,8 @@ create materialized view mv1 as select * from s1;
 statement ok 
 create materialized view mv2 as select * from s2;
 
-# Wait for source
 sleep 10s
 
-# Flush into storage
 statement ok
 flush;
 
@@ -52,10 +51,8 @@ create materialized view mv3 as select * from s1;
 statement ok 
 create materialized view mv4 as select * from s2;
 
-# Wait for source
 sleep 10s
 
-# Flush into storage
 statement ok
 flush;
 
