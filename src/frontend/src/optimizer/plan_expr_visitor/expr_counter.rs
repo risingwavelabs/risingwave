@@ -18,7 +18,7 @@ use crate::expr::{ExprVisitor, FunctionCall};
 
 #[derive(Default)]
 pub struct ExprCounter {
-    // Only count function call right now.
+    // Only count pure function call right now.
     pub counter: HashMap<FunctionCall, usize>,
 }
 
@@ -26,10 +26,12 @@ impl ExprVisitor<()> for ExprCounter {
     fn merge(_: (), _: ()) {}
 
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
-        self.counter
-            .entry(func_call.clone())
-            .and_modify(|counter| *counter += 1)
-            .or_insert(1);
+        if func_call.is_pure() {
+            self.counter
+                .entry(func_call.clone())
+                .and_modify(|counter| *counter += 1)
+                .or_insert(1);
+        }
 
         func_call
             .inputs()

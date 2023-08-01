@@ -12,3 +12,11 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name:  Common sub expression shouldn't extract impure function
+  sql: |
+    create table t(v1 varchar, v2 int, v3 int);
+    select rw_vnode(v2) + 1 as vnode,  rw_vnode(v2) + 1 as vnode2, v2 + 1 x, v2 + 1 y from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+
