@@ -89,3 +89,7 @@ tracing-test = "0.2"
 [[bench]]
 name = "stream_hash_agg"
 harness = false
+
+[[bench]]
+name = "bench_state_table"
+harness = false
