@@ -120,6 +120,7 @@ where
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
+        self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
 
         // We take retry into consideration because this is the latency user sees for a cluster to

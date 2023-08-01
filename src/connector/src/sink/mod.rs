@@ -14,6 +14,7 @@
 
 pub mod catalog;
 pub mod clickhouse;
+pub mod coordinate;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -34,7 +35,7 @@ use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::ConnectorClient;
+use risingwave_rpc_client::{ConnectorClient, MetaClient};
 use thiserror::Error;
 pub use tracing;
 
@@ -119,11 +120,12 @@ impl From<SinkCatalog> for SinkParam {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
+    pub meta_client: Option<MetaClient>,
 }
 
 #[async_trait]
@@ -142,7 +144,8 @@ pub trait Sink {
 }
 
 #[async_trait]
-pub trait SinkWriter: Send {
+pub trait SinkWriter: Send + 'static {
+    type CommitMetadata: Send = ();
     /// Begin a new epoch
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
 
@@ -151,7 +154,7 @@ pub trait SinkWriter: Send {
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
     /// Clean up
     async fn abort(&mut self) -> Result<()>;
@@ -162,7 +165,7 @@ pub trait SinkWriter: Send {
 
 #[async_trait]
 // An old version of SinkWriter for backward compatibility
-pub trait SinkWriterV1: Send {
+pub trait SinkWriterV1: Send + 'static {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
