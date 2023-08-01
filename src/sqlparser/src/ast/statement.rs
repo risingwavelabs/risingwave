@@ -1067,6 +1067,9 @@ impl fmt::Display for CreateSinkStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
         impl_fmt_display!(sink_from, v, self);
+        if let Some(ref emit_mode) = self.emit_mode {
+            v.push(format!("EMIT {}", emit_mode));
+        }
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }
