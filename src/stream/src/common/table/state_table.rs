@@ -873,8 +873,9 @@ where
                 // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
                 // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
                 // TODO(kwannoel): We can optimize it with:
-                // 1. `RefCell` if needed.
-                // 2. Pass in a direct reference to LocalStateStore,
+                // 1. Either use `RefCell`.
+                // 2. Or pass in a direct reference to LocalStateStore,
+                //    instead of referencing it indirectly from `self`.
                 //    Similar to how we do for pk_indices.
                 let mut pks = vec![];
                 {
@@ -892,8 +893,6 @@ where
                     let merged_stream = merge_sort(streams);
                     pin_mut!(merged_stream);
 
-                    // FIXME: Invariant should be enforced, that watermark is the first column of
-                    // pk.
                     while !self.watermark_cache.is_full() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
                         let (_, pk) = deserialize_pk_with_vnode(&pk[..], &self.pk_serde)?;
                         if !pk.is_null_at(0) {

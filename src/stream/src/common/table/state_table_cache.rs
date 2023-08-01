@@ -75,16 +75,6 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///
 /// TODO(kwannoel): Optimization: We can use cache to do point delete rather than range delete.
 /// If cache is not full, we can do point delete, for each cache entry.
-/// FIXME(kwannoel): This should be a trait.
-/// Then only when building state table with watermark we will initialize it.
-/// Otherwise point it to a no-op implementation.
-/// TODO(kwannoel): Add tests for it.
-/// Another thing we have to take note of are NULL values.
-/// TODO(kwannoel): After issuing DELETE range,
-/// we need to do table scan also to refresh the cache.
-/// We can optimize it by only scanning the rows larger than the last cleaned watermark value.
-/// TODO(kwannoel): Just init this, start with size 0 if watermark cache not needed.
-/// Use static dispatch on boolean to decide whether or not to use it.
 #[derive(EstimateSize, Clone)]
 pub struct StateTableWatermarkCache {
     inner: TopNStateCache<WatermarkCacheKey, ()>,
