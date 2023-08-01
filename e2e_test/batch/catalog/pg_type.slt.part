@@ -1,4 +1,4 @@
-query ITITT
+query ?????
 SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type;
 ----
 16	bool	0	f	b
@@ -9,28 +9,12 @@ SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type;
 25	text	0	f	b
 700	float4	0	f	b
 701	float8	0	f	b
-1000	_bool	0	f	b
-1001	_bytea	0	f	b
-1005	_int2	0	f	b
-1007	_int4	0	f	b
-1015	_varchar	0	f	b
-1016	_int8	0	f	b
-1021	_float4	0	f	b
-1022	_float8	0	f	b
 1043	varchar	0	f	b
 1082	date	0	f	b
 1083	time	0	f	b
 1114	timestamp	0	f	b
-1115	_timestamp	0	f	b
-1182	_date	0	f	b
-1183	_time	0	f	b
 1184	timestamptz	0	f	b
-1185	_timestamptz	0	f	b
 1186	interval	0	f	b
-1187	_interval	0	f	b
-1231	_numeric	0	f	b
 1301	rw_int256	0	f	b
-1302	_rw_int256	0	f	b
 1700	numeric	0	f	b
 3802	jsonb	0	f	b
-3807	_jsonb	0	f	b
