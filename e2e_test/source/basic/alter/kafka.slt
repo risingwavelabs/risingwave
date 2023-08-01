@@ -1,12 +1,12 @@
 statement ok 
-CREATE SOURCE s1 (v1 int)
+CREATE SOURCE s1 (v1 int) with (
   connector = 'kafka',
   topic = 'kafka_alter',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
-CREATE SOURCE s2 (v2 varchar)
+CREATE SOURCE s2 (v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_alter',
   properties.bootstrap.server = 'message_queue:29092',
