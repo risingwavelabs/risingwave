@@ -279,11 +279,11 @@ where
         &self,
         request: Request<ReportFullScanTaskRequest>,
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
-        let vacuum_manager = self.vacuum_manager.clone();
+        let hummock_manager = self.hummock_manager.clone();
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match vacuum_manager
+            match hummock_manager
                 .complete_full_gc(request.into_inner().object_ids)
                 .await
             {
@@ -302,7 +302,7 @@ where
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.vacuum_manager.start_full_gc(Duration::from_secs(
+        self.hummock_manager.start_full_gc(Duration::from_secs(
             request.into_inner().sst_retention_time_sec,
         ))?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
