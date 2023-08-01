@@ -1,10 +1,6 @@
 auto-retry: &auto-retry
   automatic:
     # Agent terminated because the AWS EC2 spot instance killed by AWS.
-    # "Exited with status 255 (after intercepting the agent’s termination signal, sent because the agent was stopped)"
-    # "Terminated with signal SIGKILL (from the agent because the agent was stopped). Exit status -1"
-    - exit_status: 255
-      limit: 2
     - signal_reason: agent_stop
       limit: 2
 
