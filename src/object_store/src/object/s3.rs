@@ -65,13 +65,6 @@ const NUM_BUCKET_PREFIXES: u32 = 256;
 /// initiated. (Day is the smallest granularity)
 const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
-// /// Retry config for compute node http timeout error.
-// const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
-// const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
-// const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
-
-// const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
-
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
 ///

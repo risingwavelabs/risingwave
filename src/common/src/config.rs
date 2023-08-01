@@ -1096,7 +1096,7 @@ pub mod default {
         }
 
         pub fn object_store_recv_buffer_size() -> Option<usize> {
-            None
+            Some(1 << 21) // 2m
         }
 
         pub fn object_store_send_buffer_size() -> Option<usize> {
