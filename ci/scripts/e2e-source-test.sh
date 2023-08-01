@@ -133,6 +133,11 @@ cargo make ci-start ci-pubsub
 cargo run --bin prepare_ci_pubsub
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/*.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/old_row_format_syntax/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka.slt'
+
+echo "--- e2e, kafka alter source"
+./scripts/source/prepare_data_after_alter.sh
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data.slt'
 
 echo "--- Run CH-benCHmark"
 ./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
