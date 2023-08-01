@@ -115,16 +115,6 @@ impl Binder {
     }
 
     pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
-        if exprs.is_empty() {
-            let lhs: ExprImpl = FunctionCall::new_unchecked(
-                ExprType::Array,
-                vec![],
-                // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List(Box::new(DataType::Varchar)),
-            )
-            .into();
-            return lhs.cast_explicit(ty).map_err(Into::into);
-        }
         let inner_type = if let DataType::List(datatype) = &ty {
             *datatype.clone()
         } else {
