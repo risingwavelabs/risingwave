@@ -1,4 +1,4 @@
-query ?????
+query ITITT
 SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type;
 ----
 16	bool	0	f	b
