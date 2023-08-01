@@ -1031,8 +1031,6 @@ impl ParseTo for CreateSinkStatement {
 
         let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
 
-        let emit_mode = p.parse_emit_mode()?;
-
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
             CreateSink::From(from_name)
@@ -1042,6 +1040,8 @@ impl ParseTo for CreateSinkStatement {
         } else {
             p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
         };
+
+        let emit_mode = p.parse_emit_mode()?;
 
         impl_parse_to!(with_properties: WithProperties, p);
         if with_properties.0.is_empty() {
