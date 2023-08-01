@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{SourceEncode, SourceStruct};
 use risingwave_source::source_desc::extract_source_struct;
@@ -89,6 +90,8 @@ pub async fn handle_alter_source_column(
                 )))?
             }
             let mut bound_columns = bind_sql_columns(&[column_def])?;
+            // fix this if we want to support drop column
+            bound_columns[0].column_desc.column_id = ColumnId::new(columns.len() as i32);
             bound_columns.remove(0)
         }
         _ => unreachable!(),

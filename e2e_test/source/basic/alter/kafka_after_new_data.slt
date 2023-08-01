@@ -51,12 +51,6 @@ select * from mv4
 22 NULL
 22 NULL
 
-statement ok
-drop source s1
-
-statement ok
-drop source s2
-
 statement ok 
 drop materialized view mv1
 
@@ -68,3 +62,9 @@ drop materialized view mv3
 
 statement ok 
 drop materialized view mv4
+
+statement ok
+drop source s1
+
+statement ok
+drop source s2
