@@ -42,9 +42,9 @@ RUN cargo fetch && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
-RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
-    mkdir -p /risingwave/bin/connector-node && \
-    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+# RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
+#     mkdir -p /risingwave/bin/connector-node && \
+#     tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM base AS risingwave
 
@@ -53,10 +53,10 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN apt-get -y install gdb \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
-RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
+# RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
+# COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=builder /risingwave/ui /risingwave/ui
 COPY --from=builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 
