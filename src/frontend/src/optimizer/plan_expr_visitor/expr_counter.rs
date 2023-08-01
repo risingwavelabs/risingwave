@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::expr::{ExprImpl, ExprVisitor, FunctionCall};
+use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall};
 
 /// `ExprCounter` is used by `CseRewriter`.
 #[derive(Default)]
@@ -53,6 +53,16 @@ impl ExprVisitor<()> for CseExprCounter {
     }
 
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        // Short cut semantic func type cannot be extracted into common sub-expression.
+        // E.g. select true or (1 / a)::bool or (1 / a)::bool from x
+        // If a is zero, common sub-expression (1 / a) would lead to division by zero error.
+        match func_call.func_type() {
+            ExprType::Case | ExprType::And | ExprType::Or => {
+                return;
+            }
+            _ => {}
+        };
+
         if func_call.is_pure() {
             self.counter
                 .entry(func_call.clone())

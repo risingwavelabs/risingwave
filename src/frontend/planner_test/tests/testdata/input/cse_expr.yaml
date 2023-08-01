@@ -30,4 +30,11 @@
     (225), (270), (315), (360)) AS t(x)
   expected_outputs:
     - batch_plan
+- name:  Common sub expression shouldn't extract expression having short cut evaluation semantics and we use stddev_samp and var_samp here because they can rewrite into a case then and have some common sub expressions.
+  sql: |
+    create table t(v int);
+    select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
 
