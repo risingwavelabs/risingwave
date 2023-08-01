@@ -21,6 +21,7 @@ use risingwave_common::types::*;
 use risingwave_expr_macro::aggregate;
 
 use self::append_only::AppendOnlyBucket;
+use self::updatable::UpdatableBucket;
 use crate::Result;
 
 mod append_only;
@@ -37,14 +38,14 @@ const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 #[aggregate(
     "approx_count_distinct(*) -> int64",
-    state = "Registers",
-    init_state = "Registers::new()"
+    state = "UpdatableRegisters",
+    init_state = "UpdatableRegisters::new()"
 )]
 fn approx_count_distinct<'a>(
-    mut reg: Registers,
+    mut reg: UpdatableRegisters,
     value: impl ScalarRef<'a>,
     retract: bool,
-) -> Result<Registers> {
+) -> Result<UpdatableRegisters> {
     reg.update(value, retract)?;
     Ok(reg)
 }
@@ -60,9 +61,15 @@ fn approx_count_distinct<'a>(
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
 #[derive(Clone)]
-struct Registers<B: Bucket = AppendOnlyBucket> {
+struct Registers<B: Bucket> {
     registers: Box<[B]>,
+    // FIXME: Currently we only store the count result (i64) as the state of updatable register.
+    // This is not correct, because the state should be the registers themselves.
+    initial_count: i64,
 }
+
+type UpdatableRegisters = Registers<UpdatableBucket>;
+type AppendOnlyRegisters = Registers<AppendOnlyBucket>;
 
 trait Bucket: Default + Clone + EstimateSize {
     /// Increments or decrements the bucket at `index` depending on the state of `retract`.
@@ -77,6 +84,7 @@ impl<B: Bucket> Registers<B> {
     fn new() -> Self {
         Self {
             registers: (0..NUM_OF_REGISTERS).map(|_| B::default()).collect(),
+            initial_count: 0,
         }
     }
 
@@ -140,7 +148,7 @@ impl<B: Bucket> Registers<B> {
             raw_estimate
         };
 
-        answer as i64
+        self.initial_count + answer as i64
     }
 }
 
@@ -157,8 +165,8 @@ impl<B: Bucket> EstimateSize for Registers<B> {
 }
 
 /// Serialize the state into a scalar.
-impl From<Registers> for ScalarImpl {
-    fn from(reg: Registers) -> Self {
+impl From<AppendOnlyRegisters> for ScalarImpl {
+    fn from(reg: AppendOnlyRegisters) -> Self {
         let buckets = &reg.registers[..];
         let result_len = (buckets.len() * LOG_COUNT_BITS as usize - 1) / (i64::BITS as usize) + 1;
         let mut result = vec![0u64; result_len];
@@ -179,7 +187,7 @@ impl From<Registers> for ScalarImpl {
 }
 
 /// Deserialize the state from a scalar.
-impl From<ScalarImpl> for Registers {
+impl From<ScalarImpl> for AppendOnlyRegisters {
     fn from(state: ScalarImpl) -> Self {
         let list = state.as_list().values();
         let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
@@ -199,7 +207,29 @@ impl From<ScalarImpl> for Registers {
                 AppendOnlyBucket(v as u8)
             })
             .collect();
-        Registers { registers }
+        Self {
+            registers,
+            initial_count: 0,
+        }
+    }
+}
+
+/// Serialize the state into a scalar.
+impl From<UpdatableRegisters> for ScalarImpl {
+    fn from(reg: UpdatableRegisters) -> Self {
+        // FIXME: store state of updatable registers properly
+        ScalarImpl::Int64(reg.calculate_result())
+    }
+}
+
+/// Deserialize the state from a scalar.
+impl From<ScalarImpl> for UpdatableRegisters {
+    fn from(state: ScalarImpl) -> Self {
+        // FIXME: restore state of updatable registers properly
+        Self {
+            initial_count: state.into_int64(),
+            ..Self::new()
+        }
     }
 }
 
