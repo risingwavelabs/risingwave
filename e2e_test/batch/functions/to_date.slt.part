@@ -28,6 +28,11 @@ select to_date('2022/12/25 15:24:33', 'YYYY/MM/DD HH24:MI:SS');
 ----
 2022-12-25
 
+query T
+select to_date('0001-02-03', 'YYYY-MM-DD') - 100;
+----
+0001-10-26 BC
+
 query TTT
 SELECT s, format, to_date(s, format)
 FROM 
@@ -40,6 +45,8 @@ FROM
     ('2022.12.25', 'YYYY.MM.DD'),
     ('2022-Dec-25', 'YYYY-Mon-DD'),
     ('Dec/25/2022', 'Mon/DD/YYYY'),
+    ('0000-12-25', 'YYYY-MM-DD'),
+    ('-0001-12-25', 'YYYY-MM-DD'),
     ('-2022-12-25', 'YYYY-MM-DD')
     -- unsupported formats
     -- ('95-12-25', 'YYY-MM-DD'),
@@ -59,4 +66,6 @@ FROM
 2022.12.25      YYYY.MM.DD      2022-12-25
 2022-Dec-25     YYYY-Mon-DD     2022-12-25
 Dec/25/2022     Mon/DD/YYYY     2022-12-25
+0000-12-25      YYYY-MM-DD      0001-12-25 BC
+-0001-12-25     YYYY-MM-DD      0001-12-25 BC
 -2022-12-25     YYYY-MM-DD      2022-12-25 BC

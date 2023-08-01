@@ -93,7 +93,10 @@ pub fn to_timestamp_const_tmpl(
 
 #[inline(always)]
 pub fn to_date_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
-    let parsed = parse(s, tmpl)?;
+    let mut parsed = parse(s, tmpl)?;
+    if let Some(year) = &mut parsed.year && *year < 0 {
+        *year += 1;
+    }
     Ok(parsed.to_naive_date()?.into())
 }
 
