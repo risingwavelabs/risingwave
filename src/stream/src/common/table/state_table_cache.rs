@@ -60,14 +60,14 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///    State table commit. See below.
 ///
 /// STATE TABLE COMMIT
-///     A. Decide whether to do state cleaning:
+///    A. Decide whether to do state cleaning:
 ///        if `watermark_to_be_cleaned` < smallest val
 ///           OR no value in cache + cache is synced:
 ///        No need issue delete range.
 ///        if `watermark_to_be_cleaned` => smallest val OR cache not synced:
 ///        Issue delete ranges.
 ///
-///     B. Refreshing the cache:
+///    B. Refreshing the cache:
 ///        On barrier, do table scan from most_recently_cleaned_watermark (inclusive) to +inf.
 ///        Take the Top N rows and insert into cache.
 ///        This has to be implemented in state_table.
