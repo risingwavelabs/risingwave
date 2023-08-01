@@ -1,3 +1,13 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    # "Exited with status 255 (after intercepting the agent’s termination signal, sent because the agent was stopped)"
+    # Terminated with signal SIGKILL (from the agent because the agent was stopped). Exit status -1
+    - exit_status: 255
+      limit: 2
+    - exit_status: -1
+      limit: 2
+
 steps:
   - label: "docker-build-push: amd64"
     command: "ci/scripts/docker.sh"
@@ -9,6 +19,7 @@ steps:
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
             GITHUB_TOKEN: github-token
+    retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
@@ -22,6 +33,7 @@ steps:
             GITHUB_TOKEN: github-token
     agents:
       queue: "linux-arm64"
+      retry: *auto-retry
 
   - label: "multi-arch-image-create-push"
     command: "ci/scripts/multi-arch-docker.sh"
@@ -34,6 +46,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+    retry: *auto-retry
 
   - label: "pre build binary"
     command: "ci/scripts/release.sh"
@@ -50,3 +63,4 @@ steps:
             - GITHUB_TOKEN
             - BUILDKITE_COMMIT
             - BUILDKITE_TAG
+    retry: *auto-retry
