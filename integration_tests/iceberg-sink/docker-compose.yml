@@ -3,7 +3,7 @@ version: "3"
 x-airflow-common:
   &airflow-common
   image: apache/airflow:2.6.2-python3.10
-  build: 
+  build:
     context: .
     target: airflow
   environment:
@@ -26,9 +26,9 @@ x-airflow-common:
       condition: service_healthy
 x-spark-common:
   &spark-air
-  build: 
+  build:
     context: .
-    target: spark   
+    target: spark
 
 services:
   spark:
@@ -51,35 +51,35 @@ services:
     container_name: presto
   compactor-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
   minio-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: prometheus-0
   mysql:
     image: mysql:8.0
@@ -98,18 +98,18 @@ services:
     container_name: mysql
   connector-node:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: connector-node
   prepare_mysql:
     image: mysql:8.0
-    depends_on: 
+    depends_on:
       - mysql
     command:
       - /bin/sh
       - -c
       - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
     volumes:
-      - "./mysql_prepare.sql:/mysql_prepare.sql"      
+      - "./mysql_prepare.sql:/mysql_prepare.sql"
     container_name: prepare_mysql
     restart: on-failure
   datagen:

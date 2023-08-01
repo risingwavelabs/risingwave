@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod compaction;
-mod compaction_schedule_policy;
-mod compaction_scheduler;
 pub mod compactor_manager;
 pub mod error;
 mod manager;
@@ -31,7 +29,6 @@ mod vacuum;
 
 use std::time::Duration;
 
-pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
@@ -40,9 +37,6 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 pub use vacuum::*;
 
-pub use crate::hummock::compaction_scheduler::{
-    CompactionRequestChannelRef, CompactionSchedulerRef,
-};
 use crate::storage::MetaStore;
 use crate::MetaOpts;
 
@@ -50,42 +44,21 @@ use crate::MetaOpts;
 pub fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     vacuum_manager: VacuumManagerRef<S>,
-    compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)>
 where
     S: MetaStore,
 {
-    let mut workers = vec![
-        start_compaction_scheduler(compaction_scheduler),
-        start_checkpoint_loop(
-            hummock_manager,
-            Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
-            meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
-        ),
-    ];
+    let mut workers = vec![start_checkpoint_loop(
+        hummock_manager,
+        Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
+        meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
+    )];
     workers.push(start_vacuum_scheduler(
         vacuum_manager,
         Duration::from_secs(meta_opts.vacuum_interval_sec),
     ));
     workers
-}
-
-/// Starts a task to accept compaction request.
-fn start_compaction_scheduler<S>(
-    compaction_scheduler: CompactionSchedulerRef<S>,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
-    // Start compaction scheduler
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let join_handle = tokio::spawn(async move {
-        compaction_scheduler.start(shutdown_rx).await;
-        tracing::info!("Compaction scheduler is stopped");
-    });
-
-    (join_handle, shutdown_tx)
 }
 
 /// Starts a task to periodically vacuum hummock.

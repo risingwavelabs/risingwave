@@ -100,7 +100,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             downstream_pk,
             sink_type,
         };
-        let sink = build_sink(sink_param.clone())?;
+        let sink = build_sink(sink_param.clone()).await?;
         let input_schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))

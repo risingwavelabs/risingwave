@@ -174,10 +174,13 @@ where
 
     /// Processes one message. Returns true if the connection is terminated.
     pub async fn process(&mut self, msg: FeMessage) -> bool {
-        self.do_process(msg).await || self.is_terminate
+        self.do_process(msg).await.is_none() || self.is_terminate
     }
 
-    async fn do_process(&mut self, msg: FeMessage) -> bool {
+    /// Return type `Option<()>` is essentially a bool, but allows `?` for early return.
+    /// - `None` means to terminate the current connection
+    /// - `Some(())` means to continue processing the next message
+    async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
         let result = AssertUnwindSafe(self.do_process_inner(msg))
             .rw_catch_unwind()
             .await
@@ -189,47 +192,46 @@ where
             .inspect_err(|error| error!(%error, "error when process message"));
 
         match result {
-            Ok(v) => v,
+            Ok(()) => Some(()),
             Err(e) => {
                 match e {
                     PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
-                            return true;
+                            return None;
                         }
                     }
 
                     PsqlError::SslError(_) => {
                         // For ssl error, because the stream has already been consumed, so there is
                         // no way to write more message.
-                        return true;
+                        return None;
                     }
 
                     PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
-                        // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
+                            .ok()?;
                         let _ = self.stream.flush().await;
-                        return true;
+                        return None;
                     }
 
                     PsqlError::QueryError(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
-                        self.ready_for_query().unwrap();
+                            .ok()?;
+                        self.ready_for_query().ok()?;
                     }
 
                     PsqlError::Panic(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
+                            .ok()?;
                         let _ = self.stream.flush().await;
 
                         // Catching the panic during message processing may leave the session in an
                         // inconsistent state. We forcefully close the connection (then end the
                         // session) here for safety.
-                        return true;
+                        return None;
                     }
 
                     PsqlError::Internal(_)
@@ -237,16 +239,16 @@ where
                     | PsqlError::ExecuteError(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
-                            .unwrap();
+                            .ok()?;
                     }
                 }
                 let _ = self.stream.flush().await;
-                false
+                Some(())
             }
         }
     }
 
-    async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<bool> {
+    async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
@@ -263,7 +265,7 @@ where
             FeMessage::Flush => self.stream.flush().await?,
         }
         self.stream.flush().await?;
-        Ok(false)
+        Ok(())
     }
 
     pub async fn read_message(&mut self) -> io::Result<FeMessage> {
@@ -839,7 +841,7 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("8.3.0"),
+            BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(

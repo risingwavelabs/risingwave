@@ -15,21 +15,27 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 use crate::expr::cast_map_array;
 
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
-pub const PG_CAST_TABLE_NAME: &str = "pg_cast";
-pub const PG_CAST_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Int32, "castsource"),
-    (DataType::Int32, "casttarget"),
-    (DataType::Varchar, "castcontext"),
-];
+pub const PG_CAST: BuiltinTable = BuiltinTable {
+    name: "pg_cast",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Int32, "castsource"),
+        (DataType::Int32, "casttarget"),
+        (DataType::Varchar, "castcontext"),
+    ],
+    pk: &[0],
+};
 
 pub static PG_CAST_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
     let mut cast_array = cast_map_array();
@@ -47,3 +53,9 @@ pub static PG_CAST_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
         })
         .collect_vec()
 });
+
+impl SysCatalogReaderImpl {
+    pub fn read_cast(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_CAST_DATA_ROWS.clone())
+    }
+}

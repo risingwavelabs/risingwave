@@ -1,0 +1,36 @@
+# Before running this test, seed data into kafka:
+#   python3 e2e_test/schema_registry/pb.py
+
+# Create a table.
+statement ok
+create table sr_pb_test with (
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest',
+    message = 'test.User')
+FORMAT plain ENCODE protobuf(
+        schema.registry = 'http://message_queue:8081',
+        message = 'test.User'
+    );
+
+# Wait for source
+sleep 10s
+
+# Flush into storage
+statement ok
+flush;
+
+query I
+select count(*) from sr_pb_test;
+----
+20
+
+query II
+select min(id), max(id) from sr_pb_test;
+----
+0 19
+
+
+statement ok
+drop table sr_pb_test;

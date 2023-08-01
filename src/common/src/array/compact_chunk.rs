@@ -298,7 +298,7 @@ mod tests {
             compacted_chunk.compact(),
             StreamChunk::from_pretty(
                 " I I I
-                + 4 9 2            
+                + 4 9 2
                 - 6 6 9
                 + 6 6 6",
             )

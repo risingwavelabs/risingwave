@@ -55,7 +55,7 @@ use crate::cache::cache_may_stale;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
-const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
+const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.

@@ -13,7 +13,8 @@ FROM
         connector = 'jdbc',
         jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
         table.name = 'target_count',
-        type = 'upsert'
+        type = 'upsert',
+        primary_key = 'target_id'
     );
 
 -- ingest the table back to RW

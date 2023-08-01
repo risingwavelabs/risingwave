@@ -276,6 +276,12 @@ impl BuildHasher for PrecomputedBuildHasher {
 
 /// Extension of scalars to be serialized into hash keys.
 ///
+/// The `exact_size` and `estimated_size` methods are used to estimate the size of the serialized
+/// hash key, so that we can pre-allocate the buffer for it.
+/// - override `exact_size` if the serialized size is known for this scalar type;
+/// - override `estimated_size` if the serialized size varies for different values of this scalar
+///   type, but we can estimate it.
+///
 /// NOTE: The hash key encoding algorithm needs to respect the implementation of `Hash` and `Eq` on
 /// scalar types, which is exactly the same behavior of the data types under `GROUP BY` or
 /// `PARTITION BY` in PostgreSQL. For example, `Decimal(1.0)` vs `Decimal(1.00)`, or `Interval(24
@@ -291,7 +297,20 @@ impl BuildHasher for PrecomputedBuildHasher {
 /// be delegated to other encoding algorithms, we can use macros of
 /// `impl_memcmp_encoding_hash_key_serde!` and `impl_value_encoding_hash_key_serde!` here.
 pub trait HashKeySer<'a>: ScalarRef<'a> {
+    /// Serialize the scalar into the given buffer.
     fn serialize_into(self, buf: impl BufMut);
+
+    /// Returns `Some` if the serialized size is known for this scalar type.
+    fn exact_size() -> Option<usize> {
+        None
+    }
+
+    /// Returns the estimated serialized size for this scalar.
+    fn estimated_size(self) -> usize {
+        Self::exact_size().unwrap_or(1) // use a default size of 1 if not known
+                                        // this should never happen in practice as we always
+                                        // implement one of these two methods
+    }
 }
 
 /// The deserialization counterpart of [`HashKeySer`].
@@ -301,14 +320,19 @@ pub trait HashKeyDe: Scalar {
 
 macro_rules! impl_value_encoding_hash_key_serde {
     ($owned_ty:ty) => {
+        // TODO: extra boxing to `ScalarRefImpl` and encoding for `NonNull` tag is
+        // unnecessary here. After we resolve them, we can make more types directly delegate
+        // to this implementation.
         impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
             fn serialize_into(self, mut buf: impl BufMut) {
-                // TODO: extra boxing to `ScalarRefImpl` and encoding for `NonNull` tag is
-                // unnecessary here. After we resolve them, we can make more types directly delegate
-                // to this implementation.
                 value_encoding::serialize_datum_into(Some(ScalarRefImpl::from(self)), &mut buf);
             }
+
+            fn estimated_size(self) -> usize {
+                value_encoding::estimate_serialize_datum_size(Some(ScalarRefImpl::from(self)))
+            }
         }
+
         impl HashKeyDe for $owned_ty {
             fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
                 let scalar = value_encoding::deserialize_datum(buf, data_type)
@@ -336,7 +360,13 @@ macro_rules! impl_memcmp_encoding_hash_key_serde {
                 )
                 .expect("serialize should never fail");
             }
+
+            // TODO: estimate size for memcmp encoding.
+            fn estimated_size(self) -> usize {
+                1
+            }
         }
+
         impl HashKeyDe for $owned_ty {
             fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
                 let mut deserializer = memcomparable::Deserializer::new(buf);
@@ -359,6 +389,10 @@ impl HashKeySer<'_> for bool {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_u8(if self { 1 } else { 0 });
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(1)
+    }
 }
 
 impl HashKeyDe for bool {
@@ -370,6 +404,10 @@ impl HashKeyDe for bool {
 impl HashKeySer<'_> for i16 {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i16_ne(self);
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(2)
     }
 }
 
@@ -383,6 +421,10 @@ impl HashKeySer<'_> for i32 {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i32_ne(self);
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(4)
+    }
 }
 
 impl HashKeyDe for i32 {
@@ -394,6 +436,10 @@ impl HashKeyDe for i32 {
 impl HashKeySer<'_> for i64 {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self);
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(8)
     }
 }
 
@@ -407,6 +453,10 @@ impl<'a> HashKeySer<'a> for Int256Ref<'a> {
     fn serialize_into(self, mut buf: impl BufMut) {
         let b = self.to_ne_bytes();
         buf.put_slice(b.as_ref());
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(32)
     }
 }
 
@@ -422,6 +472,10 @@ impl<'a> HashKeySer<'a> for Serial {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self.as_row_id());
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(8)
+    }
 }
 
 impl HashKeyDe for Serial {
@@ -433,6 +487,10 @@ impl HashKeyDe for Serial {
 impl HashKeySer<'_> for F32 {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_f32_ne(self.normalized().0);
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(4)
     }
 }
 
@@ -446,6 +504,10 @@ impl HashKeySer<'_> for F64 {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_f64_ne(self.normalized().0);
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(8)
+    }
 }
 
 impl HashKeyDe for F64 {
@@ -458,6 +520,10 @@ impl HashKeySer<'_> for Decimal {
     fn serialize_into(self, mut buf: impl BufMut) {
         let b = Decimal::unordered_serialize(&self.normalize());
         buf.put_slice(b.as_ref());
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(16)
     }
 }
 
@@ -474,6 +540,10 @@ impl HashKeySer<'_> for Date {
         let b = self.0.num_days_from_ce().to_ne_bytes();
         buf.put_slice(b.as_ref());
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(4)
+    }
 }
 
 impl HashKeyDe for Date {
@@ -487,6 +557,10 @@ impl HashKeySer<'_> for Timestamp {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self.0.timestamp());
         buf.put_u32_ne(self.0.timestamp_subsec_nanos());
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(12)
     }
 }
 
@@ -503,6 +577,10 @@ impl HashKeySer<'_> for Time {
         buf.put_u32_ne(self.0.num_seconds_from_midnight());
         buf.put_u32_ne(self.0.nanosecond());
     }
+
+    fn exact_size() -> Option<usize> {
+        Some(8)
+    }
 }
 
 impl HashKeyDe for Time {
@@ -516,6 +594,10 @@ impl HashKeyDe for Time {
 impl HashKeySer<'_> for Timestamptz {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self.timestamp_micros());
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(8)
     }
 }
 
