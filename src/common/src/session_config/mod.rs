@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 28] = [
+const CONFIG_KEYS: [&str; 29] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -63,6 +63,7 @@ const CONFIG_KEYS: [&str; 28] = [
     "RW_FORCE_SPLIT_DISTINCT_AGG",
     "CLIENT_MIN_MESSAGES",
     "CLIENT_ENCODING",
+    "SINK_DECOUPLE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -95,6 +96,7 @@ const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
 const CLIENT_MIN_MESSAGES: usize = 26;
 const CLIENT_ENCODING: usize = 27;
+const SINK_DECOUPLE: usize = 28;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -303,6 +305,7 @@ type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 90_500>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
 type ClientEncoding = ConfigString<CLIENT_ENCODING>;
+type SinkDecouple = ConfigBool<SINK_DECOUPLE, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -415,6 +418,9 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
     #[educe(Default(expression = "ConfigString::<CLIENT_ENCODING>(String::from(\"UTF8\"))"))]
     client_encoding: ClientEncoding,
+
+    /// Enable decoupling sink and internal streaming graph or not
+    sink_decouple: SinkDecouple,
 }
 
 impl ConfigMap {
@@ -514,6 +520,8 @@ impl ConfigMap {
                 }
                 .into());
             }
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            self.sink_decouple = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -583,6 +591,8 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case("bytea_output") {
             // TODO: We only support hex now.
             Ok("hex".to_string())
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            Ok(self.sink_decouple.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -729,6 +739,11 @@ impl ConfigMap {
                 name: "bytea_output".to_string(),
                 setting: "hex".to_string(),
                 description: "Sets the output format for bytea.".to_string(),
+            },
+            VariableInfo{
+                name: SinkDecouple::entry_name().to_lowercase(),
+                setting: self.sink_decouple.to_string(),
+                description: String::from("Enable decoupling sink and internal streaming graph or not")
             }
         ]
     }
@@ -844,5 +859,9 @@ impl ConfigMap {
 
     pub fn get_client_encoding(&self) -> &str {
         &self.client_encoding
+    }
+
+    pub fn get_sink_decouple(&self) -> bool {
+        self.sink_decouple.0
     }
 }

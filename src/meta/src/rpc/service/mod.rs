@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod backup_service;
+pub mod cloud_service;
 pub mod cluster_service;
 pub mod ddl_service;
 pub mod health_service;

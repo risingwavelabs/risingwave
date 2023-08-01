@@ -12,7 +12,7 @@ explain create table test_explain_table (v int);
 
 
 
-# Create materialized view on it 
+# Create materialized view on it
 statement ok
 create materialized view mv as select v from test_explain_table order by v limit 10;
 
