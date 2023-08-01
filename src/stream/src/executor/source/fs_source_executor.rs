@@ -435,9 +435,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .iter()
                             .flat_map(|(id, offset)| {
                                 let origin_split =
-                                    self.stream_source_core.stream_source_splits.get(id);
+                                    self.stream_source_core.stream_source_splits.get_mut(id);
 
-                                origin_split.map(|split| (id.clone(), split.update(offset.clone())))
+                                origin_split.map(|split| {
+                                    split.update_in_place(offset.clone());
+                                    (id.clone(), split.clone())
+                                })
                             })
                             .collect_vec();
 

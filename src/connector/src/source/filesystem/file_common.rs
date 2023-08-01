@@ -49,8 +49,8 @@ impl FsSplit {
         }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+    pub fn update_with_offset(&mut self, start_offset: String) {
         let offset = start_offset.parse().unwrap();
-        Self::new(self.name.clone(), offset, self.size)
+        self.offset = offset;
     }
 }

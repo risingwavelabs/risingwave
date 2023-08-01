@@ -38,6 +38,10 @@ impl PulsarSplit {
             start_offset,
         }
     }
+
+    pub fn update_with_offset(&mut self, _start_offset: String) {
+        unimplemented!("pulsar split")
+    }
 }
 
 impl SplitMetaData for PulsarSplit {
