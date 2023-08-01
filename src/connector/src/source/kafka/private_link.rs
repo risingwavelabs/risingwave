@@ -20,12 +20,13 @@ use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::producer::{DeliveryResult, ProducerContext};
-use rdkafka::ClientContext;
+use rdkafka::{ClientContext, Statistics};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
 use crate::common::{AwsPrivateLinkItem, BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY};
+use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use crate::source::KAFKA_CONNECTOR;
 
@@ -89,12 +90,16 @@ impl BrokerAddrRewriter {
 
 pub struct PrivateLinkConsumerContext {
     inner: BrokerAddrRewriter,
+    stats: Option<RdKafkaStats>,
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        broker_rewrite_map: Option<HashMap<String, String>>,
+        stats: Option<RdKafkaStats>,
+    ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self { inner })
+        Ok(Self { inner, stats })
     }
 }
 
@@ -102,6 +107,8 @@ impl ClientContext for PrivateLinkConsumerContext {
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         self.inner.rewrite_broker_addr(addr)
     }
+
+    fn stats(&self, statistics: Statistics) {}
 }
 
 // required by the trait bound of BaseConsumer
