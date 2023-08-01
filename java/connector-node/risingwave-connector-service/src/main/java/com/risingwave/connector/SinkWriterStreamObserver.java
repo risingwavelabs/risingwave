@@ -24,10 +24,11 @@ import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterator;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SinkStreamObserver
+public class SinkWriterStreamObserver
         implements StreamObserver<ConnectorServiceProto.SinkWriterStreamRequest> {
     private SinkWriter sink;
 
@@ -44,13 +45,13 @@ public class SinkStreamObserver
     private Deserializer deserializer;
     private final StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver;
 
-    private static final Logger LOG = LoggerFactory.getLogger(SinkStreamObserver.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SinkWriterStreamObserver.class);
 
     public boolean isInitialized() {
         return sink != null;
     }
 
-    public SinkStreamObserver(
+    public SinkWriterStreamObserver(
             StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver) {
         this.responseObserver = responseObserver;
     }
@@ -148,17 +149,20 @@ public class SinkStreamObserver
                             .asRuntimeException();
                 }
                 boolean isCheckpoint = sinkTask.getBarrier().getIsCheckpoint();
-                sink.barrier(isCheckpoint);
+                Optional<ConnectorServiceProto.SinkMetadata> metadata = sink.barrier(isCheckpoint);
                 currentEpoch = sinkTask.getBarrier().getEpoch();
                 LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
                 if (isCheckpoint) {
+                    ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse.Builder builder =
+                            ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse
+                                    .newBuilder()
+                                    .setEpoch(currentEpoch);
+                    if (metadata.isPresent()) {
+                        builder.setMetadata(metadata.get());
+                    }
                     responseObserver.onNext(
                             ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
-                                    .setCommit(
-                                            ConnectorServiceProto.SinkWriterStreamResponse
-                                                    .CommitResponse.newBuilder()
-                                                    .setEpoch(currentEpoch)
-                                                    .build())
+                                    .setCommit(builder)
                                     .build());
                 }
             } else {

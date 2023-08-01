@@ -406,6 +406,14 @@ enum MetaCommands {
         #[clap(long, default_value_t = false)]
         ignore_not_found: bool,
     },
+
+    /// Validate source interface for the cloud team
+    ValidateSource {
+        /// With properties in json format
+        /// If privatelink is used, specify `connection.id` instead of `connection.name`
+        #[clap(long)]
+        props: String,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -567,6 +575,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             yes,
             ignore_not_found,
         }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
+        Commands::Meta(MetaCommands::ValidateSource { props }) => {
+            cmd_impl::meta::validate_source(context, props).await?
+        }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
         Commands::Scale(ScaleCommands::Resize(resize)) => {

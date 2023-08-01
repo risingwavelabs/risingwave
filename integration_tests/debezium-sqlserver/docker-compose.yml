@@ -31,7 +31,7 @@ services:
 
   message_queue:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: message_queue
 
   debezium:

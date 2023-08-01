@@ -141,7 +141,7 @@ select count(*) from debezium_compact;
 ----
 2
 
-statement ok 
+statement ok
 DROP TABLE upsert_avro_json_default_key;
 
 statement ok

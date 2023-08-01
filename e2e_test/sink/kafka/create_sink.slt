@@ -1,5 +1,5 @@
 statement ok
-create table t_kafka ( 
+create table t_kafka (
     id integer primary key,
     v_varchar varchar,
     v_smallint smallint,
