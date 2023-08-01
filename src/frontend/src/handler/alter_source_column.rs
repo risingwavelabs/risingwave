@@ -28,7 +28,8 @@ use crate::Binder;
 // TODO:
 // 1. generated columns?
 // 2. `check_privilege_for_drop_alter`
-// 3. test_util
+// 3. fail test
+// 4. change the definition of source
 
 // Behaviour:
 // 1. wrong if column exists
@@ -39,7 +40,7 @@ pub async fn handle_alter_source_column(
     source_name: ObjectName,
     operation: AlterSourceOperation,
 ) -> Result<RwPgResponse> {
-    // 1. Get original definition
+    // Get original definition
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, real_source_name) =
