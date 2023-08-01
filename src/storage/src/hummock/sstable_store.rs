@@ -569,7 +569,7 @@ impl MemoryCollector for HummockMemoryCollector {
             / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
     }
 
-    fn get_uploading_memory_usage_ratio(&self) -> f64 {
+    fn get_shared_buffer_usage_ratio(&self) -> f64 {
         self.limiter.get_memory_usage() as f64
             / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
     }
