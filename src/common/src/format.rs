@@ -68,7 +68,7 @@ pub enum ParseFormatError {
 
 impl Formatter {
     /// Parse the format string into a high-efficient representation.
-    /// https://www.postgresql.org/docs/current/functions-string.html#FUNCTIONS-STRING-FORMAT
+    /// <https://www.postgresql.org/docs/current/functions-string.html#FUNCTIONS-STRING-FORMAT>
     pub fn parse(format: &str) -> Result<Self, ParseFormatError> {
         // 8 is a good magic number here, it can cover an input like 'Testing %s, %s, %s, %%'.
         let mut nodes = Vec::with_capacity(8);
