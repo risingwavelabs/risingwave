@@ -181,7 +181,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
-            | expr_node::Type::StringToArray =>
+            | expr_node::Type::StringToArray
+            | expr_node::Type::Format =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
