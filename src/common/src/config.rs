@@ -638,6 +638,9 @@ pub struct SystemConfig {
     #[serde(default = "default::system::sstable_size_mb")]
     pub sstable_size_mb: Option<u32>,
 
+    #[serde(default = "default::system::parallel_compact_size_mb")]
+    pub parallel_compact_size_mb: Option<u32>,
+
     /// Size of each block in bytes in SST.
     #[serde(default = "default::system::block_size_kb")]
     pub block_size_kb: Option<u32>,
@@ -671,6 +674,7 @@ impl SystemConfig {
             barrier_interval_ms: self.barrier_interval_ms,
             checkpoint_frequency: self.checkpoint_frequency,
             sstable_size_mb: self.sstable_size_mb,
+            parallel_compact_size_mb: self.parallel_compact_size_mb,
             block_size_kb: self.block_size_kb,
             bloom_false_positive: self.bloom_false_positive,
             state_store: self.state_store,
@@ -983,6 +987,10 @@ pub mod default {
 
         pub fn checkpoint_frequency() -> Option<u64> {
             system_param::default::checkpoint_frequency()
+        }
+
+        pub fn parallel_compact_size_mb() -> Option<u32> {
+            system_param::default::parallel_compact_size_mb()
         }
 
         pub fn sstable_size_mb() -> Option<u32> {
