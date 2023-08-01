@@ -315,12 +315,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .filter(|split| !all_completed.contains(&split.id()))
             .collect_vec();
 
-        self.stream_source_core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
-
         // restore the newest split info
         for ele in &mut boot_state {
             if let Some(recover_state) = self
@@ -333,6 +327,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             }
         }
 
+        // init in-memory split states with persisted state if any
+        self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
 
