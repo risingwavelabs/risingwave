@@ -425,6 +425,17 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_column(
+        &self,
+        source_id: u32,
+        added_column: PbColumnCatalog,
+    ) -> Result<()> {
+        self.catalog
+            .write()
+            .alter_source_column_by_id(&source_id, added_column);
+        Ok(())
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }
@@ -438,10 +449,6 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_source_column(&self, _source_id: u32, _added_column: PbColumnCatalog) -> Result<()> {
         unreachable!()
     }
 }

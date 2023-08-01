@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::plan_common::PbColumnCatalog;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
@@ -392,6 +393,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
     }
 
+    pub fn get_source_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+        source_id: &SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        self.get_schema_by_id(db_id, schema_id)?
+            .get_source_by_id(source_id)
+            .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
+    }
+
     /// Refer to [`SearchPath`].
     pub fn first_valid_schema(
         &self,
@@ -471,6 +483,37 @@ impl Catalog {
                 .to_prost(schema_id, database_id);
             table.name = table_name.to_string();
             self.update_table(&table);
+        }
+    }
+
+    // Used by test_utils only.
+    pub fn alter_source_column_by_id(
+        &mut self,
+        source_id: &SourceId,
+        added_column: PbColumnCatalog,
+    ) {
+        let (mut database_id, mut schema_id) = (0, 0);
+        let mut found = false;
+        for database in self.database_by_name.values() {
+            if !found {
+                for schema in database.iter_schemas() {
+                    if schema.iter_source().any(|s| s.id == *source_id) {
+                        found = true;
+                        database_id = database.id();
+                        schema_id = schema.id();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if found {
+            let mut source = self
+                .get_source_by_id(&database_id, &schema_id, source_id)
+                .unwrap()
+                .to_prost(schema_id, database_id);
+            source.columns.push(added_column);
+            self.update_source(&source);
         }
     }
 

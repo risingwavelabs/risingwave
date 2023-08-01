@@ -19,7 +19,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
-use super::{ColumnId, ConnectionId, OwnedByUserCatalog, SourceId};
+use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
 use crate::WithOptions;
@@ -49,6 +49,29 @@ impl SourceCatalog {
     /// Returns the SQL statement that can be used to create this source.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {
+        PbSource {
+            id: self.id,
+            schema_id,
+            database_id,
+            name: self.name.clone(),
+            row_id_index: self.row_id_index.map(|idx| idx as _),
+            columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
+            pk_column_ids: self.pk_col_ids.iter().map(Into::into).collect(),
+            properties: self.properties.clone().into_iter().collect(),
+            owner: self.owner,
+            info: Some(self.info.clone()),
+            watermark_descs: self.watermark_descs.clone(),
+            definition: self.definition.clone(),
+            connection_id: self.connection_id,
+            initialized_at_epoch: self.initialized_at_epoch.map(|x| x.0),
+            created_at_epoch: self.created_at_epoch.map(|x| x.0),
+            optional_associated_table_id: self
+                .associated_table_id
+                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
+        }
     }
 }
 

@@ -27,7 +27,7 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, ColumnCatalog, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
+    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
@@ -1347,10 +1347,7 @@ where
         commit_meta!(self, sources)?;
 
         let version = self
-            .notify_frontend_relation_info(
-                Operation::Update,
-                RelationInfo::Source(source),
-            )
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Source(source))
             .await;
 
         Ok(version)

@@ -16,7 +16,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -173,8 +172,7 @@ where
                     ctrl.drop_connection(connection_id).await
                 }
                 DdlCommand::AlterSourceColumn(source_id, added_column) => {
-                    ctrl.alter_source_column(source_id, added_column)
-                        .await
+                    ctrl.alter_source_column(source_id, added_column).await
                 }
             }
         }
@@ -259,7 +257,7 @@ where
 
     async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {
         self.catalog_manager.create_function(&function).await
-    }   
+    }
 
     async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
         self.catalog_manager.drop_function(function_id).await

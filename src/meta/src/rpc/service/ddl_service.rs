@@ -577,10 +577,17 @@ where
         &self,
         request: Request<AlterSourceColumnRequest>,
     ) -> Result<Response<AlterSourceColumnResponse>, Status> {
-        let AlterSourceColumnRequest { source_id, added_column } = request.into_inner();
-        let version = self.ddl_controller.run_command(
-            DdlCommand::AlterSourceColumn(source_id, added_column.unwrap())
-        ).await?;
+        let AlterSourceColumnRequest {
+            source_id,
+            added_column,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSourceColumn(
+                source_id,
+                added_column.unwrap(),
+            ))
+            .await?;
         Ok(Response::new(AlterSourceColumnResponse {
             status: None,
             version,

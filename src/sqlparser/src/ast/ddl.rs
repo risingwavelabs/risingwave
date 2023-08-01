@@ -200,8 +200,7 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::AddColumn { column_def } => {
                 write!(f, "ADD COLUMN {column_def}")
-            },
-            
+            }
         }
     }
 }

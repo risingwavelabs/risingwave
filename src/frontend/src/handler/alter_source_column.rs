@@ -14,11 +14,10 @@
 
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
-
 use risingwave_common::error::{ErrorCode, Result};
-
-
-use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName, Statement, CreateSourceStatement};
+use risingwave_sqlparser::ast::{
+    AlterSourceOperation, CreateSourceStatement, ObjectName, Statement,
+};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::bind_sql_columns;
@@ -70,12 +69,15 @@ pub async fn handle_alter_source_column(
     let Statement::CreateSource { ref stmt } = &definition else {
         panic!("unexpected statement: {:?}", definition);
     };
-    let CreateSourceStatement { columns, ..} = stmt;
+    let CreateSourceStatement { columns, .. } = stmt;
 
     let diff_column = match operation {
         AlterSourceOperation::AddColumn { column_def } => {
             let new_column_name = column_def.name.real_value();
-            if columns.iter().any(|c| c.name.real_value() == new_column_name) {
+            if columns
+                .iter()
+                .any(|c| c.name.real_value() == new_column_name)
+            {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{new_column_name}\" of table \"{source_name}\" already exists"
                 )))?
@@ -83,11 +85,73 @@ pub async fn handle_alter_source_column(
             let mut bound_columns = bind_sql_columns(&[column_def])?;
             bound_columns.remove(0)
         }
-        _ => unreachable!()
+        _ => unreachable!(),
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_source_column(original_catalog.id, diff_column.to_protobuf()).await?;
+    catalog_writer
+        .alter_source_column(original_catalog.id, diff_column.to_protobuf())
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_alter_source_column_handler() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        let sql = r#"create source s (v1 int) with (
+            connector = 'kafka',
+            topic = 'abc',
+            properties.bootstrap.server = 'localhost:29092',
+          ) FORMAT PLAIN ENCODE JSON;"#;
+
+        frontend.run_sql(sql).await.unwrap();
+
+        let get_source = || {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            catalog_reader
+                .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "s")
+                .unwrap()
+                .0
+                .clone()
+        };
+
+        let source = get_source();
+        let columns: HashMap<_, _> = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
+            .collect();
+
+        let sql = "alter source s add column v2 varchar;";
+        frontend.run_sql(sql).await.unwrap();
+
+        let altered_source = get_source();
+
+        let altered_columns: HashMap<_, _> = altered_source
+            .columns
+            .iter()
+            .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
+            .collect();
+
+        // Check the new column.
+        assert_eq!(columns.len() + 1, altered_columns.len());
+        assert_eq!(altered_columns["v2"].0, DataType::Varchar);
+
+        // Check the old columns and IDs are not changed.
+        assert_eq!(columns["v1"], altered_columns["v1"]);
+    }
 }
