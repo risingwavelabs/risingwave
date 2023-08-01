@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
+use crate::optimizer::plan_node::{generic, BatchProject, PlanTreeNodeUnary};
+use crate::optimizer::{BoxedRule, PlanRef, Rule};
 use crate::utils::Substitute;
 
-/// Merge contiguous [`LogicalProject`] nodes.
-pub struct ProjectMergeRule {}
-impl Rule for ProjectMergeRule {
+/// Merge contiguous [`BatchProject`] nodes.
+pub struct BatchProjectMergeRule {}
+impl Rule for BatchProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let outer_project: &LogicalProject = plan.as_logical_project()?;
+        let outer_project = plan.as_batch_project()?;
         let input = outer_project.input();
-        let inner_project: &LogicalProject = input.as_logical_project()?;
+        let inner_project = input.as_batch_project()?;
 
         let mut input_ref_counter = InputRefCounter::default();
         for expr in outer_project.exprs() {
@@ -46,12 +46,13 @@ impl Rule for ProjectMergeRule {
             .cloned()
             .map(|expr| subst.rewrite_expr(expr))
             .collect();
-        Some(LogicalProject::new(inner_project.input(), exprs).into())
+        let logical_project = generic::Project::new(exprs, inner_project.input());
+        Some(BatchProject::new(logical_project).into())
     }
 }
 
-impl ProjectMergeRule {
+impl BatchProjectMergeRule {
     pub fn create() -> BoxedRule {
-        Box::new(ProjectMergeRule {})
+        Box::new(BatchProjectMergeRule {})
     }
 }

@@ -45,6 +45,10 @@
 
     LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 
+    To Batch Plan:
+
+    BatchValues { rows: [[1:Int32]] }
+
     Inline Session Timezone:
 
     BatchValues { rows: [[1:Int32]] }

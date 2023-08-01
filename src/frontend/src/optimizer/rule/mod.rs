@@ -123,6 +123,11 @@ mod project_join_separate_rule;
 pub use project_join_separate_rule::*;
 mod grouping_sets_to_expand_rule;
 pub use grouping_sets_to_expand_rule::*;
+mod common_sub_expr_extract_rule;
+pub use common_sub_expr_extract_rule::*;
+
+mod batch;
+pub use batch::batch_project_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -175,6 +180,8 @@ macro_rules! for_all_rules {
             , { ApplyDedupTransposeRule }
             , { ProjectJoinSeparateRule }
             , { GroupingSetsToExpandRule }
+            , { CommonSubExprExtractRule }
+            , { BatchProjectMergeRule }
         }
     };
 }

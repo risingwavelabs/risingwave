@@ -8,8 +8,9 @@
       └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
-      └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
+    └─BatchProject { exprs: [t1.id, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2] }
+      └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1] }
+        └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
 - sql: |
     create materialized view t as select * from s;
     select * from tumble(t, (country).created_at, interval '3' day);
@@ -171,14 +172,16 @@
             └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
-      └─BatchFilter { predicate: (t1.v1 >= 10:Int32) }
-        └─BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
+    └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2] }
+      └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1] }
+        └─BatchFilter { predicate: (t1.v1 >= 10:Int32) }
+          └─BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2, t1._row_id] }
-      └─StreamFilter { predicate: (t1.v1 >= 10:Int32) }
-        └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+    └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2, t1._row_id] }
+      └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, t1._row_id] }
+        └─StreamFilter { predicate: (t1.v1 >= 10:Int32) }
+          └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (id int, v1 int, created_at date);
     with t2 as (select * from t1 where v1 >= 10)
@@ -209,8 +212,9 @@
       └─LogicalShare { id: 1 }
         └─LogicalValues { rows: [['2020-01-01 12:00:00':Timestamp]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamp] } }
   batch_plan: |-
-    BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
-    └─BatchValues { rows: [['2020-01-01 12:00:00':Timestamp]] }
+    BatchProject { exprs: [*VALUES*_0.column_0, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+    └─BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1] }
+      └─BatchValues { rows: [['2020-01-01 12:00:00':Timestamp]] }
 - sql: |
     create table t1 ( c1 varchar, c2 int, c3 timestamp);
     create table t2 ( d1 int, d2 varchar, d3 timestamp);

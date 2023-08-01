@@ -1,0 +1,14 @@
+- name: Common sub expression extract1
+  sql: |
+    create table t (v1 jsonb);
+    select v1->'a'->'c' x, v1->'a'->'b' y from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: Common sub expression extract2
+  sql: |
+    create table t (v1 jsonb);
+    select v1->'a'->'c' x, v1->'a'->'c' y from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
