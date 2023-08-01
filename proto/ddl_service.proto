@@ -59,6 +59,7 @@ message CreateSourceResponse {
 
 message DropSourceRequest {
   uint32 source_id = 1;
+  bool cascade = 2;
 }
 
 message DropSourceResponse {
@@ -79,6 +80,7 @@ message CreateSinkResponse {
 
 message DropSinkRequest {
   uint32 sink_id = 1;
+  bool cascade = 2;
 }
 
 message DropSinkResponse {
@@ -99,6 +101,7 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
+  bool cascade = 2;
 }
 
 message DropMaterializedViewResponse {
@@ -118,6 +121,7 @@ message CreateViewResponse {
 
 message DropViewRequest {
   uint32 view_id = 1;
+  bool cascade = 2;
 }
 
 message DropViewResponse {
@@ -179,6 +183,7 @@ message DropTableRequest {
     uint32 id = 1;
   }
   uint32 table_id = 2;
+  bool cascade = 3;
 }
 
 message DropTableResponse {
@@ -208,6 +213,7 @@ message CreateIndexResponse {
 
 message DropIndexRequest {
   uint32 index_id = 1;
+  bool cascade = 2;
 }
 
 message DropIndexResponse {

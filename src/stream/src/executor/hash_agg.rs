@@ -475,10 +475,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // 2. `MutGuard` should not be sent to other tasks.
                 let mut agg_group = unsafe { agg_group.as_mut_guard() };
                 async move {
-                    // Get agg outputs and build change.
-                    let curr_outputs = agg_group.get_outputs(storages).await?;
-                    let change = agg_group.build_change(curr_outputs);
-                    Ok::<_, StreamExecutorError>(change)
+                    // Build aggregate result change.
+                    agg_group.build_change(storages).await
                 }
             });
 

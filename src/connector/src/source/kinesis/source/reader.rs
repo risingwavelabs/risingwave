@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::SdkError;
+use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::types::ShardIteratorType;
 use aws_sdk_kinesis::Client as KinesisClient;
@@ -180,7 +180,7 @@ impl KinesisSplitReader {
                     self.new_shard_iter().await?;
                     continue;
                 }
-                Err(e) => return Err(anyhow!(e)),
+                Err(e) => return Err(anyhow!(DisplayErrorContext(e))),
             }
         }
     }

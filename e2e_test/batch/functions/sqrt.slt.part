@@ -1,4 +1,4 @@
-# testing sqrt(double precision) 
+# testing sqrt(double precision)
 query T
 SELECT abs(sqrt('1004.3') - '31.690692639953454') < 1e-12;
 ----

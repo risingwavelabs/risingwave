@@ -3,39 +3,39 @@ version: "3"
 services:
   compactor-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
   minio-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: prometheus-0
   connector-node:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: connector-node
   citus-master:
     container_name: citus-master
@@ -83,7 +83,7 @@ services:
   citus-prepare:
     container_name: citus_prepare
     image: "citusdata/citus:10.2.5"
-    depends_on: 
+    depends_on:
       - citus-master
       - citus-manager
       - citus-worker-1

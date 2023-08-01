@@ -3,39 +3,39 @@ version: "3"
 services:
   compactor-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
   minio-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: prometheus-0
   message_queue:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: message_queue
 
   postgres:
@@ -70,7 +70,7 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-    
+
   flink-jobmanager:
     image: flink
     build: ./flink
@@ -80,7 +80,7 @@ services:
     environment:
       - |
         FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager        
+        jobmanager.rpc.address: flink-jobmanager
     container_name: flink-jobmanager
 
   flink-taskmanager:
@@ -107,7 +107,7 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
-        rest.address: flink-jobmanager        
+        rest.address: flink-jobmanager
     container_name: flink-sql-client
 
   connect:

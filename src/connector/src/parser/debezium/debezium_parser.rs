@@ -22,7 +22,7 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
-    ParserProperties, ProtocolProperties, SourceStreamChunkRowWriter, WriteGuard,
+    ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -59,7 +59,7 @@ async fn build_accessor_builder(
 
 impl DebeziumParser {
     pub async fn new(
-        props: ParserProperties,
+        props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
@@ -76,7 +76,7 @@ impl DebeziumParser {
     }
 
     pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Debezium,

@@ -161,12 +161,16 @@ pub enum MetaBackend {
 /// The section `[meta]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct MetaConfig {
-    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
-    /// full SST GC.
+    /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
+    /// are dangling.
     #[serde(default = "default::meta::min_sst_retention_time_sec")]
     pub min_sst_retention_time_sec: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock
+    /// Interval of automatic hummock full GC.
+    #[serde(default = "default::meta::full_gc_interval_sec")]
+    pub full_gc_interval_sec: u64,
+
+    /// The spin interval when collecting global GC watermark in hummock.
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
 
@@ -678,7 +682,11 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            604800
+            86400
+        }
+
+        pub fn full_gc_interval_sec() -> u64 {
+            86400
         }
 
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {

@@ -111,7 +111,6 @@ impl CompactorRunner {
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
-        gc_delete_keys: bool,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<CompactionDeleteRanges>> {
@@ -132,7 +131,7 @@ impl CompactorRunner {
             builder.add_delete_events(range_tombstone_list);
         }
 
-        let aggregator = builder.build_for_compaction(gc_delete_keys);
+        let aggregator = builder.build_for_compaction();
         Ok(aggregator)
     }
 
@@ -280,7 +279,6 @@ mod tests {
 
         let collector = CompactorRunner::build_delete_range_iter(
             &sstable_infos,
-            compact_task.gc_delete_keys,
             &sstable_store,
             &mut state_clean_up_filter,
         )
