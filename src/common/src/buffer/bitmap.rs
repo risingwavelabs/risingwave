@@ -148,21 +148,22 @@ impl BitmapBuilder {
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
         if self.len % BITS == 0 {
             // fast path: self is aligned
-            match &other.bits {
-                // append the bytes
-                Some(bits) => self.data.extend_from_slice(bits),
-                // append 1s
-                None => {
-                    let new_len = self.data.len() + (other.num_bits + BITS - 1) / BITS;
-                    self.data.resize(new_len, usize::MAX);
-                    if other.num_bits % BITS != 0 {
-                        // remove tailing 1s
-                        self.data[new_len - 1] = (1 << (other.num_bits % BITS)) - 1;
-                    }
-                }
-            }
             self.len += other.len();
             self.count_ones += other.count_ones;
+            if let Some(bits) = &other.bits {
+                // append the bytes
+                self.data.extend_from_slice(bits);
+            } else if other.count_ones == 0 {
+                // append 0s
+                self.data.resize(Bitmap::vec_len(self.len), 0);
+            } else {
+                // append 1s
+                self.data.resize(Bitmap::vec_len(self.len), usize::MAX);
+                if self.len % BITS != 0 {
+                    // remove tailing 1s
+                    *self.data.last_mut().unwrap() = (1 << (self.len % BITS)) - 1;
+                }
+            }
         } else {
             // slow path: append bits one by one
             for bit in other.iter() {
@@ -783,6 +784,24 @@ mod tests {
         let byte1 = 0b0101_0110_u8;
         let expected = Bitmap::from_bytes(&[byte1]);
         assert_eq!(bitmap2, expected);
+    }
+
+    #[test]
+    fn test_builder_append_bitmap() {
+        let mut builder = BitmapBuilder::default();
+        builder.append_bitmap(&Bitmap::zeros(64));
+        builder.append_bitmap(&Bitmap::ones(64));
+        builder.append_bitmap(&Bitmap::from_bytes(&[0b1010_1010]));
+        builder.append_bitmap(&Bitmap::zeros(8));
+        builder.append_bitmap(&Bitmap::ones(8));
+        let bitmap = builder.finish();
+        assert_eq!(
+            bitmap,
+            Bitmap::from_vec_with_len(
+                vec![0, usize::MAX, 0b1111_1111_0000_0000_1010_1010],
+                64 + 64 + 8 + 8 + 8
+            ),
+        );
     }
 
     #[test]
