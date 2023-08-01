@@ -41,3 +41,16 @@
     └─StreamProject { exprs: [(Vnode(t.v2) + 1:Int32) as $expr2, (Vnode(t.v2) + 1:Int32) as $expr3, $expr1, $expr1, t._row_id] }
       └─StreamProject { exprs: [t.v2, (t.v2 + 1:Int32) as $expr1, t._row_id] }
         └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: Common sub expression shouldn't extract const
+  sql: |
+    SELECT x,
+       tand(x),
+       tand(x) IN ('-Infinity'::float8,-1,0,1,'Infinity'::float8) AS tand_exact,
+       cotd(x),
+       cotd(x) IN ('-Infinity'::float8,-1,0,1,'Infinity'::float8) AS cotd_exact
+    FROM (VALUES (0), (45), (90), (135), (180),
+    (225), (270), (315), (360)) AS t(x)
+  batch_plan: |-
+    BatchProject { exprs: [*VALUES*_0.column_0, $expr1, In($expr1, -Infinity:Float64, -1:Float64, 0:Float64, 1:Float64, Infinity:Float64) as $expr3, $expr2, In($expr2, -Infinity:Float64, -1:Float64, 0:Float64, 1:Float64, Infinity:Float64) as $expr4] }
+    └─BatchProject { exprs: [*VALUES*_0.column_0, Tand(*VALUES*_0.column_0::Float64) as $expr1, Cotd(*VALUES*_0.column_0::Float64) as $expr2] }
+      └─BatchValues { rows: [[0:Int32], [45:Int32], [90:Int32], [135:Int32], [180:Int32], [225:Int32], [270:Int32], [315:Int32], [360:Int32]] }

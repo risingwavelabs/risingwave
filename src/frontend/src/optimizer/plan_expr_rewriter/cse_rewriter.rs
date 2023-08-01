@@ -15,17 +15,17 @@
 use std::collections::HashMap;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
-use crate::optimizer::plan_expr_visitor::ExprCounter;
+use crate::optimizer::plan_expr_visitor::CseExprCounter;
 
 #[derive(Default)]
 pub struct CseRewriter {
-    pub expr_counter: ExprCounter,
+    pub expr_counter: CseExprCounter,
     pub cse_input_ref_offset: usize,
     pub cse_mapping: HashMap<FunctionCall, InputRef>,
 }
 
 impl CseRewriter {
-    pub fn new(expr_counter: ExprCounter, cse_input_ref_offset: usize) -> Self {
+    pub fn new(expr_counter: CseExprCounter, cse_input_ref_offset: usize) -> Self {
         Self {
             expr_counter,
             cse_input_ref_offset,

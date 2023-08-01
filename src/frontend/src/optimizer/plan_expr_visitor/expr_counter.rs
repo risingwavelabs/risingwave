@@ -14,16 +14,43 @@
 
 use std::collections::HashMap;
 
-use crate::expr::{ExprVisitor, FunctionCall};
+use crate::expr::{ExprImpl, ExprVisitor, FunctionCall};
 
+/// `ExprCounter` is used by `CseRewriter`.
 #[derive(Default)]
-pub struct ExprCounter {
-    // Only count pure function call right now.
+pub struct CseExprCounter {
+    // Only count pure function call and not const.
     pub counter: HashMap<FunctionCall, usize>,
 }
 
-impl ExprVisitor<()> for ExprCounter {
+impl ExprVisitor<()> for CseExprCounter {
     fn merge(_: (), _: ()) {}
+
+    fn visit_expr(&mut self, expr: &ExprImpl) {
+        // Considering this sql, `In` expression needs to ensure its in-clauses to be const.
+        // If we extract it into a common sub-expression (finally be a `InputRef`) which will
+        // violate this assumption, so ban this case. SELECT x,
+        //        tand(x) IN ('-Infinity'::float8,-1,0,1,'Infinity'::float8) AS tand_exact,
+        //        cotd(x) IN ('-Infinity'::float8,-1,0,1,'Infinity'::float8) AS cotd_exact
+        // FROM (VALUES (0), (45), (90), (135), (180),(225), (270), (315), (360)) AS t(x);
+        if expr.is_const() {
+            return;
+        }
+
+        match expr {
+            ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
+            ExprImpl::Literal(inner) => self.visit_literal(inner),
+            ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
+            ExprImpl::Subquery(inner) => self.visit_subquery(inner),
+            ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
+            ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
+            ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
+            ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
+            ExprImpl::Parameter(inner) => self.visit_parameter(inner),
+            ExprImpl::Now(inner) => self.visit_now(inner),
+        }
+    }
 
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
         if func_call.is_pure() {

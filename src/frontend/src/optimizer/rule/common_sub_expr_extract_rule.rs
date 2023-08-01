@@ -18,7 +18,7 @@ use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_expr_rewriter::CseRewriter;
-use crate::optimizer::plan_expr_visitor::ExprCounter;
+use crate::optimizer::plan_expr_visitor::CseExprCounter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 
 pub struct CommonSubExprExtractRule {}
@@ -26,7 +26,7 @@ impl Rule for CommonSubExprExtractRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project: &LogicalProject = plan.as_logical_project()?;
 
-        let mut expr_counter = ExprCounter::default();
+        let mut expr_counter = CseExprCounter::default();
         for expr in project.exprs() {
             expr_counter.visit_expr(expr);
         }
