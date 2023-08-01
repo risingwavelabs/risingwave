@@ -1077,7 +1077,7 @@ impl Binder {
                         // We've checked the count.
                         let arg = &args[j];
                         j += 1;
-                        let arg = match sp.ty {
+                        match sp.ty {
                             SpecifierType::SimpleString => arg.clone(),
                             SpecifierType::SqlIdentifier => {
                                 FunctionCall::new(ExprType::QuoteIdent, vec![arg.clone()])?.into()
@@ -1090,8 +1090,7 @@ impl Binder {
                                     .into(),
                                 )
                             }
-                        };
-                        arg
+                        }
                     }
                     FormatterNode::Literal(literal) => ExprImpl::literal_varchar(literal.clone()),
                 };
