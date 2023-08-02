@@ -1,6 +1,6 @@
 # How this magic works
 
-This crate is to configure the features of some dependencies: 
+This crate is to configure the features of some dependencies:
 - [static log verbosity level](https://docs.rs/tracing/latest/tracing/level_filters/index.html#compile-time-filters). This is forced.
 - static link some dependencies e.g., OpenSSL. This is optional and controlled by feature flag `rw-static-link`
 

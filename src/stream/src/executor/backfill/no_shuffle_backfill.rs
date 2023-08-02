@@ -141,7 +141,7 @@ where
         }
 
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {
-            let is_finished = check_all_vnode_finished(state_table, state_len).await?;
+            let is_finished = check_all_vnode_finished(state_table).await?;
             if is_finished {
                 assert!(!first_barrier.is_newly_added(self.actor_id));
             }

@@ -214,9 +214,9 @@ mod test {
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, EncodingType, ParserProperties, SourceStreamChunkBuilder,
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::{SourceColumnDesc, SourceFormat};
+    use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -290,7 +290,11 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
+            &info,
+            &HashMap::new(),
+        )?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 
@@ -320,7 +324,7 @@ mod test {
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
-        let input_data = Some(writer.into_inner().unwrap());
+        let input_data = writer.into_inner().unwrap();
         let columns = build_rw_columns();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {

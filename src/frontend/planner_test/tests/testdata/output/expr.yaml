@@ -599,7 +599,7 @@
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
   stream_plan: |-
-    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [abs] }
+    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamValues { rows: [[Abs(-1:Int32), 0:Int64]] }
 - sql: |
     select * from range(1,2);

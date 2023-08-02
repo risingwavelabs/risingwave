@@ -15,7 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::config::DefaultParallelism;
+use risingwave_common::config::{CompactionConfig, DefaultParallelism};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 
@@ -93,8 +93,11 @@ pub struct MetaOpts {
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
     /// restarted.
     pub min_delta_log_num_for_hummock_version_checkpoint: u64,
-    /// Threshold used by worker node to filter out new SSTs when scanning object store.
+    /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
+    /// are dangling.
     pub min_sst_retention_time_sec: u64,
+    /// Interval of automatic hummock full GC.
+    pub full_gc_interval_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
     pub collect_gc_watermark_spin_interval_sec: u64,
     /// Enable sanity check when SSTs are committed
@@ -146,6 +149,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
+    pub compaction_config: Option<CompactionConfig>,
 }
 
 impl MetaOpts {
@@ -161,6 +165,7 @@ impl MetaOpts {
             hummock_version_checkpoint_interval_sec: 30,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
+            full_gc_interval_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
@@ -181,6 +186,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
+            compaction_config: None,
         }
     }
 }

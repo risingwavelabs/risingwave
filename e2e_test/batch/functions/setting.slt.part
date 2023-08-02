@@ -1,0 +1,19 @@
+query T
+SELECT current_setting('server_version');
+----
+9.5.0
+
+query I
+SELECT CAST(current_setting('server_version_num') AS INT) / 100 AS version;
+----
+905
+
+query T
+SELECT set_config('client_min_messages', 'warning', false);
+----
+warning
+
+query T
+SELECT set_config('client_min_messages', 'notice', false);
+----
+notice

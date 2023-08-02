@@ -169,8 +169,8 @@ pub async fn generate_splits(
     compaction_size: u64,
     context: Arc<CompactorContext>,
 ) -> HummockResult<Vec<KeyRange_vec>> {
-    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
-    if compaction_size > sstable_size * 2 {
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
+    if compaction_size > parallel_compact_size {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_info in sstable_infos {
@@ -203,7 +203,8 @@ pub async fn generate_splits(
             indexes.len() as u64,
             context.storage_opts.max_sub_compaction as u64,
         );
-        let sub_compaction_data_size = std::cmp::max(compaction_size / parallelism, sstable_size);
+        let sub_compaction_data_size =
+            std::cmp::max(compaction_size / parallelism, parallel_compact_size);
         let parallelism = compaction_size / sub_compaction_data_size;
 
         if parallelism > 1 {
@@ -213,7 +214,7 @@ pub async fn generate_splits(
             for (data_size, key) in indexes {
                 if last_buffer_size >= sub_compaction_data_size
                     && !last_key.eq(&key)
-                    && remaining_size > sstable_size
+                    && remaining_size > parallel_compact_size
                 {
                     splits.last_mut().unwrap().right = key.clone();
                     splits.push(KeyRange_vec::new(key.clone(), vec![]));
@@ -231,20 +232,34 @@ pub async fn generate_splits(
     Ok(vec![])
 }
 
-pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
+pub fn estimate_task_memory_capacity(
+    context: Arc<CompactorContext>,
+    task: &CompactTask,
+) -> (usize, usize, usize) {
     let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
-    let total_file_size = task
+    let total_input_file_size = task
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
         .map(|table| table.file_size)
         .sum::<u64>();
+    let total_input_uncompressed_file_size = task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table| table.uncompressed_file_size)
+        .sum::<u64>();
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
-    let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+    let total_file_size = (total_input_file_size as f64 * 1.4).round() as usize;
 
-    match task.compression_algorithm {
+    let c = match task.compression_algorithm {
         0 => std::cmp::min(capacity, total_file_size),
         _ => capacity,
-    }
+    };
+    (
+        c,
+        total_input_file_size as usize,
+        total_input_uncompressed_file_size as usize,
+    )
 }

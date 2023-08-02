@@ -13,24 +13,33 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 
 use super::unified::bytes::BytesAccess;
 use super::unified::AccessImpl;
-use super::AccessBuilder;
+use super::{AccessBuilder, EncodingProperties};
 
 #[derive(Debug)]
-pub struct BytesAccessBuilder {}
+pub struct BytesAccessBuilder {
+    column_name: Option<String>,
+}
 
 impl AccessBuilder for BytesAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
-        Ok(AccessImpl::Bytes(BytesAccess::new(payload)))
+        Ok(AccessImpl::Bytes(BytesAccess::new(
+            &self.column_name,
+            payload,
+        )))
     }
 }
 
 impl BytesAccessBuilder {
-    pub fn new() -> Result<Self> {
-        Ok(Self {})
+    pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let config = try_match_expand!(encoding_properties, EncodingProperties::Bytes)?;
+        Ok(Self {
+            column_name: config.column_name,
+        })
     }
 }
 
@@ -42,8 +51,8 @@ mod tests {
 
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::{
-        EncodingProperties, ParserProperties, ProtocolProperties, SourceColumnDesc,
-        SourceStreamChunkBuilder,
+        BytesProperties, EncodingProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -52,9 +61,9 @@ mod tests {
 
     async fn test_bytes_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Bytes,
+            encoding_config: EncodingProperties::Bytes(BytesProperties { column_name: None }),
             protocol_config: ProtocolProperties::Plain,
         };
         let mut parser = PlainParser::new(props, descs.clone(), Default::default())
@@ -65,7 +74,7 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();

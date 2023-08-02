@@ -97,6 +97,7 @@ steps:
           - "debezium-postgres"
           - "tidb-cdc-sink"
           - "debezium-sqlserver"
+          - "citus-cdc"
         format:
           - "json"
           - "protobuf"
@@ -119,5 +120,9 @@ steps:
           skip: true
         - with:
             testcase: "debezium-sqlserver"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "citus-cdc"
             format: "protobuf"
           skip: true

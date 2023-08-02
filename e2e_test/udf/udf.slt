@@ -8,10 +8,10 @@ statement ok
 create function int_42() returns int as int_42 using link 'http://localhost:8815';
 
 # Argument or return type mismatch.
-statement error argument mismatch
+statement error type mismatch
 create function foo(int) returns int as int_42 using link 'http://localhost:8815';
 
-statement error return type mismatch
+statement error type mismatch
 create function foo() returns real as int_42 using link 'http://localhost:8815';
 
 # Create another function.
