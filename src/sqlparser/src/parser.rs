@@ -2881,7 +2881,7 @@ impl Parser {
             let column_def = self.parse_column_def()?;
             AlterSourceOperation::AddColumn { column_def }
         } else {
-            return self.expected("RENAME after ALTER SOURCE", self.peek_token());
+            return self.expected("RENAME | ADD COLUMN after ALTER SOURCE", self.peek_token());
         };
 
         Ok(Statement::AlterSource {
