@@ -25,7 +25,7 @@ use url::Url;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
@@ -118,7 +118,6 @@ impl AvroParserConfig {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
         if avro_config.use_schema_registry {
-            let kafka_topic = &avro_config.topic;
             let client = Client::new(url, &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
             let upsert_primary_key_column_name =
@@ -127,17 +126,16 @@ impl AvroParserConfig {
                 } else {
                     None
                 };
+            let (subject_key, subject_value) = get_subject_by_strategy(
+                &avro_config.name_strategy,
+                avro_config.topic.as_str(),
+                avro_config.record_name.as_deref(),
+            )?;
 
             Ok(Self {
-                schema: resolver
-                    .get_by_subject_name(&format!("{}-value", kafka_topic))
-                    .await?,
+                schema: resolver.get_by_subject_name(&subject_value).await?,
                 key_schema: if enable_upsert {
-                    Some(
-                        resolver
-                            .get_by_subject_name(&format!("{}-key", kafka_topic))
-                            .await?,
-                    )
+                    Some(resolver.get_by_subject_name(&subject_key).await?)
                 } else {
                     None
                 },

@@ -39,7 +39,9 @@ use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
 };
-use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{
+    PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
+};
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
     self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
@@ -336,6 +338,11 @@ pub(crate) async fn try_bind_columns_from_source(
                 return Err(RwError::from(ProtocolError(
     "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
+            let message_name = try_consume_string_from_options(&mut options, "message");
+            let x = try_consume_string_from_options(&mut options, "name.strategy");
+            let name_strategy =
+                PbSchemaRegistryNameStrategy::from_str(x.as_ref().map(|s| s.0.as_str()))
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             (
                 Some(extract_avro_table_schema(&avro_schema, with_properties).await?),
                 sql_defined_pk_names,
@@ -344,7 +351,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_encode: EncodeType::Avro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
-                    proto_message_name: "".to_owned(),
+                    proto_message_name: message_name.unwrap_or("".into()).0,
                     ..Default::default()
                 },
             )

@@ -31,7 +31,9 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::catalog::{
+    SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
+};
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -582,6 +584,8 @@ pub struct AvroProperties {
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
     pub enable_upsert: bool,
+    pub record_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -592,6 +596,7 @@ pub struct ProtobufProperties {
     pub aws_auth_props: Option<AwsAuthProps>,
     pub client_config: SchemaRegistryAuth,
     pub topic: String,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -686,6 +691,12 @@ impl SpecificParserConfig {
             (SourceFormat::Plain, SourceEncode::Avro)
             | (SourceFormat::Upsert, SourceEncode::Avro) => {
                 let mut config = AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    name_strategy: info.name_strategy.unwrap_or(0) as PbSchemaRegistryNameStrategy,
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     upsert_primary_key: info.upsert_avro_primary_key.clone(),
@@ -728,6 +739,12 @@ impl SpecificParserConfig {
             }
             (SourceFormat::Debezium, SourceEncode::Avro) => {
                 EncodingProperties::Avro(AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    name_strategy: info.name_strategy.unwrap_or(0) as PbSchemaRegistryNameStrategy,
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: SchemaRegistryAuth::from(props),

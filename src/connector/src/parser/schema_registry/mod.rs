@@ -15,4 +15,52 @@
 mod client;
 mod util;
 pub use client::*;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::RwError;
+use risingwave_pb::catalog::SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy;
 pub(crate) use util::*;
+
+pub fn get_subject_by_strategy(
+    name_strategy: &PbSchemaRegistryNameStrategy,
+    topic: &str,
+    record: Option<&str>,
+) -> Result<(String, String), RwError> {
+    let build_error =
+        |ns: &PbSchemaRegistryNameStrategy, expect: &[&str], got: &[Option<&str>]| -> RwError {
+            RwError::from(ProtocolError(format!(
+                "{:?} expect num-empty field {:?} but got {:?}",
+                ns.as_str_name(),
+                expect,
+                got
+            )))
+        };
+    match name_strategy {
+        ns @ PbSchemaRegistryNameStrategy::TopicNameStrategy => {
+            Ok((format!("{}-key", topic), format!("{}-value", topic)))
+        }
+        ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy => {
+            if let Some(record_name) = record {
+                Ok((
+                    format!("{}-key", record_name),
+                    format!("{}-value", record_name),
+                ))
+            } else {
+                Err(build_error(ns, &["record"], &[record]))
+            }
+        }
+        ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy => {
+            if let Some(record_name) = record {
+                Ok((
+                    format!("{}-{}-key", topic, record_name),
+                    format!("{}-{}-value", topic, record_name),
+                ))
+            } else {
+                Err(build_error(
+                    ns,
+                    &["topic", "record"],
+                    &[Some(topic), record],
+                ))
+            }
+        }
+    }
+}
