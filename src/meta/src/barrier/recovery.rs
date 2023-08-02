@@ -67,14 +67,12 @@ where
     /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
-        let table_fragments = self.fragment_manager.list_table_fragments().await;
-        let to_drop_table_fragments = table_fragments
-            .into_iter()
-            .filter(|table_fragment| {
-                !stream_job_ids.contains(&table_fragment.table_id().table_id)
-                    || !table_fragment.is_created()
+        let to_drop_table_fragments = self
+            .fragment_manager
+            .list_dirty_table_fragments(|tf| {
+                !stream_job_ids.contains(&tf.table_id().table_id) || !tf.is_created()
             })
-            .collect_vec();
+            .await;
 
         let to_drop_streaming_ids = to_drop_table_fragments
             .iter()
@@ -387,7 +385,7 @@ where
             }));
         }
 
-        let node_actors = self.fragment_manager.all_node_actors(false).await;
+        let mut node_actors = self.fragment_manager.all_node_actors(false).await;
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
@@ -403,7 +401,7 @@ where
             client
                 .update_actors(UpdateActorsRequest {
                     request_id,
-                    actors: node_actors.get(node_id).cloned().unwrap_or_default(),
+                    actors: node_actors.remove(node_id).unwrap_or_default(),
                 })
                 .await?;
         }
