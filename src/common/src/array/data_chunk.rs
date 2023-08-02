@@ -830,6 +830,19 @@ impl DataChunkTestExt for DataChunk {
         varchar_properties: &VarcharProperty,
         visibility_ratio: f64,
     ) -> Self {
+        let mut visible_count = 0;
+        let mut invisible_count = 0;
+        let mut vis = BitmapBuilder::with_capacity(chunk_size);
+        for i in 0..chunk_size {
+            let bit = if visible_count / invisible_count < visibility_ratio {
+                visible_count += 1;
+                true
+            } else {
+                invisible_count += 1;
+                false
+            };
+            vis.append(bit);
+        }
         let mut columns = Vec::new();
         // Generate columns of this chunk.
         for data_type in data_types {
