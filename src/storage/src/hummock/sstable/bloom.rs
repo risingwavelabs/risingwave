@@ -152,7 +152,12 @@ impl FilterBuilder for BloomFilterBuilder {
         self.key_hash_entries.len() * 4
     }
 
-    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
+        // FIXME: If Bloom is enabled, a more accurate memory calculation is used for Bloom
+        let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
+            memory_limit.must_require_memory(self.approximate_building_memory() as u64)
+        });
+
         // 0.69 is approximately ln(2)
         let k = ((self.bits_per_key as f64) * 0.69) as u32;
         // limit k in [1, 30]
