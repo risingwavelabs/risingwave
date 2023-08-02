@@ -6191,6 +6191,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "await-tree",
+ "chrono",
  "clap",
  "either",
  "futures",
@@ -6785,6 +6786,7 @@ dependencies = [
  "serde_json",
  "sqllogictest",
  "tempfile",
+ "tikv-jemallocator",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
@@ -8176,9 +8178,8 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-ctl"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e37706572f4b151dff7a0146e040804e9c26fe3a3118591112f05cf12a4216c1"
+version = "0.5.4"
+source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
 dependencies = [
  "libc",
  "paste",
@@ -8187,9 +8188,8 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-sys"
-version = "0.5.3+5.3.0-patched"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a678df20055b43e57ef8cddde41cdfda9a3c1a060b67f4c5836dfb1d78543ba8"
+version = "0.5.4+5.3.0-patched"
+source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
 dependencies = [
  "cc",
  "libc",
@@ -8197,9 +8197,8 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemallocator"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20612db8a13a6c06d57ec83953694185a367e16945f66565e8028d2c0bd76979"
+version = "0.5.4"
+source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",

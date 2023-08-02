@@ -62,7 +62,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+    reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -95,7 +95,8 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config = Arc::new(config.streaming.clone());
+    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
+        Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
@@ -150,7 +151,6 @@ pub async fn compute_node_serve(
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
     let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
-    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -210,7 +210,7 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let output_memory_limiter = Arc::new(MemoryLimiter::new(
+            let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
@@ -221,7 +221,7 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
-                output_memory_limiter,
+                memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
@@ -229,7 +229,7 @@ pub async fn compute_node_serve(
             });
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client, 2.0);
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -279,7 +279,11 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), memory_control_policy);
+    let memory_mgr = GlobalMemoryManager::new(
+        streaming_metrics.clone(),
+        total_memory_bytes,
+        config.server.auto_dump_heap_profile.clone(),
+    );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(
         batch_mgr_clone,
@@ -398,7 +402,7 @@ pub async fn compute_node_serve(
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
             .add_service(ExchangeServiceServer::new(exchange_srv))
-            .add_service(StreamServiceServer::new(stream_srv))
+            .add_service(StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX))
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
