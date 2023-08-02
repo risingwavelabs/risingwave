@@ -23,4 +23,6 @@ pub trait FilterBuilder: Send {
     fn approximate_len(&self) -> usize;
 
     fn create(fpr: f64, capacity: usize) -> Self;
+
+    fn switch_builder(&mut self) {}
 }

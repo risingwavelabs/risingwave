@@ -531,6 +531,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
+        self.filter_builder.switch_builder();
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())

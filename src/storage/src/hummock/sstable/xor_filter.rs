@@ -15,11 +15,13 @@
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use xorf::{Filter, Xor16, Xor8};
+use risingwave_hummock_sdk::key::{FullKey, user_key, UserKeyRange};
 
 use super::{FilterBuilder, Sstable};
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
+const FOOTER_BLOCKED_XOR16: u8 = 254;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -64,7 +66,11 @@ impl FilterBuilder for Xor16FilterBuilder {
     fn finish(&mut self) -> Vec<u8> {
         self.key_hash_entries.sort();
         self.key_hash_entries.dedup();
+        if self.key_hash_entries.is_empty() {
+            return vec![];
+        }
         let xor_filter = Xor16::from(&self.key_hash_entries);
+        self.key_hash_entries.clear();
         let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
         buf.put_u64_le(xor_filter.seed);
         buf.put_u32_le(xor_filter.block_length as u32);
@@ -109,6 +115,62 @@ impl FilterBuilder for Xor8FilterBuilder {
 
     fn create(_fpr: f64, capacity: usize) -> Self {
         Xor8FilterBuilder::new(capacity)
+    }
+}
+
+pub struct BlockedXor16FilterBuilder {
+    current: Xor16FilterBuilder,
+    data: Vec<u8>,
+    block_count: usize,
+}
+
+const BLOCK_FILTER_CAPACITY: usize = 16 * 1024;    // 16KB means 2K key count.
+
+impl BlockedXor16FilterBuilder {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            current: Xor16FilterBuilder::new(BLOCK_FILTER_CAPACITY),
+            data: Vec::with_capacity(capacity),
+            block_count: 0,
+        }
+    }
+}
+
+impl FilterBuilder for BlockedXor16FilterBuilder {
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.current.add_key(key, table_id)
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
+        self.data.put_u32_le(self.block_count as u32);
+        self.data.put_u8(FOOTER_BLOCKED_XOR16);
+        std::mem::take(&mut self.data)
+    }
+
+    fn approximate_len(&self) -> usize {
+        self.current.approximate_len() + self.data.len()
+    }
+
+    fn create(_fpr: f64, capacity: usize) -> Self {
+        BlockedXor16FilterBuilder::new(capacity)
+    }
+
+    fn switch_builder(&mut self) {
+        let block = self.current.finish();
+        self.data.put_u32_le(block.len() as u32);
+        self.data.extend(block);
+        self.block_count += 1;
+    }
+}
+
+pub struct BlockedXorFilter {
+    filters: Vec<(Vec<u8>, Xor16)>,
+}
+
+impl BlockedXorFilter {
+    pub fn may_exist(&self, user_key: &UserKeyRange, h: u64) -> bool {
+        true
     }
 }
 
