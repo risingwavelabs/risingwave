@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
+use crate::hash::VirtualNode;
+
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
@@ -323,11 +325,16 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
+                Err(serde::de::Error::custom(format!(
+                    "default parallelism should be not great than {}",
+                    VirtualNode::COUNT
+                )))?
+            } else {
                 NonZeroUsize::new(i)
                     .context("default parallelism should be greater than 0")
-                    .map_err(|e| serde::de::Error::custom(e.to_string()))?,
-            )),
+                    .map_err(|e| serde::de::Error::custom(e.to_string()))?
+            })),
         }
     }
 }
