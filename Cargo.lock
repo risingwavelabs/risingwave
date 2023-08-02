@@ -6570,6 +6570,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "static_assertions",
  "thiserror",
  "tokio-retry",
  "tokio-stream",
@@ -6888,6 +6889,7 @@ dependencies = [
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
+ "static_assertions",
  "thiserror",
 ]
 

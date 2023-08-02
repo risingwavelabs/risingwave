@@ -40,6 +40,10 @@ impl SystemParamsReader {
         self.prost.checkpoint_frequency.unwrap()
     }
 
+    pub fn parallel_compact_size_mb(&self) -> u32 {
+        self.prost.parallel_compact_size_mb.unwrap()
+    }
+
     pub fn sstable_size_mb(&self) -> u32 {
         self.prost.sstable_size_mb.unwrap()
     }

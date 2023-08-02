@@ -32,7 +32,7 @@ use core::str::Chars;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::DollarQuotedString;
+use crate::ast::{CstyleEscapedString, DollarQuotedString};
 use crate::keywords::{Keyword, ALL_KEYWORDS, ALL_KEYWORDS_INDEX};
 
 /// SQL Token enumeration
@@ -52,7 +52,7 @@ pub enum Token {
     /// Dollar quoted string: i.e: $$string$$ or $tag_name$string$tag_name$
     DollarQuotedString(DollarQuotedString),
     /// Single quoted string with c-style escapes: i.e: E'string'
-    CstyleEscapesString(String),
+    CstyleEscapesString(CstyleEscapedString),
     /// "National" string literal: i.e: N'string'
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
@@ -887,7 +887,8 @@ impl<'a> Tokenizer<'a> {
     fn tokenize_single_quoted_string_with_escape(
         &self,
         chars: &mut Peekable<Chars<'_>>,
-    ) -> Result<String, TokenizerError> {
+    ) -> Result<CstyleEscapedString, TokenizerError> {
+        let mut terminated = false;
         let mut s = String::new();
         chars.next(); // consume the opening quote
 
@@ -900,7 +901,8 @@ impl<'a> Tokenizer<'a> {
                         s.push(ch);
                         chars.next();
                     } else {
-                        return Ok(s);
+                        terminated = true;
+                        break;
                     }
                 }
                 '\\' => {
@@ -920,7 +922,128 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
-        self.tokenizer_error("Unterminated string literal")
+
+        if !terminated {
+            return self.tokenizer_error("Unterminated string literal");
+        }
+
+        let unescaped = match Self::unescape_c_style(&s) {
+            Ok(unescaped) => unescaped,
+            Err(e) => return self.tokenizer_error(e),
+        };
+
+        Ok(CstyleEscapedString {
+            value: unescaped,
+            raw: s,
+        })
+    }
+
+    /// Helper function used to convert string with c-style escapes into a normal string
+    /// e.g. 'hello\x3fworld' -> 'hello?world'
+    ///
+    /// Detail of c-style escapes refer from:
+    /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-UESCAPE:~:text=4.1.2.2.%C2%A0String%20Constants%20With%20C%2DStyle%20Escapes>
+    fn unescape_c_style(s: &str) -> Result<String, String> {
+        fn hex_byte_process(
+            chars: &mut Peekable<Chars<'_>>,
+            res: &mut String,
+            len: usize,
+            default_char: char,
+        ) -> Result<(), String> {
+            let mut unicode_seq: String = String::with_capacity(len);
+            for _ in 0..len {
+                if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
+                    unicode_seq.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            if unicode_seq.is_empty() && len == 2 {
+                res.push(default_char);
+                return Ok(());
+            } else if unicode_seq.len() < len && len != 2 {
+                return Err("invalid unicode sequence: must be \\uXXXX or \\UXXXXXXXX".to_string());
+            }
+
+            if len == 2 {
+                let number = [u8::from_str_radix(&unicode_seq, 16)
+                    .map_err(|e| format!("invalid unicode sequence: {}", e))?];
+
+                res.push(
+                    std::str::from_utf8(&number)
+                        .map_err(|err| format!("invalid unicode sequence: {}", err))?
+                        .chars()
+                        .next()
+                        .unwrap(),
+                );
+            } else {
+                let number = u32::from_str_radix(&unicode_seq, 16)
+                    .map_err(|e| format!("invalid unicode sequence: {}", e))?;
+                res.push(
+                    char::from_u32(number)
+                        .ok_or_else(|| format!("invalid unicode sequence: {}", unicode_seq))?,
+                );
+            }
+            Ok(())
+        }
+
+        fn octal_byte_process(
+            chars: &mut Peekable<Chars<'_>>,
+            res: &mut String,
+            digit: char,
+        ) -> Result<(), String> {
+            let mut unicode_seq: String = String::with_capacity(3);
+            unicode_seq.push(digit);
+            for _ in 0..2 {
+                if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
+                    unicode_seq.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            let number = [u8::from_str_radix(&unicode_seq, 8)
+                .map_err(|e| format!("invalid unicode sequence: {}", e))?];
+
+            res.push(
+                std::str::from_utf8(&number)
+                    .map_err(|err| format!("invalid unicode sequence: {}", err))?
+                    .chars()
+                    .next()
+                    .unwrap(),
+            );
+            Ok(())
+        }
+
+        let mut chars = s.chars().peekable();
+        let mut res = String::with_capacity(s.len());
+
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    None => {
+                        return Err("unterminated escape sequence".to_string());
+                    }
+                    Some(next_c) => match next_c {
+                        'b' => res.push('\u{08}'),
+                        'f' => res.push('\u{0C}'),
+                        'n' => res.push('\n'),
+                        'r' => res.push('\r'),
+                        't' => res.push('\t'),
+                        'x' => hex_byte_process(&mut chars, &mut res, 2, 'x')?,
+                        'u' => hex_byte_process(&mut chars, &mut res, 4, 'u')?,
+                        'U' => hex_byte_process(&mut chars, &mut res, 8, 'U')?,
+                        digit @ '0'..='7' => octal_byte_process(&mut chars, &mut res, digit)?,
+                        _ => res.push(next_c),
+                    },
+                }
+            } else {
+                res.push(c);
+            }
+        }
+
+        Ok(res)
     }
 
     fn tokenize_multiline_comment(
