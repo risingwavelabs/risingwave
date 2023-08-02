@@ -1061,8 +1061,8 @@ impl Binder {
         if specifier_count != args.len() {
             return Err(ErrorCode::BindError(format!(
                 "Function `format` required {} arguments based on the `formatstr`, but {} found.",
-                specifier_count + 1,
-                args.len() + 1
+                specifier_count,
+                args.len()
             ))
             .into());
         }
