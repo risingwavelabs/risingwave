@@ -140,10 +140,6 @@ impl StateTableWatermarkCache {
     pub fn get_table_row_count(&self) -> &Option<usize> {
         self.inner.get_table_row_count()
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
 }
 
 impl StateCache for StateTableWatermarkCache {
