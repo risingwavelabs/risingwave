@@ -403,7 +403,7 @@ impl ClickHouseSinkWriter {
                         let fields_name_update = ck_fields_name
                             .iter()
                             .filter(|n| !pk_names.contains(n))
-                            .map(|s| format!("{}", s))
+                            .map(|s| s.to_string())
                             .collect_vec();
 
                         let update = self.client.update(
