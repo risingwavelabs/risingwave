@@ -390,6 +390,15 @@ impl HummockVersionUpdateExt for HummockVersion {
             let mut removed_l0_ssts: BTreeSet<u64> = BTreeSet::new();
             let mut removed_ssts: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
 
+            // Build only if all deltas are intra level deltas.
+            if !group_deltas
+                .group_deltas
+                .iter()
+                .all(|delta| matches!(delta.get_delta_type().unwrap(), DeltaType::IntraLevel(..)))
+            {
+                continue;
+            }
+
             for group_delta in &group_deltas.group_deltas {
                 if let DeltaType::IntraLevel(delta) = group_delta.get_delta_type().unwrap() {
                     if !delta.inserted_table_infos.is_empty() {
