@@ -73,16 +73,14 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => {
-                return Err(ErrorCode::NotImplemented(
-                    format!(
-                        "the pgwire extended-mode encoding for {} is unsupported",
-                        ty
-                    ),
-                    Some(7949).into(),
-                )
-                .into());
-            }
+            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => Err(ErrorCode::NotImplemented(
+                format!(
+                    "the pgwire extended-mode encoding for {} is unsupported",
+                    ty
+                ),
+                Some(7949).into(),
+            )
+            .into()),
         }
     }
 }
