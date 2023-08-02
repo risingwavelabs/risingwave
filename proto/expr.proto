@@ -59,6 +59,7 @@ message ExprNode {
     // Parse text to timestamp by format string.
     // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
     TO_TIMESTAMP1 = 107;
+    CHAR_TO_DATE = 111;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
     ADD_WITH_TIME_ZONE = 109;

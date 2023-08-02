@@ -189,7 +189,7 @@ pub(crate) mod tests {
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-            output_memory_limiter: MemoryLimiter::unlimit(),
+            memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(
                 hummock_meta_client.clone(),
@@ -1222,7 +1222,6 @@ pub(crate) mod tests {
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
 
-        // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()

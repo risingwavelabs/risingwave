@@ -64,6 +64,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
             | expr_node::Type::ToTimestamp1
+            | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
             | expr_node::Type::SubtractWithTimeZone

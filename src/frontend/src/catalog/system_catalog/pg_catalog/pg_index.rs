@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Into;
 use std::sync::LazyLock;
 
-use itertools::Itertools;
-use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinView, SystemCatalogColumnsDef};
 
 pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
 pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
@@ -39,37 +36,16 @@ pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
 
 /// The catalog `pg_index` contains part of the information about indexes.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
-pub static PG_INDEX: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+pub static PG_INDEX: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     name: PG_INDEX_TABLE_NAME,
     schema: PG_CATALOG_SCHEMA_NAME,
     columns: &PG_INDEX_COLUMNS,
-    pk: &[0],
+    sql: "SELECT id AS indexrelid, \
+                primary_table_id AS indrelid, \
+                ARRAY_LENGTH(original_column_ids)::smallint AS indnatts, \
+                original_column_ids AS indkey, \
+                NULL AS indexprs, \
+                NULL AS indpred \
+            FROM rw_catalog.rw_indexes"
+        .into(),
 });
-
-impl SysCatalogReaderImpl {
-    pub fn read_index_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.catalog_reader.read_guard();
-        let schemas = reader.iter_schemas(&self.auth_context.database)?;
-
-        Ok(schemas
-            .flat_map(|schema| {
-                schema.iter_index().map(|index| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(index.id.index_id() as i32)),
-                        Some(ScalarImpl::Int32(index.primary_table.id.table_id() as i32)),
-                        Some(ScalarImpl::Int16(index.original_columns.len() as i16)),
-                        Some(ScalarImpl::List(ListValue::new(
-                            index
-                                .original_columns
-                                .iter()
-                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
-                                .collect_vec(),
-                        ))),
-                        None,
-                        None,
-                    ])
-                })
-            })
-            .collect_vec())
-    }
-}
