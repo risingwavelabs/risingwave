@@ -324,6 +324,16 @@ pub trait StreamChunkTestExt: Sized {
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
     ) -> Vec<Self>;
+
+    fn gen_stream_chunks_inner(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+        visibility_percent: f64, // % of rows that are visible
+        inserts_weight: f64,
+        deletes_weight: f64,
+    ) -> Vec<Self>;
 }
 
 impl StreamChunkTestExt for StreamChunk {
@@ -460,7 +470,39 @@ impl StreamChunkTestExt for StreamChunk {
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
     ) -> Vec<StreamChunk> {
-        DataChunk::gen_data_chunks(num_of_chunks, chunk_size, data_types, varchar_properties)
+        Self::gen_stream_chunks_inner(num_of_chunks, chunk_size, data_types, varchar_properties, 1.0, 1.0, 0.0);
+    }
+
+    fn gen_stream_chunks_inner(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+        visibility_ratio: f64, // % of rows that are visible
+        inserts_weight: f64,
+        deletes_weight: f64,
+    ) -> Vec<StreamChunk> {
+        assert!(inserts_weight >= 0.0 && deletes_weight >= 0.0);
+        let ops = if inserts_weight == 0 {
+            vec![Op::Delete; chunk_size]
+        } else if deletes_weight == 0 {
+            vec![Op::Insert; chunk_size]
+        } else {
+            let mut ops = vec![];
+            let mut n_inserts = 0.0;
+            let mut n_deletes = 0.0;
+            let inserts_to_deletes_ratio = inserts_weight / deletes_weight;
+            for i in 0..chunk_size {
+                if n_inserts / n_deletes < inserts_to_deletes_ratio {
+                    ops.push(Op::Insert);
+                    n_inserts += 1.0;
+                } else {
+                    ops.push(Op::Delete);
+                    n_deletes += 1.0;
+                }
+            }
+        };
+        DataChunk::gen_data_chunks(num_of_chunks, chunk_size, data_types, varchar_properties, visibility_ratio)
             .into_iter()
             .map(|chunk| {
                 let ops = vec![Op::Insert; chunk_size];

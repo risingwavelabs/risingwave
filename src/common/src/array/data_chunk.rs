@@ -692,6 +692,7 @@ pub trait DataChunkTestExt {
         chunk_size: usize,
         data_types: &[DataType],
         string_properties: &VarcharProperty,
+        visibility_ratio: f64,
     ) -> Self;
 
     /// Generate data chunks when supplied with `chunk_size` and column data types.
@@ -700,6 +701,7 @@ pub trait DataChunkTestExt {
         chunk_size: usize,
         data_types: &[DataType],
         string_properties: &VarcharProperty,
+        visibility_ratio: f64,
     ) -> Vec<Self>
     where
         Self: Sized;
@@ -826,6 +828,7 @@ impl DataChunkTestExt for DataChunk {
         chunk_size: usize,
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
+        visibility_ratio: f64,
     ) -> Self {
         let mut columns = Vec::new();
         // Generate columns of this chunk.
@@ -860,9 +863,10 @@ impl DataChunkTestExt for DataChunk {
         chunk_size: usize,
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
+        visibility_ratio: f64,
     ) -> Vec<Self> {
         (0..num_of_chunks)
-            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, varchar_properties))
+            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, varchar_properties, visibity_ratio))
             .collect()
     }
 }
