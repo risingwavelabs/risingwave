@@ -91,21 +91,20 @@ impl ClickHouseSink {
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
         let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?;
-        assert_eq!(
-            ck_fields_name.len(),
-            clickhouse_column.len(),
-            "Schema len not match"
-        );
+        if !ck_fields_name.len().eq(&clickhouse_column.len()) {
+            return Err(SinkError::ClickHouse("Schema len not match".to_string()));
+        }
 
         ck_fields_name
             .iter()
             .zip_eq_fast(clickhouse_column)
             .try_for_each(|(key, value)| {
-                assert_eq!(
-                    key.0, value.name,
-                    "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
-                    key.0, value.name
-                );
+                if !key.0.eq(&value.name) {
+                    return Err(SinkError::ClickHouse(format!(
+                        "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
+                        key.0, value.name
+                    )));
+                }
                 Self::check_and_correct_column_type(&key.1, &value)
             })?;
         Ok(())
@@ -194,12 +193,12 @@ impl Sink for ClickHouseSink {
             .bind("position")
             .fetch_all::<SystemColumn>()
             .await?;
-        assert!(
-            !clickhouse_column.is_empty(),
-            "table {:?}.{:?} is not find in clickhouse",
-            self.config.common.database,
-            self.config.common.table
-        );
+        if clickhouse_column.is_empty() {
+            return Err(SinkError::ClickHouse(format!(
+                "table {:?}.{:?} is not find in clickhouse",
+                self.config.common.database, self.config.common.table
+            )));
+        }
         self.check_column_name_and_type(clickhouse_column)?;
         Ok(())
     }
