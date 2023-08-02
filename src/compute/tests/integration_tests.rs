@@ -99,6 +99,14 @@ impl SingleChunkExecutor {
 
 /// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
+/// TODO(siyuan):  
+/// 构造一个source exec，然后以mock的方式给它传入stream chunk,
+///
+#[tokio::test]
+async fn test_cdc_table_backfill() -> StreamResult<()> {}
+
+/// This test checks whether batch task and streaming task work together for `Table` creation,
+/// insertion, deletion, and materialization.
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;

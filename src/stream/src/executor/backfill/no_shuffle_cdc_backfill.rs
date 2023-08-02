@@ -216,7 +216,7 @@ where
 
         let mut last_binlog_offset: Option<BinlogOffset>;
 
-        let mut consumed_binlog_offset: Option<BinlogOffset>;
+        let mut consumed_binlog_offset: Option<BinlogOffset> = None;
 
         // Backfill Algorithm:
         //
