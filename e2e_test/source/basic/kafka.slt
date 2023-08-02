@@ -377,7 +377,6 @@ WITH (
 	topic = 'debezium_mongo_json_customers_no_schema_field')
 FORMAT DEBEZIUM_MONGO ENCODE JSON
 
-# we cannot create upsert_json source without pk
 statement ok
 CREATE TABLE upsert_students_default_key (
     "ID" INT,
