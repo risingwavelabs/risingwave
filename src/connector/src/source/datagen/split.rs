@@ -50,7 +50,8 @@ impl DatagenSplit {
         }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         self.start_offset = Some(start_offset.as_str().parse::<u64>().unwrap());
+        Ok(())
     }
 }

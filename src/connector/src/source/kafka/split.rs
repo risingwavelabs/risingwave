@@ -56,8 +56,9 @@ impl KafkaSplit {
         }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         self.start_offset = Some(start_offset.as_str().parse::<i64>().unwrap());
+        Ok(())
     }
 
     pub fn get_topic_and_partition(&self) -> (String, i32) {

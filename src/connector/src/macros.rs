@@ -99,10 +99,11 @@ macro_rules! impl_split {
                     .to_string()
             }
 
-            pub fn update_in_place(&mut self, start_offset: String) {
+            pub fn update_in_place(&mut self, start_offset: String) -> anyhow::Result<()> {
                 match self {
-                    $( Self::$variant_name(inner) => inner.update_with_offset(start_offset), )*
+                    $( Self::$variant_name(inner) => inner.update_with_offset(start_offset)?, )*
                 }
+                Ok(())
             }
 
             pub fn encode_to_json_inner(&self) -> JsonbVal {

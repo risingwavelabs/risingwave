@@ -434,11 +434,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                     self.stream_source_core.stream_source_splits.get_mut(id);
 
                                 origin_split.map(|split| {
-                                    split.update_in_place(offset.clone());
-                                    (id.clone(), split.clone())
+                                    split.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((id.clone(), split.clone()))
                                 })
                             })
-                            .collect_vec();
+                            .try_collect()?;
 
                         self.stream_source_core.state_cache.extend(state);
                     }

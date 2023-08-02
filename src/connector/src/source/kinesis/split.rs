@@ -61,7 +61,7 @@ impl KinesisSplit {
         }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let start_offset = if start_offset.is_empty() {
             KinesisOffset::Earliest
         } else {
@@ -69,5 +69,6 @@ impl KinesisSplit {
         };
 
         self.start_position = start_offset;
+        Ok(())
     }
 }

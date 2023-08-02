@@ -522,11 +522,11 @@ impl<S: StateStore> SourceExecutor<S> {
                                     .get_mut(split_id);
 
                                 origin_split_impl.map(|split_impl| {
-                                    split_impl.update_in_place(offset.clone());
-                                    (split_id.clone(), split_impl.clone())
+                                    split_impl.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((split_id.clone(), split_impl.clone()))
                                 })
                             })
-                            .collect();
+                            .try_collect()?;
 
                         self.stream_source_core
                             .as_mut()

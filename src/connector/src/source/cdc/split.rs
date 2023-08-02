@@ -92,11 +92,11 @@ impl MySqlCdcSplit {
         Self { inner: split }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
             let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-                .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
+                .map_err(|e| anyhow!("invalid mysql offset: {}, error: {}", start_offset, e))?;
             snapshot_done = match dbz_offset.source_offset.snapshot {
                 Some(val) => !val,
                 None => true,
@@ -104,6 +104,7 @@ impl MySqlCdcSplit {
         }
         self.inner.start_offset = Some(start_offset);
         self.inner.snapshot_done = snapshot_done;
+        Ok(())
     }
 }
 
@@ -120,11 +121,11 @@ impl PostgresCdcSplit {
         }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
             let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-                .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
+                .map_err(|e| anyhow!("invalid postgres offset: {}, error: {}", start_offset, e))?;
             snapshot_done = dbz_offset
                 .source_offset
                 .last_snapshot_record
@@ -133,6 +134,7 @@ impl PostgresCdcSplit {
         self.inner.start_offset = Some(start_offset);
         // if snapshot_done is already true, it won't be updated
         self.inner.snapshot_done = snapshot_done;
+        Ok(())
     }
 }
 
@@ -208,12 +210,13 @@ impl DebeziumCdcSplit {
         unreachable!("invalid debezium split")
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &mut self.mysql_split {
-            split.update_with_offset(start_offset);
+            split.update_with_offset(start_offset)?
         } else if let Some(split) = &mut self.pg_split {
-            split.update_with_offset(start_offset);
+            split.update_with_offset(start_offset)?
         }
+        Ok(())
     }
 }

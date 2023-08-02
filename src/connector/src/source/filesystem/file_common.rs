@@ -49,8 +49,9 @@ impl FsSplit {
         }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let offset = start_offset.parse().unwrap();
         self.offset = offset;
+        Ok(())
     }
 }
