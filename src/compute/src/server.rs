@@ -64,7 +64,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+    reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -97,7 +97,8 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config = Arc::new(config.streaming.clone());
+    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
+        Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
@@ -152,7 +153,6 @@ pub async fn compute_node_serve(
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
     let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
-    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -282,7 +282,11 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), memory_control_policy);
+    let memory_mgr = GlobalMemoryManager::new(
+        streaming_metrics.clone(),
+        total_memory_bytes,
+        config.server.auto_dump_heap_profile.clone(),
+    );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(
         batch_mgr_clone,
