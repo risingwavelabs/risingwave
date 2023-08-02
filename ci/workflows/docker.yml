@@ -29,7 +29,7 @@ steps:
             GITHUB_TOKEN: github-token
     agents:
       queue: "linux-arm64"
-      retry: *auto-retry
+    retry: *auto-retry
 
   - label: "multi-arch-image-create-push"
     command: "ci/scripts/multi-arch-docker.sh"
