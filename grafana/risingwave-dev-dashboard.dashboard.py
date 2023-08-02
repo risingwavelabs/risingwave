@@ -60,12 +60,12 @@ def section_cluster_node(panels):
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
-                    "cpu - {{job}} @ {{instance}}",
+                    "cpu usage (total) - {{job}} @ {{instance}}",
                 ),
 
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance) / avg({metric('process_cpu_core_num')}) by (job,instance)",
-                    "cpu usage -{{job}} @ {{instance}}",
+                    "cpu usage (avg per core) - {{job}} @ {{instance}}",
                 ),
             ],
         ),
