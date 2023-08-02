@@ -213,7 +213,7 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let output_memory_limiter = Arc::new(MemoryLimiter::new(
+            let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
@@ -224,7 +224,7 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
-                output_memory_limiter,
+                memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
@@ -232,7 +232,7 @@ pub async fn compute_node_serve(
             });
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client, 2.0);
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -401,7 +401,7 @@ pub async fn compute_node_serve(
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
             .add_service(ExchangeServiceServer::new(exchange_srv))
-            .add_service(StreamServiceServer::new(stream_srv))
+            .add_service(StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX))
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))

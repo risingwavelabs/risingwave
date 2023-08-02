@@ -83,7 +83,7 @@ ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
 # set classpath
 RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop_classpath_273.txt -P /root/
 
-# Need to copy the content in the hadoop_classpath_273.txt file, and then set env. 
+# Need to copy the content in the hadoop_classpath_273.txt file, and then set env.
 # Since the env command can only be written but not read, The following line is deleted here, and then added manually when packaging.
 
 # ENV CLASSPATH=/root/hadoop_classpath_273.txt:$CLASSPATH

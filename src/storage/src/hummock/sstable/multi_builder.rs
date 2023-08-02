@@ -179,7 +179,7 @@ where
             if is_new_user_key {
                 if switch_builder {
                     need_seal_current = true;
-                } else if builder.reach_capacity() {
+                } else if builder.reach_capacity() || builder.reach_key_count() {
                     need_seal_current = self.split_weight_by_vnode == 0
                         || (self.is_target_level_l0_or_lbase && vnode_changed);
                 }
@@ -415,7 +415,7 @@ mod tests {
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{
         create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
-        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
+        SstableBuilderOptions, DEFAULT_MAX_KEY_COUNT, DEFAULT_RESTART_INTERVAL,
     };
 
     #[tokio::test]
@@ -428,6 +428,7 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::for_test(builder_factory);
@@ -445,6 +446,7 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
@@ -637,6 +639,7 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
@@ -681,6 +684,7 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
         let table_id = TableId::new(1);
         let mut builder = CapacitySplitTableBuilder::new(

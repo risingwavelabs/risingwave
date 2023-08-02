@@ -83,6 +83,10 @@ pub struct StorageOpts {
     pub object_store_upload_timeout_ms: u64,
     /// object store read timeout.
     pub object_store_read_timeout_ms: u64,
+
+    pub object_store_recv_buffer_size: Option<usize>,
+    pub compactor_max_sst_key_count: u64,
+    pub compactor_max_task_multiplier: f32,
 }
 
 impl Default for StorageOpts {
@@ -137,6 +141,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             object_store_upload_timeout_ms: c.storage.object_store_upload_timeout_ms,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
+            object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,
+            compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
+            compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
         }
     }
 }
