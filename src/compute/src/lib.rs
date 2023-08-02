@@ -114,7 +114,7 @@ pub struct ComputeNodeOpts {
 
     /// Enable heap profile dump when memory usage is high.
     #[clap(long, env = "RW_AUTO_DUMP_HEAP_PROFILE_DIR")]
-    #[override_opts(path = streaming.auto_dump_heap_profile.dir)]
+    #[override_opts(path = server.auto_dump_heap_profile.dir)]
     pub auto_dump_heap_profile_dir: Option<String>,
 
     #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]

@@ -6,6 +6,10 @@ connection_pool_size = 16
 metrics_level = 0
 telemetry_enabled = true
 
+[server.auto_dump_heap_profile]
+dir = ""
+threshold = 0.8999999761581421
+
 [meta]
 min_sst_retention_time_sec = 86400
 full_gc_interval_sec = 86400
@@ -60,10 +64,6 @@ batch_chunk_size = 1024
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
-
-[streaming.auto_dump_heap_profile]
-dir = ""
-threshold = 0.8999999761581421
 
 [streaming.developer]
 stream_connector_message_buffer_size = 16

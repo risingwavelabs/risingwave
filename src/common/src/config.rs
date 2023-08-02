@@ -353,6 +353,10 @@ pub struct ServerConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[serde(default = "default::server::auto_dump_heap_profile")]
+    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -391,10 +395,6 @@ pub struct StreamingConfig {
     /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
-
-    /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::streaming::auto_dump_heap_profile")]
-    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 
     #[serde(default, with = "streaming_prefix")]
     pub developer: StreamingDeveloperConfig,
@@ -767,6 +767,7 @@ pub mod default {
     }
 
     pub mod server {
+        use crate::config::AutoDumpHeapProfileConfig;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -782,6 +783,10 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
+        }
+
+        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
+            Default::default()
         }
     }
 
@@ -874,7 +879,7 @@ pub mod default {
     }
 
     pub mod streaming {
-        use crate::config::{AsyncStackTraceOption, AutoDumpHeapProfileConfig};
+        use crate::config::AsyncStackTraceOption;
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -884,10 +889,6 @@ pub mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::default()
-        }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
         }
 
         pub fn unique_user_stream_errors() -> usize {
