@@ -130,7 +130,7 @@ pub struct SinkWriterParam {
 
 #[async_trait]
 pub trait Sink {
-    type Writer: SinkWriter;
+    type Writer: SinkWriter<CommitMetadata = ()>;
     type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
