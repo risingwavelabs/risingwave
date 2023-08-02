@@ -950,10 +950,16 @@ where
                     if let Some(key) = self.watermark_cache.lowest_key() {
                         watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
                     } else {
-                        // If empty and synced, means no rows in table.
-                        self.watermark_cache.is_empty()
+                        // Watermark cache is synced,
+                        // And there's no key in watermark cache.
+                        // That implies table is empty.
+                        // We should not clean watermark.
+                        false
                     }
                 } else {
+                    // Either we are not using watermark cache,
+                    // Or watermark_cache is not synced.
+                    // In either case we should clean watermark.
                     true
                 }
             }
