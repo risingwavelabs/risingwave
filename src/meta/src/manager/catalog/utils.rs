@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::error::{ErrorCode, ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;

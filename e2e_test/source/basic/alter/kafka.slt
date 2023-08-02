@@ -1,4 +1,4 @@
-statement ok 
+statement ok
 CREATE SOURCE s1 (v1 int) with (
   connector = 'kafka',
   topic = 'kafka_alter',
@@ -14,10 +14,10 @@ CREATE SOURCE s2 (v2 varchar) with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
-statement ok 
+statement ok
 create materialized view mv1 as select * from s1;
 
-statement ok 
+statement ok
 create materialized view mv2 as select * from s2;
 
 sleep 10s
@@ -42,13 +42,13 @@ statement ok
 alter source s1 add column v2 varchar;
 
 # alter source with null column
-statement ok 
+statement ok
 alter source s2 add column v3 int;
 
-statement ok 
+statement ok
 create materialized view mv3 as select * from s1;
 
-statement ok 
+statement ok
 create materialized view mv4 as select * from s2;
 
 sleep 10s
@@ -65,14 +65,14 @@ select * from s1
 query TI rowsort
 select * from s2
 ----
-11 NULL 
-22 NULL 
+11 NULL
+22 NULL
 
 query I rowsort
 select * from mv1;
 ----
-1 
-2 
+1
+2
 
 query T rowsort
 select * from mv2;
@@ -89,5 +89,5 @@ select * from mv3;
 query TI rowsort
 select * from mv4;
 ----
-11 NULL 
-22 NULL 
+11 NULL
+22 NULL

@@ -28,7 +28,7 @@ select * from mv3
 2 22
 
 query TI rowsort
-select * from s2 
+select * from s2
 ----
 11 NULL
 11 NULL
@@ -51,16 +51,16 @@ select * from mv4
 22 NULL
 22 NULL
 
-statement ok 
+statement ok
 drop materialized view mv1
 
-statement ok 
+statement ok
 drop materialized view mv2
 
-statement ok 
+statement ok
 drop materialized view mv3
 
-statement ok 
+statement ok
 drop materialized view mv4
 
 statement ok
