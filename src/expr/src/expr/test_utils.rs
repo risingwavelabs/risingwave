@@ -102,7 +102,8 @@ pub fn make_hop_window_expression(
             reason: format!(
                 "window_size {} cannot be divided by window_slide {}",
                 window_size, window_slide
-            ),
+            )
+            .into(),
         })?
         .get();
 
@@ -123,7 +124,8 @@ pub fn make_hop_window_expression(
             reason: format!(
                 "window_size {} cannot be subtracted by window_slide {}",
                 window_size, window_slide
-            ),
+            )
+            .into(),
         })
         .unwrap();
 
@@ -152,7 +154,8 @@ pub fn make_hop_window_expression(
                     reason: format!(
                         "window_slide {} cannot be multiplied by {}",
                         window_slide, i
-                    ),
+                    )
+                    .into(),
                 })?;
         let window_end_offset =
             window_slide
@@ -162,7 +165,8 @@ pub fn make_hop_window_expression(
                     reason: format!(
                         "window_slide {} cannot be multiplied by {}",
                         window_slide, i
-                    ),
+                    )
+                    .into(),
                 })?;
         let window_start_expr = make_func_call(
             expr_node::Type::Add,
