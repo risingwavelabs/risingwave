@@ -141,7 +141,6 @@ message ExprNode {
     LOG10 = 273;
     CBRT = 274;
     SIGN = 275;
-    FORMAT = 276;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -163,6 +162,7 @@ message ExprNode {
     SHA512 = 316;
     LEFT = 317;
     RIGHT = 318;
+    FORMAT = 319;
 
     // Unary operators
     NEG = 401;
