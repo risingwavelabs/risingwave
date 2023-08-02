@@ -569,7 +569,7 @@ impl StateStoreImpl {
                 foyer_store_config,
                 runtime_worker_threads: None,
             };
-            FileCache::foyer_runtime(config)
+            FileCache::foyer(config)
                 .await
                 .map_err(HummockError::file_cache)?
         };
@@ -603,7 +603,7 @@ impl StateStoreImpl {
                 foyer_store_config,
                 runtime_worker_threads: None,
             };
-            FileCache::foyer_runtime(config)
+            FileCache::foyer(config)
                 .await
                 .map_err(HummockError::file_cache)?
         };

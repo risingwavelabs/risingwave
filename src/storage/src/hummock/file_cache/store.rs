@@ -158,10 +158,6 @@ where
     V: Value,
 {
     None,
-    Foyer {
-        store: Arc<FoyerStore<K, V>>,
-        enable_filter: bool,
-    },
     FoyerRuntime {
         runtime: Arc<BackgroundShutdownRuntime>,
         store: Arc<FoyerStore<K, V>>,
@@ -178,57 +174,7 @@ where
         Self::None
     }
 
-    pub async fn foyer(config: FoyerStoreConfig<K, V>) -> Result<Self> {
-        let file_capacity = config.file_capacity;
-        let capacity = config.capacity;
-        let capacity = capacity - (capacity % file_capacity);
-
-        let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
-        if config.rated_random_rate > 0 {
-            let rr = RatedRandomAdmissionPolicy::new(
-                config.rated_random_rate,
-                Duration::from_millis(100),
-            );
-            admissions.push(Arc::new(rr));
-        }
-
-        let enable_filter = config.enable_filter;
-
-        let c = LfuFsStoreConfig {
-            eviction_config: EvictionConfig {
-                window_to_cache_size_ratio: config.lfu_window_to_cache_size_ratio,
-                tiny_lru_capacity_ratio: config.lfu_tiny_lru_capacity_ratio,
-            },
-            device_config: DeviceConfig {
-                dir: config.dir,
-                capacity,
-                file_capacity,
-                align: config.device_align,
-                io_size: config.device_io_size,
-            },
-            admissions,
-            reinsertions: vec![],
-            buffer_pool_size: config.buffer_pool_size,
-            flushers: config.flushers,
-            flush_rate_limit: config.flush_rate_limit,
-            reclaimers: config.reclaimers,
-            reclaim_rate_limit: config.reclaim_rate_limit,
-            recover_concurrency: config.recover_concurrency,
-            event_listeners: config.event_listener,
-            prometheus_config: PrometheusConfig {
-                registry: config.prometheus_registry,
-                namespace: config.prometheus_namespace,
-            },
-            clean_region_threshold: config.reclaimers + config.reclaimers / 2,
-        };
-        let store = FoyerStore::open(c).await.map_err(FileCacheError::foyer)?;
-        Ok(Self::Foyer {
-            store,
-            enable_filter,
-        })
-    }
-
-    pub async fn foyer_runtime(config: FoyerRuntimeConfig<K, V>) -> Result<Self> {
+    pub async fn foyer(config: FoyerRuntimeConfig<K, V>) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if let Some(runtime_worker_threads) = config.runtime_worker_threads {
             builder.worker_threads(runtime_worker_threads);
@@ -304,10 +250,6 @@ where
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
         match self {
             FileCache::None => Ok(false),
-            FileCache::Foyer { store, .. } => store
-                .insert_if_not_exists(key, value)
-                .await
-                .map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 runtime
@@ -323,7 +265,6 @@ where
     pub fn insert_without_wait(&self, key: K, value: V) {
         match self {
             FileCache::None => {}
-            FileCache::Foyer { .. } => panic!("unsupported"),
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 runtime.spawn(async move { store.insert_if_not_exists(key, value).await });
@@ -345,14 +286,6 @@ where
     {
         match self {
             FileCache::None => Ok(false),
-            FileCache::Foyer { store, .. } => store
-                .insert_if_not_exists_with_future(
-                    key,
-                    fetch_value,
-                    key.serialized_len() + value_serialized_len,
-                )
-                .await
-                .map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 let future = fetch_value();
@@ -377,9 +310,6 @@ where
     pub async fn remove(&self, key: &K) -> Result<bool> {
         match self {
             FileCache::None => Ok(false),
-            FileCache::Foyer { store, .. } => {
-                store.remove(key).await.map_err(FileCacheError::foyer)
-            }
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 let key = *key;
@@ -396,7 +326,6 @@ where
     pub fn remove_without_wait(&self, key: &K) {
         match self {
             FileCache::None => {}
-            FileCache::Foyer { .. } => panic!("unsupported"),
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 let key = *key;
@@ -409,7 +338,6 @@ where
     pub async fn clear(&self) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
-            FileCache::Foyer { store, .. } => store.clear().await.map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 runtime
@@ -425,7 +353,6 @@ where
     pub fn clear_without_wait(&self) {
         match self {
             FileCache::None => {}
-            FileCache::Foyer { .. } => panic!("unsupported"),
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 runtime.spawn(async move { store.clear().await });
@@ -437,9 +364,6 @@ where
     pub async fn lookup(&self, key: &K) -> Result<Option<V>> {
         match self {
             FileCache::None => Ok(None),
-            FileCache::Foyer { store, .. } => {
-                store.lookup(key).await.map_err(FileCacheError::foyer)
-            }
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 let key = *key;
@@ -456,7 +380,6 @@ where
     pub async fn exists(&self, key: &K) -> Result<bool> {
         match self {
             FileCache::None => Ok(false),
-            FileCache::Foyer { store, .. } => store.exists(key).map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { store, .. } => {
                 store.exists(key).map_err(FileCacheError::foyer)
             }
@@ -466,7 +389,6 @@ where
     pub fn is_filter_enabled(&self) -> bool {
         match self {
             FileCache::None => false,
-            FileCache::Foyer { enable_filter, .. } => *enable_filter,
             FileCache::FoyerRuntime { enable_filter, .. } => *enable_filter,
         }
     }

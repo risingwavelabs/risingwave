@@ -18,10 +18,12 @@ use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 
+pub trait RecentFilterKey = Eq + Ord + Send + Sync + Debug + Clone + 'static;
+
 #[derive(Debug)]
 pub struct RecentFilter<K>
 where
-    K: Eq + Ord + Send + Sync + Debug + Clone + 'static,
+    K: RecentFilterKey,
 {
     refresh_interval: Duration,
     inner: RwLock<CacheRefillFilterInner<K>>,
@@ -30,7 +32,7 @@ where
 #[derive(Debug)]
 struct CacheRefillFilterInner<K>
 where
-    K: Eq + Ord + Send + Sync + Debug + Clone + 'static,
+    K: RecentFilterKey,
 {
     last_refresh: Instant,
     layers: VecDeque<RwLock<BTreeSet<K>>>,
@@ -38,7 +40,7 @@ where
 
 impl<K> RecentFilter<K>
 where
-    K: Eq + Ord + Send + Sync + Debug + Clone + 'static,
+    K: RecentFilterKey,
 {
     pub fn new(layers: usize, refresh_interval: Duration) -> Self {
         assert!(layers > 0);
