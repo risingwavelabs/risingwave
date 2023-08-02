@@ -310,15 +310,15 @@ impl Compactor {
         // If the task does not have enough memory, it should cancel the task and let the meta
         // reschedule it, so that it does not occupy the compactor's resources.
         let memory_detector = context
-            .output_memory_limiter
+            .memory_limiter
             .try_require_memory(task_memory_capacity_with_parallelism);
         if memory_detector.is_none() {
             tracing::warn!(
                 "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
                 compact_task.task_id,
                 task_memory_capacity_with_parallelism,
-                context.output_memory_limiter.get_memory_usage(),
-                context.output_memory_limiter.quota()
+                context.memory_limiter.get_memory_usage(),
+                context.memory_limiter.quota()
             );
             task_status = TaskStatus::NoAvailResourceCanceled;
             return Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
@@ -493,7 +493,7 @@ impl Compactor {
         );
         let max_pull_task_count = (cpu_core_num as f32
             * compactor_context.storage_opts.compactor_max_task_multiplier)
-            as u32;
+            .ceil() as u32;
 
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
@@ -1111,7 +1111,7 @@ impl Compactor {
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
-            limiter: self.context.output_memory_limiter.clone(),
+            limiter: self.context.memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),

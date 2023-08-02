@@ -817,7 +817,7 @@ pub struct S3ObjectStoreConfig {
 impl Default for S3ObjectStoreConfig {
     fn default() -> Self {
         Self {
-            keepalive_ms: Some(s3_objstore_config::object_store_keepalive_ms()),
+            keepalive_ms: s3_objstore_config::object_store_keepalive_ms(),
             recv_buffer_size: s3_objstore_config::object_store_recv_buffer_size(),
             send_buffer_size: s3_objstore_config::object_store_send_buffer_size(),
             nodelay: s3_objstore_config::object_store_nodelay(),

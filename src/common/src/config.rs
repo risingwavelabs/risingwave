@@ -454,9 +454,15 @@ pub struct StorageConfig {
     #[serde(default)]
     pub compactor_memory_limit_mb: Option<usize>,
 
+    /// Compactor calculates the maximum number of tasks that can be executed on the node based on
+    /// worker_num and compactor_max_task_multiplier.
+    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
     #[serde(default = "default::storage::compactor_max_task_multiplier")]
     pub compactor_max_task_multiplier: f32,
 
+    /// The percentage of memory available when compactor is deployed separately.
+    /// total_memory_available_bytes = total_memory_available_bytes *
+    /// compactor_memory_available_proportion
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
     pub compactor_memory_available_proportion: f64,
 
@@ -491,7 +497,7 @@ pub struct StorageConfig {
     pub object_store_read_timeout_ms: u64,
 
     #[serde(default = "default::s3_objstore_config::object_store_keepalive_ms")]
-    pub object_store_keepalive_ms: u64,
+    pub object_store_keepalive_ms: Option<u64>,
     #[serde(default = "default::s3_objstore_config::object_store_recv_buffer_size")]
     pub object_store_recv_buffer_size: Option<usize>,
     #[serde(default = "default::s3_objstore_config::object_store_send_buffer_size")]
@@ -845,7 +851,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            1.501
+            1.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -890,7 +896,7 @@ pub mod default {
         }
 
         pub fn compactor_max_sst_key_count() -> u64 {
-            200 * 10000 // 200w
+            2 * 1024 * 1024 // 200w
         }
     }
 
@@ -1099,8 +1105,8 @@ pub mod default {
 
         const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
 
-        pub fn object_store_keepalive_ms() -> u64 {
-            DEFAULT_KEEPALIVE_MS // 10min
+        pub fn object_store_keepalive_ms() -> Option<u64> {
+            Some(DEFAULT_KEEPALIVE_MS) // 10min
         }
 
         pub fn object_store_recv_buffer_size() -> Option<usize> {

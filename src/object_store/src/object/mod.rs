@@ -925,7 +925,7 @@ pub async fn parse_remote_object_store_with_config(
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             let s3_object_store_config = config
                 .map(|storage_config| S3ObjectStoreConfig {
-                    keepalive_ms: Some(storage_config.object_store_keepalive_ms),
+                    keepalive_ms: storage_config.object_store_keepalive_ms,
                     recv_buffer_size: storage_config.object_store_recv_buffer_size,
                     send_buffer_size: storage_config.object_store_send_buffer_size,
                     nodelay: storage_config.object_store_nodelay,

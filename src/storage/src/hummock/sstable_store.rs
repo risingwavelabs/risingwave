@@ -780,9 +780,7 @@ impl SstableWriter for StreamingUploadWriter {
                     t
                 });
 
-            debug_assert!(
-                !meta.block_metas.is_empty() || !meta.monotonic_tombstone_events.is_empty()
-            );
+            assert!(!meta.block_metas.is_empty() || !meta.monotonic_tombstone_events.is_empty());
 
             // Upload data to object store.
             self.object_uploader
