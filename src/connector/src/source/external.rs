@@ -60,8 +60,9 @@ pub struct PostgresOffset {
     pub tx_usec: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum BinlogOffset {
+    Undefined,
     MySQL(MySqlOffset),
     Postgres(PostgresOffset),
 }
@@ -92,11 +93,15 @@ pub struct DebeziumOffset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebeziumSourceOffset {
     // postgres snapshot progress
-    last_snapshot_record: Option<bool>,
+    pub(crate) last_snapshot_record: Option<bool>,
     // mysql snapshot progress
     pub(crate) snapshot: Option<bool>,
+
+    // mysql binlog offset
     file: Option<String>,
     pos: Option<u64>,
+
+    // postgres binlog offset
     lsn: Option<u64>,
     #[serde(rename = "txId")]
     txid: Option<u64>,
@@ -105,8 +110,9 @@ pub struct DebeziumSourceOffset {
 
 impl MySqlOffset {
     pub fn from_str(offset: &str) -> ConnectorResult<Self> {
-        let dbz_offset: DebeziumOffset = serde_json::from_str(&offset)
-            .unwrap_or_else(|e| panic!("invalid upstream offset: {}, error: {}", offset, e));
+        let dbz_offset: DebeziumOffset = serde_json::from_str(&offset).map_err(|e| {
+            ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
+        })?;
 
         Ok(Self {
             filename: dbz_offset
@@ -146,7 +152,7 @@ pub enum ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
-    pub fn deserialize_bin_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
+    pub fn deserialize_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
         match self {
             ExternalTableReaderImpl::MYSQL(_) => {
                 Ok(BinlogOffset::MySQL(MySqlOffset::from_str(offset)?))
@@ -288,7 +294,7 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         async move {
             match self {
                 ExternalTableReaderImpl::MYSQL(mysql) => mysql.current_binlog_offset().await,
-                _ => Ok(BinlogOffset::default()),
+                _ => Ok(BinlogOffset::Undefined),
             }
         }
     }

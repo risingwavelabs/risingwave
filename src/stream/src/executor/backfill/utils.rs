@@ -20,9 +20,9 @@ use await_tree::InstrumentAwait;
 use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
-use risingwave_common::array::stream_chunk::{BinlogOffset, StreamChunkMeta};
+use risingwave_common::array::stream_chunk::StreamChunkMeta;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
@@ -113,7 +113,7 @@ pub(crate) fn mark_chunk(
     pk_order: &[OrderType],
 ) -> StreamChunk {
     let chunk = chunk.compact();
-    mark_chunk_inner(chunk, current_pos, None, pk_in_output_indices, pk_order).unwrap()
+    mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
 pub(crate) fn mark_cdc_chunk(
@@ -182,58 +182,25 @@ pub(crate) fn mark_chunk_ref_by_vnode(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    last_binlog_offset: Option<BinlogOffset>,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
-) -> StreamExecutorResult<StreamChunk> {
-    let (data, ops, meta) = chunk.into_parts_with_meta();
+) -> StreamChunk {
+    let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-
-    if let Some(StreamChunkMeta { offsets }) = meta {
-        for v in zip_eq_fast(data.rows(), offsets.iter()).map(|(row, offset)| {
-            // filter changelog events with binlog range
-            let in_binlog_range = if let Some(binlog_low) = last_binlog_offset {
-                let event_offset = MySqlOffset::from_str(offset.value())?;
-                binlog_low <= event_offset
-            } else {
-                true
-            };
-
-            if !in_binlog_range {
-                false
-            } else {
-                let lhs = row.project(pk_in_output_indices);
-                let rhs = current_pos.project(pk_in_output_indices);
-                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                let visible = match order {
-                    Ordering::Less | Ordering::Equal => true,
-                    Ordering::Greater => false,
-                };
-            }
-        }) {
-            new_visibility.append(v);
+    // Use project to avoid allocation.
+    for v in data.rows().map(|row| {
+        let lhs = row.project(pk_in_output_indices);
+        let rhs = current_pos;
+        let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+        match order {
+            Ordering::Less | Ordering::Equal => true,
+            Ordering::Greater => false,
         }
-    } else {
-        // Use project to avoid allocation.
-        for v in data.rows().map(|row| {
-            let lhs = row.project(pk_in_output_indices);
-            let rhs = current_pos.project(pk_in_output_indices);
-            let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-            match order {
-                Ordering::Less | Ordering::Equal => true,
-                Ordering::Greater => false,
-            }
-        }) {
-            new_visibility.append(v);
-        }
+    }) {
+        new_visibility.append(v);
     }
-
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
-        ops,
-        columns,
-        Some(new_visibility.finish()),
-    ))
+    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
 }
 
 fn mark_cdc_chunk_inner(
@@ -248,40 +215,41 @@ fn mark_cdc_chunk_inner(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
 
     if let Some(StreamChunkMeta { offsets }) = meta {
-        for v in zip_eq_fast(data.rows(), offsets.iter()).map(|(row, offset)| {
-            // filter changelog events with binlog range
-            let in_binlog_range = if let Some(binlog_low) = last_binlog_offset {
-                let event_offset = table_reader.deserialize_bin_offset(offset.value())?;
-                binlog_low <= event_offset
-            } else {
-                true
-            };
+        let binlog_offsets = offsets
+            .into_iter()
+            .map(|offset| table_reader.deserialize_binlog_offset(offset.value()))
+            .try_collect::<Vec<_>>()?;
 
-            if !in_binlog_range {
-                false
-            } else {
-                let lhs = row.project(pk_in_output_indices);
-                let rhs = current_pos.project(pk_in_output_indices);
-                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                let visible = match order {
-                    Ordering::Less | Ordering::Equal => true,
-                    Ordering::Greater => false,
+        for v in
+            zip_eq_fast(data.rows_with_holes(), binlog_offsets.iter()).map(|(row, event_offset)| {
+                let visible = match row {
+                    None => false,
+                    Some(row) => {
+                        // filter changelog events with binlog range
+                        let in_binlog_range = if let Some(binlog_low) = &last_binlog_offset {
+                            binlog_low <= event_offset
+                        } else {
+                            true
+                        };
+
+                        if in_binlog_range {
+                            let lhs = row.project(pk_in_output_indices);
+                            let rhs = current_pos.project(pk_in_output_indices);
+                            let order =
+                                cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                            match order {
+                                Ordering::Less | Ordering::Equal => true,
+                                Ordering::Greater => false,
+                            }
+                        } else {
+                            false
+                        }
+                    }
                 };
-            }
-        }) {
-            new_visibility.append(v);
-        }
-    } else {
-        // Use project to avoid allocation.
-        for v in data.rows().map(|row| {
-            let lhs = row.project(pk_in_output_indices);
-            let rhs = current_pos.project(pk_in_output_indices);
-            let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-            match order {
-                Ordering::Less | Ordering::Equal => true,
-                Ordering::Greater => false,
-            }
-        }) {
+
+                visible
+            })
+        {
             new_visibility.append(v);
         }
     }
@@ -482,7 +450,7 @@ pub(crate) fn get_consumed_binlog_offset(
 ) -> StreamExecutorResult<Option<BinlogOffset>> {
     if let Some(meta) = chunk.meta() {
         let off = meta.offsets.last().unwrap();
-        Ok(Some(table_reader.deserialize_bin_offset(off.value())?))
+        Ok(Some(table_reader.deserialize_binlog_offset(off.value())?))
     } else {
         Ok(None)
     }

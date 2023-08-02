@@ -214,9 +214,9 @@ where
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
 
-        let mut last_binlog_offset: Option<BinlogOffset> = None;
+        let mut last_binlog_offset: Option<BinlogOffset>;
 
-        let mut consumed_binlog_offset: Option<BinlogOffset> = None;
+        let mut consumed_binlog_offset: Option<BinlogOffset>;
 
         // Backfill Algorithm:
         //

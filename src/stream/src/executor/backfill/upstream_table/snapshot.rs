@@ -20,7 +20,7 @@ use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
 use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamTableRead {
-    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<MySqlOffset>>>
+    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<BinlogOffset>>>
         + Send
         + 'a
     where
@@ -74,20 +74,13 @@ pub struct UpstreamTableReader<T> {
     inner: T,
 }
 
-impl<T: UpstreamTable> UpstreamTableReader<T> {
+impl<T> UpstreamTableReader<T> {
     pub fn inner(&self) -> &T {
         &self.inner
     }
 
     pub fn new(table: T) -> Self {
         Self { inner: table }
-    }
-}
-
-impl UpstreamTableReader<ExternalStorageTable> {
-    pub fn deserialize_bin_offset(&self, offset: &str) -> StreamExecutorResult<BinlogOffset> {
-        let ret = self.inner.table_reader().deserialize_bin_offset(offset);
-        Ok(ret.map_err(StreamExecutorError::from)?)
     }
 }
 
