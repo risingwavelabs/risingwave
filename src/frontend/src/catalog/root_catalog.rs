@@ -505,15 +505,13 @@ impl Catalog {
     ) {
         let (mut database_id, mut schema_id) = (0, 0);
         let mut found = false;
-        for database in self.database_by_name.values() {
-            if !found {
-                for schema in database.iter_schemas() {
-                    if schema.iter_source().any(|s| s.id == *source_id) {
-                        found = true;
-                        database_id = database.id();
-                        schema_id = schema.id();
-                        break;
-                    }
+        'outer: for database in self.database_by_name.values() {
+            for schema in database.iter_schemas() {
+                if schema.iter_source().any(|s| s.id == *source_id) {
+                    found = true;
+                    database_id = database.id();
+                    schema_id = schema.id();
+                    break 'outer;
                 }
             }
         }

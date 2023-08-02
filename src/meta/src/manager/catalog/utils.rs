@@ -14,13 +14,18 @@
 
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::error::{ErrorCode, ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_sqlparser::ast::{
-    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, Distinct, Expr, Function,
-    FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
-    TableAlias, TableFactor, TableWithJoins,
+    Array, ColumnDef, CreateSink, CreateSinkStatement, CreateSourceStatement,
+    DataType as AstDataType, Distinct, Expr, Function, FunctionArg, FunctionArgExpr, Ident,
+    ObjectName, Query, SelectItem, SetExpr, Statement, StructField, TableAlias, TableFactor,
+    TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -86,6 +91,72 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
     };
 
     stmt.to_string()
+}
+
+pub fn to_ast_type(data_type: &DataType) -> Result<AstDataType> {
+    let data_type = match data_type {
+        DataType::Boolean => AstDataType::Boolean,
+        DataType::Int16 => AstDataType::SmallInt,
+        DataType::Int32 => AstDataType::Int,
+        DataType::Int64 => AstDataType::BigInt,
+        DataType::Float32 => AstDataType::Float(Some(24)),
+        DataType::Float64 => AstDataType::Float(Some(53)),
+        DataType::Decimal => AstDataType::Decimal(None, None),
+        DataType::Date => AstDataType::Date,
+        DataType::Varchar => AstDataType::Varchar,
+        DataType::Time => AstDataType::Time(false),
+        DataType::Timestamp => AstDataType::Timestamp(false),
+        DataType::Timestamptz => AstDataType::Timestamp(true),
+        DataType::Interval => AstDataType::Interval,
+        DataType::Struct(struct_type) => {
+            let mut fields = vec![];
+            for (name, data_type) in struct_type.iter() {
+                fields.push(StructField {
+                    name: Ident::new_unchecked(name),
+                    data_type: to_ast_type(data_type)?,
+                });
+            }
+            AstDataType::Struct(fields)
+        }
+        DataType::List(datatype) => AstDataType::Array(Box::new(to_ast_type(datatype)?)),
+        DataType::Bytea => AstDataType::Bytea,
+        DataType::Jsonb => AstDataType::Custom(ObjectName::from_test_str("jsonb")),
+        DataType::Serial => {
+            return Err(ErrorCode::NotSupported(
+                "Column type SERIAL is not supported".into(),
+                "Please remove the SERIAL column".into(),
+            )
+            .into())
+        }
+        DataType::Int256 => AstDataType::Custom(ObjectName::from_test_str("rw_int256")),
+    };
+    Ok(data_type)
+}
+
+/// `alter_relation_add_column` adds a new column to the definition of the relation.
+pub fn alter_relation_add_column(definition: &str, column: &PbColumnCatalog) -> Result<String> {
+    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
+    let mut stmt = ast
+        .into_iter()
+        .exactly_one()
+        .expect("should contains only one statement");
+    let column = ColumnCatalog::from(column.clone()).column_desc;
+
+    match &mut stmt {
+        Statement::CreateSource {
+            stmt: CreateSourceStatement { columns, .. },
+        } => {
+            columns.push(ColumnDef {
+                name: Ident::new_unchecked(column.name),
+                data_type: Some(to_ast_type(&column.data_type)?),
+                collation: None,
+                options: vec![],
+            });
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(stmt.to_string())
 }
 
 /// `alter_relation_rename_refs` updates all references of renamed-relation in the definition of

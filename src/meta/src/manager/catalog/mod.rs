@@ -117,6 +117,7 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
+use self::utils::alter_relation_add_column;
 use crate::manager::catalog::utils::{
     alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
     refcnt_inc_connection, ReplaceTableExprRewriter,
@@ -1547,7 +1548,6 @@ where
         .await
     }
 
-    // TODO: change definition
     pub async fn alter_source_column(
         &self,
         source_id: SourceId,
@@ -1558,6 +1558,8 @@ where
         database_core.ensure_source_id(source_id)?;
 
         let mut source = database_core.sources.get(&source_id).unwrap().clone();
+        source.definition =
+            alter_relation_add_column(&source.definition, &added_column).map_err(|e| anyhow!(e))?;
         source.columns.push(added_column);
 
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);

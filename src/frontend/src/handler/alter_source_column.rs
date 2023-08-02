@@ -24,14 +24,11 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::Binder;
 
-// TODO:
-// 1. generated columns?
-// 2. `check_privilege_for_drop_alter`
-// 3. fail test
-// 4. change the definition of source
+// Note for future drop column:
+// 1. Dependencies of generated columns
 
-// Behaviour:
-// 1. wrong if column exists
+// TODO:
+// 1. change the definition of source
 
 /// Handle `ALTER TABLE [ADD] COLUMN` statements.
 pub async fn handle_alter_source_column(
@@ -89,10 +86,12 @@ pub async fn handle_alter_source_column(
                     "column \"{new_column_name}\" of table \"{source_name}\" already exists"
                 )))?
             }
-            let mut bound_columns = bind_sql_columns(&[column_def])?;
-            // fix this if we want to support drop column
-            bound_columns[0].column_desc.column_id = ColumnId::new(columns.len() as i32);
-            bound_columns.remove(0)
+            let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
+            bound_column.column_desc.column_id = columns
+                .iter()
+                .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
+                .next();
+            bound_column
         }
         _ => unreachable!(),
     };
