@@ -65,9 +65,6 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(long, env = "RW_MAX_COMPACTOR_TASK_MULTIPLIER", default_value = "2.0")]
-    pub max_compactor_task_multiplier: f32,
-
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
