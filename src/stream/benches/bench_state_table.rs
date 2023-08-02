@@ -52,7 +52,7 @@ async fn create_state_table() -> TestStateTable {
 }
 
 fn gen_inserts(n: usize, data_types: &[DataType]) -> Vec<OwnedRow> {
-    let chunk = DataChunk::gen_data_chunk(0, n, data_types, &VarcharProperty::Constant);
+    let chunk = DataChunk::gen_data_chunk(0, n, data_types, &VarcharProperty::Constant, 1.0);
     chunk.rows().map(|r| r.into_owned_row()).collect()
 }
 

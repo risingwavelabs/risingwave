@@ -18,11 +18,14 @@ use std::{fmt, usize};
 
 use bytes::Bytes;
 use itertools::Itertools;
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
 use risingwave_pb::data::PbDataChunk;
 
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray, Vis};
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
+
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
@@ -828,21 +831,21 @@ impl DataChunkTestExt for DataChunk {
         chunk_size: usize,
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
-        visibility_ratio: f64,
+        visibility_percent: f64,
     ) -> Self {
-        let mut visible_count = 0;
-        let mut invisible_count = 0;
-        let mut vis = BitmapBuilder::with_capacity(chunk_size);
-        for i in 0..chunk_size {
-            let bit = if visible_count / invisible_count < visibility_ratio {
-                visible_count += 1;
-                true
-            } else {
-                invisible_count += 1;
-                false
-            };
-            vis.append(bit);
-        }
+        let vis = if visibility_percent == 0.0 {
+            Bitmap::zeros(chunk_size)
+        } else if visibility_percent == 1.0 {
+            Bitmap::ones(chunk_size)
+        } else {
+            let mut rng = SmallRng::from_seed([0; 32]);
+            let mut vis_builder = BitmapBuilder::with_capacity(chunk_size);
+            for _i in 0..chunk_size {
+                vis_builder.append(rng.gen_bool(visibility_percent));
+            }
+            vis_builder.finish()
+        };
+
         let mut columns = Vec::new();
         // Generate columns of this chunk.
         for data_type in data_types {
@@ -868,7 +871,7 @@ impl DataChunkTestExt for DataChunk {
             }
             columns.push(array_builder.finish().into());
         }
-        DataChunk::new(columns, Bitmap::ones(chunk_size))
+        DataChunk::new(columns, vis)
     }
 
     fn gen_data_chunks(
@@ -876,10 +879,18 @@ impl DataChunkTestExt for DataChunk {
         chunk_size: usize,
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
-        visibility_ratio: f64,
+        visibility_percent: f64,
     ) -> Vec<Self> {
         (0..num_of_chunks)
-            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, varchar_properties, visibity_ratio))
+            .map(|i| {
+                Self::gen_data_chunk(
+                    i,
+                    chunk_size,
+                    data_types,
+                    varchar_properties,
+                    visibility_percent,
+                )
+            })
             .collect()
     }
 }
