@@ -430,8 +430,9 @@ impl HummockEventHandler {
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
+                        let sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
                         self.cache_refill_policy
-                            .execute(version_delta.clone(), max_level)
+                            .execute(sst_delta_infos, max_level)
                             .await;
                     }
                     version_to_apply.apply_version_delta(version_delta);

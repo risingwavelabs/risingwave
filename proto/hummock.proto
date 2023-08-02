@@ -55,7 +55,6 @@ message IntraLevelDelta {
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
-  repeated uint64 removed_table_object_ids = 5;
 }
 
 enum CompatibilityVersion {

@@ -2730,7 +2730,6 @@ fn gen_version_delta<'a>(
             level_idx: compact_task.target_level,
             inserted_table_infos: compact_task.sorted_output_ssts.clone(),
             l0_sub_level_id: compact_task.target_sub_level_id,
-            removed_table_object_ids: gc_object_ids.clone(),
             ..Default::default()
         })),
     };

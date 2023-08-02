@@ -128,10 +128,6 @@ impl Value for Box<Block> {
 }
 
 impl Value for Box<Sstable> {
-    fn weight(&self) -> usize {
-        std::mem::size_of::<Self>()
-    }
-
     fn serialized_len(&self) -> usize {
         8 + self.meta.encoded_size() // id (8B) + meta size
     }
