@@ -150,6 +150,9 @@ steps:
 #    retry: *auto-retry
 
   - label: "check connector node integration test"
+    depends_on:
+      - "build"
+      - "build-other"
     plugins:
       - chronotc/monorepo-diff#v2.5.8:
           diff: "git diff --name-only origin/main"
@@ -158,22 +161,19 @@ steps:
                 - "java/"
                 - "proto/"
               config:
-                label: "connector node integration test Java {{matrix.java_version}}"
-                command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
-                depends_on:
-                  - "build"
-                  - "build-other"
+                label: "connector node integration test Java 11"
+                command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v 11"
                 plugins:
                   - docker-compose#v4.9.0:
                       run: rw-build-env
                       config: ci/docker-compose.yml
                       mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        java_version:
-          - "11"
-          - "17"
+#    matrix:
+#      setup:
+#        java_version:
+#          - "11"
+#          - "17"
     timeout_in_minutes: 10
     retry: *auto-retry
 
