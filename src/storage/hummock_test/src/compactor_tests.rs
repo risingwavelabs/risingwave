@@ -278,13 +278,8 @@ pub(crate) mod tests {
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
-        assert_eq!(compactor.context_id(), worker_node.id);
+
+        let _recv = compactor_manager.add_compactor(worker_node.id);
         let version = hummock_manager_ref.get_current_version().await;
         let group =
             version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
@@ -301,7 +296,6 @@ pub(crate) mod tests {
                 table_infos: level.table_infos.clone(),
             })
             .collect();
-
 
         // assert compact_task
         assert_eq!(compact_task.input_ssts.len(), SST_COUNT as usize);

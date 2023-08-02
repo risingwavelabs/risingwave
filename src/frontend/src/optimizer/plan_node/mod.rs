@@ -328,6 +328,12 @@ impl PlanRef {
                     .take_predicate(self.id())
                     .expect("must have predicate")
                     .into_iter()
+                    .map(|mut c| Condition {
+                        conjunctions: c
+                            .conjunctions
+                            .drain_filter(|e| e.count_nows() == 0 && e.is_pure())
+                            .collect(),
+                    })
                     .reduce(|a, b| a.or(b))
                     .unwrap();
                 let input: PlanRef = logical_share.input();
