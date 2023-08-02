@@ -8,7 +8,15 @@ create table s0 (v1 int, v2 varchar) with (
 ) FORMAT PLAIN ENCODE CSV (delimiter = ',');
 
 statement ok
-create table s0 (v1 int, v2 varchar) with (
+create table t0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_csv_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
+
+statement ok
+create source s0 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_csv_topic',
   properties.bootstrap.server = 'message_queue:29092',
@@ -443,6 +451,15 @@ flush;
 sleep 1s
 
 query IT rowsort
+select v1, v2 from t0;
+----
+1 1
+2 22
+3 333
+4 4444
+
+
+query IT rowsort
 select v1, v2 from s0;
 ----
 1 1
@@ -451,7 +468,10 @@ select v1, v2 from s0;
 4 4444
 
 statement ok
-drop table s0
+drop source s0
+
+statement ok
+drop table t0
 
 query IT rowsort
 select * from s1
