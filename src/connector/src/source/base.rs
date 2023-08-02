@@ -346,6 +346,10 @@ impl ConnectorProperties {
                 | ConnectorProperties::CitusCdc(_)
         )
     }
+
+    pub fn support_multiple_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Kafka(_))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]

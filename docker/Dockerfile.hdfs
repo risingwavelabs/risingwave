@@ -2,7 +2,8 @@ FROM ubuntu:22.04 AS base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install build-essential pkg-config wget openjdk-11-jdk libsasl2-dev
+RUN apt-get update \
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
 
 FROM base AS builder
 
@@ -34,6 +35,7 @@ RUN rustup self update \
   && rustup show \
   && rustup component add rustfmt
 
+RUN cargo fetch
 
 # java home for hdrs
 ARG JAVA_HOME_PATH
@@ -76,6 +78,15 @@ ENV PATH $PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
 ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
+ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
+
+# set classpath
+RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop_classpath_273.txt -P /root/
+
+# Need to copy the content in the hadoop_classpath_273.txt file, and then set env. 
+# Since the env command can only be written but not read, The following line is deleted here, and then added manually when packaging.
+
+# ENV CLASSPATH=/root/hadoop_classpath_273.txt:$CLASSPATH
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
