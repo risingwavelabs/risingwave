@@ -22,6 +22,7 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, Ove
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::create_overlap_strategy;
+use crate::hummock::compaction::picker::include_sst_picker::L0IncludeSstPicker;
 use crate::hummock::compaction::picker::MinOverlappingPicker;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -176,6 +177,63 @@ impl LevelCompactionPicker {
             return None;
         }
 
+        let mut last_ssts = vec![];
+        let mut total_file_size = 0;
+        let mut last_overlap_info = overlap_strategy.create_overlap_info();
+        let mut exist_small_task = false;
+        let max_target_file_size = std::cmp::min(
+            self.config.max_compaction_bytes / 8,
+            self.config.sub_level_max_compaction_bytes,
+        );
+        for (idx, sst) in target_level.table_infos.iter().enumerate() {
+            let pending_compact =
+                level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id);
+            if !last_ssts.is_empty()
+                && (total_file_size + sst.file_size > max_target_file_size || pending_compact)
+            {
+                let picker = L0IncludeSstPicker::new(
+                    last_overlap_info,
+                    overlap_strategy.clone(),
+                    self.config.max_compaction_bytes / 2,
+                );
+                last_overlap_info = overlap_strategy.create_overlap_info();
+                let input = picker.pick_tables(&l0.sub_levels, &level_handlers[0]);
+                if !input.sstable_infos.is_empty() && input.total_file_size > total_file_size {
+                    min_write_amp_meet = true;
+                    exist_small_task = true;
+                    input_levels.push((input, total_file_size, std::mem::take(&mut last_ssts)));
+                }
+                last_ssts.clear();
+                total_file_size = 0;
+            }
+            if pending_compact {
+                continue;
+            }
+            let key_range = sst.key_range.as_ref().unwrap();
+            if idx > 0 && idx + 1 < target_level.table_infos.len() {
+                last_overlap_info.update_key_range(key_range);
+            } else if idx == 0 {
+                let mut key_range = key_range.clone();
+                key_range.left.clear();
+                last_overlap_info.update_key_range(&key_range);
+            } else {
+                let mut key_range = key_range.clone();
+                key_range.right.clear();
+                last_overlap_info.update_key_range(&key_range);
+            }
+
+            total_file_size += sst.file_size;
+            last_ssts.push(sst.clone());
+        }
+        input_levels.sort_by_key(|(input, _, _)| input.sstable_infos.len());
+        input_levels.sort_by(|(a, _, _), (b, _, _)| {
+            b.sstable_infos
+                .len()
+                .cmp(&a.sstable_infos.len())
+                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
+                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
+        });
+
         if !min_write_amp_meet && strict_check {
             // If the write-amplification of all candidate task are large, we may hope to wait base
             // level compact more data to lower level.  But if we skip all task, I'm
@@ -186,7 +244,11 @@ impl LevelCompactionPicker {
         }
 
         for (input, target_file_size, target_level_files) in input_levels {
-            if min_write_amp_meet && input.total_file_size < target_file_size {
+            if min_write_amp_meet && target_file_size > input.total_file_size {
+                continue;
+            }
+
+            if exist_small_task && target_file_size > self.config.sub_level_max_compaction_bytes {
                 continue;
             }
 

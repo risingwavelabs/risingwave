@@ -287,17 +287,16 @@ where
         fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        config: CompactionConfig,
+        opts: risingwave_common::config::CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> HummockManagerRef<S> {
         use crate::manager::CatalogManager;
-        let compaction_group_manager =
-            Self::build_compaction_group_manager_with_config(&env, config)
-                .await
-                .unwrap();
+        let compaction_group_manager = Self::build_compaction_group_manager_with_config(&env, opts)
+            .await
+            .unwrap();
         let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
         Self::new_impl(
             env,
@@ -449,11 +448,12 @@ where
                 checkpoint
             } else {
                 // As no record found in stores, create a initial version.
-                let default_compaction_config = self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .default_compaction_config();
+                let default_compaction_config = {
+                    let compaction_group_manager = self.compaction_group_manager.read().await;
+                    let default_compaction = compaction_group_manager.default_compaction_config();
+                    CompactionConfigBuilder::with_opt(default_compaction).build()
+                };
+
                 let checkpoint = create_init_version(default_compaction_config);
                 tracing::info!("init hummock version checkpoint");
                 HummockVersionStats::default()
@@ -2793,6 +2793,8 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 use tokio::sync::mpsc::error::SendError;
+
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {

@@ -203,13 +203,14 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_compaction_watermark() {
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(1)
-            .level0_max_compact_file_number(130)
-            .level0_overlapping_sub_level_compact_level_count(1)
-            .build();
+        let opts = risingwave_common::config::CompactionConfig {
+            level0_tier_compact_file_number: 1,
+            level0_max_compact_file_number: 130,
+            level0_overlapping_sub_level_compact_level_count: 1,
+            ..Default::default()
+        };
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env_with_config(8080, config).await;
+            setup_compute_env_with_config(8080, opts).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,

@@ -86,9 +86,8 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     let config = load_config(&opts.config_path, NoOverride);
-    let compaction_config = CompactionConfigBuilder::new().build();
     compaction_test(
-        compaction_config,
+        risingwave_common::config::CompactionConfig::default(),
         config,
         &opts.state_store,
         1000000,
@@ -99,15 +98,16 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
 }
 
 async fn compaction_test(
-    compaction_config: CompactionConfig,
+    opts: risingwave_common::config::CompactionConfig,
     config: RwConfig,
     state_store_type: &str,
     test_range: u64,
     test_count: u64,
     test_delete_ratio: u32,
 ) -> anyhow::Result<()> {
+    let compaction_config = CompactionConfigBuilder::with_opt(&opts).build();
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env_with_config(8080, compaction_config.clone()).await;
+        setup_compute_env_with_config(8080, opts).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -595,13 +595,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
         let config = RwConfig::default();
-        let mut compaction_config = CompactionConfigBuilder::new().build();
-        compaction_config.max_sub_compaction = 1;
-        compaction_config.level0_tier_compact_file_number = 2;
-        compaction_config.max_bytes_for_level_base = 512 * 1024;
-        compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
+        let compaction_config = risingwave_common::config::CompactionConfig {
+            max_sub_compaction: 1,
+            level0_tier_compact_file_number: 1,
+            max_bytes_for_level_base: 512 * 1024,
+            sub_level_max_compaction_bytes: 256 * 1024,
+            ..Default::default()
+        };
         compaction_test(
-            compaction_config.clone(),
+            compaction_config,
             config.clone(),
             "hummock+memory",
             1000000,

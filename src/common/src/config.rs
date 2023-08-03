@@ -1054,6 +1054,13 @@ pub mod default {
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
         }
+
+        pub fn large_group_max_bytes_for_level_base() -> u64 {
+            DEFAULT_MAX_BYTES_FOR_LEVEL_BASE * 4
+        }
+        pub fn large_group_sub_level_max_compaction_bytes() -> u64 {
+            DEFAULT_MIN_COMPACTION_BYTES * 3
+        }
     }
 }
 
@@ -1133,6 +1140,11 @@ pub struct CompactionConfig {
     pub max_space_reclaim_bytes: u64,
     #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
     pub level0_max_compact_file_number: u64,
+
+    #[serde(default = "default::compaction_config::large_group_max_bytes_for_level_base")]
+    pub large_group_max_bytes_for_level_base: u64,
+    #[serde(default = "default::compaction_config::large_group_sub_level_max_compaction_bytes")]
+    pub large_group_sub_level_max_compaction_bytes: u64,
 }
 
 #[cfg(test)]

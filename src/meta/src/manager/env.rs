@@ -149,7 +149,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
-    pub compaction_config: Option<CompactionConfig>,
+    pub compaction_config: CompactionConfig,
 }
 
 impl MetaOpts {
@@ -186,7 +186,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
-            compaction_config: None,
+            compaction_config: CompactionConfig::default(),
         }
     }
 }

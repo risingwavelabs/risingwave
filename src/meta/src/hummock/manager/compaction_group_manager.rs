@@ -54,16 +54,13 @@ impl<S: MetaStore> HummockManager<S> {
     pub(super) async fn build_compaction_group_manager(
         env: &MetaSrvEnv<S>,
     ) -> Result<RwLock<CompactionGroupManager>> {
-        let default_config = match env.opts.compaction_config.as_ref() {
-            None => CompactionConfigBuilder::new().build(),
-            Some(opt) => CompactionConfigBuilder::with_opt(opt).build(),
-        };
-        Self::build_compaction_group_manager_with_config(env, default_config).await
+        let opts = env.opts.compaction_config.clone();
+        Self::build_compaction_group_manager_with_config(env, opts).await
     }
 
     pub(super) async fn build_compaction_group_manager_with_config(
         env: &MetaSrvEnv<S>,
-        default_config: CompactionConfig,
+        default_config: risingwave_common::config::CompactionConfig,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
@@ -554,15 +551,15 @@ impl<S: MetaStore> HummockManager<S> {
                     .generate::<{ IdCategory::CompactionGroup }>()
                     .await?;
                 // The new config will be persisted later.
-                let mut config = self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .default_compaction_config();
+                let manager = self.compaction_group_manager.read().await;
+                let opts = manager.default_compaction_config();
+                let mut config = CompactionConfigBuilder::with_opt(&opts).build();
                 config.split_by_state_table = allow_split_by_table;
                 if !allow_split_by_table {
                     // TODO: remove it after we increase `max_bytes_for_level_base` for all group.
-                    config.max_bytes_for_level_base *= 4;
+                    config.max_bytes_for_level_base = opts.large_group_max_bytes_for_level_base;
+                    config.sub_level_max_compaction_bytes =
+                        opts.large_group_sub_level_max_compaction_bytes;
                     config.split_weight_by_vnode = weight_split_by_vnode;
                 }
 
@@ -729,7 +726,7 @@ impl<S: MetaStore> HummockManager<S> {
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
-    default_config: CompactionConfig,
+    default_config: risingwave_common::config::CompactionConfig,
 }
 
 impl CompactionGroupManager {
@@ -769,7 +766,10 @@ impl CompactionGroupManager {
             if compaction_groups.contains_key(id) {
                 continue;
             }
-            let new_entry = CompactionGroup::new(*id, self.default_config.clone());
+            let new_entry = CompactionGroup::new(
+                *id,
+                CompactionConfigBuilder::with_opt(&self.default_config).build(),
+            );
             compaction_groups.insert(*id, new_entry);
         }
         let mut trx = Transaction::default();
@@ -791,8 +791,8 @@ impl CompactionGroupManager {
         self.compaction_groups.get(&compaction_group_id).cloned()
     }
 
-    pub(super) fn default_compaction_config(&self) -> CompactionConfig {
-        self.default_config.clone()
+    pub(super) fn default_compaction_config(&self) -> &risingwave_common::config::CompactionConfig {
+        &self.default_config
     }
 
     async fn update_compaction_config<S: MetaStore>(

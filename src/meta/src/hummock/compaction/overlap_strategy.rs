@@ -24,7 +24,11 @@ pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
     fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize>;
-    fn update(&mut self, table: &SstableInfo);
+    fn update(&mut self, table: &SstableInfo) {
+        let other = table.key_range.as_ref().unwrap();
+        self.update_key_range(other);
+    }
+    fn update_key_range(&mut self, table: &KeyRange);
 }
 
 pub trait OverlapStrategy: Send + Sync {
@@ -45,6 +49,7 @@ pub trait OverlapStrategy: Send + Sync {
             others[range].to_vec()
         }
     }
+
     fn check_overlap_with_tables(
         &self,
         tables: &[SstableInfo],
@@ -136,8 +141,7 @@ impl OverlapInfo for RangeOverlapInfo {
         }
     }
 
-    fn update(&mut self, table: &SstableInfo) {
-        let other = table.key_range.as_ref().unwrap();
+    fn update_key_range(&mut self, other: &KeyRange) {
         if let Some(range) = self.target_range.as_mut() {
             range.full_key_extend(other);
             return;

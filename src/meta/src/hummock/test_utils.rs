@@ -24,12 +24,9 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 #[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{
-    CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
-};
+use risingwave_pb::hummock::{HummockSnapshot, HummockVersion, KeyRange, SstableInfo};
 use risingwave_pb::meta::add_worker_node_request::Property;
 
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 #[cfg(test)]
 use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
@@ -302,7 +299,7 @@ pub fn get_sorted_committed_object_ids(
 }
 pub async fn setup_compute_env_with_config(
     port: i32,
-    config: CompactionConfig,
+    opts: risingwave_common::config::CompactionConfig,
 ) -> (
     MetaSrvEnv<MemStore>,
     HummockManagerRef<MemStore>,
@@ -328,7 +325,7 @@ pub async fn setup_compute_env_with_config(
         fragment_manager,
         Arc::new(MetaMetrics::new()),
         compactor_manager,
-        config,
+        opts,
         compactor_streams_change_tx,
     )
     .await;
@@ -361,13 +358,14 @@ pub async fn setup_compute_env(
     ClusterManagerRef<MemStore>,
     WorkerNode,
 ) {
-    let config = CompactionConfigBuilder::new()
-        .level0_tier_compact_file_number(1)
-        .level0_max_compact_file_number(130)
-        .level0_sub_level_compact_level_count(1)
-        .level0_overlapping_sub_level_compact_level_count(1)
-        .build();
-    setup_compute_env_with_config(port, config).await
+    let opts = risingwave_common::config::CompactionConfig {
+        level0_tier_compact_file_number: 1,
+        level0_max_compact_file_number: 130,
+        level0_sub_level_compact_level_count: 1,
+        level0_overlapping_sub_level_compact_level_count: 1,
+        ..Default::default()
+    };
+    setup_compute_env_with_config(port, opts).await
 }
 
 pub async fn get_sst_ids<S>(

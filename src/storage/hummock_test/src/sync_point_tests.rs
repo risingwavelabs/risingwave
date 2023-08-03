@@ -263,12 +263,13 @@ pub async fn compact_once(
 #[cfg(feature = "sync_point")]
 #[serial]
 async fn test_syncpoints_get_in_delete_range_boundary() {
-    let config = CompactionConfigBuilder::new()
-        .level0_tier_compact_file_number(1)
-        .max_bytes_for_level_base(4096)
-        .build();
+    let opts = risingwave_common::config::CompactionConfig {
+        level0_tier_compact_file_number: 1,
+        max_bytes_for_level_base: 4096,
+        ..Default::default()
+    };
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env_with_config(8080, config).await;
+        setup_compute_env_with_config(8080, opts).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
