@@ -13,42 +13,41 @@
 // limitations under the License.
 
 use risingwave_common::bail;
+use risingwave_common::types::JsonbVal;
 use risingwave_expr_macro::aggregate;
 use serde_json::Value;
 
 use crate::{ExprError, Result};
 
-#[aggregate("jsonb_agg(boolean) -> jsonb", state = "Value")]
-#[aggregate("jsonb_agg(*int) -> jsonb", state = "Value")]
-#[aggregate("jsonb_agg(*float) -> jsonb", state = "Value")]
-#[aggregate("jsonb_agg(varchar) -> jsonb", state = "Value")]
-#[aggregate("jsonb_agg(jsonb) -> jsonb", state = "Value")]
-fn jsonb_agg(state: Option<Value>, input: Option<impl Into<Value>>) -> Value {
-    let mut array = match state {
-        Some(Value::Array(a)) => a,
-        None => Vec::with_capacity(1),
+#[aggregate("jsonb_agg(boolean) -> jsonb")]
+#[aggregate("jsonb_agg(*int) -> jsonb")]
+#[aggregate("jsonb_agg(*float) -> jsonb")]
+#[aggregate("jsonb_agg(varchar) -> jsonb")]
+#[aggregate("jsonb_agg(jsonb) -> jsonb")]
+fn jsonb_agg(state: Option<JsonbVal>, input: Option<impl Into<Value>>) -> JsonbVal {
+    let mut jsonb = state.unwrap_or_else(|| Value::Array(Vec::with_capacity(1)).into());
+    match jsonb.as_serde_mut() {
+        Value::Array(a) => a.push(input.map_or(Value::Null, Into::into)),
         _ => unreachable!("invalid jsonb state"),
     };
-    array.push(input.map_or(Value::Null, Into::into));
-    Value::Array(array)
+    jsonb
 }
 
-#[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb", state = "Value")]
-#[aggregate("jsonb_object_agg(varchar, *int) -> jsonb", state = "Value")]
-#[aggregate("jsonb_object_agg(varchar, *float) -> jsonb", state = "Value")]
-#[aggregate("jsonb_object_agg(varchar, varchar) -> jsonb", state = "Value")]
-#[aggregate("jsonb_object_agg(varchar, jsonb) -> jsonb", state = "Value")]
+#[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, *int) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, *float) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, varchar) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, jsonb) -> jsonb")]
 fn jsonb_object_agg(
-    state: Option<Value>,
+    state: Option<JsonbVal>,
     key: Option<&str>,
     value: Option<impl Into<Value>>,
-) -> Result<Option<Value>> {
+) -> Result<JsonbVal> {
     let key = key.ok_or(ExprError::FieldNameNull)?;
-    let mut map = match state {
-        Some(Value::Object(o)) => o,
-        None => Default::default(),
+    let mut jsonb = state.unwrap_or_else(|| Value::Object(Default::default()).into());
+    match jsonb.as_serde_mut() {
+        Value::Object(map) => map.insert(key.into(), value.map_or(Value::Null, Into::into)),
         _ => unreachable!("invalid jsonb state"),
     };
-    map.insert(key.into(), value.map_or(Value::Null, Into::into));
-    Ok(Some(Value::Object(map)))
+    Ok(jsonb)
 }
