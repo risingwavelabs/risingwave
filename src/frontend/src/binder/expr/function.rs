@@ -90,7 +90,7 @@ impl Binder {
                 .into());
         }
 
-        // FIXME: This is a hack to support [Bytebase queries]([format(](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549)).
+        // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
         // Bytebase widely used the pattern like `obj_description(format('%s.%s',
         // quote_ident(idx.schemaname), quote_ident(idx.indexname))::regclass) AS comment` to
         // retrieve object comment, however we don't support cast a non-literal expression to
