@@ -43,7 +43,7 @@ hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
 hytra = { workspace = true }
-itertools = "0.10"
+itertools = "0.11"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
@@ -65,7 +65,7 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common_proc_macro = { path = "./proc_macro" }
-risingwave_pb = { path = "../prost" }
+risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
@@ -102,7 +102,7 @@ uuid = "1.4.1"
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.14", default-features = false }
+procfs = { version = "0.15", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]

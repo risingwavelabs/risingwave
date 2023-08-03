@@ -20,6 +20,9 @@ use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
+// TODO: `rw_relation_info` contains some extra streaming meta info that's only meaningful for
+// streaming jobs, we'd better query relation infos from `rw_relations` and move these streaming
+// infos into anther system table.
 pub const RW_RELATION_INFO: BuiltinTable = BuiltinTable {
     name: "rw_relation_info",
     schema: RW_CATALOG_SCHEMA_NAME,
@@ -36,7 +39,7 @@ pub const RW_RELATION_INFO: BuiltinTable = BuiltinTable {
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
     ],
-    pk: &[],
+    pk: &[0, 1],
 };
 
 impl SysCatalogReaderImpl {

@@ -95,9 +95,10 @@ impl ConnectorSourceWorker {
     }
 
     pub async fn create(
-        connector_client: Option<ConnectorClient>,
+        connector_client: &Option<ConnectorClient>,
         source: &Source,
         period: Duration,
+        splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
@@ -116,7 +117,7 @@ impl ConnectorSourceWorker {
             }),
         )
         .await?;
-        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+
         Ok(Self {
             source_id: source.id,
             source_name: source.name.clone(),
@@ -125,7 +126,7 @@ impl ConnectorSourceWorker {
             period,
             metrics,
             connector_properties: properties,
-            connector_client,
+            connector_client: connector_client.clone(),
             fail_cnt: 0,
         })
     }
@@ -526,20 +527,24 @@ where
         {
             let sources = catalog_manager.list_sources().await;
             for source in sources {
-                Self::create_source_worker(
+                Self::create_source_worker_async(
                     env.connector_client(),
-                    &source,
+                    source,
                     &mut managed_sources,
-                    false,
                     metrics.clone(),
                 )
-                .await?
+                .await
             }
         }
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager.list_table_fragments().await {
+        for table_fragments in fragment_manager
+            .get_fragment_read_guard()
+            .await
+            .table_fragments()
+            .values()
+        {
             source_fragments.extend(table_fragments.stream_source_fragments());
             actor_splits.extend(table_fragments.actor_splits.clone());
         }
@@ -704,6 +709,58 @@ where
         Ok(())
     }
 
+    async fn create_source_worker_async(
+        connector_client: Option<ConnectorClient>,
+        source: Source,
+        managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
+        metrics: Arc<MetaMetrics>,
+    ) {
+        tracing::info!("spawning new watcher for source {}", source.id);
+
+        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+        let current_splits_ref = splits.clone();
+        let source_id = source.id;
+
+        let handle = tokio::spawn(async move {
+            let mut ticker = time::interval(Self::SOURCE_TICK_INTERVAL);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            let mut worker = loop {
+                ticker.tick().await;
+
+                match ConnectorSourceWorker::create(
+                    &connector_client,
+                    &source,
+                    Duration::from_secs(10),
+                    splits.clone(),
+                    metrics.clone(),
+                )
+                .await
+                {
+                    Ok(worker) => {
+                        break worker;
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to create source worker: {}", e);
+                    }
+                }
+            };
+
+            worker.run(sync_call_rx).await
+        });
+
+        managed_sources.insert(
+            source_id,
+            ConnectorSourceWorkerHandle {
+                handle,
+                sync_call_tx,
+                splits: current_splits_ref,
+            },
+        );
+    }
+
     async fn create_source_worker(
         connector_client: Option<ConnectorClient>,
         source: &Source,
@@ -711,14 +768,16 @@ where
         force_tick: bool,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
+        let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let mut worker = ConnectorSourceWorker::create(
-            connector_client,
+            &connector_client,
             source,
             Duration::from_secs(10),
+            current_splits_ref.clone(),
             metrics,
         )
         .await?;
-        let current_splits_ref = worker.current_splits.clone();
+
         tracing::info!("spawning new watcher for source {}", source.id);
 
         // don't force tick in process of recovery. One source down should not lead to meta recovery
@@ -778,7 +837,7 @@ where
 
         if !diff.is_empty() {
             let command = Command::SourceSplitAssignment(diff);
-            tracing::debug!("pushing down command {:#?}", command);
+            tracing::info!(command = ?command, "pushing down split assignment command");
             self.barrier_scheduler.run_command(command).await?;
         }
 

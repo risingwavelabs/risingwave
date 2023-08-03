@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fs;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+use risingwave_common::config::AutoDumpHeapProfileConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 
 use super::MemoryControlRef;
-use crate::memory_management::MemoryControlStats;
+use crate::memory_management::{build_memory_control_policy, MemoryControlStats};
 
 /// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
 pub struct GlobalMemoryManager {
@@ -44,10 +46,17 @@ impl GlobalMemoryManager {
 
     pub fn new(
         metrics: Arc<StreamingMetrics>,
-        memory_control_policy: MemoryControlRef,
+        total_memory_bytes: usize,
+        auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
     ) -> Arc<Self> {
+        let memory_control_policy =
+            build_memory_control_policy(total_memory_bytes, auto_dump_heap_profile_config.clone())
+                .unwrap();
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
+        if auto_dump_heap_profile_config.enabled() {
+            fs::create_dir_all(&auto_dump_heap_profile_config.dir).unwrap();
+        }
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             metrics,
@@ -79,8 +88,8 @@ impl GlobalMemoryManager {
         let mut tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
 
         let mut memory_control_stats = MemoryControlStats {
-            jemalloc_allocated_mib: 0,
-            jemalloc_active_mib: 0,
+            jemalloc_allocated_bytes: 0,
+            jemalloc_active_bytes: 0,
             lru_watermark_step: 0,
             lru_watermark_time_ms: Epoch::physical_now(),
             lru_physical_now_ms: Epoch::physical_now(),
@@ -120,10 +129,10 @@ impl GlobalMemoryManager {
                     self.metrics.lru_runtime_loop_count.inc();
                     self.metrics
                         .jemalloc_allocated_bytes
-                        .set(memory_control_stats.jemalloc_allocated_mib as i64);
+                        .set(memory_control_stats.jemalloc_allocated_bytes as i64);
                     self.metrics
                         .jemalloc_active_bytes
-                        .set(memory_control_stats.jemalloc_active_mib as i64);
+                        .set(memory_control_stats.jemalloc_active_bytes as i64);
                 }
             }
         }

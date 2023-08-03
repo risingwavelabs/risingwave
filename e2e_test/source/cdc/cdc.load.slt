@@ -179,3 +179,6 @@ create table person_rw (
   publication.name='dumb_publicaton',
   publication.create.enable='false'
 );
+
+statement ok
+create materialized view person_cnt as select count(*) as cnt from person_rw;

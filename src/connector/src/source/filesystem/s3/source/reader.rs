@@ -248,8 +248,8 @@ mod tests {
 
     use super::*;
     use crate::parser::{
-        CommonParserConfig, CsvProperties, EncodingProperties, ParserProperties,
-        ProtocolProperties, SpecificParserConfig,
+        CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
+        SpecificParserConfig,
     };
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
     use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
@@ -287,11 +287,11 @@ mod tests {
 
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
-            specific: SpecificParserConfig::Plain(ParserProperties {
+            specific: SpecificParserConfig {
                 key_encoding_config: None,
                 encoding_config: EncodingProperties::Csv(csv_config),
                 protocol_config: ProtocolProperties::Plain,
-            }),
+            },
         };
 
         let reader = S3FileReader::new(props, splits, config, Default::default(), None)

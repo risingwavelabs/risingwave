@@ -412,6 +412,7 @@ where
             })
             .collect();
 
+        // FIXME: the same as anther place calling `list_table_fragments` in scaling.
         // Index for StreamActor
         let mut actor_map = HashMap::new();
         // Index for Fragment
@@ -1641,12 +1642,14 @@ where
 
         let all_table_fragments = self.fragment_manager.list_table_fragments().await;
 
+        // FIXME: only need actor id and dispatcher info, avoid clone it.
         let mut actor_map = HashMap::new();
         let mut actor_status = HashMap::new();
+        // FIXME: only need fragment distribution info, should avoid clone it.
         let mut fragment_map = HashMap::new();
 
-        for table_fragments in &all_table_fragments {
-            for (fragment_id, fragment) in &table_fragments.fragments {
+        for table_fragments in all_table_fragments {
+            for (fragment_id, fragment) in table_fragments.fragments {
                 fragment
                     .actors
                     .iter()
@@ -1655,10 +1658,10 @@ where
                         actor_map.insert(id as ActorId, actor.clone());
                     });
 
-                fragment_map.insert(*fragment_id, fragment.clone());
+                fragment_map.insert(fragment_id, fragment);
             }
 
-            actor_status.extend(table_fragments.actor_status.clone());
+            actor_status.extend(table_fragments.actor_status);
         }
 
         let mut no_shuffle_source_fragment_ids = HashSet::new();
