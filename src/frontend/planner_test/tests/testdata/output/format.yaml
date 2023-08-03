@@ -24,7 +24,7 @@
     Bind error: failed to bind expression: format('Testing %s, %s, %s, %%', 'one', 'two')
 
     Caused by:
-      Bind error: Function `format` required 4 arguments based on the `formatstr`, but 3 found.
+      Bind error: Function `format` required 3 arguments based on the `formatstr`, but 2 found.
 - sql: |
     SELECT format('Testing %s, %s, %s, %', 'one', 'two', 'three');
   binder_error: |-
