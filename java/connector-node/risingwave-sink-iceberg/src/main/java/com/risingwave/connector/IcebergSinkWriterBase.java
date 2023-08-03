@@ -23,6 +23,7 @@ import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.java.utils.ObjectSerde;
 import com.risingwave.proto.ConnectorServiceProto;
 import java.util.Collections;
+import java.util.Optional;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -59,7 +60,7 @@ public abstract class IcebergSinkWriterBase implements SinkWriter {
     protected abstract IcebergMetadata collectSinkMetadata();
 
     @Override
-    public void barrier(boolean isCheckpoint) {
+    public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
         if (isCheckpoint) {
             IcebergMetadata icebergMetadata = collectSinkMetadata();
 
@@ -76,6 +77,7 @@ public abstract class IcebergSinkWriterBase implements SinkWriter {
                             .build();
             coordinator.commit(epoch, Collections.singletonList(metadata));
         }
+        return Optional.empty();
     }
 
     public HadoopCatalog getHadoopCatalog() {
