@@ -116,9 +116,9 @@ async fn run_bench_state_table_chunks(mut state_table: TestStateTable, chunks: V
 }
 
 fn bench_state_table_write_chunk(c: &mut Criterion) {
-    let visiblities = [0.5, 0.90, 0.99, 1.0];
+    let visibilities = [0.5, 0.90, 0.99, 1.0];
     let inserts = [0.5, 0.90, 0.99, 1.0];
-    for visibility in visiblities {
+    for visibility in visibilities {
         for insert in inserts {
             bench_state_table_chunks(c, visibility, insert);
         }
@@ -132,18 +132,29 @@ fn bench_state_table_chunks(c: &mut Criterion, visibility_percent: f64, inserts_
     let deletes_percent = 1.0 - inserts_percent;
 
     let rt = Runtime::new().unwrap();
-    group.bench_function(format!("benchmark_chunks_visibility_{visibility_percent}_inserts_{inserts_percent}_deletes_{deletes_percent}"), |b| {
-        b.to_async(&rt).iter_batched(
-            || {
-                (
-                    setup_bench_state_table(),
-                    gen_stream_chunks(100, &[DataType::Int32, DataType::Int64, DataType::Int64], visibility_percent, inserts_percent),
-                )
-            },
-            |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
-            BatchSize::SmallInput,
-        )
-    });
+    group.bench_function(
+        format!(
+            "benchmark_chunks_visibility_{:.2}_inserts_{:.2}_deletes_{:.2}",
+            visibility_percent, inserts_percent, deletes_percent
+        ),
+        |b| {
+            b.to_async(&rt).iter_batched(
+                || {
+                    (
+                        setup_bench_state_table(),
+                        gen_stream_chunks(
+                            100,
+                            &[DataType::Int32, DataType::Int64, DataType::Int64],
+                            visibility_percent,
+                            inserts_percent,
+                        ),
+                    )
+                },
+                |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
+                BatchSize::SmallInput,
+            )
+        },
+    );
 }
 
 criterion_group!(
