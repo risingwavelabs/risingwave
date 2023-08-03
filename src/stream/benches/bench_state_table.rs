@@ -56,8 +56,20 @@ fn gen_inserts(n: usize, data_types: &[DataType]) -> Vec<OwnedRow> {
     chunk.rows().map(|r| r.into_owned_row()).collect()
 }
 
-fn gen_stream_chunks(n: usize, data_types: &[DataType], visibility_percent: f64, inserts_percent: f64) -> Vec<StreamChunk> {
-    StreamChunk::gen_stream_chunks_inner(n, 1024, data_types, &VarcharProperty::Constant, visibility_percent, inserts_percent)
+fn gen_stream_chunks(
+    n: usize,
+    data_types: &[DataType],
+    visibility_percent: f64,
+    inserts_percent: f64,
+) -> Vec<StreamChunk> {
+    StreamChunk::gen_stream_chunks_inner(
+        n,
+        1024,
+        data_types,
+        &VarcharProperty::Constant,
+        visibility_percent,
+        inserts_percent,
+    )
 }
 
 fn setup_bench_state_table() -> TestStateTable {
