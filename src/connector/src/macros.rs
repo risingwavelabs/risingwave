@@ -190,31 +190,40 @@ macro_rules! impl_common_split_reader_logic {
                 let parser_config = self.parser_config.clone();
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
-                let split_id = self.split_id.clone();
                 let metrics = self.source_ctx.metrics.clone();
                 let source_ctx = self.source_ctx.clone();
 
                 let data_stream = self.into_data_stream();
 
                 let data_stream = data_stream
-                    .inspect_ok(move |data_batch| {
+                .inspect_ok(move |data_batch| {
+                    let mut by_split_id = std::collections::HashMap::new();
+
+                    for msg in data_batch {
+                        by_split_id
+                            .entry(msg.split_id.as_ref())
+                            .or_insert_with(Vec::new)
+                            .push(msg);
+                    }
+
+                    for (split_id, msgs) in by_split_id {
                         metrics
                             .partition_input_count
-                            .with_label_values(&[&actor_id, &source_id, &split_id])
-                            .inc_by(data_batch.len() as u64);
-                        let sum_bytes = data_batch
+                            .with_label_values(&[&actor_id, &source_id, split_id])
+                            .inc_by(msgs.len() as u64);
+
+                        let sum_bytes = msgs
                             .iter()
-                            .map(|msg| match &msg.payload {
-                                None => 0,
-                                Some(payload) => payload.len() as u64,
-                            })
+                            .flat_map(|msg| msg.payload.as_ref().map(|p| p.len() as u64))
                             .sum();
+
                         metrics
                             .partition_input_bytes
                             .with_label_values(&[&actor_id, &source_id, &split_id])
                             .inc_by(sum_bytes);
-                    })
-                    .boxed();
+                    }
+                }).boxed();
+
                 let parser =
                     $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
                 #[for_await]
