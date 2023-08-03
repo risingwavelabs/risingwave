@@ -516,8 +516,68 @@
     create table t(x int[], y int[], k int primary key);
     select *, (select sum(i) from unnest(x) i) as sum_x from t;
   batch_error: 'internal error: Subquery can not be unnested.'
-- name: test subquery in project set
+- name: CorrelatedInputRef in ProjectSet and apply on condition is true.
   sql: |
     create table t(x int[], y int[], k int primary key);
-    select *, (select sum(i) from (select unnest(x) i ) i) as sum_x from t;
-  batch_error: 'internal error: Subquery can not be unnested.'
+    select *, (select sum(i) from (select unnest(x) i) Q ) as sum_x from t;
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x] }
+        └─LogicalProject { exprs: [t.x, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, Unnest($0)] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [t.x], aggs: [] }
+              │ └─LogicalScan { table: t, columns: [t.x] }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x] }
+        └─LogicalProject { exprs: [t.x, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, Unnest($0)] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [t.x], aggs: [] }
+              │ └─LogicalScan { table: t, columns: [t.x] }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: CorrelatedInputRef in ProjectSet and apply on condition refers to no table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i, 1 c) Q where k = c ) as sum_x from t;
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x, t.k] }
+        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+              │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x, t.k] }
+        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+              │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: CorrelatedInputRef in ProjectSet and apply on condition refers to table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q where k = i ) as sum_x from t;
+  optimizer_error: 'internal error: Subquery can not be unnested.'

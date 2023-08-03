@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
@@ -470,7 +471,17 @@ where
             NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
         // Use configured parallel units if no default parallelism is specified.
         let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
-            DefaultParallelism::Full => available_parallel_units,
+            DefaultParallelism::Full => {
+                if available_parallel_units.get() > VirtualNode::COUNT {
+                    tracing::warn!(
+                        "Too many parallel units, use {} instead",
+                        VirtualNode::COUNT
+                    );
+                    NonZeroUsize::new(VirtualNode::COUNT).unwrap()
+                } else {
+                    available_parallel_units
+                }
+            }
             DefaultParallelism::Default(num) => *num,
         });
 
