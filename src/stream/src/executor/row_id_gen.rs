@@ -89,7 +89,7 @@ impl RowIdGenExecutor {
         builder.finish().into_ref()
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mut upstream = self.upstream.take().unwrap().execute();
 

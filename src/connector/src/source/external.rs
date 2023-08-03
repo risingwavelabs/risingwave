@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::AtomicUsize;
 
 use anyhow::anyhow;
 use futures::{pin_mut, Stream, StreamExt};
@@ -23,11 +24,13 @@ use itertools::Itertools;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{Datum, ScalarImpl, F64};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::error::ConnectorError;
 use crate::parser::mysql_row_to_datums;
 use crate::source::cdc::CdcProperties;
+use crate::source::datagen::DatagenEventGenerator;
 
 pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
@@ -85,27 +88,27 @@ pub enum BinlogOffset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebeziumOffset {
     #[serde(rename = "sourcePartition")]
-    source_partition: HashMap<String, String>,
+    pub source_partition: HashMap<String, String>,
     #[serde(rename = "sourceOffset")]
-    pub(crate) source_offset: DebeziumSourceOffset,
+    pub source_offset: DebeziumSourceOffset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebeziumSourceOffset {
     // postgres snapshot progress
-    pub(crate) last_snapshot_record: Option<bool>,
+    pub last_snapshot_record: Option<bool>,
     // mysql snapshot progress
-    pub(crate) snapshot: Option<bool>,
+    pub snapshot: Option<bool>,
 
     // mysql binlog offset
-    file: Option<String>,
-    pos: Option<u64>,
+    pub file: Option<String>,
+    pub pos: Option<u64>,
 
     // postgres binlog offset
-    lsn: Option<u64>,
+    pub lsn: Option<u64>,
     #[serde(rename = "txId")]
-    txid: Option<u64>,
-    tx_usec: Option<u64>,
+    pub txid: Option<u64>,
+    pub tx_usec: Option<u64>,
 }
 
 impl MySqlOffset {
@@ -148,6 +151,7 @@ pub trait ExternalTableReader {
 
 #[derive(Debug)]
 pub enum ExternalTableReaderImpl {
+    MOCK(MockExternalTableReader),
     MYSQL(MySqlExternalTableReader),
 }
 
@@ -159,6 +163,87 @@ impl ExternalTableReaderImpl {
             }
             _ => {
                 unreachable!("unexpected external table reader")
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MockExternalTableReader {
+    binlog_watermarks: Vec<MySqlOffset>,
+    snapshot_cnt: AtomicUsize,
+}
+
+impl MockExternalTableReader {
+    pub fn new(binlog_watermarks: Vec<MySqlOffset>) -> Self {
+        Self {
+            binlog_watermarks,
+            snapshot_cnt: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl ExternalTableReader for MockExternalTableReader {
+    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
+    type RowStream<'a> = impl Stream<Item = ConnectorResult<OwnedRow>> + 'a;
+
+    fn get_normalized_table_name(_table_name: &SchemaTableName) -> String {
+        format!("`mock_table`")
+    }
+
+    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+        static IDX: AtomicUsize = AtomicUsize::new(0);
+        async move {
+            let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(BinlogOffset::MySQL(self.binlog_watermarks[idx].clone()))
+        }
+    }
+
+    fn snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _primary_keys: Vec<String>,
+    ) -> Self::RowStream<'_> {
+        let snap_idx = self
+            .snapshot_cnt
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        #[try_stream]
+        async move {
+            let snap1 = vec![
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(1)),
+                    Some(ScalarImpl::Float64(1.0001.into())),
+                ]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(2)),
+                    Some(ScalarImpl::Float64(1.0002.into())),
+                ]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(3)),
+                    Some(ScalarImpl::Float64(1.0003.into())),
+                ]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(4)),
+                    Some(ScalarImpl::Float64(1.0004.into())),
+                ]),
+            ];
+            let snap2 = vec![
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(5)),
+                    Some(ScalarImpl::Float64(1.0005.into())),
+                ]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(6)),
+                    Some(ScalarImpl::Float64(1.0006.into())),
+                ]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(7)),
+                    Some(ScalarImpl::Float64(1.0007.into())),
+                ]),
+            ];
+            let snapshots = vec![snap1, snap2];
+            for row in snapshots[snap_idx] {
+                yield row;
             }
         }
     }

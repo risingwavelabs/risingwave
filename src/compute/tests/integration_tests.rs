@@ -26,7 +26,8 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
+use risingwave_common::array::stream_chunk::{Offset, StreamChunkMeta};
+use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
@@ -39,6 +40,9 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::external::{
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MockExternalTableReader,
+};
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
@@ -49,14 +53,19 @@ use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::Distribution;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
+use risingwave_stream::executor::external::ExternalStorageTable;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
+use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
+    expect_first_barrier, ActorContext, ActorContextRef, BackfillExecutor, Barrier,
+    BoxedMessageStream, CdcBackfillExecutor, Executor, MaterializeExecutor, Message, PkIndices,
+    PkIndicesRef,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -95,6 +104,211 @@ impl SingleChunkExecutor {
     async fn do_execute(self: Box<Self>) {
         yield self.chunk.unwrap()
     }
+}
+
+// mock upstream binlog offset
+pub struct MockOffsetGenExecutor {
+    ctx: ActorContextRef,
+
+    upstream: Option<BoxedExecutor>,
+
+    schema: Schema,
+
+    pk_indices: PkIndices,
+
+    identity: String,
+
+    start_offset: u32,
+}
+
+impl MockOffsetGenExecutor {
+    pub fn new(
+        ctx: ActorContextRef,
+        upstream: BoxedExecutor,
+        schema: Schema,
+        pk_indices: PkIndices,
+    ) -> Self {
+        Self {
+            ctx,
+            upstream: Some(upstream),
+            schema,
+            pk_indices,
+            identity: format!("MockOffsetGenExecutor"),
+            start_offset: 0,
+        }
+    }
+
+    fn next_offset(&mut self) -> Result<String> {
+        let start_offset = self.start_offset;
+        let dbz_offset = DebeziumOffset {
+            source_partition: Default::default(),
+            source_offset: DebeziumSourceOffset {
+                last_snapshot_record: None,
+                snapshot: None,
+                file: Some("1.binlog".to_string()),
+                pos: Some(start_offset as _),
+                lsn: None,
+                txid: None,
+                tx_usec: None,
+            },
+        };
+
+        self.start_offset += 1;
+        let out = serde_json::to_string(&dbz_offset)?;
+        Ok(out)
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self) {
+        // fake offset in stream chunk
+        let mut upstream = self.upstream.take().unwrap().execute();
+
+        // The first barrier mush propagated.
+        let barrier = expect_first_barrier(&mut upstream).await?;
+        yield Message::Barrier(barrier);
+
+        #[for_await]
+        for msg in upstream {
+            let msg = msg?;
+
+            match msg {
+                Message::Chunk(chunk) => {
+                    let mut offsets = vec![];
+                    let (ops, columns, bitmap) = chunk.into_inner();
+                    assert!(bitmap.is_none());
+
+                    for _ in 0..ops.len() {
+                        offsets.push(Offset(self.next_offset()?));
+                    }
+                    yield Message::Chunk(StreamChunk::new_with_meta(
+                        ops,
+                        columns,
+                        bitmap,
+                        Some(StreamChunkMeta { offsets }),
+                    ));
+                }
+                Message::Barrier(barrier) => {
+                    yield Message::Barrier(barrier);
+                }
+                Message::Watermark(watermark) => yield Message::Watermark(watermark),
+            }
+        }
+    }
+}
+
+impl Executor for MockOffsetGenExecutor {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+}
+
+#[tokio::test]
+async fn test_cdc_backfill() -> StreamResult<()> {
+    use risingwave_common::types::DataType;
+    let memory_state_store = MemoryStateStore::new();
+
+    let table_id = TableId::default();
+    let schema = Schema::new(vec![
+        Field::unnamed(DataType::Int64), // primary key
+        Field::unnamed(DataType::Float64),
+    ]);
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+        ColumnDesc::unnamed(ColumnId::new(1), DataType::Float64),
+    ];
+    let pk_indices = vec![0];
+
+    let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+    let actor_ctx = ActorContext::create(0x3a3a3a);
+
+    let mock_offset_executor = MockOffsetGenExecutor::new(
+        actor_ctx,
+        Box::new(source),
+        schema.clone(),
+        pk_indices.clone(),
+    );
+
+    let external_table = ExternalStorageTable::new(
+        table_id,
+        "mock_table".to_string(),
+        "public".to_string(),
+        ExternalTableReaderImpl::MOCK(MockExternalTableReader::new(vec![])),
+        schema.clone(),
+        vec![],
+        pk_indices,
+        vec![0, 1],
+        Distribution::fallback(),
+    );
+
+    let cdc_backfill = CdcBackfillExecutor::<PanicStateStore>::new(
+        external_table,
+        Box::new(mock_offset_executor),
+        None,
+        vec![0, 1],
+        None,
+        schema.clone(),
+        vec![0],
+        Arc::new(StreamingMetrics::unused()),
+        10,
+    );
+
+    // Create a `MaterializeExecutor` to write the changes to storage.
+    let mut materialize = MaterializeExecutor::for_test(
+        Box::new(cdc_backfill),
+        memory_state_store.clone(),
+        table_id,
+        vec![ColumnOrder::new(0, OrderType::ascending())],
+        all_column_ids.clone(),
+        4,
+        Arc::new(AtomicU64::new(0)),
+        ConflictBehavior::NoCheck,
+    )
+    .await
+    .boxed()
+    .execute();
+
+    // assert barrier is forwarded to mview
+    assert!(matches!(
+        materialize.next().await.unwrap()?,
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: None,
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
+
+    // Poll `Materialize`, should output the same insertion stream chunk.
+    let message = materialize.next().await.unwrap()?;
+    let mut col_row_ids = vec![];
+    match message {
+        Message::Watermark(_) => {
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
+        }
+        Message::Chunk(c) => {
+            let col_row_id = c.columns()[0].as_serial();
+            col_row_ids.push(col_row_id.value_at(0).unwrap());
+            col_row_ids.push(col_row_id.value_at(1).unwrap());
+
+            let col_data = c.columns()[1].as_float64();
+            assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
+            assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
+        }
+        Message::Barrier(_) => panic!(),
+    }
+
+    Ok(())
 }
 
 /// This test checks whether batch task and streaming task work together for `Table` creation,
@@ -228,6 +442,8 @@ async fn test_table_materialize() -> StreamResult<()> {
          1.14
          5.14",
     );
+
+    // insert_inner是InsertExecutor的输入
     let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(
         chunk,
         get_schema(&[ColumnId::from(1)]),
