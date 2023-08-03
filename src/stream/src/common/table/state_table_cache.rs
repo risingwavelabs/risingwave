@@ -73,8 +73,11 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///        This has to be implemented in state_table.
 ///        We do not need to store any values, just the keys.
 ///
-/// TODO(kwannoel): Optimization: We can use cache to do point delete rather than range delete.
-/// If cache is not full, we can do point delete, for each cache entry.
+/// TODO(kwannoel):
+/// Optimization: If cache is not full,
+/// we can also do point delete for each cache entry.
+/// Not sure if this is more optimal,
+/// we have to measure this scenario to see if it is indeed better.
 #[derive(EstimateSize, Clone)]
 pub struct StateTableWatermarkCache {
     inner: TopNStateCache<WatermarkCacheKey, ()>,
