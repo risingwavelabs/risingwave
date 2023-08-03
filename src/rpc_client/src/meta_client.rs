@@ -1531,9 +1531,8 @@ impl GrpcMetaClient {
     }
 
     fn addr_to_endpoint(addr: String) -> Result<Endpoint> {
-        Endpoint::from_shared(addr)
-            .map(|endpoint| endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
-            .map_err(RpcError::TransportError)
+        let endpoint = Endpoint::from_shared(addr)?;
+        Ok(endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
     }
 
     pub(crate) async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
@@ -1571,8 +1570,7 @@ impl GrpcMetaClient {
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
-            .await
-            .map_err(RpcError::TransportError)?
+            .await?
             .tracing_injected();
 
         Ok(channel)

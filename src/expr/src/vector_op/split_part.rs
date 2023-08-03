@@ -28,7 +28,7 @@ pub fn split_part(
     if nth_expr == 0 {
         return Err(ExprError::InvalidParam {
             name: "data",
-            reason: "can't be zero".to_string(),
+            reason: "can't be zero".into(),
         });
     };
 

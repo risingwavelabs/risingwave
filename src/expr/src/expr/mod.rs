@@ -49,6 +49,7 @@ mod expr_proctime;
 pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;
+mod expr_to_date_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
 pub(crate) mod expr_udf;
 mod expr_unary;
