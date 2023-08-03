@@ -123,6 +123,8 @@ mod project_join_separate_rule;
 pub use project_join_separate_rule::*;
 mod grouping_sets_to_expand_rule;
 pub use grouping_sets_to_expand_rule::*;
+mod apply_project_set_transpose_rule;
+pub use apply_project_set_transpose_rule::*;
 mod common_sub_expr_extract_rule;
 pub use common_sub_expr_extract_rule::*;
 
@@ -136,6 +138,7 @@ macro_rules! for_all_rules {
               { ApplyAggTransposeRule }
             , { ApplyFilterTransposeRule }
             , { ApplyProjectTransposeRule }
+            , { ApplyProjectSetTransposeRule }
             , { ApplyEliminateRule }
             , { ApplyJoinTransposeRule }
             , { ApplyShareEliminateRule }

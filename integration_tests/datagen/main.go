@@ -159,6 +159,12 @@ func main() {
 						Destination: &cfg.Kinesis.Region,
 					},
 					cli.StringFlag{
+						Name:        "endpoint",
+						Usage:       "The endpoint of this Kinesis stream",
+						Required:    false,
+						Destination: &cfg.Kinesis.Endpoint,
+					},
+					cli.StringFlag{
 						Name:        "name",
 						Usage:       "The Kinesis stream name",
 						Required:    true,

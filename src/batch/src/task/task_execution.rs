@@ -323,7 +323,9 @@ impl ShutdownToken {
     /// This method is cancel safe.
     pub async fn cancelled(&mut self) {
         if matches!(*self.0.borrow(), ShutdownMsg::Init) {
-            self.0.changed().await.expect("shutdown sender dropped");
+            if let Err(_err) = self.0.changed().await {
+                std::future::pending::<()>().await;
+            }
         }
     }
 
