@@ -21,6 +21,8 @@
 #![feature(lazy_cell)]
 #![feature(round_ties_even)]
 #![feature(generators)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 
 pub mod agg;
 mod error;

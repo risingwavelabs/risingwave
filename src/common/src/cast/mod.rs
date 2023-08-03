@@ -14,15 +14,68 @@
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
+use snafu::{OptionExt, ResultExt, Snafu};
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
+use strum::EnumMessage;
 
 use crate::types::{Date, Time, Timestamp, Timestamptz};
 
-type Result<T> = std::result::Result<T, String>;
+type Result<T> = std::result::Result<T, CastError>;
 
-pub const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
-pub const PARSE_ERROR_STR_TO_TIME: &str =
-    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}][Z] or HH:MM)";
+#[derive(Snafu, Debug)]
+#[snafu(display("{}", inner.get_documentation().unwrap()))]
+pub struct SpeedateParseError {
+    inner: speedate::ParseError,
+}
+
+impl From<speedate::ParseError> for SpeedateParseError {
+    fn from(value: speedate::ParseError) -> Self {
+        Self { inner: value }
+    }
+}
+
+// impl<E> std::error::Error for BaseError<E> where E: std::fmt {
+// }
+
+#[derive(Snafu, Debug)]
+pub enum CastError {
+    #[snafu(display("can't cast `{from}` to date (expected format is YYYY-MM-DD)"))]
+    DateParse {
+        from: Box<str>,
+        #[snafu(source(from(speedate::ParseError, Into::into)), provide(false))]
+        source: SpeedateParseError,
+    },
+
+    #[snafu(display(
+        "can't cast `{from}` to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)",
+    ))]
+    TimeParse {
+        from: Box<str>,
+        #[snafu(source(from(speedate::ParseError, Into::into)), provide(false))]
+        source: SpeedateParseError,
+    },
+
+    #[snafu(display(
+        "can't cast `{from}` to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)",
+    ))]
+    TimestampParse {
+        from: Box<str>,
+        #[snafu(source(from(speedate::ParseError, Into::into)), provide(false))]
+        source: SpeedateParseError,
+    },
+
+    #[snafu(display("can't cast integer `{from}` to timestamp"))]
+    TimestampFromInt { from: i64 },
+
+    #[snafu(display("invalid hex digit `{from}`"))]
+    InvalidHexDigit { from: char },
+
+    #[snafu(display("invalid format (`{from}`) for bytea: {message}"))]
+    InvalidBytea { from: Box<str>, message: Box<str> },
+}
+
+pub const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "";
+pub const PARSE_ERROR_STR_TO_TIME: &str = "Can't cast string to time ()";
 pub const PARSE_ERROR_STR_TO_DATE: &str =
     "Can't cast string to date (expected format is YYYY-MM-DD)";
 pub const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
@@ -43,15 +96,14 @@ pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
 
 #[inline]
 pub fn parse_naive_date(s: &str) -> Result<NaiveDate> {
-    let res = SpeedDate::parse_str(s).map_err(|_| PARSE_ERROR_STR_TO_DATE.to_string())?;
+    let res = SpeedDate::parse_str(s).context(DateParseSnafu { from: s })?;
     Ok(Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 pub fn parse_naive_time(s: &str) -> Result<NaiveTime> {
     let s_without_zone = s.trim_end_matches('Z');
-    let res =
-        SpeedTime::parse_str(s_without_zone).map_err(|_| PARSE_ERROR_STR_TO_TIME.to_string())?;
+    let res = SpeedTime::parse_str(s_without_zone).context(TimeParseSnafu { from: s })?;
     Ok(Time::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
@@ -77,7 +129,7 @@ pub fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
         )
         .0)
     } else {
-        let res = SpeedDate::parse_str(s).map_err(|_| PARSE_ERROR_STR_TO_TIMESTAMP.to_string())?;
+        let res = SpeedDate::parse_str(s).context(TimestampParseSnafu { from: s })?;
         Ok(
             Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
                 .and_hms_micro_uncheck(0, 0, 0, 0)
@@ -106,7 +158,7 @@ pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
         E11..E14 => Ok(Timestamptz::from_millis(t).unwrap()), // ms
         E14..E17 => Ok(Timestamptz::from_micros(t)),      // us
         E17.. => Ok(Timestamptz::from_micros(t / 1000)),  // ns
-        _ => Err(ERROR_INT_TO_TIMESTAMP.to_string()),
+        _ => TimestampFromIntSnafu { from: t }.fail(),
     }
 }
 
@@ -168,7 +220,7 @@ fn get_hex(c: u8) -> Result<u8> {
         b'A'..=b'F' => Ok(c - b'A' + 10),
         b'a'..=b'f' => Ok(c - b'a' + 10),
         b'0'..=b'9' => Ok(c - b'0'),
-        _ => Err(format!("invalid hexadecimal digit: \"{}\"", c as char)),
+        _ => InvalidHexDigitSnafu { from: c as char }.fail(),
     }
 }
 
@@ -184,13 +236,13 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         }
         let v1 = get_hex(c)?;
 
-        match bytes.next() {
-            Some(c) => {
-                let v2 = get_hex(c)?;
-                res.push((v1 << 4) | v2);
-            }
-            None => return Err("invalid hexadecimal data: odd number of digits".to_string()),
-        }
+        let c = bytes.next().context(InvalidByteaSnafu {
+            from: s,
+            message: "odd number of digits in hex format",
+        })?;
+
+        let v2 = get_hex(c)?;
+        res.push((v1 << 4) | v2);
     }
 
     Ok(res)
@@ -198,6 +250,11 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
 
 /// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
 pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
+    let context = InvalidByteaSnafu {
+        from: s,
+        message: "invalid input syntax for escape format",
+    };
+
     let mut bytes = s.bytes();
 
     let mut res = Vec::new();
@@ -215,12 +272,12 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
                     }
                     _ => {
                         // one backslash, not followed by another or ### valid octal
-                        return Err("invalid input syntax for type bytea".to_string());
+                        return context.fail();
                     }
                 },
                 _ => {
                     // one backslash, not followed by another or ### valid octal
-                    return Err("invalid input syntax for type bytea".to_string());
+                    return context.fail();
                 }
             }
         }
@@ -231,6 +288,8 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches::assert_matches;
+
     use super::*;
 
     #[test]
@@ -245,17 +304,17 @@ mod tests {
         str_to_time("04:05").unwrap();
         str_to_time("04:05:06").unwrap();
 
-        assert_eq!(
+        assert_matches!(
             str_to_timestamp("1999-01-08 04:05:06AA").unwrap_err(),
-            PARSE_ERROR_STR_TO_TIMESTAMP.to_string()
+            CastError::TimestampParse { .. }
         );
-        assert_eq!(
+        assert_matches!(
             str_to_date("1999-01-08AA").unwrap_err(),
-            PARSE_ERROR_STR_TO_DATE.to_string()
+            CastError::DateParse { .. }
         );
-        assert_eq!(
+        assert_matches!(
             str_to_time("AA04:05:06").unwrap_err(),
-            PARSE_ERROR_STR_TO_TIME.to_string()
+            CastError::TimeParse { .. }
         );
     }
 

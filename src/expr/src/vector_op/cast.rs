@@ -31,7 +31,9 @@ use risingwave_common::types::{
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::{build_function, function};
 use risingwave_pb::expr::expr_node::PbType;
+use snafu::ResultExt;
 
+use crate::error::ParseSnafu;
 use crate::expr::template::UnaryExpression;
 use crate::expr::{build_func, BoxedExpression, Expression, InputRefExpression};
 use crate::{ExprError, Result};
@@ -46,9 +48,10 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
 
 #[function("cast(varchar) -> date")]
 pub fn str_to_date(elem: &str) -> Result<Date> {
-    Ok(Date::new(
-        parse_naive_date(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    ))
+    parse_naive_date(elem).context(ParseSnafu)
+    // Ok(Date::new(
+    //     parse_naive_date(elem).map_err(|err| ExprError::Parse(err.into()))?,
+    // ))
 }
 
 #[function("cast(varchar) -> time")]

@@ -74,6 +74,7 @@ etcd-client = { package = "madsim-etcd-client", version = "0.3" }
 futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
+snafu = { version = "0.7", features = ["unstable-provider-api", "rust_1_61", "backtraces-impl-std"] }
 hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"] }
 criterion = "0.5"
 tonic = { package = "madsim-tonic", version = "0.3.1" }
