@@ -27,9 +27,9 @@ message WatermarkDesc {
 }
 
 enum SchemaRegistryNameStrategy {
-  TopicNameStrategy = 0;
-  RecordNameStrategy = 1;
-  TopicRecordNameStrategy = 2;
+  TOPIC_NAME_STRATEGY_UNSPECIFIED = 0;
+  RECORD_NAME_STRATEGY = 1;
+  TOPIC_RECORD_NAME_STRATEGY = 2;
 }
 
 message StreamSourceInfo {

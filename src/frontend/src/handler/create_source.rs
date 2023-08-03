@@ -27,7 +27,8 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig, SpecificParserConfig,
+    name_strategy_from_str, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -254,9 +255,9 @@ fn get_schema_location(row_options: &mut BTreeMap<String, String>) -> Result<(As
 fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Option<i32>> {
     match name_strategy {
         None => Ok(None),
-        Some(name) => Ok(Some(PbSchemaRegistryNameStrategy::from_str_name(name.0.as_str())
+        Some(name) => Ok(Some(name_strategy_from_str(name.0.as_str())
             .ok_or_else(|| RwError::from(ProtocolError(format!("\
-            expect strategy name in TopicNameStrategy, RecordNameStrategy and TopicRecordNameStrategy, but got {}", name))))? as i32)),
+            expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy, but got {}", name))))? as i32)),
     }
 }
 
@@ -302,9 +303,10 @@ pub(crate) async fn try_bind_columns_from_source(
                 NAME_STRATEGY_KEY,
             ))?;
             if !protobuf_schema.use_schema_registry && name_strategy.is_some() {
-                return Err(RwError::from(ProtocolError(format!(
+                return Err(RwError::from(ProtocolError(
                     "schema registry name strategy only works with schema registry enabled"
-                ))));
+                        .to_string(),
+                )));
             }
             (
                 Some(
@@ -348,9 +350,10 @@ pub(crate) async fn try_bind_columns_from_source(
                 NAME_STRATEGY_KEY,
             ))?;
             if !avro_schema.use_schema_registry && name_strategy.is_some() {
-                return Err(RwError::from(ProtocolError(format!(
+                return Err(RwError::from(ProtocolError(
                     "schema registry name strategy only works with schema registry enabled"
-                ))));
+                        .to_string(),
+                )));
             }
             let stream_source_info = StreamSourceInfo {
                 format: FormatType::Plain as i32,
@@ -452,9 +455,10 @@ pub(crate) async fn try_bind_columns_from_source(
                 NAME_STRATEGY_KEY,
             ))?;
             if !avro_schema.use_schema_registry && name_strategy.is_some() {
-                return Err(RwError::from(ProtocolError(format!(
+                return Err(RwError::from(ProtocolError(
                     "schema registry name strategy only works with schema registry enabled"
-                ))));
+                        .to_string(),
+                )));
             }
 
             if sql_defined_pk {

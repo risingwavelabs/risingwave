@@ -20,6 +20,15 @@ use risingwave_common::error::RwError;
 use risingwave_pb::catalog::SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy;
 pub(crate) use util::*;
 
+pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrategy> {
+    match value {
+        "topic_name_strategy" => Some(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified),
+        "record_name_strategy" => Some(PbSchemaRegistryNameStrategy::RecordNameStrategy),
+        "topic_record_name_strategy" => Some(PbSchemaRegistryNameStrategy::TopicRecordNameStrategy),
+        _ => None,
+    }
+}
+
 pub fn get_subject_by_strategy(
     name_strategy: &PbSchemaRegistryNameStrategy,
     topic: &str,
@@ -35,7 +44,8 @@ pub fn get_subject_by_strategy(
             )))
         };
     match name_strategy {
-        PbSchemaRegistryNameStrategy::TopicNameStrategy => {
+        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified => {
+            // default behavior
             Ok((format!("{}-key", topic), format!("{}-value", topic)))
         }
         ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy => {
