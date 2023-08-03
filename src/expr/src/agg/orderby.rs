@@ -64,8 +64,7 @@ impl ProjectionOrderBy {
 
     fn push_row(&mut self, row: RowRef<'_>) -> Result<()> {
         let key =
-            memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
-                .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
+            memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)?;
         let projected_row = row.project(&self.arg_indices).to_owned_row();
 
         self.unordered_values_estimated_heap_size +=

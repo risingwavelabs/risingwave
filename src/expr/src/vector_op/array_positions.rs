@@ -16,7 +16,7 @@ use risingwave_common::array::{ListRef, ListValue};
 use risingwave_common::types::{ScalarImpl, ScalarRef};
 use risingwave_expr_macro::function;
 
-use crate::error::ExprError;
+use crate::error::{CastOutOfRangeSnafu, ExprError};
 use crate::Result;
 
 /// Returns the subscript of the first occurrence of the second argument in the array, or `NULL` if
@@ -124,7 +124,7 @@ fn array_position_common<'a, T: ScalarRef<'a>>(
 ) -> Result<Option<i32>> {
     let Some(left) = array else { return Ok(None) };
     if i32::try_from(left.len()).is_err() {
-        return Err(ExprError::CastOutOfRange("invalid array length"));
+        return CastOutOfRangeSnafu { to: "array length" }.fail();
     }
 
     Ok(left
@@ -200,7 +200,7 @@ fn array_positions<'a, T: ScalarRef<'a>>(
                         .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
                         .collect(),
                 ))),
-                Err(_) => Err(ExprError::CastOutOfRange("invalid array length")),
+                Err(_) => CastOutOfRangeSnafu { to: "array length" }.fail(),
             }
         }
         _ => Ok(None),

@@ -18,7 +18,9 @@ use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
 use risingwave_expr_macro::function;
+use snafu::{OptionExt, ResultExt};
 
+use crate::error::CastOutOfRangeSnafu;
 use crate::{ExprError, Result};
 
 // Conscious decision for shl and shr is made here to diverge from PostgreSQL.
@@ -68,7 +70,8 @@ where
     // TODO: We need to improve the error message
     let r: u32 = r
         .try_into()
-        .map_err(|_| ExprError::CastOutOfRange(type_name::<u32>()))?;
+        .ok()
+        .context(CastOutOfRangeSnafu { to: "u32" })?;
     atm(l, r)
 }
 

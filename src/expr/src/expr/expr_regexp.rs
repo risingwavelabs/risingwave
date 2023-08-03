@@ -26,8 +26,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
+use snafu::whatever;
 
 use super::{build_from_prost as expr_build_from_prost, Expression};
+use crate::error::UnsupportedFunctionSnafu;
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
@@ -131,8 +133,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                 let pattern_datum = deserialize_datum(
                     pattern_value.get_body().as_slice(),
                     &DataType::from(pattern_node.get_return_type().unwrap()),
-                )
-                .map_err(|e| ExprError::Internal(e.into()))?;
+                )?;
 
                 match pattern_datum {
                     Some(ScalarImpl::Utf8(pattern)) => pattern.to_string(),
@@ -142,9 +143,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                 }
             }
             _ => {
-                return Err(ExprError::UnsupportedFunction(
-                    "non-constant pattern in regexp_match".to_string(),
-                ))
+                whatever!("non-constant pattern in regexp_match")
             }
         };
 
@@ -154,8 +153,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                     let flags_datum = deserialize_datum(
                         flags_value.get_body().as_slice(),
                         &DataType::from(flags_node.get_return_type().unwrap()),
-                    )
-                    .map_err(|e| ExprError::Internal(e.into()))?;
+                    )?;
 
                     match flags_datum {
                         Some(ScalarImpl::Utf8(flags)) => flags.to_string(),
@@ -168,9 +166,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                     }
                 }
                 _ => {
-                    return Err(ExprError::UnsupportedFunction(
-                        "non-constant flags in regexp_match".to_string(),
-                    ))
+                    whatever!("non-constant pattern in regexp_match")
                 }
             }
         } else {

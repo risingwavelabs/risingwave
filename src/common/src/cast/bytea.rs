@@ -4,9 +4,13 @@ use snafu::{OptionExt, Snafu};
 type Result<T> = std::result::Result<T, ByteaCastError>;
 
 #[derive(Snafu, Debug)]
+#[snafu(visibility(pub))]
 pub enum ByteaCastError {
     #[snafu(display("invalid hex digit `{from}`"))]
     InvalidHexDigit { from: char },
+
+    #[snafu(display("invalid base64 symbol: `{from}`"))]
+    InvalidBase64 { from: char },
 
     #[snafu(display("invalid format (`{from}`) for bytea: {message}"))]
     InvalidBytea { from: Box<str>, message: Box<str> },

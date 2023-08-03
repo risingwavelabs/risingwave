@@ -15,7 +15,9 @@
 use std::fmt::Write;
 
 use hex;
-use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
+use risingwave_common::cast::{
+    parse_bytes_hex, parse_bytes_traditional, ByteaCastError, InvalidBase64Snafu, InvalidByteaSnafu,
+};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -63,12 +65,8 @@ pub fn encode(data: &[u8], format: &str, writer: &mut dyn Write) -> Result<()> {
 pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
     match format {
         "base64" => Ok(parse_bytes_base64(data)?.into()),
-        "hex" => Ok(parse_bytes_hex(data)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into()),
-        "escape" => Ok(parse_bytes_traditional(data)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into()),
+        "hex" => Ok(parse_bytes_hex(data)?.into()),
+        "escape" => Ok(parse_bytes_traditional(data)?.into()),
         _ => Err(ExprError::InvalidParam {
             name: "format",
             reason: format!("unrecognized encoding: \"{}\"", format).into(),
@@ -139,7 +137,15 @@ fn encode_bytes_base64(data: &[u8], writer: &mut dyn Write) -> Result<()> {
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-BASE64
 // parse_bytes_base64 need ignores carriage-return[0x0D], newline[0x0A], space[0x20], and tab[0x09].
 // When decode is supplied invalid base64 data, including incorrect trailing padding, return error.
-fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
+fn parse_bytes_base64(data: &str) -> Result<Vec<u8>, ByteaCastError> {
+    let fail = |message: &'static str| {
+        InvalidByteaSnafu {
+            from: data,
+            message,
+        }
+        .fail()
+    };
+
     let mut out = Vec::new();
     let data_bytes = data.as_bytes();
 
@@ -165,16 +171,16 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
                 out.push(s2 << 4 | s3 >> 2);
             }
             (Some(b'='), _, _, _) => {
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
+                return fail(PARSE_BASE64_INVALID_PADDING);
             }
             (Some(d1), Some(b'='), _, _) => {
                 alphabet_decode(d1)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
+                return fail(PARSE_BASE64_INVALID_PADDING);
             }
             (Some(d1), Some(d2), Some(b'='), _) => {
                 alphabet_decode(d1)?;
                 alphabet_decode(d2)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
+                return fail(PARSE_BASE64_INVALID_PADDING);
             }
             (Some(d1), Some(d2), Some(d3), Some(d4)) => {
                 let s1 = alphabet_decode(d1)?;
@@ -187,21 +193,21 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
             }
             (Some(d1), None, None, None) => {
                 alphabet_decode(d1)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                return fail(PARSE_BASE64_INVALID_END);
             }
             (Some(d1), Some(d2), None, None) => {
                 alphabet_decode(d1)?;
                 alphabet_decode(d2)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                return fail(PARSE_BASE64_INVALID_END);
             }
             (Some(d1), Some(d2), Some(d3), None) => {
                 alphabet_decode(d1)?;
                 alphabet_decode(d2)?;
                 alphabet_decode(d3)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                return fail(PARSE_BASE64_INVALID_END);
             }
             _ => {
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                return fail(PARSE_BASE64_INVALID_END);
             }
         }
     }
@@ -209,25 +215,13 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
 }
 
 #[inline]
-fn alphabet_decode(d: u8) -> Result<u8> {
+fn alphabet_decode(d: u8) -> Result<u8, ByteaCastError> {
     if d > 0x7A {
-        Err(ExprError::Parse(
-            format!(
-                "invalid symbol \"{}\" while decoding base64 sequence",
-                std::char::from_u32(d as u32).unwrap()
-            )
-            .into(),
-        ))
+        InvalidBase64Snafu { from: d as char }.fail()
     } else {
         let p = PARSE_BASE64_ALPHABET_DECODE_TABLE[d as usize];
         if p == 0x7f {
-            Err(ExprError::Parse(
-                format!(
-                    "invalid symbol \"{}\" while decoding base64 sequence",
-                    std::char::from_u32(d as u32).unwrap()
-                )
-                .into(),
-            ))
+            InvalidBase64Snafu { from: d as char }.fail()
         } else {
             Ok(p)
         }

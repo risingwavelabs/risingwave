@@ -21,6 +21,7 @@ use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use smallvec::SmallVec;
 
 use super::WindowFuncCall;
+use crate::error::UnsupportedFunctionSnafu;
 use crate::function::window::WindowFuncKind;
 use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
@@ -120,16 +121,20 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
             let args = (call.args.arg_types().iter())
                 .map(|t| t.into())
                 .collect::<Vec<_>>();
-            return Err(ExprError::UnsupportedFunction(format!(
-                "{:?}",
-                FuncSigDebug {
-                    func: kind,
-                    inputs_type: &args,
-                    ret_type: call.return_type.clone().into(),
-                    set_returning: false,
-                    deprecated: false,
-                }
-            )));
+
+            return UnsupportedFunctionSnafu {
+                name: format!(
+                    "{:?}",
+                    FuncSigDebug {
+                        func: kind,
+                        inputs_type: &args,
+                        ret_type: call.return_type.clone().into(),
+                        set_returning: false,
+                        deprecated: false,
+                    }
+                ),
+            }
+            .fail();
         }
     })
 }

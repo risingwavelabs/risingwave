@@ -15,7 +15,9 @@
 use dyn_clone::DynClone;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::types::{DataType, DataTypeName};
+use snafu::OptionExt;
 
+use crate::error::UnsupportedFunctionSnafu;
 use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
 
@@ -86,8 +88,8 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
     let ret_type = (&agg.return_type).into();
     let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
         .get(agg.kind, &args, ret_type)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
+        .with_context(|| UnsupportedFunctionSnafu {
+            name: format!(
                 "{:?}",
                 FuncSigDebug {
                     func: agg.kind,
@@ -96,7 +98,7 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
                     set_returning: false,
                     deprecated: false,
                 }
-            ))
+            ),
         })?;
 
     let mut aggregator = (desc.build)(agg.clone())?;

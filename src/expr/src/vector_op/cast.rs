@@ -33,7 +33,7 @@ use risingwave_expr_macro::{build_function, function};
 use risingwave_pb::expr::expr_node::PbType;
 use snafu::ResultExt;
 
-use crate::error::ParseSnafu;
+use crate::error::{InvalidParamSnafu, ParseSnafu};
 use crate::expr::template::UnaryExpression;
 use crate::expr::{build_func, BoxedExpression, Expression, InputRefExpression};
 use crate::{ExprError, Result};
@@ -48,24 +48,17 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
 
 #[function("cast(varchar) -> date")]
 pub fn str_to_date(elem: &str) -> Result<Date> {
-    parse_naive_date(elem).context(ParseSnafu)
-    // Ok(Date::new(
-    //     parse_naive_date(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    // ))
+    Ok(Date::new(parse_naive_date(elem)?))
 }
 
 #[function("cast(varchar) -> time")]
 pub fn str_to_time(elem: &str) -> Result<Time> {
-    Ok(Time::new(
-        parse_naive_time(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    ))
+    Ok(Time::new(parse_naive_time(elem)?))
 }
 
 #[function("cast(varchar) -> timestamp")]
 pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
-    Ok(Timestamp::new(
-        parse_naive_datetime(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    ))
+    Ok(Timestamp::new(parse_naive_datetime(elem)?))
 }
 
 #[function("cast(varchar) -> *int")]
@@ -77,24 +70,25 @@ pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
 pub fn str_parse<T>(elem: &str) -> Result<T>
 where
     T: FromStr,
-    <T as FromStr>::Err: std::fmt::Display,
+    <T as FromStr>::Err: risingwave_common::error::Error,
 {
-    elem.trim()
-        .parse()
-        .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
+    elem.trim().parse().map_err(Into::into).context(ParseSnafu)
 }
 
 #[function("cast(int16) -> int256")]
 #[function("cast(int32) -> int256")]
 #[function("cast(int64) -> int256")]
-pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
-    elem.try_into()
-        .map_err(|_| ExprError::CastOutOfRange("int256"))
+pub fn to_int256<T>(elem: T) -> Result<Int256>
+where
+    T: TryInto<Int256>,
+    <T as TryInto<Int256>>::Error: risingwave_common::error::Error,
+{
+    elem.try_into().map_err(Into::into).context(ParseSnafu)
 }
 
 #[function("cast(jsonb) -> boolean")]
 pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
-    v.as_bool().map_err(|e| ExprError::Parse(e.into()))
+    Ok(v.as_bool()?)
 }
 
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
@@ -106,8 +100,7 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> float32")]
 #[function("cast(jsonb) -> float64")]
 pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
-    v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))?
+    v.as_number()?
         .into_ordered()
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
@@ -155,8 +148,9 @@ pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
 {
-    elem.try_into()
-        .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
+    elem.try_into().map_err(|_| ExprError::CastOutOfRange {
+        to: std::any::type_name::<T2>(),
+    })
 }
 
 #[function("cast(boolean) -> int32")]
@@ -198,7 +192,11 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     {
         Ok(false)
     } else {
-        Err(ExprError::Parse("Invalid bool".into()))
+        InvalidParamSnafu {
+            name: "input",
+            reason: format!("invalid boolean literal `{trimmed_input}`"),
+        }
+        .fail()
     }
 }
 
@@ -243,7 +241,7 @@ pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
 
 #[function("cast(varchar) -> bytea")]
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    str_to_bytea_common(elem).map_err(|err| ExprError::Parse(err.into()))
+    str_to_bytea_common(elem).map_err(Into::into)
 }
 
 /// A lite version of casting from string to target type. Used by frontend to handle types that have
@@ -294,7 +292,11 @@ pub fn literal_parsing(
 fn unnest(input: &str) -> Result<Vec<&str>> {
     let trimmed = input.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-        return Err(ExprError::Parse("Input must be braced".into()));
+        return InvalidParamSnafu {
+            name: "input",
+            reason: "not braced",
+        }
+        .fail();
     }
     let trimmed = &trimmed[1..trimmed.len() - 1];
 
@@ -314,7 +316,11 @@ fn unnest(input: &str) -> Result<Vec<&str>> {
         }
     }
     if depth != 0 {
-        return Err(ExprError::Parse("Unbalanced braces".into()));
+        return InvalidParamSnafu {
+            name: "input",
+            reason: "unbalanced braces",
+        }
+        .fail();
     }
     let last = trimmed[start..].trim();
     if !last.is_empty() {

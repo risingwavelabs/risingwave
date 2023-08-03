@@ -20,6 +20,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use postgres_types::ToSql;
 use serde::{Deserialize, Serialize};
+use snafu::{ResultExt, Snafu};
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
@@ -140,15 +141,21 @@ impl From<Timestamptz> for chrono::DateTime<Utc> {
     }
 }
 
+#[derive(Snafu, Debug)]
+#[snafu(display("can't cast {} to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] followed by +hh:mm or literal Z)
+\nFor example: '2021-04-01 00:00:00+00:00'", from))]
+pub struct TimestamptzParseError {
+    from: Box<str>,
+    source: chrono::ParseError,
+}
+
 impl FromStr for Timestamptz {
-    type Err = &'static str;
+    type Err = TimestamptzParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        pub const ERROR_MSG: &str = concat!(
-            "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
-            , "\nFor example: '2021-04-01 00:00:00+00:00'"
-        );
-        let ret = s.parse::<DateTime<Utc>>().map_err(|_| ERROR_MSG)?;
+        let ret = s
+            .parse::<DateTime<Utc>>()
+            .context(TimestamptzParseSnafu { from: s })?;
         Ok(Timestamptz(ret.timestamp_micros()))
     }
 }

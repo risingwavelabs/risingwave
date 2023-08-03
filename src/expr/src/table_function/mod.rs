@@ -22,8 +22,10 @@ use risingwave_common::types::{DataType, DataTypeName, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::table_function::PbType;
 use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
+use snafu::OptionExt;
 
 use super::{ExprError, Result};
+use crate::error::UnsupportedFunctionSnafu;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::sig::FuncSigDebug;
 
@@ -138,8 +140,8 @@ pub fn build(
         .collect::<Vec<DataTypeName>>();
     let desc = crate::sig::table_function::FUNC_SIG_MAP
         .get(func, &args)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
+        .with_context(|| UnsupportedFunctionSnafu {
+            name: format!(
                 "{:?}",
                 FuncSigDebug {
                     func: func.as_str_name(),
@@ -148,7 +150,7 @@ pub fn build(
                     set_returning: true,
                     deprecated: false,
                 }
-            ))
+            ),
         })?;
     (desc.build)(return_type, chunk_size, children)
 }

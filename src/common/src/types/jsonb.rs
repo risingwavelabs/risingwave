@@ -17,6 +17,7 @@ use std::hash::Hash;
 
 use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
+use snafu::{OptionExt, Snafu};
 
 use crate::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
@@ -248,23 +249,25 @@ impl<'a> JsonbRef<'a> {
         }
     }
 
-    pub fn array_len(&self) -> Result<usize, String> {
+    pub fn array_len(&self) -> Result<usize, JsonbError> {
         match self.0 {
             Value::Array(v) => Ok(v.len()),
-            _ => Err(format!(
-                "cannot get array length of a jsonb {}",
-                self.type_name()
-            )),
+            _ => ActionSnafu {
+                action: "get array length of",
+                type_name: self.type_name(),
+            }
+            .fail(),
         }
     }
 
-    pub fn as_bool(&self) -> Result<bool, String> {
+    pub fn as_bool(&self) -> Result<bool, JsonbError> {
         match self.0 {
             Value::Bool(v) => Ok(*v),
-            _ => Err(format!(
-                "cannot cast jsonb {} to type boolean",
-                self.type_name()
-            )),
+            _ => CastSnafu {
+                to: "boolean",
+                type_name: self.type_name(),
+            }
+            .fail(),
         }
     }
 
@@ -272,13 +275,14 @@ impl<'a> JsonbRef<'a> {
     ///
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
-    pub fn as_number(&self) -> Result<f64, String> {
+    pub fn as_number(&self) -> Result<f64, JsonbError> {
         match self.0 {
-            Value::Number(v) => v.as_f64().ok_or_else(|| "jsonb number out of range".into()),
-            _ => Err(format!(
-                "cannot cast jsonb {} to type number",
-                self.type_name()
-            )),
+            Value::Number(v) => v.as_f64().context(NumberOutOfRangeSnafu),
+            _ => CastSnafu {
+                to: "number",
+                type_name: self.type_name(),
+            }
+            .fail(),
         }
     }
 
@@ -316,36 +320,60 @@ impl<'a> JsonbRef<'a> {
     }
 
     /// Returns an iterator over the elements if this is an array.
-    pub fn array_elements(self) -> Result<impl Iterator<Item = JsonbRef<'a>>, String> {
+    pub fn array_elements(self) -> Result<impl Iterator<Item = JsonbRef<'a>>, JsonbError> {
         match &self.0 {
             Value::Array(array) => Ok(array.iter().map(Self)),
-            _ => Err(format!(
-                "cannot extract elements from a jsonb {}",
-                self.type_name()
-            )),
+            _ => ActionSnafu {
+                action: "extract elements from",
+                type_name: self.type_name(),
+            }
+            .fail(),
         }
     }
 
     /// Returns an iterator over the keys if this is an object.
-    pub fn object_keys(self) -> Result<impl Iterator<Item = &'a str>, String> {
+    pub fn object_keys(self) -> Result<impl Iterator<Item = &'a str>, JsonbError> {
         match &self.0 {
             Value::Object(object) => Ok(object.keys().map(|s| s.as_str())),
-            _ => Err(format!(
-                "cannot call jsonb_object_keys on a jsonb {}",
-                self.type_name()
-            )),
+            _ => ActionSnafu {
+                action: "call `jsonb_object_keys` on",
+                type_name: self.type_name(),
+            }
+            .fail(),
         }
     }
 
     /// Returns an iterator over the key-value pairs if this is an object.
     pub fn object_key_values(
         self,
-    ) -> Result<impl Iterator<Item = (&'a str, JsonbRef<'a>)>, String> {
+    ) -> Result<impl Iterator<Item = (&'a str, JsonbRef<'a>)>, JsonbError> {
         match &self.0 {
             Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
-            _ => Err(format!("cannot deconstruct a jsonb {}", self.type_name())),
+            _ => ActionSnafu {
+                action: "deconstruct",
+                type_name: self.type_name(),
+            }
+            .fail(),
         }
     }
+}
+
+#[derive(Snafu, Debug)]
+pub enum JsonbError {
+    #[snafu(display("cannot cast jsonb {type_name} to type {to}"))]
+    Cast {
+        to: &'static str,
+        type_name: &'static str,
+    },
+
+    #[snafu(display("cannot {action} a jsonb {type_name}"))]
+    Action {
+        action: &'static str,
+        type_name: &'static str,
+    },
+
+    #[snafu(display("jsonb number out of range"))]
+    NumberOutOfRange,
 }
 
 /// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra

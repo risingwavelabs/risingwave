@@ -152,6 +152,14 @@ pub mod java_binding_serde;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PbFieldNotFound(pub &'static str);
 
+impl std::fmt::Display for PbFieldNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "protobuf field `{}` not found", self.0)
+    }
+}
+
+impl std::error::Error for PbFieldNotFound {}
+
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
         tonic::Status::new(tonic::Code::Internal, e.0)

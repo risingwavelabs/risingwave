@@ -35,7 +35,7 @@ select to_date('0001-02-03', 'YYYY-MM-DD') - 100;
 
 query TTT
 SELECT s, format, to_date(s, format)
-FROM 
+FROM
   (VALUES
     ('2022-12-25', 'YYYY-MM-DD'),
     ('2022/12/25', 'YYYY/MM/DD'),

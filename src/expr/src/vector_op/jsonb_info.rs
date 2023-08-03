@@ -26,10 +26,5 @@ pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut dyn Write) {
 
 #[function("jsonb_array_length(jsonb) -> int32")]
 pub fn jsonb_array_length(v: JsonbRef<'_>) -> Result<i32> {
-    v.array_len()
-        .map(|n| n as i32)
-        .map_err(|e| ExprError::InvalidParam {
-            name: "",
-            reason: e.into(),
-        })
+    v.array_len().map(|n| n as i32).map_err(Into::into)
 }

@@ -21,6 +21,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::build_function;
 
 use super::{BoxedExpression, Expression, Result};
+use crate::error::UnsupportedFunctionSnafu;
 use crate::expr::template::{BinaryExpression, TernaryExpression};
 use crate::vector_op::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::vector_op::to_timestamp::{to_timestamp, to_timestamp_const_tmpl, to_timestamp_legacy};
@@ -81,9 +82,11 @@ impl Expression for ExprToTimestampConstTmpl {
 // Only to register this signature to function signature map.
 #[build_function("to_timestamp1(varchar, varchar) -> timestamptz")]
 fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "to_timestamp should have been rewritten to include timezone".into(),
-    ))
+    // should have been rewritten
+    UnsupportedFunctionSnafu {
+        name: "to_timestamp w/o timezone",
+    }
+    .fail()
 }
 
 #[build_function("to_timestamp1(varchar, varchar, varchar) -> timestamptz")]

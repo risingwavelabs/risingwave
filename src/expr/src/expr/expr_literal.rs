@@ -79,8 +79,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
         let value = deserialize_datum(
             prost_value.get_body().as_slice(),
             &DataType::from(prost.get_return_type().unwrap()),
-        )
-        .map_err(|e| ExprError::Internal(e.into()))?;
+        )?;
         Ok(Self {
             return_type: ret_type,
             literal: value,

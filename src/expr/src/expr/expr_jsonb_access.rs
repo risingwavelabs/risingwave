@@ -21,9 +21,10 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, JsonbRef, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::build_function;
+use snafu::ResultExt;
 
 use super::{BoxedExpression, Expression};
-use crate::Result;
+use crate::{ExprError, Result};
 
 /// This is forked from [`BinaryExpression`] for the following reasons:
 /// * Optimize for the case when rhs path is const. (not implemented yet)
@@ -204,7 +205,7 @@ impl AccessOutput for Utf8ArrayBuilder {
             false => {
                 let mut writer = self.writer().begin();
                 v.force_str(&mut writer)
-                    .map_err(|e| crate::ExprError::Internal(e.into()))?;
+                    .whatever_context::<_, ExprError>("access jsonb as string")?;
                 writer.finish();
             }
         };

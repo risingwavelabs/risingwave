@@ -19,6 +19,7 @@ use risingwave_common::cast::str_to_timestamp;
 use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
 use risingwave_expr_macro::function;
 
+use crate::error::UnsupportedFunctionSnafu;
 use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
@@ -79,7 +80,7 @@ pub fn timestamptz_to_string(
         "{}",
         instant_local.format("%Y-%m-%d %H:%M:%S%.f%:z")
     )
-    .map_err(|e| ExprError::Internal(e.into()))?;
+    .unwrap();
     Ok(())
 }
 
@@ -87,12 +88,8 @@ pub fn timestamptz_to_string(
 // timestamp and then adjusts it with the session timezone.
 #[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
-    elem.parse().or_else(|_| {
-        timestamp_at_time_zone(
-            str_to_timestamp(elem).map_err(|err| ExprError::Parse(err.into()))?,
-            time_zone,
-        )
-    })
+    elem.parse()
+        .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
 }
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
@@ -177,9 +174,10 @@ fn timestamptz_interval_quantitative(
 ) -> Result<Timestamptz> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
     if r.months() != 0 || r.days() != 0 {
-        return Err(ExprError::UnsupportedFunction(
-            "timestamp with time zone +/- interval of days".into(),
-        ));
+        return UnsupportedFunctionSnafu {
+            name: "timestamp with time zone +/- interval of days",
+        }
+        .fail();
     }
     let delta_usecs = r.usecs();
     let usecs = f(l.timestamp_micros(), delta_usecs).ok_or(ExprError::NumericOutOfRange)?;

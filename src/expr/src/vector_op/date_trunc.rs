@@ -16,6 +16,7 @@ use risingwave_common::types::{Interval, Timestamp, Timestamptz};
 use risingwave_expr_macro::{build_function, function};
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
+use crate::error::{InvalidParamSnafu, UnsupportedFunctionSnafu};
 use crate::{ExprError, Result};
 
 #[function("date_trunc(varchar, timestamp) -> timestamp")]
@@ -44,9 +45,11 @@ fn build_date_trunc_timestamptz_implicit_zone(
     _return_type: risingwave_common::types::DataType,
     _children: Vec<crate::expr::BoxedExpression>,
 ) -> Result<crate::expr::BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "date_trunc of timestamptz should have been rewritten to include timezone".into(),
-    ))
+    // should have been rewritten
+    UnsupportedFunctionSnafu {
+        name: "date_trunc w/o timezone",
+    }
+    .fail()
 }
 
 #[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]
@@ -69,10 +72,13 @@ pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> 
         "minute" => interval.truncate_minute(),
         "hour" => interval.truncate_hour(),
         "day" => interval.truncate_day(),
-        "week" => return Err(ExprError::UnsupportedFunction(
-            "interval units \"week\" not supported because months usually have fractional weeks"
-                .into(),
-        )),
+        "week" => {
+            return InvalidParamSnafu {
+                name: "interval unit",
+                reason: "\"week\" not supported because months usually have fractional weeks",
+            }
+            .fail()
+        }
         "month" => interval.truncate_month(),
         "quarter" => interval.truncate_quarter(),
         "year" => interval.truncate_year(),

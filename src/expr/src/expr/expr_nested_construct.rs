@@ -24,6 +24,7 @@ use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
+use crate::error::InvalidParamSnafu;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
@@ -60,9 +61,11 @@ impl Expression for NestedConstructExpression {
             }
             Ok(Arc::new(ArrayImpl::List(builder.finish())))
         } else {
-            Err(ExprError::UnsupportedFunction(
-                "expects struct or list type".to_string(),
-            ))
+            InvalidParamSnafu {
+                name: "target",
+                reason: "expect struct or list type",
+            }
+            .fail()
         }
     }
 
@@ -76,9 +79,11 @@ impl Expression for NestedConstructExpression {
         } else if let DataType::List(_) = &self.data_type {
             Ok(Some(ListValue::new(datums).to_scalar_value()))
         } else {
-            Err(ExprError::UnsupportedFunction(
-                "expects struct or list type".to_string(),
-            ))
+            InvalidParamSnafu {
+                name: "target",
+                reason: "expect struct or list type",
+            }
+            .fail()
         }
     }
 }

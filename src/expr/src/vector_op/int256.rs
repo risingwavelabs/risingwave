@@ -14,11 +14,41 @@
 
 use risingwave_common::types::Int256;
 use risingwave_expr_macro::function;
+use snafu::{ResultExt, Snafu};
 
-use crate::ExprError::Parse;
-use crate::Result;
+use crate::{ExprError, Result};
 
 const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
+
+struct Truncated<'a, const N: usize>(&'a str);
+
+impl<'a, const N: usize> std::fmt::Display for Truncated<'a, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.len() <= N {
+            write!(f, "'{}'", self)
+        } else {
+            write!(
+                f,
+                "'{}...'(truncated, total {} bytes)",
+                &self.0[..N],
+                self.0.len(),
+            )
+        }
+    }
+}
+
+#[derive(Snafu, Debug)]
+#[snafu(display("failed to parse hex {}", Truncated::<MAX_AVAILABLE_HEX_STR_LEN>(from)))]
+pub struct ParseInt256Error {
+    from: Box<str>,
+    source: std::num::ParseIntError,
+}
+
+impl From<ParseInt256Error> for ExprError {
+    fn from(e: ParseInt256Error) -> Self {
+        ExprError::Parse { source: e.into() }
+    }
+}
 
 /// Returns the integer value of the hexadecimal string.
 ///
@@ -32,21 +62,9 @@ const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 /// ```
 #[function("hex_to_int256(varchar) -> int256")]
 pub fn hex_to_int256(s: &str) -> Result<Int256> {
-    Int256::from_str_hex(s).map_err(|e| {
-        Parse(
-            if s.len() <= MAX_AVAILABLE_HEX_STR_LEN {
-                format!("failed to parse hex '{}', {}", s, e)
-            } else {
-                format!(
-                    "failed to parse hex '{}...'(truncated, total {} bytes), {}",
-                    &s[..MAX_AVAILABLE_HEX_STR_LEN],
-                    s.len(),
-                    e
-                )
-            }
-            .into(),
-        )
-    })
+    Int256::from_str_hex(s)
+        .context(ParseInt256Snafu { from: s })
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -95,6 +113,5 @@ mod tests {
     fn test_failed() {
         let failed_result = hex_to_int256("0xggggggg");
         assert!(failed_result.is_err());
-        assert!(matches!(failed_result.as_ref().err(), Some(Parse(_))));
     }
 }

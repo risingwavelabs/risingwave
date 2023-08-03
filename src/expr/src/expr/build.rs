@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
+use snafu::OptionExt;
 
 use super::expr_array_concat::ArrayConcatExpression;
 use super::expr_case::CaseExpression;
@@ -30,6 +31,7 @@ use super::expr_regexp::RegexpMatchExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use crate::error::UnsupportedFunctionSnafu;
 use crate::expr::expr_proctime::ProcTimeExpression;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
@@ -97,8 +99,8 @@ pub fn build_func(
         .collect_vec();
     let desc = FUNC_SIG_MAP
         .get(func, &args, (&ret_type).into())
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
+        .with_context(|| UnsupportedFunctionSnafu {
+            name: format!(
                 "{:?}",
                 FuncSigDebug {
                     func: func.as_str_name(),
@@ -107,7 +109,7 @@ pub fn build_func(
                     set_returning: false,
                     deprecated: false,
                 }
-            ))
+            ),
         })?;
     (desc.build)(ret_type, children)
 }

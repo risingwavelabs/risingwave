@@ -125,18 +125,14 @@ impl Planner {
                 Vec::with_capacity(original_select_items_len);
             let mut input_proj_builder = ProjectBuilder::default();
             for (select_item_index, select_item) in select_items.iter().enumerate() {
-                let builder_index = input_proj_builder
-                    .add_expr(select_item)
-                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+                let builder_index = input_proj_builder.add_expr(select_item).unwrap(); // TODO(snafu): fix this
                 if builder_index >= builder_index_to_select_items_index.len() {
                     debug_assert_eq!(builder_index, builder_index_to_select_items_index.len());
                     builder_index_to_select_items_index.push(select_item_index);
                 }
             }
             for distinct_expr in distinct_list {
-                let builder_index = input_proj_builder
-                    .add_expr(distinct_expr)
-                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+                let builder_index = input_proj_builder.add_expr(distinct_expr).unwrap(); // TODO(snafu): fix this
                 if builder_index >= builder_index_to_select_items_index.len() {
                     debug_assert_eq!(builder_index, builder_index_to_select_items_index.len());
                     select_items.push(distinct_expr.clone());

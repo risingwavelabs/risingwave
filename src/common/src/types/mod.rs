@@ -67,7 +67,7 @@ mod to_text;
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
-pub use self::jsonb::{JsonbRef, JsonbVal};
+pub use self::jsonb::{JsonbError, JsonbRef, JsonbVal};
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
