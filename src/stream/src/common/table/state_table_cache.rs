@@ -36,9 +36,9 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 /// -----------------
 /// - If cache is synced, it will ALWAYS contain TopN entries. NOTE: TopN here refers to the lowest
 ///   N entries, where the first is the minimum and so on.
-/// - Cache will not contain NULL values in the watermark column,
-///   they are ignored in watermark state cleaning. They will
-///   not be included in the cache's table row count either, since they are treated as invisible.
+/// - Cache will not contain NULL values in the watermark column, they are ignored in watermark
+///   state cleaning. They will not be included in the cache's table row count either, since they
+///   are treated as invisible.
 ///
 /// Updates to Cache
 /// -----------------

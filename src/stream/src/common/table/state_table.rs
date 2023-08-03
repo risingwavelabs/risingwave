@@ -796,8 +796,7 @@ where
         match vis {
             Vis::Bitmap(vis) => {
                 for ((op, (key, key_bytes), value), vis) in
-                    izip!(op, vnode_and_pks, values).zip_eq_debug(vis.iter())
-
+                    izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(vis.iter())
                 {
                     if vis {
                         match op {
@@ -818,7 +817,7 @@ where
                 }
             }
             Vis::Compact(_) => {
-                for (op, (key, key_bytes), value) in izip!(op, vnode_and_pks, values) {
+                for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
