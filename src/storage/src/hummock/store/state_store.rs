@@ -245,19 +245,11 @@ impl LocalStateStore for LocalHummockStorage {
                 self.mem_table.update(key, old_val, new_val)?;
             }
         };
-        self.mem_table_size
-            .set(self.mem_table.kv_size.size() as i64);
-        self.mem_table_item_count
-            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
         self.mem_table.delete(key, old_val)?;
-        self.mem_table_size
-            .set(self.mem_table.kv_size.size() as i64);
-        self.mem_table_item_count
-            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
@@ -265,8 +257,6 @@ impl LocalStateStore for LocalHummockStorage {
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> StorageResult<usize> {
-        self.mem_table_size.set(0);
-        self.mem_table_item_count.set(0);
         debug_assert!(delete_ranges
             .iter()
             .map(|(key, _)| key)
@@ -429,6 +419,7 @@ impl LocalHummockStorage {
             Some(tracker),
         );
         let imm_size = imm.size();
+        let imm_count = imm.kv_count();
         self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
         // insert imm to uploader
@@ -444,6 +435,8 @@ impl LocalHummockStorage {
             .write_batch_size
             .with_label_values(&[table_id_label.as_str()])
             .observe(imm_size as _);
+        self.mem_table_size.set(imm_size as i64);
+        self.mem_table_item_count.set(imm_count as i64);
         Ok(imm_size)
     }
 }
