@@ -102,27 +102,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
 }
 
 pub fn estimate_state_for_compaction(task: &CompactTask) -> CompactTaskEstimatedState {
-    let mut estimate_memory_size = 0;
-    let mut estimate_key_count = 0;
-
     let mut total_key_count = 0;
     let mut total_file_count: u64 = 0;
     let mut total_file_size = 0;
     let mut total_uncompressed_file_size = 0;
 
     for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                estimate_memory_size += table.file_size * task.splits.len() as u64;
-                estimate_key_count += table.total_key_count;
-            }
-        } else {
-            for table in &level.table_infos {
-                estimate_memory_size += table.file_size;
-                estimate_key_count += table.total_key_count;
-            }
-        }
-
         total_file_count += level.table_infos.len() as u64;
 
         level.table_infos.iter().for_each(|sst| {
@@ -133,8 +118,6 @@ pub fn estimate_state_for_compaction(task: &CompactTask) -> CompactTaskEstimated
     }
 
     CompactTaskEstimatedState {
-        estimate_memory_size,
-        estimate_key_count,
         total_file_count,
         total_key_count,
         total_file_size,
@@ -144,9 +127,6 @@ pub fn estimate_state_for_compaction(task: &CompactTask) -> CompactTaskEstimated
 
 #[derive(Debug)]
 pub struct CompactTaskEstimatedState {
-    pub estimate_memory_size: u64,
-    pub estimate_key_count: u64,
-
     pub total_file_count: u64,
     pub total_key_count: u64,
     pub total_file_size: u64,
