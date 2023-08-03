@@ -304,6 +304,16 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            if ret
+                .sstable_infos
+                .iter()
+                .filter(|ssts| !ssts.is_empty())
+                .count()
+                > MAX_LEVEL_COUNT
+            {
+                break;
+            }
+
             ret.total_file_count += add_files_count;
             ret.total_file_size += add_files_size + current_level_size;
             if !overlap_files_range.is_empty() {
