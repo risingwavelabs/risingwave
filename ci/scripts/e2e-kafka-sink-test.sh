@@ -3,6 +3,22 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+BROKER="127.0.0.1:29092"
+TOPICS=("test-rw-sink-append-only" "test-rw-sink-upsert" "test-rw-sink-debezium")
+
+for TOPIC_NAME in "${TOPICS[@]}"; do
+  # Check if the topic already exists
+  EXISTING_TOPIC=$(./.risingwave/bin/kafka/bin/kafka-topic.sh --list --bootstrap-server $BROKER | grep "$TOPIC_NAME")
+
+  if [ -n "$EXISTING_TOPIC" ]; then
+    echo "Topic $TOPIC_NAME already exists. Skipping creation."
+  else
+    ./.risingwave/bin/kafka/bin/kafka-topic.sh --create --bootstrap-server $BROKER --topic "$TOPIC_NAME"
+    echo "create topic $TOPIC_NAME"
+  fi
+done
+
+
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
 
