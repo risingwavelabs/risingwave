@@ -513,7 +513,7 @@ impl StreamChunkTestExt for StreamChunk {
             visibility_percent,
         )
         .into_iter()
-        .map(|chunk| StreamChunk::from_parts(ops, chunk))
+        .map(|chunk| StreamChunk::from_parts(ops.clone(), chunk))
         .collect()
     }
 }
