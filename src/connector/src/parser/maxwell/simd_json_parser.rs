@@ -12,71 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
-
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
-use simd_json::BorrowedValue;
-
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::maxwell::MaxwellChangeEvent;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
-
-const AFTER: &str = "data";
-const BEFORE: &str = "old";
-const OP: &str = "type";
-
-#[derive(Debug)]
-pub struct MaxwellParser {
-    pub(crate) rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-}
-
-impl MaxwellParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
-        Ok(Self {
-            rw_columns,
-            source_ctx,
-        })
-    }
-
-    #[allow(clippy::unused_async)]
-    pub async fn parse_inner(
-        &self,
-        mut payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        let accessor = JsonAccess::new_with_options(event, &JsonParseOptions::DEFAULT);
-
-        let row_op = MaxwellChangeEvent::new(accessor);
-
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
-    }
-}
-
-impl ByteStreamSourceParser for MaxwellParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
-    }
-
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
-    }
-
-    async fn parse_one<'a>(
-        &'a mut self,
-        payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::Op;
@@ -84,8 +19,11 @@ mod tests {
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
-    use super::*;
-    use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
+    use crate::parser::maxwell::MaxwellParser;
+    use crate::parser::{
+        EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
+    };
     #[tokio::test]
     async fn test_json_parser() {
         let descs = vec![
@@ -95,7 +33,14 @@ mod tests {
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
 
-        let parser = MaxwellParser::new(descs.clone(), Default::default()).unwrap();
+        let props = SpecificParserConfig {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            protocol_config: ProtocolProperties::Maxwell,
+        };
+        let mut parser = MaxwellParser::new(props, descs.clone(), Default::default())
+            .await
+            .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         let payloads = vec![

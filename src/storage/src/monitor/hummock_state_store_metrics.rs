@@ -19,8 +19,8 @@ use prometheus::core::{
 };
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, HistogramVec,
-    IntGauge, Opts, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, Gauge, HistogramVec, IntGauge, IntGaugeVec, Opts, Registry,
 };
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -65,6 +65,10 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
+
+    // memory
+    pub mem_table_memory_size: IntGaugeVec,
+    pub mem_table_item_count: IntGaugeVec,
 }
 
 impl HummockStateStoreMetrics {
@@ -239,6 +243,23 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        // todo(wcy-fdu): may replace instance_id with actor_id.
+        let mem_table_memory_size = register_int_gauge_vec_with_registry!(
+            "state_store_mem_table_memory_size",
+            "Memory usage of mem_table",
+            &["table_id", "instance_id"],
+            registry
+        )
+        .unwrap();
+
+        let mem_table_item_count = register_int_gauge_vec_with_registry!(
+            "state_store_mem_table_item_count",
+            "Item counts in mem_table",
+            &["table_id", "instance_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -263,6 +284,8 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
+            mem_table_memory_size,
+            mem_table_item_count,
         }
     }
 
@@ -278,7 +301,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
-    fn get_uploading_memory_usage_ratio(&self) -> f64;
+    fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 struct StateStoreCollector {
@@ -369,7 +392,7 @@ impl Collector for StateStoreCollector {
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
         self.uploading_memory_usage_ratio
-            .set(self.memory_collector.get_uploading_memory_usage_ratio());
+            .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());

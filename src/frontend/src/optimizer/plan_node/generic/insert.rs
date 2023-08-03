@@ -16,11 +16,13 @@ use std::hash::Hash;
 
 use educe::Educe;
 use pretty_xmlish::{Pretty, StrAssocArr};
-use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema, TableVersionId};
+use risingwave_common::types::DataType;
 
-use super::GenericPlanRef;
+use super::{GenericPlanNode, GenericPlanRef};
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
@@ -31,6 +33,7 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub table_name: String, // explain-only
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
+    pub table_visible_columns: Vec<ColumnCatalog>,
     pub input: PlanRef,
     pub column_indices: Vec<usize>, // columns in which to insert
     pub default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
@@ -38,13 +41,42 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub returning: bool,
 }
 
-impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
-    pub fn ctx(&self) -> OptimizerContextRef {
-        self.input.ctx()
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Insert<PlanRef> {
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        FunctionalDependencySet::new(self.output_len())
     }
 
-    pub fn schema(&self) -> &Schema {
-        self.input.schema()
+    fn schema(&self) -> Schema {
+        if self.returning {
+            // We cannot directly use `self.input.schema()` here since it may omit some columns that
+            // will be filled with default values.
+            Schema::new(
+                self.table_visible_columns
+                    .iter()
+                    .map(|c| Field::from(&c.column_desc))
+                    .collect(),
+            )
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        }
+    }
+
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        None
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.input.ctx()
+    }
+}
+
+impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
+    pub fn output_len(&self) -> usize {
+        if self.returning {
+            self.table_visible_columns.len()
+        } else {
+            1
+        }
     }
 
     pub fn fields_pretty<'a>(&self, verbose: bool) -> StrAssocArr<'a> {
@@ -89,6 +121,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
         table_name: String,
         table_id: TableId,
         table_version_id: TableVersionId,
+        table_visible_columns: Vec<ColumnCatalog>,
         column_indices: Vec<usize>,
         default_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
@@ -98,6 +131,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
             table_name,
             table_id,
             table_version_id,
+            table_visible_columns,
             input,
             column_indices,
             default_columns,

@@ -151,11 +151,12 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             .iter()
             .cloned()
             .map(|x| match x.value {
+                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
                 Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
                 _ => Err(ErrorCode::InvalidParameterValue(
-                    "`with options` or `with properties` only support single quoted string value"
+                    "`with options` or `with properties` only support single quoted string value and C style escaped string"
                         .to_owned(),
                 )),
             })

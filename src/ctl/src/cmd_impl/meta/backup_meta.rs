@@ -29,15 +29,14 @@ pub async fn backup_meta(context: &CtlContext) -> anyhow::Result<()> {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
             BackupJobStatus::Succeeded => {
-                tracing::info!("backup job succeeded: job {}", job_id);
                 break;
             }
             _ => {
-                tracing::info!("backup job failed: job {}", job_id);
-                break;
+                return Err(anyhow::anyhow!("backup job failed: job {}", job_id));
             }
         }
     }
+    tracing::info!("backup job succeeded: job {}", job_id);
     Ok(())
 }
 

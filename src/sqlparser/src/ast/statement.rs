@@ -104,6 +104,115 @@ pub enum SourceSchema {
     Bytes,
 }
 
+impl SourceSchema {
+    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+        let (format, row_encode) = match self {
+            SourceSchema::Protobuf(_) => (Format::Plain, Encode::Protobuf),
+            SourceSchema::Json => (Format::Plain, Encode::Json),
+            SourceSchema::DebeziumJson => (Format::Debezium, Encode::Json),
+            SourceSchema::DebeziumMongoJson => (Format::DebeziumMongo, Encode::Json),
+            SourceSchema::UpsertJson => (Format::Upsert, Encode::Json),
+            SourceSchema::Avro(_) => (Format::Plain, Encode::Avro),
+            SourceSchema::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
+            SourceSchema::Maxwell => (Format::Maxwell, Encode::Json),
+            SourceSchema::CanalJson => (Format::Canal, Encode::Json),
+            SourceSchema::Csv(_) => (Format::Plain, Encode::Csv),
+            SourceSchema::DebeziumAvro(_) => (Format::Debezium, Encode::Avro),
+            SourceSchema::Bytes => (Format::Plain, Encode::Bytes),
+            SourceSchema::Native => (Format::Native, Encode::Native),
+        };
+
+        let row_options = match self {
+            SourceSchema::Protobuf(schema) => {
+                let mut options = vec![SqlOption {
+                    name: ObjectName(vec![Ident {
+                        value: "message".into(),
+                        quote_style: None,
+                    }]),
+                    value: Value::SingleQuotedString(schema.message_name.0),
+                }];
+                if schema.use_schema_registry {
+                    options.push(SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.registry".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    });
+                } else {
+                    options.push(SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.location".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    })
+                }
+                options
+            }
+            SourceSchema::Avro(schema) | SourceSchema::UpsertAvro(schema) => {
+                if schema.use_schema_registry {
+                    vec![SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.registry".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    }]
+                } else {
+                    vec![SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "schema.location".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    }]
+                }
+            }
+            SourceSchema::DebeziumAvro(schema) => {
+                vec![SqlOption {
+                    name: ObjectName(vec![Ident {
+                        value: "schema.registry".into(),
+                        quote_style: None,
+                    }]),
+                    value: Value::SingleQuotedString(schema.row_schema_location.0),
+                }]
+            }
+            SourceSchema::Csv(schema) => {
+                vec![
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "delimiter".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(
+                            String::from_utf8_lossy(&[schema.delimiter]).into(),
+                        ),
+                    },
+                    SqlOption {
+                        name: ObjectName(vec![Ident {
+                            value: "without_header".into(),
+                            quote_style: None,
+                        }]),
+                        value: Value::SingleQuotedString(if schema.has_header {
+                            "false".into()
+                        } else {
+                            "true".into()
+                        }),
+                    },
+                ]
+            }
+            _ => vec![],
+        };
+
+        SourceSchemaV2 {
+            format,
+            row_encode,
+            row_options,
+        }
+    }
+}
+
 impl fmt::Display for SourceSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -386,6 +495,13 @@ impl CompatibleSourceSchema {
             }
         }
     }
+
+    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+        match self {
+            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
+            CompatibleSourceSchema::V2(inner) => inner,
+        }
+    }
 }
 
 impl From<SourceSchemaV2> for CompatibleSourceSchema {
@@ -462,6 +578,22 @@ pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
 }
 
 impl SourceSchemaV2 {
+    pub fn gen_options(&self) -> Result<BTreeMap<String, String>, ParserError> {
+        self.row_options
+            .iter()
+            .cloned()
+            .map(|x| match x.value {
+                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
+                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
+                Value::Number(n) => Ok((x.name.real_value(), n)),
+                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
+                _ => Err(ParserError::ParserError(
+                    "`row format options` only support single quoted string value and C style escaped string".to_owned(),
+                )),
+            })
+            .try_collect()
+    }
+
     /// just a temporal compatibility layer will be removed soon(so the implementation is a little
     /// dirty)
     #[allow(deprecated)]
@@ -503,7 +635,7 @@ impl SourceSchemaV2 {
                     (None, Some(schema_registry)) => Ok((schema_registry, true)),
                     (Some(schema_location), None) => Ok((schema_location, false)),
                     (Some(_), Some(_)) => Err(ParserError::ParserError(
-                        "missing either a schema location or a schema registry".to_string(),
+                        "only need either the schema location or the schema registry".to_string(),
                     )),
                 }
             };
@@ -539,14 +671,8 @@ impl SourceSchemaV2 {
                 RowFormat::Maxwell => SourceSchema::Maxwell,
                 RowFormat::CanalJson => SourceSchema::CanalJson,
                 RowFormat::Csv => {
-                    let mut chars = consume_string_from_options(&options, "delimiter")?.0;
-                    if chars.len() != 1 {
-                        return Err(ParserError::ParserError(format!(
-                            "The delimiter should be a char, but got {:?}",
-                            chars
-                        )));
-                    }
-                    let delimiter = chars.remove(0) as u8;
+                    let chars = consume_string_from_options(&options, "delimiter")?.0;
+                    let delimiter = get_delimiter(chars.as_str())?;
                     let has_header = try_consume_string_from_options(&options, "without_header")
                         .map(|s| s.0 == "false")
                         .unwrap_or(true);
@@ -716,19 +842,23 @@ pub struct CsvInfo {
     pub has_header: bool,
 }
 
+pub fn get_delimiter(chars: &str) -> Result<u8, ParserError> {
+    match chars {
+        "," => Ok(b','),   // comma
+        "\t" => Ok(b'\t'), // tab
+        other => Err(ParserError::ParserError(format!(
+            "The delimiter should be one of ',', E'\\t', but got {:?}",
+            other
+        ))),
+    }
+}
+
 impl ParseTo for CsvInfo {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
         impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
         impl_parse_to!(delimiter: AstString, p);
-        let mut chars = delimiter.0.chars().collect_vec();
-        if chars.len() != 1 {
-            return Err(ParserError::ParserError(format!(
-                "The delimiter should be a char, but got {:?}",
-                chars
-            )));
-        }
-        let delimiter = chars.remove(0) as u8;
+        let delimiter = get_delimiter(delimiter.0.as_str())?;
         Ok(Self {
             delimiter,
             has_header: !without_header,

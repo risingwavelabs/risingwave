@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -85,7 +86,7 @@ pub async fn compute_node_serve(
     registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
+    let config = load_config(&opts.config_path, &opts);
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -227,16 +228,17 @@ pub async fn compute_node_serve(
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
+                running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+                Compactor::start_compactor(compactor_context, hummock_meta_client, 2.0);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let memory_limiter = storage.get_memory_limiter();
+        let flush_limiter = storage.get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            memory_limiter,
+            flush_limiter,
             storage_memory_config,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
@@ -396,7 +398,8 @@ pub async fn compute_node_serve(
             .tcp_nodelay(true)
             .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
             .layer(TracingExtractLayer::new())
-            .add_service(TaskServiceServer::new(batch_srv))
+            // XXX: unlimit the max message size to allow arbitrary large SQL input.
+            .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))

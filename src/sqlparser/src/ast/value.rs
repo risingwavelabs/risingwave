@@ -28,7 +28,7 @@ pub enum Value {
     // $<tag_name>$string value$<tag_name>$ (postgres syntax)
     DollarQuotedString(DollarQuotedString),
     /// String Constants With C-Style Escapes
-    CstyleEscapesString(String),
+    CstyleEscapedString(CstyleEscapedString),
     /// N'string value'
     NationalStringLiteral(String),
     /// X'hex value'
@@ -68,7 +68,7 @@ impl fmt::Display for Value {
             Value::DollarQuotedString(v) => write!(f, "{}", v),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
             Value::HexStringLiteral(v) => write!(f, "X'{}'", v),
-            Value::CstyleEscapesString(v) => write!(f, "E'{}'", v),
+            Value::CstyleEscapedString(v) => write!(f, "E'{}'", v),
             Value::Boolean(v) => write!(f, "{}", v),
             Value::Interval {
                 value,
@@ -132,6 +132,21 @@ impl fmt::Display for DollarQuotedString {
                 write!(f, "$${}$$", self.value)
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CstyleEscapedString {
+    /// The unescaped string.
+    pub value: String,
+    /// The raw string used for simplifying `fmt::Display` (unparsing) implementation.
+    pub raw: String,
+}
+
+impl fmt::Display for CstyleEscapedString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.raw)
     }
 }
 

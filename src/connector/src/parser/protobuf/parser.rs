@@ -20,7 +20,7 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
@@ -30,18 +30,43 @@ use url::Url;
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::{
-    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
-};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::parser::unified::protobuf::ProtobufAccess;
+use crate::parser::unified::AccessImpl;
+use crate::parser::{AccessBuilder, EncodingProperties};
 
-#[derive(Debug, Clone)]
-pub struct ProtobufParser {
-    message_descriptor: MessageDescriptor,
+#[derive(Debug)]
+pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
-    rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
+    message_descriptor: MessageDescriptor,
+}
+
+impl AccessBuilder for ProtobufAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
+
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+    }
+}
+
+impl ProtobufAccessBuilder {
+    pub fn new(config: ProtobufParserConfig) -> Result<Self> {
+        let ProtobufParserConfig {
+            confluent_wire_type,
+            message_descriptor,
+        } = config;
+        Ok(Self {
+            confluent_wire_type,
+            message_descriptor,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,11 +76,8 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let protobuf_config = try_match_expand!(
-            parser_properties.encoding_config,
-            EncodingProperties::Protobuf
-        )?;
+    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = Url::parse(location)
@@ -179,60 +201,6 @@ impl ProtobufParserConfig {
     }
 }
 
-impl ProtobufParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        config: ProtobufParserConfig,
-        source_ctx: SourceContextRef,
-    ) -> Result<Self> {
-        let ProtobufParserConfig {
-            confluent_wire_type,
-            message_descriptor,
-        } = config;
-        Ok(Self {
-            message_descriptor,
-            confluent_wire_type,
-            rw_columns,
-            source_ctx,
-        })
-    }
-
-    #[allow(clippy::unused_async)]
-    pub async fn parse_inner(
-        &self,
-        payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let payload = if self.confluent_wire_type {
-            resolve_pb_header(&payload)?
-        } else {
-            &payload
-        };
-
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-        writer.insert(|column_desc| {
-            let field_desc = message
-                .descriptor()
-                .get_field_by_name(&column_desc.name)
-                .ok_or_else(|| {
-                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
-                    tracing::error!(err_msg);
-                    RwError::from(ProtocolError(err_msg))
-                })?;
-            let value = message.get_field(&field_desc);
-            from_protobuf_value(&field_desc, &value).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e
-            })
-        })
-    }
-}
-
 fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
     let identifier = format!("{}({})", fd.name(), fd.full_name());
     if trace.iter().any(|s| s == identifier.as_str()) {
@@ -247,25 +215,7 @@ fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result
     Ok(())
 }
 
-impl ByteStreamSourceParser for ProtobufParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
-    }
-
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
-    }
-
-    async fn parse_one<'a>(
-        &'a mut self,
-        payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
-    }
-}
-
-fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
+pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
         Value::I32(i) => ScalarImpl::Int32(*i),
@@ -318,6 +268,7 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
                 .collect::<Result<Vec<_>>>()?;
             ScalarImpl::List(ListValue::new(rw_values))
         }
+        Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
             let err_msg = format!(
                 "protobuf parse error.unsupported type {:?}, value {:?}",
@@ -355,13 +306,7 @@ fn protobuf_type_mapping(
             DataType::new_struct(fields, field_names)
         }
         Kind::Enum(_) => DataType::Varchar,
-        actual_type => {
-            return Err(NotImplemented(
-                format!("unsupported field type: {:?}", actual_type),
-                None.into(),
-            )
-            .into());
-        }
+        Kind::Bytes => DataType::Bytea,
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))
@@ -392,11 +337,13 @@ mod test {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
+    use bytes::Bytes;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
-    use crate::source::SourceFormat;
+    use crate::parser::SpecificParserConfig;
+    use crate::source::{SourceEncode, SourceFormat, SourceStruct};
 
     fn schema_dir() -> String {
         let dir = PathBuf::from("src/test_data");
@@ -425,10 +372,13 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(parser_config).await?;
-        let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
-        let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )?;
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
+        let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
             value.get_field_by_name("id").unwrap().into_owned(),
@@ -469,8 +419,12 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(parser_config).await?;
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )?;
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
@@ -516,9 +470,15 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config =
-            ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
-        let conf = ProtobufParserConfig::new(parser_config).await.unwrap();
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )
+        .unwrap();
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config)
+            .await
+            .unwrap();
         let columns = conf.map_to_columns();
         // expect error message:
         // "Err(Protocol error: circular reference detected:
@@ -527,5 +487,38 @@ mod test {
         // parent(recursive.ComplexRecursiveMessage.parent), kind
         // recursive.ComplexRecursiveMessage.Parent"
         assert!(columns.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_all_types() {
+        let location = schema_dir() + "/proto_recursive/recursive.pb";
+        let message_name = "recursive.AllTypes";
+
+        let info = StreamSourceInfo {
+            proto_message_name: message_name.to_string(),
+            row_schema_location: location.to_string(),
+            use_schema_registry: false,
+            ..Default::default()
+        };
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )
+        .unwrap();
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config)
+            .await
+            .unwrap();
+        // Ensure that the parser can recognize the schema.
+        conf.map_to_columns().unwrap();
+
+        let field_desc = conf
+            .message_descriptor
+            .get_field_by_name("bytes_field")
+            .unwrap();
+        let d = from_protobuf_value(&field_desc, &Value::Bytes(Bytes::from(vec![1, 2, 3])))
+            .unwrap()
+            .unwrap();
+        assert_eq!(d, ScalarImpl::Bytea(vec![1, 2, 3].into_boxed_slice()));
     }
 }

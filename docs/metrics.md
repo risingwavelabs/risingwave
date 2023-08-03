@@ -48,4 +48,4 @@ Suppose stream message processing is at its limit, and there's high latency as a
 Typically, backpressure kicks in, the source is throttled.
 If buffer sizes are too large, or if there are many buffers, there will not be backpressure applied to source immediately.
 During this delay, we will continue to see high barrier latency.
-A heuristic algorithm is on the way to deal with this: https://github.com/risingwavelabs/risingwave/issues/8654. 
+A heuristic algorithm is on the way to deal with this: https://github.com/risingwavelabs/risingwave/issues/8654.

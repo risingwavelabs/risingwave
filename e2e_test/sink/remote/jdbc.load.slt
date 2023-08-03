@@ -64,6 +64,7 @@ CREATE SINK s_postgres_0 FROM mv_remote_0 WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t_remote_0',
+    primary_key='id',
     type='upsert'
 );
 
@@ -72,6 +73,7 @@ CREATE SINK s_postgres_1 FROM mv_remote_1 WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t_remote_1',
+    primary_key='id',
     type='upsert'
 );
 
@@ -80,6 +82,7 @@ CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
     connector='jdbc',
     jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
     table.name='t_remote_0',
+    primary_key='id',
     type='upsert'
 );
 
@@ -88,6 +91,7 @@ CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
     connector='jdbc',
     jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
     table.name='t_remote_1',
+    primary_key='id',
     type='upsert'
 );
 
@@ -96,6 +100,7 @@ CREATE SINK s2_postgres FROM rw_types WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t_types',
+    primary_key='id',
     schema.name='biz',
     type='upsert'
 );
@@ -105,6 +110,7 @@ CREATE SINK s2_mysql FROM rw_types WITH (
     connector='jdbc',
     jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
     table.name='t_types',
+    primary_key='id',
     type='upsert'
 );
 

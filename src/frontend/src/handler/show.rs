@@ -43,16 +43,16 @@ pub fn get_columns_from_table(
     let catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns,
-        Relation::SystemTable(t) => t.sys_table_catalog.columns,
+        Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
         _ => {
             return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
         }
     };
 
     Ok(catalogs
-        .iter()
+        .into_iter()
         .filter(|c| !c.is_hidden)
-        .map(|c| c.column_desc.clone())
+        .map(|c| c.column_desc)
         .collect())
 }
 

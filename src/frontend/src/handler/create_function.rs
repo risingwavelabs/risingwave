@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -129,7 +130,7 @@ pub async fn handle_create_function(
         arg_types
             .iter()
             .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
-            .try_collect()?,
+            .try_collect::<_, Fields, _>()?,
     );
     let returns = arrow_schema::Schema::new(match kind {
         Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],

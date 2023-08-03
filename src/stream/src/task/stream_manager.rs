@@ -239,16 +239,14 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Clear all senders and collect rx in barrier manager.
-    pub fn clear_all_senders_and_collect_rx(&self) {
-        let mut barrier_manager = self.context.lock_barrier_manager();
-        barrier_manager.clear_senders();
-        barrier_manager.clear_collect_rx();
+    /// Reset the state of the barrier manager.
+    pub fn reset_barrier_manager(&self) {
+        self.context.lock_barrier_manager().reset();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
         let complete_receiver = {
             let mut barrier_manager = self.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)?
@@ -263,7 +261,7 @@ impl LocalStreamManager {
             .barrier_inflight_timer
             .expect("no timer for test")
             .observe_duration();
-        Ok((result, complete_receiver.checkpoint))
+        Ok(result)
     }
 
     pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
@@ -325,9 +323,9 @@ impl LocalStreamManager {
     /// Force stop all actors on this worker, and then drop their resources.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         self.core.lock().await.stop_all_actors().await;
+        self.reset_barrier_manager();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_senders_and_collect_rx();
 
         Ok(())
     }
