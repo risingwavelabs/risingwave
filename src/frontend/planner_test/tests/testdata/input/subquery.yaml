@@ -199,3 +199,29 @@
     select 1 from a where exists ( select 1 from b having exists ( select a1 from c ));
   expected_outputs:
   - optimized_logical_plan_for_stream
+- name: test subquery in table function
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from unnest(x) i) as sum_x from t;
+  expected_outputs:
+    - batch_error
+- name: CorrelatedInputRef in ProjectSet and apply on condition is true.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q ) as sum_x from t;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name:  CorrelatedInputRef in ProjectSet and apply on condition refers to no table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i, 1 c) Q where k = c ) as sum_x from t;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name:  CorrelatedInputRef in ProjectSet and apply on condition refers to table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q where k = i ) as sum_x from t;
+  expected_outputs:
+    - optimizer_error

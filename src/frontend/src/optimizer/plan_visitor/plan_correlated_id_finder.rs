@@ -17,7 +17,8 @@ use std::collections::HashSet;
 use super::{DefaultBehavior, DefaultValue};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode,
+    LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, LogicalProjectSet,
+    LogicalTableFunction, PlanTreeNode,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
@@ -84,6 +85,31 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
         plan.agg_calls()
             .iter()
             .for_each(|agg_call| agg_call.filter.visit_expr(&mut finder));
+        self.correlated_id_set.extend(finder.correlated_id_set);
+
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
+    }
+
+    fn visit_logical_project_set(&mut self, plan: &LogicalProjectSet) {
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.select_list()
+            .iter()
+            .for_each(|expr| finder.visit_expr(expr));
+        self.correlated_id_set.extend(finder.correlated_id_set);
+
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
+    }
+
+    fn visit_logical_table_function(&mut self, plan: &LogicalTableFunction) {
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.table_function
+            .args
+            .iter()
+            .for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
         plan.inputs()
