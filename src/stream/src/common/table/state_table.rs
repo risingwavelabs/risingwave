@@ -59,8 +59,10 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
-/// This num is arbitrary and we may want to improve this choice in the future.
-const WATERMARK_CACHE_ENTRIES: usize = 1024;
+/// Mostly watermark operators will have inserts (append-only).
+/// So this number should not need to be very large.
+/// But we may want to improve this choice in the future.
+const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
