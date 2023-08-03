@@ -23,7 +23,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
+use risingwave_common::config::{AutoDumpHeapProfileConfig, StorageConfig, StorageMemoryConfig};
 use risingwave_common::error::Result;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
@@ -50,8 +50,8 @@ pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 /// `MemoryControlStats` contains the state from previous control loop
 #[derive(Default)]
 pub struct MemoryControlStats {
-    pub jemalloc_allocated_mib: usize,
-    pub jemalloc_active_mib: usize,
+    pub jemalloc_allocated_bytes: usize,
+    pub jemalloc_active_bytes: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
     pub lru_physical_now_ms: u64,
@@ -71,14 +71,30 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
 }
 
 #[cfg(target_os = "linux")]
-pub fn build_memory_control_policy(total_memory_bytes: usize) -> Result<MemoryControlRef> {
+pub fn build_memory_control_policy(
+    total_memory_bytes: usize,
+    auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
+) -> Result<MemoryControlRef> {
+    use risingwave_common::bail;
+    use tikv_jemalloc_ctl::opt;
+
     use self::policy::JemallocMemoryControl;
 
-    Ok(Box::new(JemallocMemoryControl::new(total_memory_bytes)))
+    if !opt::prof::read().unwrap() && auto_dump_heap_profile_config.enabled() {
+        bail!("Auto heap profile dump should not be enabled with Jemalloc profile disable");
+    }
+
+    Ok(Box::new(JemallocMemoryControl::new(
+        total_memory_bytes,
+        auto_dump_heap_profile_config,
+    )))
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn build_memory_control_policy(_total_memory_bytes: usize) -> Result<MemoryControlRef> {
+pub fn build_memory_control_policy(
+    _total_memory_bytes: usize,
+    _auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
+) -> Result<MemoryControlRef> {
     // We disable memory control on operating systems other than Linux now because jemalloc
     // stats do not work well.
     tracing::warn!("memory control is only enabled on Linux now");

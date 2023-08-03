@@ -179,7 +179,13 @@ macro_rules! impl_system_params_from_kv {
             });
             derive_missing_fields(&mut ret);
             if !kvs.is_empty() {
-                Err(format!("unrecognized system params {:?}", kvs))
+                let unrecognized_params = kvs.into_iter().map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                    )
+                }).collect::<Vec<_>>();
+                Err(format!("unrecognized system params {:?}", unrecognized_params))
             } else {
                 Ok(ret)
             }

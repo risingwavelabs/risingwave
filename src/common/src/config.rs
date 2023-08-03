@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
+use crate::hash::VirtualNode;
+
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
@@ -178,9 +180,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    /// Interval of invoking a vacuum job, to remove stale metadata from meta store and objects
+    /// from object store.
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
+
+    /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
+    /// meta node.
+    #[serde(default = "default::meta::vacuum_spin_interval_ms")]
+    pub vacuum_spin_interval_ms: u64,
 
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
@@ -323,11 +331,16 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
+                Err(serde::de::Error::custom(format!(
+                    "default parallelism should be not great than {}",
+                    VirtualNode::COUNT
+                )))?
+            } else {
                 NonZeroUsize::new(i)
                     .context("default parallelism should be greater than 0")
-                    .map_err(|e| serde::de::Error::custom(e.to_string()))?,
-            )),
+                    .map_err(|e| serde::de::Error::custom(e.to_string()))?
+            })),
         }
     }
 }
@@ -353,6 +366,10 @@ pub struct ServerConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[serde(default = "default::server::auto_dump_heap_profile")]
+    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -451,9 +468,20 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
 
-    /// Capacity of sstable meta cache.
     #[serde(default)]
     pub compactor_memory_limit_mb: Option<usize>,
+
+    /// Compactor calculates the maximum number of tasks that can be executed on the node based on
+    /// worker_num and compactor_max_task_multiplier.
+    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
+    #[serde(default = "default::storage::compactor_max_task_multiplier")]
+    pub compactor_max_task_multiplier: f32,
+
+    /// The percentage of memory available when compactor is deployed separately.
+    /// total_memory_available_bytes = total_memory_available_bytes *
+    /// compactor_memory_available_proportion
+    #[serde(default = "default::storage::compactor_memory_available_proportion")]
+    pub compactor_memory_available_proportion: f64,
 
     /// Number of SST ids fetched from meta per RPC
     #[serde(default = "default::storage::sstable_id_remote_fetch_number")]
@@ -484,6 +512,24 @@ pub struct StorageConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::storage::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+
+    #[serde(default = "default::s3_objstore_config::object_store_keepalive_ms")]
+    pub object_store_keepalive_ms: Option<u64>,
+    #[serde(default = "default::s3_objstore_config::object_store_recv_buffer_size")]
+    pub object_store_recv_buffer_size: Option<usize>,
+    #[serde(default = "default::s3_objstore_config::object_store_send_buffer_size")]
+    pub object_store_send_buffer_size: Option<usize>,
+    #[serde(default = "default::s3_objstore_config::object_store_nodelay")]
+    pub object_store_nodelay: Option<bool>,
+    #[serde(default = "default::s3_objstore_config::object_store_req_retry_interval_ms")]
+    pub object_store_req_retry_interval_ms: u64,
+    #[serde(default = "default::s3_objstore_config::object_store_req_retry_max_delay_ms")]
+    pub object_store_req_retry_max_delay_ms: u64,
+    #[serde(default = "default::s3_objstore_config::object_store_req_retry_max_attempts")]
+    pub object_store_req_retry_max_attempts: usize,
+
+    #[serde(default = "default::storage::compactor_max_sst_key_count")]
+    pub compactor_max_sst_key_count: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -536,6 +582,20 @@ impl AsyncStackTraceOption {
             Self::On => Some(false),
             Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct AutoDumpHeapProfileConfig {
+    #[serde(default = "default::auto_dump_heap_profile::dir")]
+    pub dir: String,
+    #[serde(default = "default::auto_dump_heap_profile::threshold")]
+    pub threshold: f32,
+}
+
+impl AutoDumpHeapProfileConfig {
+    pub fn enabled(&self) -> bool {
+        !self.dir.is_empty()
     }
 }
 
@@ -687,6 +747,10 @@ pub mod default {
             30
         }
 
+        pub fn vacuum_spin_interval_ms() -> u64 {
+            10
+        }
+
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
         }
@@ -753,6 +817,7 @@ pub mod default {
     }
 
     pub mod server {
+        use crate::config::AutoDumpHeapProfileConfig;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -768,6 +833,10 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
+        }
+
+        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
+            Default::default()
         }
     }
 
@@ -821,6 +890,14 @@ pub mod default {
             512
         }
 
+        pub fn compactor_max_task_multiplier() -> f32 {
+            1.5000
+        }
+
+        pub fn compactor_memory_available_proportion() -> f64 {
+            0.8
+        }
+
         pub fn sstable_id_remote_fetch_number() -> u32 {
             10
         }
@@ -856,6 +933,10 @@ pub mod default {
 
         pub fn object_store_read_timeout_ms() -> u64 {
             60 * 60 * 1000
+        }
+
+        pub fn compactor_max_sst_key_count() -> u64 {
+            2 * 1024 * 1024 // 200w
         }
     }
 
@@ -901,6 +982,16 @@ pub mod default {
 
         pub fn cache_file_max_write_size_mb() -> usize {
             4
+        }
+    }
+
+    pub mod auto_dump_heap_profile {
+        pub fn dir() -> String {
+            "".to_string()
+        }
+
+        pub fn threshold() -> f32 {
+            0.9
         }
     }
 
@@ -1053,6 +1144,43 @@ pub mod default {
         }
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+    }
+
+    pub mod s3_objstore_config {
+        /// Retry config for compute node http timeout error.
+        const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
+        const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
+        const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
+
+        const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
+
+        pub fn object_store_keepalive_ms() -> Option<u64> {
+            Some(DEFAULT_KEEPALIVE_MS) // 10min
+        }
+
+        pub fn object_store_recv_buffer_size() -> Option<usize> {
+            Some(1 << 21) // 2m
+        }
+
+        pub fn object_store_send_buffer_size() -> Option<usize> {
+            None
+        }
+
+        pub fn object_store_nodelay() -> Option<bool> {
+            Some(true)
+        }
+
+        pub fn object_store_req_retry_interval_ms() -> u64 {
+            DEFAULT_RETRY_INTERVAL_MS
+        }
+
+        pub fn object_store_req_retry_max_delay_ms() -> u64 {
+            DEFAULT_RETRY_MAX_DELAY_MS // 10s
+        }
+
+        pub fn object_store_req_retry_max_attempts() -> usize {
+            DEFAULT_RETRY_MAX_ATTEMPTS
         }
     }
 }

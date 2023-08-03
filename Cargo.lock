@@ -2048,15 +2048,15 @@ source = "git+https://github.com/risingwavelabs/darwin-libproc.git?rev=a502be24b
 
 [[package]]
 name = "dashmap"
-version = "5.4.0"
+version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
+checksum = "6943ae99c34386c84a470c499d3414f66502a41340aa895406e0d2e4a207b91d"
 dependencies = [
  "cfg-if",
- "hashbrown 0.12.3",
+ "hashbrown 0.14.0",
  "lock_api",
  "once_cell",
- "parking_lot_core 0.9.7",
+ "parking_lot_core 0.9.8",
 ]
 
 [[package]]
@@ -2204,9 +2204,9 @@ dependencies = [
 
 [[package]]
 name = "duration-str"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f94be4825ff6a563f1bfbdb786ae10c687333c7524fade954e2271170e7f7e6d"
+checksum = "d9f037c488d179e21c87ef5fa9c331e8e62f5dddfa84618b41bb197da03edff1"
 dependencies = [
  "chrono",
  "nom",
@@ -3558,9 +3558,9 @@ dependencies = [
 
 [[package]]
 name = "lock_api"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "435011366fe56583b16cf956f9df0095b405b82d76425bc8981c0e22e60ec4df"
+checksum = "c1cc9717a20b1bb222f333e6a92fd32f7d8a18ddc5a3191a11af45dcbf4dcd16"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -4284,9 +4284,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.17.1"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
+checksum = "dd8b5dd2ae5ed71462c540258bedcb51965123ad7e7ccf4b9a8cafaa4a63576d"
 
 [[package]]
 name = "oorandom"
@@ -4573,7 +4573,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
 dependencies = [
  "lock_api",
- "parking_lot_core 0.9.7",
+ "parking_lot_core 0.9.8",
 ]
 
 [[package]]
@@ -4592,18 +4592,18 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.9.7"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9069cbb9f99e3a5083476ccb29ceb1de18b9118cafa53e90c9551235de2b9521"
+checksum = "93f00c865fe7cabf650081affecd3871070f26767e7b2070a3ffae14c654b447"
 dependencies = [
  "backtrace",
  "cfg-if",
  "libc",
  "petgraph",
- "redox_syscall 0.2.16",
+ "redox_syscall 0.3.5",
  "smallvec",
  "thread-id",
- "windows-sys 0.45.0",
+ "windows-targets 0.48.0",
 ]
 
 [[package]]
@@ -5157,6 +5157,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "procfs"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "943ca7f9f29bab5844ecd8fdb3992c5969b6622bb9609b9502fef9b4310e3f1f"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "hex",
+ "lazy_static",
+ "rustix 0.36.13",
+]
+
+[[package]]
 name = "prometheus"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5168,7 +5181,7 @@ dependencies = [
  "libc",
  "memchr",
  "parking_lot 0.12.1",
- "procfs",
+ "procfs 0.14.2",
  "protobuf",
  "thiserror",
 ]
@@ -5942,7 +5955,7 @@ dependencies = [
  "paste",
  "postgres-types",
  "pretty_assertions",
- "procfs",
+ "procfs 0.15.1",
  "prometheus",
  "prost",
  "rand",
@@ -6065,6 +6078,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "await-tree",
+ "chrono",
  "clap",
  "either",
  "futures",
@@ -6659,6 +6673,7 @@ dependencies = [
  "serde_json",
  "sqllogictest",
  "tempfile",
+ "tikv-jemallocator",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
@@ -6792,7 +6807,7 @@ dependencies = [
  "nix 0.25.1",
  "num-integer",
  "parking_lot 0.12.1",
- "procfs",
+ "procfs 0.15.1",
  "prometheus",
  "prost",
  "rand",
@@ -7270,9 +7285,9 @@ dependencies = [
 
 [[package]]
 name = "serde_bytes"
-version = "0.11.9"
+version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "416bda436f9aab92e02c8e10d49a15ddd339cea90b6e340fe51ed97abb548294"
+checksum = "ab33ec92f677585af6d88c65593ae2375adde54efdbf16d597f2cbc7a6d368ff"
 dependencies = [
  "serde",
 ]
@@ -8048,9 +8063,8 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-ctl"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e37706572f4b151dff7a0146e040804e9c26fe3a3118591112f05cf12a4216c1"
+version = "0.5.4"
+source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
 dependencies = [
  "libc",
  "paste",
@@ -8059,9 +8073,8 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-sys"
-version = "0.5.3+5.3.0-patched"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a678df20055b43e57ef8cddde41cdfda9a3c1a060b67f4c5836dfb1d78543ba8"
+version = "0.5.4+5.3.0-patched"
+source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
 dependencies = [
  "cc",
  "libc",
@@ -8069,9 +8082,8 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemallocator"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20612db8a13a6c06d57ec83953694185a367e16945f66565e8028d2c0bd76979"
+version = "0.5.4"
+source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",
@@ -8731,9 +8743,9 @@ dependencies = [
 
 [[package]]
 name = "urlencoding"
-version = "2.1.2"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8db7427f936968176eaa7cdf81b7f98b980b18495ec28f1b5791ac3bfe3eea9"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf8parse"
@@ -9249,7 +9261,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
- "parking_lot_core 0.9.7",
+ "parking_lot_core 0.9.8",
  "petgraph",
  "phf",
  "phf_shared",

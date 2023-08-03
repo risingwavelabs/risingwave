@@ -6,12 +6,17 @@ connection_pool_size = 16
 metrics_level = 0
 telemetry_enabled = true
 
+[server.auto_dump_heap_profile]
+dir = ""
+threshold = 0.8999999761581421
+
 [meta]
 min_sst_retention_time_sec = 86400
 full_gc_interval_sec = 86400
 collect_gc_watermark_spin_interval_sec = 5
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
+vacuum_spin_interval_ms = 10
 hummock_version_checkpoint_interval_sec = 30
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
@@ -78,6 +83,8 @@ imm_merge_threshold = 4
 write_conflict_detection_enabled = true
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
+compactor_max_task_multiplier = 1.5
+compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
@@ -87,6 +94,13 @@ object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
 object_store_read_timeout_ms = 3600000
+object_store_keepalive_ms = 600000
+object_store_recv_buffer_size = 2097152
+object_store_nodelay = true
+object_store_req_retry_interval_ms = 20
+object_store_req_retry_max_delay_ms = 10000
+object_store_req_retry_max_attempts = 8
+compactor_max_sst_key_count = 2097152
 
 [storage.file_cache]
 dir = ""
