@@ -178,9 +178,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    /// Interval of invoking a vacuum job, to remove stale metadata from meta store and objects
+    /// from object store.
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
+
+    /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
+    /// meta node.
+    #[serde(default = "default::meta::vacuum_spin_interval_ms")]
+    pub vacuum_spin_interval_ms: u64,
 
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
@@ -714,6 +720,10 @@ pub mod default {
 
         pub fn vacuum_interval_sec() -> u64 {
             30
+        }
+
+        pub fn vacuum_spin_interval_ms() -> u64 {
+            10
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
