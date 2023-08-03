@@ -60,12 +60,12 @@ def section_cluster_node(panels):
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
-                    "cpu - {{job}} @ {{instance}}",
+                    "cpu usage (total) - {{job}} @ {{instance}}",
                 ),
 
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance) / avg({metric('process_cpu_core_num')}) by (job,instance)",
-                    "cpu usage -{{job}} @ {{instance}}",
+                    "cpu usage (avg per core) - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -1140,7 +1140,7 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
                             "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
-           
+
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
@@ -1192,7 +1192,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_temporal_join_cached_entry_count')}",
                                       "Temporal Join cached count | table {{table_id}} actor {{actor_id}}"),
-                       
+
                     ],
                 ),
 
@@ -1202,7 +1202,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_lookup_cached_entry_count')}",
                                       "lookup cached count | table {{table_id}} actor {{actor_id}}"),
-                       
+
                     ],
                 ),
             ],
@@ -2306,7 +2306,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
 
-        
+
                 panels.timeseries_count(
                     "Table KV Count",
                     "",

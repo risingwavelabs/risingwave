@@ -158,9 +158,9 @@ integer 2
 
 # Test multiple castings of the same input.
 query TTI
-select 
+select
     (arr::varchar[][])[1][2] as double_varchar,
-    (arr::varchar[][][])[1][2][3] as triple_varchar, 
+    (arr::varchar[][][])[1][2][3] as triple_varchar,
     (arr::integer[][][])[1][2][3] as triple_integer
 from (values ('{{{1, 2, 3}, {44, 55, 66}}}')) as t(arr);
 ----

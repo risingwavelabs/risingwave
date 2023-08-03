@@ -18,12 +18,12 @@ anyhow = "1"
 easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-itertools = "0.10"
+itertools = "0.11"
 parking_lot = "0.12"
 rand = "0.8"
-risingwave_common = { path = "../common" }
-risingwave_connector = { path = "../connector" }
-risingwave_pb = { path = "../prost" }
+risingwave_common = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_pb = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tracing = { version = "0.1" }
 

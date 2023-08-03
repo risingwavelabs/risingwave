@@ -127,25 +127,27 @@ drop view v1;
 statement ok
 drop table t3;
 
-query TT
-describe pg_matviews;
-----
-schemaname varchar
-matviewname varchar
-matviewowner integer
-definition varchar
-matviewid integer
-matviewtimezone varchar
-matviewgraph varchar
-primary key schemaname, matviewname
-
-query TT
-show columns from pg_catalog.pg_matviews;
-----
-schemaname varchar
-matviewname varchar
-matviewowner integer
-definition varchar
-matviewid integer
-matviewtimezone varchar
-matviewgraph varchar
+# todo: re-enable it when we support these commands on view
+# https://github.com/risingwavelabs/risingwave/issues/11234
+#query TT
+#describe pg_matviews;
+#----
+#schemaname varchar
+#matviewname varchar
+#matviewowner integer
+#definition varchar
+#matviewid integer
+#matviewtimezone varchar
+#matviewgraph varchar
+#primary key schemaname, matviewname
+#
+#query TT
+#show columns from pg_catalog.pg_matviews;
+#----
+#schemaname varchar
+#matviewname varchar
+#matviewowner integer
+#definition varchar
+#matviewid integer
+#matviewtimezone varchar
+#matviewgraph varchar

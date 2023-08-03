@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::mem::swap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,13 +23,15 @@ use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::message::BorrowedMessage;
+use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
+use crate::source::kafka::{
+    KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
+};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
@@ -37,12 +41,9 @@ impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<PrivateLinkConsumerContext>,
-    start_offset: Option<i64>,
-    stop_offset: Option<i64>,
+    offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     bytes_per_second: usize,
     max_num_messages: usize,
-
-    split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
@@ -71,6 +72,10 @@ impl SplitReader for KafkaSplitReader {
         config.set("bootstrap.servers", bootstrap_servers);
 
         properties.common.set_security_properties(&mut config);
+        properties.set_client(&mut config);
+
+        // rdkafka fetching config
+        properties.rdkafka_properties.set_client(&mut config);
 
         if config.get("group.id").is_none() {
             config.set(
@@ -92,26 +97,28 @@ impl SplitReader for KafkaSplitReader {
             .await
             .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 
-        let mut start_offset = None;
+        let splits = splits
+            .into_iter()
+            .map(|split| split.into_kafka().unwrap())
+            .collect::<Vec<KafkaSplit>>();
 
-        assert_eq!(splits.len(), 1);
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-        let split = splits.into_iter().next().unwrap().into_kafka().unwrap();
+        let mut offsets = HashMap::new();
 
-        let split_id = split.id();
+        for split in splits {
+            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
-        if let Some(offset) = split.start_offset {
-            start_offset = Some(offset);
-            tpl.add_partition_offset(
-                split.topic.as_str(),
-                split.partition,
-                Offset::Offset(offset + 1),
-            )?;
-        } else {
-            tpl.add_partition(split.topic.as_str(), split.partition);
+            if let Some(offset) = split.start_offset {
+                tpl.add_partition_offset(
+                    split.topic.as_str(),
+                    split.partition,
+                    Offset::Offset(offset + 1),
+                )?;
+            } else {
+                tpl.add_partition(split.topic.as_str(), split.partition);
+            }
         }
-        let stop_offset = split.stop_offset;
 
         consumer.assign(&tpl)?;
 
@@ -132,11 +139,9 @@ impl SplitReader for KafkaSplitReader {
 
         Ok(Self {
             consumer,
-            start_offset,
-            stop_offset,
+            offsets,
             bytes_per_second,
             max_num_messages,
-            split_id,
             parser_config,
             source_ctx,
         })
@@ -148,7 +153,7 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
-    fn report_latest_message_id(&self, offset: i64) {
+    fn report_latest_message_id(&self, split_id: &str, offset: i64) {
         self.source_ctx
             .metrics
             .latest_message_id
@@ -156,22 +161,32 @@ impl KafkaSplitReader {
                 // source name is not available here
                 &self.source_ctx.source_info.source_id.to_string(),
                 &self.source_ctx.source_info.actor_id.to_string(),
-                &self.split_id,
+                split_id,
             ])
             .set(offset);
     }
 
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_data_stream(self) {
-        if let Some(stop_offset) = self.stop_offset {
-            if let Some(start_offset) = self.start_offset && (start_offset + 1) >= stop_offset {
-                yield Vec::new();
-                return Ok(());
-            } else if stop_offset == 0 {
-                yield Vec::new();
-                return Ok(());
+        if self.offsets.values().all(|(start_offset, stop_offset)| {
+            match (start_offset, stop_offset) {
+                (Some(start), Some(stop)) if (*start + 1) >= *stop => true,
+                (_, Some(stop)) if *stop == 0 => true,
+                _ => false,
             }
-        }
+        }) {
+            yield Vec::new();
+            return Ok(());
+        };
+
+        let mut stop_offsets: HashMap<_, _> = self
+            .offsets
+            .iter()
+            .flat_map(|(split_id, (_, stop_offset))| {
+                stop_offset.map(|offset| (split_id.clone() as SplitId, offset))
+            })
+            .collect();
+
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;
         let mut bytes_current_second = 0;
@@ -180,38 +195,54 @@ impl KafkaSplitReader {
         let mut res = Vec::with_capacity(max_chunk_size);
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
-            self.report_latest_message_id(match msgs.last() {
-                Some(msg) => {
-                    if let Ok(msg) = msg {
-                        msg.offset()
-                    } else {
-                        continue;
-                    }
-                }
-                None => continue,
-            });
+            let msgs: Vec<_> = msgs
+                .into_iter()
+                .collect::<std::result::Result<_, KafkaError>>()?;
+
+            let mut split_msg_offsets = HashMap::new();
+
+            for msg in &msgs {
+                split_msg_offsets.insert(msg.partition(), msg.offset());
+            }
+
+            for (partition, offset) in split_msg_offsets {
+                let split_id = partition.to_string();
+                self.report_latest_message_id(&split_id, offset);
+            }
+
             for msg in msgs {
-                let msg: BorrowedMessage<'_> = msg?;
                 let cur_offset = msg.offset();
                 bytes_current_second += match &msg.payload() {
                     None => 0,
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                res.push(SourceMessage::from_kafka_message(&msg));
+                let source_message = SourceMessage::from_kafka_message(&msg);
+                let split_id = source_message.split_id.clone();
+                res.push(source_message);
 
-                if let Some(stop_offset) = self.stop_offset {
+                if let Entry::Occupied(o) = stop_offsets.entry(split_id) {
+                    let stop_offset = *o.get();
+
                     if cur_offset == stop_offset - 1 {
                         tracing::debug!(
-                            "stop offset reached, stop reading, offset: {}, stop offset: {}",
+                            "stop offset reached for split {}, stop reading, offset: {}, stop offset: {}",
+                            o.key(),
                             cur_offset,
                             stop_offset
                         );
-                        yield res;
-                        break 'for_outer_loop;
+
+                        o.remove();
+
+                        if stop_offsets.is_empty() {
+                            yield res;
+                            break 'for_outer_loop;
+                        }
+
+                        continue;
                     }
                 }
-                // This judgement has to be put in the inner loop as `msgs` can be multiple ones.
+
                 if bytes_current_second > self.bytes_per_second {
                     // swap to make compiler happy
                     let mut cur = Vec::with_capacity(res.capacity());

@@ -18,6 +18,8 @@ use risingwave_common::system_param::system_params_for_test;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
+    /// The size of parallel task for one compact/flush job.
+    pub parallel_compact_size_mb: u32,
     /// Target size of the Sstable.
     pub sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
@@ -81,6 +83,10 @@ pub struct StorageOpts {
     pub object_store_upload_timeout_ms: u64,
     /// object store read timeout.
     pub object_store_read_timeout_ms: u64,
+
+    pub object_store_recv_buffer_size: Option<usize>,
+    pub compactor_max_sst_key_count: u64,
+    pub compactor_max_task_multiplier: f32,
 }
 
 impl Default for StorageOpts {
@@ -95,6 +101,7 @@ impl Default for StorageOpts {
 impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
     fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
         Self {
+            parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),
@@ -134,6 +141,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             object_store_upload_timeout_ms: c.storage.object_store_upload_timeout_ms,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
+            object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,
+            compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
+            compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
         }
     }
 }
