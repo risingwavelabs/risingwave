@@ -11,3 +11,6 @@ jobs:
 
     - name: Check spelling of the entire repository
       uses: crate-ci/typos@v1.15.0
+    
+    - name: Check trailing whitespaces
+      run: scripts/check/check-trailing-spaces.sh
