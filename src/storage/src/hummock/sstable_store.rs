@@ -492,27 +492,21 @@ impl SstableStore {
         self.meta_cache.get_memory_usage() as u64
     }
 
-    pub async fn get_stream(
+    pub async fn get_stream_by_position(
         &self,
-        sst: &Sstable,
+        object_id: HummockSstableObjectId,
         block_index: Option<usize>,
+        metas: &[BlockMeta],
     ) -> HummockResult<BlockStream> {
-        fail_point!("get_stream_err");
+        let data_path = self.get_sst_data_path(object_id);
+        let store = self.store().clone();
         let start_pos = match block_index {
             None => None,
             Some(index) => {
-                let block_meta = sst
-                    .meta
-                    .block_metas
-                    .get(index)
-                    .ok_or_else(HummockError::invalid_block)?;
-
+                let block_meta = metas.get(index).ok_or_else(HummockError::invalid_block)?;
                 Some(block_meta.offset as usize)
             }
         };
-
-        let data_path = self.get_sst_data_path(sst.id);
-        let store = self.store().clone();
 
         Ok(BlockStream::new(
             store
@@ -520,8 +514,18 @@ impl SstableStore {
                 .await
                 .map_err(HummockError::object_io_error)?,
             block_index.unwrap_or(0),
-            &sst.meta,
+            metas,
         ))
+    }
+
+    pub async fn get_stream(
+        &self,
+        sst: &Sstable,
+        block_index: Option<usize>,
+    ) -> HummockResult<BlockStream> {
+        fail_point!("get_stream_err");
+        self.get_stream_by_position(sst.id, block_index, &sst.meta.block_metas)
+            .await
     }
 }
 
@@ -873,19 +877,15 @@ impl BlockStream {
         block_index: usize,
 
         // Meta data of the SST that is streamed.
-        sst_meta: &SstableMeta,
+        metas: &[BlockMeta],
     ) -> Self {
-        let metas = &sst_meta.block_metas;
-
         // Avoids panicking if `block_index` is too large.
         let block_index = std::cmp::min(block_index, metas.len());
 
         let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
-        sst_meta.block_metas[block_index..]
-            .iter()
-            .for_each(|b_meta| {
-                block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
-            });
+        metas[block_index..].iter().for_each(|b_meta| {
+            block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
+        });
 
         Self {
             byte_stream,
