@@ -4,7 +4,6 @@ auto-retry: &auto-retry
     - signal_reason: agent_stop
       limit: 2
 
-
 steps:
   - label: "check ci image rebuild"
     plugins:
@@ -15,6 +14,7 @@ steps:
               config:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
+    retry: *auto-retry
   - wait
 
   - label: "build"
