@@ -40,9 +40,7 @@ use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
 };
-use risingwave_pb::catalog::{
-    PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
-};
+use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
     self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
