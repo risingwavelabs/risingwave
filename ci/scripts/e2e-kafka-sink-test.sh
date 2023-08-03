@@ -13,7 +13,7 @@ for TOPIC_NAME in "${TOPICS[@]}"; do
   if [ -n "$EXISTING_TOPIC" ]; then
     echo "Topic $TOPIC_NAME already exists. Skipping creation."
   else
-    ./.risingwave/bin/kafka/bin/kafka-topic.sh --create --bootstrap-server $BROKER --topic "$TOPIC_NAME"
+    ./.risingwave/bin/kafka/bin/kafka-topics.sh --create --bootstrap-server $BROKER --topic "$TOPIC_NAME"
     echo "create topic $TOPIC_NAME"
   fi
 done
