@@ -123,3 +123,47 @@ pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize, u64) {
 
     (total_memory_size, total_file_count, total_key_count)
 }
+
+pub fn estimate_memory_for_compact_task(
+    task: &CompactTask,
+    block_size: u64,
+    recv_buffer_size: u64,
+    sst_capacity: u64,
+    support_streaming_upload: bool,
+) -> u64 {
+    let mut result = 0;
+    // When building the SstableStreamIterator, sstable_syncable will fetch the SstableMeta and seek
+    // to the specified block and build the iterator. Since this operation is concurrent, the memory
+    // usage will need to take into account the size of the SstableMeta.
+    // The common size of SstableMeta in tests is no more than 1m (mainly from xor filters). Even
+    // though SstableMeta is used for a shorter period of time, it is safe to use 3m for the
+    // calculation.
+    // TODO: Note that this algorithm may fail when SstableMeta is occupied by a large number of
+    // range tombstones
+    const ESTIMATED_META_SIZE: u64 = 3 * 1048576;
+
+    // The memory usage of the SstableStreamIterator comes from SstableInfo with some state
+    // information (use ESTIMATED_META_SIZE to estimate it), the BlockStream being read (one block),
+    // and tcp recv_buffer_size.
+    let max_input_stream_estimated_memory = ESTIMATED_META_SIZE + block_size + recv_buffer_size;
+
+    // input
+    for level in &task.input_ssts {
+        if level.level_type() == LevelType::Nonoverlapping {
+            result += max_input_stream_estimated_memory;
+        } else {
+            result += max_input_stream_estimated_memory * level.table_infos.len() as u64;
+        }
+    }
+
+    // output
+    // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
+    if support_streaming_upload {
+        result += ESTIMATED_META_SIZE + 2 * block_size
+    } else {
+        result += ESTIMATED_META_SIZE + sst_capacity; // Use sst_capacity to avoid BatchUploader
+                                                      // memory bursts.
+    }
+
+    result
+}
