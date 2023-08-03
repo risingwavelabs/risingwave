@@ -128,10 +128,6 @@ impl StateTableWatermarkCache {
         self.inner.len()
     }
 
-    pub fn is_full(&self) -> bool {
-        self.len() == self.capacity()
-    }
-
     pub fn set_table_row_count(&mut self, table_row_count: usize) {
         self.inner.set_table_row_count(table_row_count)
     }

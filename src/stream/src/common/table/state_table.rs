@@ -877,7 +877,7 @@ where
                 // 2. Or pass in a direct reference to LocalStateStore,
                 //    instead of referencing it indirectly from `self`.
                 //    Similar to how we do for pk_indices.
-                let mut pks = vec![];
+                let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
                 {
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
@@ -893,7 +893,7 @@ where
                     let merged_stream = merge_sort(streams);
                     pin_mut!(merged_stream);
 
-                    while !self.watermark_cache.is_full() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
+                    while pks.len() < self.watermark_cache.capacity() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
                         let (_, pk) = deserialize_pk_with_vnode(&pk[..], &self.pk_serde)?;
                         if !pk.is_null_at(0) {
                             pks.push(pk);
