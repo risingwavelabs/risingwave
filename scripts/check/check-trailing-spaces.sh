@@ -51,7 +51,7 @@ if [[ $has_trailing_spaces == true ]]; then
     if [[ $fix == false ]]; then
         echo
         echo -e "${RED}${BOLD}Please clean all the trailing spaces.${NONE}"
-        echo -e "${BOLD}You can run 'scripts/check-trailing-spaces.sh --fix' for convenience.${NONE}"
+        echo -e "${BOLD}You can run 'scripts/check/check-trailing-spaces.sh --fix' for convenience.${NONE}"
         exit 1
     else
         echo
