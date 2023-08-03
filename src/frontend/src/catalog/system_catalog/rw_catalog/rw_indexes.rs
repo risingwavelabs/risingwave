@@ -12,25 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use itertools::Itertools;
+use risingwave_common::array::ListValue;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
-pub const RW_INDEXES_TABLE_NAME: &str = "rw_indexes";
+pub static RW_INDEXES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
+    vec![
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Int32, "primary_table_id"),
+        (
+            DataType::List(Box::new(DataType::Int16)),
+            "original_column_ids",
+        ),
+        (DataType::Int32, "schema_id"),
+        (DataType::Int32, "owner"),
+        (DataType::Varchar, "definition"),
+        (DataType::Varchar, "acl"),
+        (DataType::Timestamptz, "initialized_at"),
+        (DataType::Timestamptz, "created_at"),
+    ]
+});
 
-pub const RW_INDEXES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Int32, "schema_id"),
-    (DataType::Int32, "owner"),
-    (DataType::Varchar, "definition"),
-    (DataType::Varchar, "acl"),
-    (DataType::Timestamptz, "initialized_at"),
-    (DataType::Timestamptz, "created_at"),
-];
+pub static RW_INDEXES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_indexes",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &RW_INDEXES_COLUMNS,
+    pk: &[0],
+});
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_indexes_info(&self) -> Result<Vec<OwnedRow>> {
@@ -43,6 +59,14 @@ impl SysCatalogReaderImpl {
                     OwnedRow::new(vec![
                         Some(ScalarImpl::Int32(index.id.index_id as i32)),
                         Some(ScalarImpl::Utf8(index.name.clone().into())),
+                        Some(ScalarImpl::Int32(index.primary_table.id().table_id as i32)),
+                        Some(ScalarImpl::List(ListValue::new(
+                            index
+                                .original_columns
+                                .iter()
+                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
+                                .collect_vec(),
+                        ))),
                         Some(ScalarImpl::Int32(schema.id() as i32)),
                         Some(ScalarImpl::Int32(index.index_table.owner as i32)),
                         Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),

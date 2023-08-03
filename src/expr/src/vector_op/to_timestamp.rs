@@ -13,19 +13,16 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use either::Either;
-use risingwave_common::types::{Timestamp, Timestamptz};
+use risingwave_common::types::{Date, Timestamp, Timestamptz};
 
 // use risingwave_expr_macro::function;
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::Result;
 
+/// Parse the input string with the given chrono pattern.
 #[inline(always)]
-pub fn to_timestamp_common(
-    s: &str,
-    tmpl: &ChronoPattern,
-) -> Result<Either<Timestamp, Timestamptz>> {
+fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_dependent().iter())?;
 
@@ -66,20 +63,17 @@ pub fn to_timestamp_common(
 
     // Seconds and nanoseconds can be omitted, so we don't need to assign default value for them.
 
-    // The parsed result may or may not contain an offset.
-    Ok(match parsed.offset {
-        None => Either::Left(parsed.to_naive_datetime_with_offset(0)?.into()),
-        Some(_) => Either::Right(parsed.to_datetime()?.into()),
-    })
+    Ok(parsed)
 }
 
 #[inline(always)]
 pub fn to_timestamp_const_tmpl_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
-    match to_timestamp_common(s, tmpl)? {
-        Either::Left(ts) => Ok(ts),
+    let parsed = parse(s, tmpl)?;
+    match parsed.offset {
+        None => Ok(parsed.to_naive_datetime_with_offset(0)?.into()),
         // If the parsed result is a physical instant, return its reading in UTC.
         // This decision was arbitrary and we are just being backward compatible here.
-        Either::Right(tsz) => timestamptz_at_time_zone(tsz, "UTC"),
+        Some(_) => timestamptz_at_time_zone(parsed.to_datetime()?.into(), "UTC"),
     }
 }
 
@@ -89,11 +83,21 @@ pub fn to_timestamp_const_tmpl(
     tmpl: &ChronoPattern,
     timezone: &str,
 ) -> Result<Timestamptz> {
-    Ok(match to_timestamp_common(s, tmpl)? {
-        Either::Right(tsz) => tsz,
+    let parsed = parse(s, tmpl)?;
+    Ok(match parsed.offset {
+        Some(_) => parsed.to_datetime()?.into(),
         // If the parsed result lacks offset info, interpret it in the implicit session time zone.
-        Either::Left(ts) => timestamp_at_time_zone(ts, timezone)?,
+        None => timestamp_at_time_zone(parsed.to_naive_datetime_with_offset(0)?.into(), timezone)?,
     })
+}
+
+#[inline(always)]
+pub fn to_date_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
+    let mut parsed = parse(s, tmpl)?;
+    if let Some(year) = &mut parsed.year && *year < 0 {
+        *year += 1;
+    }
+    Ok(parsed.to_naive_date()?.into())
 }
 
 // #[function("to_timestamp1(varchar, varchar) -> timestamp")]
@@ -106,6 +110,12 @@ pub fn to_timestamp_legacy(s: &str, tmpl: &str) -> Result<Timestamp> {
 pub fn to_timestamp(s: &str, tmpl: &str, timezone: &str) -> Result<Timestamptz> {
     let pattern = compile_pattern_to_chrono(tmpl);
     to_timestamp_const_tmpl(s, &pattern, timezone)
+}
+
+// #[function("to_date(varchar, varchar) -> date")]
+pub fn to_date(s: &str, tmpl: &str) -> Result<Date> {
+    let pattern = compile_pattern_to_chrono(tmpl);
+    to_date_const_tmpl(s, &pattern)
 }
 
 #[cfg(test)]

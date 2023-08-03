@@ -659,7 +659,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip
 
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
@@ -961,6 +961,16 @@ echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
+[tasks.check-trailing-spaces]
+private = true
+category = "RiseDev - Check"
+description = "Check trailing spaces and attempt to fix"
+script = """
+#!/usr/bin/env bash
+
+# This can trim trailing spaces in all git-managed text files, including .md, .toml, .sh, etc.
+scripts/check/check-trailing-spaces.sh --fix
+"""
 
 [tasks.check]
 category = "RiseDev - Check"
@@ -969,6 +979,7 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
+  "check-trailing-spaces",
   "check-typos",
   "check-clippy",
   "check-java",
@@ -991,6 +1002,7 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
+  "check-trailing-spaces",
   "check-typos",
   "check-clippy-fix",
   "check-java-fix",
@@ -1052,7 +1064,7 @@ description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.15.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ] }
 command = "sqllogictest"

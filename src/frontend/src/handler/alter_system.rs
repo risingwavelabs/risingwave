@@ -44,12 +44,12 @@ pub async fn handle_alter_system(
     if let Some(params) = params {
         if params.barrier_interval_ms() >= NOTICE_BARRIER_INTERVAL_MS {
             builder = builder.notice(
-                format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.", 
+                format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
                          params.barrier_interval_ms(), NOTICE_BARRIER_INTERVAL_MS));
         }
         if params.checkpoint_frequency() >= NOTICE_CHECKPOINT_FREQUENCY {
             builder = builder.notice(
-                format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.", 
+                format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
                          params.checkpoint_frequency(), NOTICE_CHECKPOINT_FREQUENCY));
         }
     }

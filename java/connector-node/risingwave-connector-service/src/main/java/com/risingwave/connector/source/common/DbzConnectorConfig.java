@@ -24,8 +24,12 @@ import java.util.Map;
 import java.util.Properties;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class DbzConnectorConfig {
+    private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
+
     /* Debezium private configs */
     public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
             "debezium.embedded.shutdown.pause.before.interrupt.ms";
@@ -94,6 +98,13 @@ public class DbzConnectorConfig {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone) {
+        LOG.info(
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}",
+                source,
+                sourceId,
+                startOffset,
+                snapshotDone);
+
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         if (source == SourceTypeE.MYSQL) {

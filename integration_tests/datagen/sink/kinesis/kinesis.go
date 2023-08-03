@@ -13,6 +13,7 @@ import (
 type KinesisConfig struct {
 	StreamName string
 	Region     string
+	Endpoint   string
 }
 
 type KinesisSink struct {
@@ -22,7 +23,11 @@ type KinesisSink struct {
 
 func OpenKinesisSink(cfg KinesisConfig) (*KinesisSink, error) {
 	ss := session.Must(session.NewSession())
-	client := kinesis.New(ss, aws.NewConfig().WithRegion(cfg.Region))
+	config := aws.NewConfig().WithRegion(cfg.Region)
+	if cfg.Endpoint != "" {
+		config = config.WithEndpoint(cfg.Endpoint)
+	}
+	client := kinesis.New(ss, config)
 	return &KinesisSink{
 		client: client,
 		cfg:    cfg,

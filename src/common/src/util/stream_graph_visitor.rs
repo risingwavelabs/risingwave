@@ -61,7 +61,6 @@ fn visit_stream_node_tables_inner<F>(
         }};
     }
 
-    #[allow(unused_macros)]
     macro_rules! optional {
         ($table:expr, $name:expr) => {
             if let Some(table) = &mut $table {
@@ -217,6 +216,7 @@ where
     visit_stream_node_tables_inner(stream_node, true, f)
 }
 
+#[allow(dead_code)]
 pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),

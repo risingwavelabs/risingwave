@@ -156,11 +156,12 @@ async fn compact_shared_buffer(
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
     let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
         context.storage_opts.share_buffers_sync_parallelism as u64,
         size_and_start_user_keys.len() as u64,
     );
-    let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
+    let sub_compaction_data_size = if compact_data_size > parallel_compact_size && parallelism > 1 {
         compact_data_size / parallelism
     } else {
         compact_data_size
@@ -217,7 +218,7 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let agg = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
+    let agg = builder.build_for_compaction();
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -341,7 +342,7 @@ pub async fn merge_imms_in_memory(
 
         imm_iters.push(imm.into_forward_iter());
     }
-    let compaction_delete_ranges = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
+    let compaction_delete_ranges = builder.build_for_compaction();
     let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
     epochs.sort();

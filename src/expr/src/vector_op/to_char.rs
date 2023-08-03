@@ -18,7 +18,6 @@ use std::sync::LazyLock;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
 use risingwave_common::types::Timestamp;
-use static_assertions::const_assert_eq;
 
 type Pattern<'a> = Vec<chrono::format::Item<'a>>;
 
@@ -41,30 +40,58 @@ impl Debug for ChronoPattern {
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
 pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
-    // https://www.postgresql.org/docs/current/functions-formatting.html
-    const PG_PATTERNS: &[&str] = &[
-        "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
-        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd", "US", "us", "MS",
-        "ms", "TZH:TZM", "tzh:tzm", "TZHTZM", "tzhtzm", "TZH", "tzh",
+    // mapping from pg pattern to chrono pattern
+    // pg pattern: https://www.postgresql.org/docs/current/functions-formatting.html
+    // chrono pattern: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+    const PATTERNS: &[(&str, &str)] = &[
+        ("HH24", "%H"),
+        ("hh24", "%H"),
+        ("HH12", "%I"),
+        ("hh12", "%I"),
+        ("HH", "%I"),
+        ("hh", "%I"),
+        ("MI", "%M"),
+        ("mi", "%M"),
+        ("SS", "%S"),
+        ("ss", "%S"),
+        ("YYYY", "%Y"),
+        ("yyyy", "%Y"),
+        ("YY", "%y"),
+        ("yy", "%y"),
+        ("IYYY", "%G"),
+        ("iyyy", "%G"),
+        ("IY", "%g"),
+        ("iy", "%g"),
+        ("MM", "%m"),
+        ("mm", "%m"),
+        ("Month", "%B"),
+        ("Mon", "%b"),
+        ("DD", "%d"),
+        ("dd", "%d"),
+        ("US", "%6f"),
+        ("us", "%6f"),
+        ("MS", "%3f"),
+        ("ms", "%3f"),
+        ("TZH:TZM", "%:z"),
+        ("tzh:tzm", "%:z"),
+        ("TZHTZM", "%z"),
+        ("tzhtzm", "%z"),
+        ("TZH", "%#z"),
+        ("tzh", "%#z"),
     ];
-    // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
-    const CHRONO_PATTERNS: &[&str] = &[
-        "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
-        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f", "%:z",
-        "%:z", "%z", "%z", "%#z", "%#z",
-    ];
-    const_assert_eq!(PG_PATTERNS.len(), CHRONO_PATTERNS.len());
+    // build an Aho-Corasick automaton for fast matching
     static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasickBuilder::new()
             .ascii_case_insensitive(false)
             .match_kind(aho_corasick::MatchKind::LeftmostLongest)
-            .build(PG_PATTERNS)
+            .build(PATTERNS.iter().map(|(k, _)| k))
             .expect("failed to build an Aho-Corasick automaton")
     });
 
+    // replace all pg patterns with chrono patterns
     let mut chrono_tmpl = String::new();
     AC.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
-        dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
+        dst.push_str(PATTERNS[mat.pattern()].1);
         true
     });
     tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");

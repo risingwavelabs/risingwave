@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
-use super::compaction_utils::estimate_task_memory_capacity;
+use super::compaction_utils::estimate_task_output_capacity;
 use super::task_progress::TaskProgress;
 use super::TaskConfig;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -52,7 +52,7 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
-        options.capacity = estimate_task_memory_capacity(context.clone(), &task);
+        options.capacity = estimate_task_output_capacity(context.clone(), &task);
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
@@ -111,7 +111,6 @@ impl CompactorRunner {
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
-        gc_delete_keys: bool,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<CompactionDeleteRanges>> {
@@ -132,7 +131,7 @@ impl CompactorRunner {
             builder.add_delete_events(range_tombstone_list);
         }
 
-        let aggregator = builder.build_for_compaction(gc_delete_keys);
+        let aggregator = builder.build_for_compaction();
         Ok(aggregator)
     }
 
@@ -280,7 +279,6 @@ mod tests {
 
         let collector = CompactorRunner::build_delete_range_iter(
             &sstable_infos,
-            compact_task.gc_delete_keys,
             &sstable_store,
             &mut state_clean_up_filter,
         )

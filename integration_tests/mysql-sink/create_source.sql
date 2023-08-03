@@ -37,7 +37,8 @@ FROM
         connector = 'jdbc',
         jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
         table.name = 'data_types',
-        type = 'upsert'
+        type = 'upsert',
+        primary_key = 'id'
     );
 
 INSERT INTO data_types (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, jsonb_column, bytea_column)
