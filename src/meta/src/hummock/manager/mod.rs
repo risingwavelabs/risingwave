@@ -31,7 +31,7 @@ use parking_lot::Mutex;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::{pending_on_none, select_all};
-use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
+use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockLevelsExt, HummockVersionExt,
@@ -951,7 +951,7 @@ where
                 compaction_group_id,
             );
 
-            let compact_task_estimated_state = estimate_state_for_compaction(&compact_task);
+            let compact_task_statistics = statistics_compact_task(&compact_task);
 
             let level_type_label = format!(
                 "L{}->L{}",
@@ -970,7 +970,7 @@ where
             self.metrics
                 .compact_task_size
                 .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_estimated_state.total_file_size as _);
+                .observe(compact_task_statistics.total_file_size as _);
 
             self.metrics
                 .compact_task_size
@@ -978,22 +978,22 @@ where
                     &compaction_group_id.to_string(),
                     &format!("{} uncompressed", level_type_label),
                 ])
-                .observe(compact_task_estimated_state.total_uncompressed_file_size as _);
+                .observe(compact_task_statistics.total_uncompressed_file_size as _);
 
             self.metrics
                 .compact_task_file_count
                 .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_estimated_state.total_file_count as _);
+                .observe(compact_task_statistics.total_file_count as _);
 
             tracing::trace!(
-                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_estimated_state {:?}",
+                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
                     compaction_group_id,
                     level_count,
                     compact_task.input_ssts[0].level_type().as_str_name(),
                     compact_task.input_ssts[0].level_idx,
                     compact_task.target_level,
                     start_time.elapsed(),
-                    compact_task_estimated_state
+                    compact_task_statistics
                 );
         }
 

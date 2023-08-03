@@ -101,7 +101,7 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     }
 }
 
-pub fn estimate_state_for_compaction(task: &CompactTask) -> CompactTaskEstimatedState {
+pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
     let mut total_key_count = 0;
     let mut total_file_count: u64 = 0;
     let mut total_file_size = 0;
@@ -117,7 +117,7 @@ pub fn estimate_state_for_compaction(task: &CompactTask) -> CompactTaskEstimated
         });
     }
 
-    CompactTaskEstimatedState {
+    CompactTaskStatistics {
         total_file_count,
         total_key_count,
         total_file_size,
@@ -126,7 +126,7 @@ pub fn estimate_state_for_compaction(task: &CompactTask) -> CompactTaskEstimated
 }
 
 #[derive(Debug)]
-pub struct CompactTaskEstimatedState {
+pub struct CompactTaskStatistics {
     pub total_file_count: u64,
     pub total_key_count: u64,
     pub total_file_size: u64,

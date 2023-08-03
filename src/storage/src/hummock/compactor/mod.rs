@@ -41,7 +41,7 @@ pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{
-    compact_task_to_string, estimate_memory_for_compact_task, estimate_state_for_compaction,
+    compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::table_stats::{
@@ -256,7 +256,7 @@ impl Compactor {
             }
         }
 
-        let compact_task_estimated_state = estimate_state_for_compaction(&compact_task);
+        let compact_task_statistics = statistics_compact_task(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -294,9 +294,9 @@ impl Compactor {
         ) * compact_task.splits.len() as u64;
 
         tracing::info!(
-            "Ready to handle compaction task: {} compact_task_estimated_state {:?} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+            "Ready to handle compaction task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
                 compact_task.task_id,
-                compact_task_estimated_state,
+                compact_task_statistics,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
                 parallelism,

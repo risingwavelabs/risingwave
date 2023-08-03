@@ -18,7 +18,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use fail::fail_point;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::compact::estimate_state_for_compaction;
+use risingwave_hummock_sdk::compact::statistics_compact_task;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
@@ -254,11 +254,11 @@ impl CompactorManagerInner {
                 cancellable_tasks.push(task.clone());
 
                 if task_duration_too_long {
-                    let compact_task_estimated_state = estimate_state_for_compaction(task);
+                    let compact_task_statistics = statistics_compact_task(task);
                     tracing::info!(
                         "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} \
                             pending_read_io_count {} pending_write_io_count {} target_level {} \
-                            base_level {} target_sub_level_id {} task_type {} compact_task_estimated_state {:?}",
+                            base_level {} target_sub_level_id {} task_type {} compact_task_statistics {:?}",
                             task.compaction_group_id,
                             task.task_id,
                             create_time,
@@ -271,7 +271,7 @@ impl CompactorManagerInner {
                             task.base_level,
                             task.target_sub_level_id,
                             task.task_type,
-                            compact_task_estimated_state
+                            compact_task_statistics
                     );
                 }
             }
