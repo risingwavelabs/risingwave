@@ -173,8 +173,8 @@ You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config 
 
 ### Configure system variables
 
-You can check `src/common/src/config.rs` to see all the configurable variables. 
-If additional variables are needed, 
+You can check `src/common/src/config.rs` to see all the configurable variables.
+If additional variables are needed,
 include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
 
 
@@ -202,9 +202,9 @@ Then, connect to the playground instance via:
 psql -h localhost -p 4566 -d dev -U root
 ```
 
-## Debug playground using vscode 
+## Debug playground using vscode
 
-To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`.
 
 ## Develop the dashboard
 
@@ -303,8 +303,8 @@ If you want to see the coverage report, run this command:
 ```
 
 Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
-error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`. 
-If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a 
+error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`.
+If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a
 directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
 
 ### Planner tests
@@ -436,10 +436,17 @@ MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**
 ./risedev sslt -- --kill-meta --etcd-timeout-rate=0.01 './e2e_test/path/to/directory/**/*.slt'
 
 # see more usages
-./risedev sslt -- --help  
+./risedev sslt -- --help
 ```
 
 Deterministic test is included in CI as well. See [CI script](../ci/scripts/deterministic-e2e-test.sh) for details.
+
+### Deterministic Simulation Integration tests
+
+To run these tests:
+```shell
+./risedev sit-test
+```
 
 ## Miscellaneous checks
 

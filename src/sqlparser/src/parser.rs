@@ -886,12 +886,12 @@ impl Parser {
             Ok(Expr::GroupingSets(result))
         } else if self.parse_keyword(Keyword::CUBE) {
             self.expect_token(&Token::LParen)?;
-            let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
+            let result = self.parse_comma_separated(|p| p.parse_tuple(true, false))?;
             self.expect_token(&Token::RParen)?;
             Ok(Expr::Cube(result))
         } else if self.parse_keyword(Keyword::ROLLUP) {
             self.expect_token(&Token::LParen)?;
-            let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
+            let result = self.parse_comma_separated(|p| p.parse_tuple(true, false))?;
             self.expect_token(&Token::RParen)?;
             Ok(Expr::Rollup(result))
         } else {
@@ -1970,14 +1970,14 @@ impl Parser {
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        self.expect_keyword(Keyword::AS)?;
+        let query = Box::new(self.parse_query()?);
         let emit_mode = if materialized {
             self.parse_emit_mode()?
         } else {
             None
         };
-        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
-        self.expect_keyword(Keyword::AS)?;
-        let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
         Ok(Statement::CreateView {
             if_not_exists,
@@ -2303,13 +2303,7 @@ impl Parser {
 
         let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
-            if cfg!(debug_assertions) {
-                true
-            } else {
-                return Err(ParserError::ParserError(
-                    "APPEND ONLY is only allowed in debug model".to_string(),
-                ));
-            }
+            true
         } else {
             false
         };
@@ -2973,7 +2967,7 @@ impl Parser {
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
             Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone())),
-            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
+            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapedString(s.clone())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected.with_location(token.location)),

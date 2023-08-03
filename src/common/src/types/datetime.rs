@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::hash::Hash;
 use std::io::Write;
 
@@ -34,18 +35,7 @@ const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            Default,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Hash,
-            parse_display::Display,
-        )]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
 
@@ -62,6 +52,12 @@ macro_rules! impl_chrono_wrapper {
 
             fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
                 Ok($variant_name(s.parse()?))
+            }
+        }
+
+        impl Display for $variant_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                ToText::write(self, f)
             }
         }
 
@@ -110,8 +106,30 @@ impl InvalidParamsError {
 type Result<T> = std::result::Result<T, InvalidParamsError>;
 
 impl ToText for Date {
+    /// ```
+    /// # use risingwave_common::types::Date;
+    /// let date = Date::from_ymd_uncheck(2001, 5, 16);
+    /// assert_eq!(date.to_string(), "2001-05-16");
+    ///
+    /// let date = Date::from_ymd_uncheck(1, 10, 26);
+    /// assert_eq!(date.to_string(), "0001-10-26");
+    ///
+    /// let date = Date::from_ymd_uncheck(0, 10, 26);
+    /// assert_eq!(date.to_string(), "0001-10-26 BC");
+    /// ```
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let (ce, year) = self.0.year_ce();
+        if ce {
+            write!(f, "{}", self.0)
+        } else {
+            write!(
+                f,
+                "{:04}-{:02}-{:02} BC",
+                year,
+                self.0.month(),
+                self.0.day()
+            )
+        }
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -202,6 +220,13 @@ impl Date {
                 .checked_add_days(Days::new(UNIX_EPOCH_DAYS as u64))
                 .ok_or_else(|| InvalidParamsError::date(days))?,
         ))
+    }
+
+    pub fn get_nums_days_unix_epoch(&self) -> i32 {
+        self.0
+            .checked_sub_days(Days::new(UNIX_EPOCH_DAYS as u64))
+            .unwrap()
+            .num_days_from_ce()
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -296,6 +321,10 @@ impl Timestamp {
         output
             .write(&(self.0.timestamp_micros()).to_be_bytes())
             .map_err(Into::into)
+    }
+
+    pub fn get_timestamp_nanos(&self) -> i64 {
+        self.0.timestamp_nanos()
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {

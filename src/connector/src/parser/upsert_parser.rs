@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use super::bytes_parser::BytesAccessBuilder;
 use super::unified::upsert::UpsertChangeEvent;
 use super::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
 use super::unified::{AccessImpl, ChangeEventOperation};
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
 };
 use crate::extract_key_config;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -50,21 +52,38 @@ async fn build_accessor_builder(
     }
 }
 
+fn check_rw_default_key(columns: &Vec<SourceColumnDesc>) -> bool {
+    for col in columns {
+        if col.name.starts_with(DEFAULT_KEY_COLUMN_NAME) {
+            return true;
+        }
+    }
+    false
+}
+
 impl UpsertParser {
     pub async fn new(
-        props: ParserProperties,
+        props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        // TODO: should check where to find name(key or value) when there is such circumstances.
-        let avro_primary_key_column_name =
+        let mut avro_primary_key_column_name = None;
+        let key_builder: AccessBuilderImpl;
+        // check whether columns has `DEFAULT_KEY_COLUMN_NAME`, if so, the key accessor should be
+        // bytes
+        if check_rw_default_key(&rw_columns) {
+            key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+                EncodingProperties::Bytes(BytesProperties {
+                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
+                }),
+            )?);
+        } else {
             if let EncodingProperties::Avro(config) = &props.encoding_config {
-                Some(config.upsert_primary_key.clone())
-            } else {
-                None
-            };
-        let (key_config, key_type) = extract_key_config!(props);
-        let key_builder = build_accessor_builder(key_config, key_type).await?;
+                avro_primary_key_column_name = Some(config.upsert_primary_key.clone())
+            }
+            let (key_config, key_type) = extract_key_config!(props);
+            key_builder = build_accessor_builder(key_config, key_type).await?;
+        }
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
         Ok(Self {

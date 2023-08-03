@@ -105,6 +105,7 @@ pub fn build_func(
                     inputs_type: &args,
                     ret_type: (&ret_type).into(),
                     set_returning: false,
+                    deprecated: false,
                 }
             ))
         })?;

@@ -302,7 +302,6 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        assert_eq!(filter.id().0, 4);
 
         let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();

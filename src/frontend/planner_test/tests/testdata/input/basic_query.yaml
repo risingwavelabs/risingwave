@@ -89,6 +89,11 @@
   expected_outputs:
   - batch_plan
 - sql: |
+    create table t (v1 int, v2 int);
+    delete from t where v1;
+  expected_outputs:
+  - binder_error
+- sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   expected_outputs:
   - batch_plan

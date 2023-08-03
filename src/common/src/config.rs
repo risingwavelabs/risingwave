@@ -30,14 +30,14 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
+use crate::hash::VirtualNode;
+
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-/// For non-user-facing components where the CLI arguments do not override the config file.
-pub const NO_OVERRIDE: Option<NoOverride> = None;
 
 /// Unrecognized fields in a config section. Generic over the config section type to provide better
 /// error messages.
@@ -92,7 +92,7 @@ impl<T> Serialize for Unrecognized<T> {
     }
 }
 
-pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
+pub fn load_config(path: &str, cli_override: impl OverrideConfig) -> RwConfig
 where
 {
     let mut config = if path.is_empty() {
@@ -103,22 +103,26 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
-    if let Some(cli_override) = cli_override {
-        cli_override.r#override(&mut config);
-    }
+    cli_override.r#override(&mut config);
     config
 }
 
 pub trait OverrideConfig {
-    fn r#override(self, config: &mut RwConfig);
+    fn r#override(&self, config: &mut RwConfig);
 }
 
-/// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
+impl<'a, T: OverrideConfig> OverrideConfig for &'a T {
+    fn r#override(&self, config: &mut RwConfig) {
+        T::r#override(self, config)
+    }
+}
+
+/// For non-user-facing components where the CLI arguments do not override the config file.
 #[derive(Clone, Copy)]
-pub struct NoOverride {}
+pub struct NoOverride;
 
 impl OverrideConfig for NoOverride {
-    fn r#override(self, _config: &mut RwConfig) {}
+    fn r#override(&self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
@@ -159,12 +163,16 @@ pub enum MetaBackend {
 /// The section `[meta]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct MetaConfig {
-    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
-    /// full SST GC.
+    /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
+    /// are dangling.
     #[serde(default = "default::meta::min_sst_retention_time_sec")]
     pub min_sst_retention_time_sec: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock
+    /// Interval of automatic hummock full GC.
+    #[serde(default = "default::meta::full_gc_interval_sec")]
+    pub full_gc_interval_sec: u64,
+
+    /// The spin interval when collecting global GC watermark in hummock.
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
 
@@ -262,6 +270,9 @@ pub struct MetaConfig {
     // If the compaction task does not change in progress beyond the
     // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
     pub compaction_task_max_heartbeat_interval_secs: u64,
+
+    #[serde(default)]
+    pub compaction_config: CompactionConfig,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -314,11 +325,16 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
+                Err(serde::de::Error::custom(format!(
+                    "default parallelism should be not great than {}",
+                    VirtualNode::COUNT
+                )))?
+            } else {
                 NonZeroUsize::new(i)
                     .context("default parallelism should be greater than 0")
-                    .map_err(|e| serde::de::Error::custom(e.to_string()))?,
-            )),
+                    .map_err(|e| serde::de::Error::custom(e.to_string()))?
+            })),
         }
     }
 }
@@ -344,6 +360,10 @@ pub struct ServerConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[serde(default = "default::server::auto_dump_heap_profile")]
+    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -442,9 +462,20 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
 
-    /// Capacity of sstable meta cache.
     #[serde(default)]
     pub compactor_memory_limit_mb: Option<usize>,
+
+    /// Compactor calculates the maximum number of tasks that can be executed on the node based on
+    /// worker_num and compactor_max_task_multiplier.
+    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
+    #[serde(default = "default::storage::compactor_max_task_multiplier")]
+    pub compactor_max_task_multiplier: f32,
+
+    /// The percentage of memory available when compactor is deployed separately.
+    /// total_memory_available_bytes = total_memory_available_bytes *
+    /// compactor_memory_available_proportion
+    #[serde(default = "default::storage::compactor_memory_available_proportion")]
+    pub compactor_memory_available_proportion: f64,
 
     /// Number of SST ids fetched from meta per RPC
     #[serde(default = "default::storage::sstable_id_remote_fetch_number")]
@@ -475,6 +506,24 @@ pub struct StorageConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::storage::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+
+    #[serde(default = "default::s3_objstore_config::object_store_keepalive_ms")]
+    pub object_store_keepalive_ms: Option<u64>,
+    #[serde(default = "default::s3_objstore_config::object_store_recv_buffer_size")]
+    pub object_store_recv_buffer_size: Option<usize>,
+    #[serde(default = "default::s3_objstore_config::object_store_send_buffer_size")]
+    pub object_store_send_buffer_size: Option<usize>,
+    #[serde(default = "default::s3_objstore_config::object_store_nodelay")]
+    pub object_store_nodelay: Option<bool>,
+    #[serde(default = "default::s3_objstore_config::object_store_req_retry_interval_ms")]
+    pub object_store_req_retry_interval_ms: u64,
+    #[serde(default = "default::s3_objstore_config::object_store_req_retry_max_delay_ms")]
+    pub object_store_req_retry_max_delay_ms: u64,
+    #[serde(default = "default::s3_objstore_config::object_store_req_retry_max_attempts")]
+    pub object_store_req_retry_max_attempts: usize,
+
+    #[serde(default = "default::storage::compactor_max_sst_key_count")]
+    pub compactor_max_sst_key_count: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -527,6 +576,20 @@ impl AsyncStackTraceOption {
             Self::On => Some(false),
             Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct AutoDumpHeapProfileConfig {
+    #[serde(default = "default::auto_dump_heap_profile::dir")]
+    pub dir: String,
+    #[serde(default = "default::auto_dump_heap_profile::threshold")]
+    pub threshold: f32,
+}
+
+impl AutoDumpHeapProfileConfig {
+    pub fn enabled(&self) -> bool {
+        !self.dir.is_empty()
     }
 }
 
@@ -606,6 +669,9 @@ pub struct SystemConfig {
     #[serde(default = "default::system::sstable_size_mb")]
     pub sstable_size_mb: Option<u32>,
 
+    #[serde(default = "default::system::parallel_compact_size_mb")]
+    pub parallel_compact_size_mb: Option<u32>,
+
     /// Size of each block in bytes in SST.
     #[serde(default = "default::system::block_size_kb")]
     pub block_size_kb: Option<u32>,
@@ -639,6 +705,7 @@ impl SystemConfig {
             barrier_interval_ms: self.barrier_interval_ms,
             checkpoint_frequency: self.checkpoint_frequency,
             sstable_size_mb: self.sstable_size_mb,
+            parallel_compact_size_mb: self.parallel_compact_size_mb,
             block_size_kb: self.block_size_kb,
             bloom_false_positive: self.bloom_false_positive,
             state_store: self.state_store,
@@ -650,12 +717,16 @@ impl SystemConfig {
     }
 }
 
-mod default {
+pub mod default {
     pub mod meta {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            604800
+            86400
+        }
+
+        pub fn full_gc_interval_sec() -> u64 {
+            86400
         }
 
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
@@ -736,6 +807,7 @@ mod default {
     }
 
     pub mod server {
+        use crate::config::AutoDumpHeapProfileConfig;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -751,6 +823,10 @@ mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
+        }
+
+        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
+            Default::default()
         }
     }
 
@@ -804,6 +880,14 @@ mod default {
             512
         }
 
+        pub fn compactor_max_task_multiplier() -> f32 {
+            1.5000
+        }
+
+        pub fn compactor_memory_available_proportion() -> f64 {
+            0.8
+        }
+
         pub fn sstable_id_remote_fetch_number() -> u32 {
             10
         }
@@ -839,6 +923,10 @@ mod default {
 
         pub fn object_store_read_timeout_ms() -> u64 {
             60 * 60 * 1000
+        }
+
+        pub fn compactor_max_sst_key_count() -> u64 {
+            2 * 1024 * 1024 // 200w
         }
     }
 
@@ -884,6 +972,16 @@ mod default {
 
         pub fn cache_file_max_write_size_mb() -> usize {
             4
+        }
+    }
+
+    pub mod auto_dump_heap_profile {
+        pub fn dir() -> String {
+            "".to_string()
+        }
+
+        pub fn threshold() -> f32 {
+            0.9
         }
     }
 
@@ -937,6 +1035,10 @@ mod default {
             system_param::default::checkpoint_frequency()
         }
 
+        pub fn parallel_compact_size_mb() -> Option<u32> {
+            system_param::default::parallel_compact_size_mb()
+        }
+
         pub fn sstable_size_mb() -> Option<u32> {
             system_param::default::sstable_size_mb()
         }
@@ -973,6 +1075,102 @@ mod default {
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
             true
+        }
+    }
+
+    pub mod compaction_config {
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+
+        // decrease this configure when the generation of checkpoint barrier is not frequent.
+        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+        const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
+        const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
+        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
+        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+
+        use crate::catalog::hummock::CompactionFilterFlag;
+
+        pub fn max_bytes_for_level_base() -> u64 {
+            DEFAULT_MAX_BYTES_FOR_LEVEL_BASE
+        }
+        pub fn max_bytes_for_level_multiplier() -> u64 {
+            DEFAULT_LEVEL_MULTIPLIER
+        }
+        pub fn max_compaction_bytes() -> u64 {
+            DEFAULT_MAX_COMPACTION_BYTES
+        }
+        pub fn sub_level_max_compaction_bytes() -> u64 {
+            DEFAULT_MIN_COMPACTION_BYTES
+        }
+        pub fn level0_tier_compact_file_number() -> u64 {
+            DEFAULT_TIER_COMPACT_TRIGGER_NUMBER
+        }
+        pub fn target_file_size_base() -> u64 {
+            DEFAULT_TARGET_FILE_SIZE_BASE
+        }
+        pub fn compaction_filter_mask() -> u32 {
+            (CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL).into()
+        }
+        pub fn max_sub_compaction() -> u32 {
+            DEFAULT_MAX_SUB_COMPACTION
+        }
+        pub fn level0_stop_write_threshold_sub_level_number() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER
+        }
+        pub fn level0_sub_level_compact_level_count() -> u32 {
+            DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT
+        }
+        pub fn level0_overlapping_sub_level_compact_level_count() -> u32 {
+            DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT
+        }
+        pub fn max_space_reclaim_bytes() -> u64 {
+            DEFAULT_MAX_SPACE_RECLAIM_BYTES
+        }
+        pub fn level0_max_compact_file_number() -> u64 {
+            DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+    }
+
+    pub mod s3_objstore_config {
+        /// Retry config for compute node http timeout error.
+        const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
+        const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
+        const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
+
+        const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
+
+        pub fn object_store_keepalive_ms() -> Option<u64> {
+            Some(DEFAULT_KEEPALIVE_MS) // 10min
+        }
+
+        pub fn object_store_recv_buffer_size() -> Option<usize> {
+            Some(1 << 21) // 2m
+        }
+
+        pub fn object_store_send_buffer_size() -> Option<usize> {
+            None
+        }
+
+        pub fn object_store_nodelay() -> Option<bool> {
+            Some(true)
+        }
+
+        pub fn object_store_req_retry_interval_ms() -> u64 {
+            DEFAULT_RETRY_INTERVAL_MS
+        }
+
+        pub fn object_store_req_retry_max_delay_ms() -> u64 {
+            DEFAULT_RETRY_MAX_DELAY_MS // 10s
+        }
+
+        pub fn object_store_req_retry_max_attempts() -> usize {
+            DEFAULT_RETRY_MAX_ATTEMPTS
         }
     }
 }
@@ -1021,6 +1219,38 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct CompactionConfig {
+    #[serde(default = "default::compaction_config::max_bytes_for_level_base")]
+    pub max_bytes_for_level_base: u64,
+    #[serde(default = "default::compaction_config::max_bytes_for_level_multiplier")]
+    pub max_bytes_for_level_multiplier: u64,
+    #[serde(default = "default::compaction_config::max_compaction_bytes")]
+    pub max_compaction_bytes: u64,
+    #[serde(default = "default::compaction_config::sub_level_max_compaction_bytes")]
+    pub sub_level_max_compaction_bytes: u64,
+    #[serde(default = "default::compaction_config::level0_tier_compact_file_number")]
+    pub level0_tier_compact_file_number: u64,
+    #[serde(default = "default::compaction_config::target_file_size_base")]
+    pub target_file_size_base: u64,
+    #[serde(default = "default::compaction_config::compaction_filter_mask")]
+    pub compaction_filter_mask: u32,
+    #[serde(default = "default::compaction_config::max_sub_compaction")]
+    pub max_sub_compaction: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_sub_level_number")]
+    pub level0_stop_write_threshold_sub_level_number: u64,
+    #[serde(default = "default::compaction_config::level0_sub_level_compact_level_count")]
+    pub level0_sub_level_compact_level_count: u32,
+    #[serde(
+        default = "default::compaction_config::level0_overlapping_sub_level_compact_level_count"
+    )]
+    pub level0_overlapping_sub_level_compact_level_count: u32,
+    #[serde(default = "default::compaction_config::max_space_reclaim_bytes")]
+    pub max_space_reclaim_bytes: u64,
+    #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
+    pub level0_max_compact_file_number: u64,
 }
 
 #[cfg(test)]

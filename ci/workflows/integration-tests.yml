@@ -93,10 +93,12 @@ steps:
         testcase:
           - "twitter"
           - "twitter-pulsar"
-        # - "debezium-mongo"
+          # - "debezium-mongo"
           - "debezium-postgres"
           - "tidb-cdc-sink"
           - "debezium-sqlserver"
+          - "citus-cdc"
+          - "kinesis-s3-source"
         format:
           - "json"
           - "protobuf"
@@ -105,10 +107,10 @@ steps:
             testcase: "twitter-pulsar"
             format: "protobuf"
           skip: true
-      # - with:
-      #     testcase: "debezium-mongo"
-      #     format: "protobuf"
-      #   skip: true
+        # - with:
+        #     testcase: "debezium-mongo"
+        #     format: "protobuf"
+        #   skip: true
         - with:
             testcase: "debezium-postgres"
             format: "protobuf"
@@ -119,5 +121,13 @@ steps:
           skip: true
         - with:
             testcase: "debezium-sqlserver"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "citus-cdc"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "kinesis-s3-source"
             format: "protobuf"
           skip: true

@@ -14,53 +14,34 @@
 
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+use super::{Access, AccessError, AccessResult};
 
 // where do we put data
 
-pub struct BytesAccess {
+pub struct BytesAccess<'a> {
+    column_name: &'a Option<String>,
     bytes: Vec<u8>,
 }
 
-impl BytesAccess {
-    pub fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes }
+impl<'a> BytesAccess<'a> {
+    pub fn new(column_name: &'a Option<String>, bytes: Vec<u8>) -> Self {
+        Self { column_name, bytes }
     }
 }
 
-pub struct BytesChangeEvent {
-    value_accessor: BytesAccess,
-    key_accessor: Option<BytesAccess>,
-}
-
-impl BytesChangeEvent {
-    pub fn with_value(value_accessor: BytesAccess) -> Self {
-        Self::new(None, value_accessor)
-    }
-
-    pub fn new(key_accessor: Option<BytesAccess>, value_accessor: BytesAccess) -> Self {
-        Self {
-            value_accessor,
-            key_accessor,
-        }
-    }
-}
-
-impl ChangeEvent for BytesChangeEvent {
-    fn op(&self) -> std::result::Result<ChangeEventOperation, super::AccessError> {
-        Ok(ChangeEventOperation::Upsert)
-    }
-
-    fn access_field(&self, name: &str, type_expected: &DataType) -> super::AccessResult {
-        self.value_accessor.access(&[name], Some(type_expected))
-    }
-}
-
-impl Access for BytesAccess {
+impl<'a> Access for BytesAccess<'a> {
     /// path is empty currently, `type_expected` should be `Bytea`
-    fn access(&self, _path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
-        if let Some(DataType::Bytea) = type_expected {
-            return Ok(Some(ScalarImpl::Bytea(Box::from(self.bytes.as_slice()))));
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+        if let DataType::Bytea = type_expected.unwrap() {
+            if self.column_name.is_none()
+                || (path.len() == 1 && self.column_name.as_ref().unwrap() == path[0])
+            {
+                return Ok(Some(ScalarImpl::Bytea(Box::from(self.bytes.as_slice()))));
+            }
+            return Err(AccessError::Undefined {
+                name: path[0].to_string(),
+                path: self.column_name.as_ref().unwrap().to_string(),
+            });
         }
         Err(AccessError::TypeError {
             expected: "Bytea".to_string(),

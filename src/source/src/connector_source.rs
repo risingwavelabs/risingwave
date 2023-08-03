@@ -81,42 +81,70 @@ impl ConnectorSource {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
-        let to_reader_splits = match splits {
-            Some(vec_split_impl) => vec_split_impl
-                .into_iter()
-                .map(|split| Some(vec![split]))
-                .collect::<Vec<ConnectorState>>(),
-            None => vec![None],
+        let data_gen_columns = Some(
+            columns
+                .iter()
+                .map(|col| Column {
+                    name: col.name.clone(),
+                    data_type: col.data_type.clone(),
+                    is_visible: col.is_visible(),
+                })
+                .collect_vec(),
+        );
+
+        let parser_config = ParserConfig {
+            specific: self.parser_config.clone(),
+            common: CommonParserConfig {
+                rw_columns: columns,
+            },
         };
-        let readers = try_join_all(to_reader_splits.into_iter().map(|state| {
-            tracing::debug!("spawning connector split reader for split {:?}", state);
-            let props = config.clone();
-            let columns = columns.clone();
-            let data_gen_columns = Some(
-                columns
-                    .iter()
-                    .map(|col| Column {
-                        name: col.name.clone(),
-                        data_type: col.data_type.clone(),
-                        is_visible: col.is_visible(),
-                    })
-                    .collect_vec(),
+
+        let readers = if config.support_multiple_splits() {
+            tracing::debug!(
+                "spawning connector split reader for multiple splits {:?}",
+                splits
             );
-            // TODO: is this reader split across multiple threads...? Realistically, we want
-            // source_ctx to live in a single actor.
-            let source_ctx = source_ctx.clone();
-            async move {
-                let parser_config = ParserConfig {
-                    specific: self.parser_config.clone(),
-                    common: CommonParserConfig {
-                        rw_columns: columns,
-                    },
-                };
-                SplitReaderImpl::create(props, state, parser_config, source_ctx, data_gen_columns)
+
+            let reader = SplitReaderImpl::create(
+                config,
+                splits,
+                parser_config,
+                source_ctx,
+                data_gen_columns,
+            )
+            .await?;
+
+            vec![reader]
+        } else {
+            let to_reader_splits = match splits {
+                Some(vec_split_impl) => vec_split_impl
+                    .into_iter()
+                    .map(|split| Some(vec![split]))
+                    .collect::<Vec<ConnectorState>>(),
+                None => vec![None],
+            };
+
+            try_join_all(to_reader_splits.into_iter().map(|state| {
+                tracing::debug!("spawning connector split reader for split {:?}", state);
+                let props = config.clone();
+                let data_gen_columns = data_gen_columns.clone();
+                let parser_config = parser_config.clone();
+                // TODO: is this reader split across multiple threads...? Realistically, we want
+                // source_ctx to live in a single actor.
+                let source_ctx = source_ctx.clone();
+                async move {
+                    SplitReaderImpl::create(
+                        props,
+                        state,
+                        parser_config,
+                        source_ctx,
+                        data_gen_columns,
+                    )
                     .await
-            }
-        }))
-        .await?;
+                }
+            }))
+            .await?
+        };
 
         Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
     }

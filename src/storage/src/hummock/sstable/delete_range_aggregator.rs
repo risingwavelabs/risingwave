@@ -114,10 +114,9 @@ pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &Compactio
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CompactionDeleteRanges {
     events: Vec<CompactionDeleteRangeEvent>,
-    gc_delete_keys: bool,
 }
 
 impl CompactionDeleteRangesBuilder {
@@ -169,7 +168,7 @@ impl CompactionDeleteRangesBuilder {
         result
     }
 
-    pub(crate) fn build_for_compaction(self, gc_delete_keys: bool) -> Arc<CompactionDeleteRanges> {
+    pub(crate) fn build_for_compaction(self) -> Arc<CompactionDeleteRanges> {
         let mut ret = BTreeMap::<
             PointRange<Vec<u8>>,
             (Vec<TombstoneEnterExitEvent>, Vec<TombstoneEnterExitEvent>),
@@ -197,21 +196,11 @@ impl CompactionDeleteRangesBuilder {
             .map(|(k, (exits, enters))| (k, exits, enters))
             .collect_vec();
 
-        Arc::new(CompactionDeleteRanges {
-            events,
-            gc_delete_keys,
-        })
+        Arc::new(CompactionDeleteRanges { events })
     }
 }
 
 impl CompactionDeleteRanges {
-    pub(crate) fn for_test() -> Self {
-        Self {
-            events: vec![],
-            gc_delete_keys: false,
-        }
-    }
-
     pub(crate) fn iter(self: &Arc<Self>) -> CompactionDeleteRangeIterator {
         CompactionDeleteRangeIterator {
             events: self.clone(),
@@ -221,12 +210,13 @@ impl CompactionDeleteRanges {
     }
 
     /// the `largest_user_key` is always exclusive
+    #[cfg(test)]
     pub(crate) fn get_tombstone_between(
         &self,
         smallest_user_key: UserKey<&[u8]>,
         largest_user_key: UserKey<&[u8]>,
     ) -> Vec<MonotonicDeleteEvent> {
-        if self.gc_delete_keys || self.events.is_empty() {
+        if self.events.is_empty() {
             return vec![];
         }
 
@@ -303,6 +293,10 @@ impl CompactionDeleteRangeIterator {
         apply_event(&mut self.epochs, &self.events.events[idx]);
     }
 
+    pub(crate) fn next(&mut self) {
+        self.seek_idx += 1;
+    }
+
     /// Return the earliest range-tombstone which deletes target-key.
     /// Target-key must be given in order.
     pub(crate) fn earliest_delete_which_can_see_key(
@@ -318,6 +312,24 @@ impl CompactionDeleteRangeIterator {
             self.seek_idx += 1;
         }
         self.earliest_delete_since(epoch)
+    }
+
+    pub fn update_range(&mut self) {
+        self.apply(self.seek_idx);
+    }
+
+    pub fn key(&self) -> &PointRange<Vec<u8>> {
+        &self.events.events[self.seek_idx].0
+    }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        self.seek_idx < self.events.events.len()
+    }
+
+    pub(crate) fn earliest_epoch(&self) -> HummockEpoch {
+        self.epochs
+            .first()
+            .map_or(HummockEpoch::MAX, |epoch| *epoch)
     }
 
     pub(crate) fn earliest_delete_since(&self, epoch: HummockEpoch) -> HummockEpoch {
@@ -495,7 +507,7 @@ mod tests {
         for range in data {
             builder.add_delete_events(create_monotonic_events(vec![range]));
         }
-        let compaction_delete_ranges = builder.build_for_compaction(false);
+        let compaction_delete_ranges = builder.build_for_compaction();
         let mut iter = compaction_delete_ranges.iter();
 
         assert_eq!(
@@ -577,7 +589,7 @@ mod tests {
         for range in data {
             builder.add_delete_events(create_monotonic_events(vec![range]));
         }
-        let compaction_delete_range = builder.build_for_compaction(false);
+        let compaction_delete_range = builder.build_for_compaction();
         let split_ranges = compaction_delete_range.get_tombstone_between(
             test_user_key(b"bbbb").as_ref(),
             test_user_key(b"eeeeee").as_ref(),
