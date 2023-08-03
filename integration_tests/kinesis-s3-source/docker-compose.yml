@@ -52,7 +52,7 @@ services:
       - |
         export AWS_ACCESS_KEY_ID="test"
         export AWS_SECRET_ACCESS_KEY="test"
-        export AWS_DEFAULT_REGION="us-east-1" 
+        export AWS_DEFAULT_REGION="us-east-1"
         aws --endpoint-url=http://localstack:4566 kinesis create-stream --stream-name ad-impression
         aws --endpoint-url=http://localstack:4566 s3api create-bucket --bucket ad-click
         /datagen --mode ad-ctr --topic ad_impression --qps 10 kinesis --region us-east-1 --name ad-impression --endpoint http://localstack:4566 &
