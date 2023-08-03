@@ -42,10 +42,9 @@ impl Rule for CrossJoinEliminateRule {
         let values: &LogicalValues = right.as_logical_values()?;
         if on.always_true() // cross join
             && join_type == JoinType::Inner
-            && join.output_indices_is_trivial()
             && values.rows().len() == 1 // one row
-            && values.rows()[0].is_empty()
-        // no columns
+            && values.rows()[0].is_empty() // no columns
+            && join.output_indices_is_trivial()
         {
             Some(left)
         } else {
