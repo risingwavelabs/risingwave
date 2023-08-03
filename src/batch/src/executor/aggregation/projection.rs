@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::types::DataType;
+use std::ops::Range;
 
-use super::{Aggregator, BoxedAggState};
-use crate::Result;
+use risingwave_common::array::StreamChunk;
+use risingwave_common::types::{DataType, Datum};
+use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::Result;
 
 #[derive(Clone)]
 pub struct Projection {
@@ -36,23 +37,34 @@ impl Aggregator for Projection {
         self.inner.return_type()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        self.inner.update(&input.project(&self.indices)).await
+    }
+
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
         self.inner
-            .update_multi(
-                &input.clone().reorder_columns(&self.indices),
-                start_row_id,
-                end_row_id,
-            )
+            .update_range(&input.project(&self.indices), range)
             .await
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        self.inner.output(builder)
+    fn get_output(&self) -> Result<Datum> {
+        self.inner.get_output()
+    }
+
+    fn output(&mut self) -> Result<Datum> {
+        self.inner.output()
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    fn get_state(&self) -> Datum {
+        self.inner.get_state()
+    }
+
+    fn set_state(&mut self, state: Datum) {
+        self.inner.set_state(state);
     }
 
     fn estimated_size(&self) -> usize {

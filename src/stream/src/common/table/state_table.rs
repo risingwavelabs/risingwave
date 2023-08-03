@@ -768,18 +768,17 @@ where
             &self.vnodes,
         );
 
-        let value_chunk = if let Some(ref value_indices) = self.value_indices {
-            chunk.clone().reorder_columns(value_indices)
+        let values = if let Some(ref value_indices) = self.value_indices {
+            chunk.project(value_indices).serialize_with(&self.row_serde)
         } else {
-            chunk.clone()
+            chunk.serialize_with(&self.row_serde)
         };
-        let values = value_chunk.serialize_with(&self.row_serde);
 
-        let key_chunk = chunk.reorder_columns(self.pk_indices());
         // TODO(kwannoel): Seems like we are doing vis check twice here.
         // Once below, when using vis, and once here,
         // when using vis to set rows empty or not.
         // If we are to use the vis optimization, we should skip this.
+        let key_chunk = chunk.project(self.pk_indices());
         let vnode_and_pks = key_chunk
             .rows_with_holes()
             .zip_eq_fast(vnodes.iter())
@@ -798,6 +797,7 @@ where
             Vis::Bitmap(vis) => {
                 for ((op, (key, key_bytes), value), vis) in
                     izip!(op, vnode_and_pks, values).zip_eq_debug(vis.iter())
+
                 {
                     if vis {
                         match op {

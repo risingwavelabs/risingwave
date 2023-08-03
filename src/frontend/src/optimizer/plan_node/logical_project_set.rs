@@ -186,6 +186,10 @@ impl LogicalProjectSet {
     pub fn select_list(&self) -> &Vec<ExprImpl> {
         &self.core.select_list
     }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
+        self.core.decompose()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProjectSet {

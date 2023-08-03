@@ -2308,6 +2308,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "equivalent"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
+
+[[package]]
 name = "errno"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2838,7 +2844,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http",
- "indexmap",
+ "indexmap 1.9.3",
  "slab",
  "tokio",
  "tokio-util",
@@ -3191,6 +3197,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "indexmap"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
+dependencies = [
+ "equivalent",
+ "hashbrown 0.14.0",
+]
+
+[[package]]
 name = "indextree"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3216,7 +3232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fb7c1b80a1dfa604bb4a649a5c5aeef3d913f7c520cb42b40e534e8a61bcdfc"
 dependencies = [
  "ahash 0.8.3",
- "indexmap",
+ "indexmap 1.9.3",
  "is-terminal",
  "itoa",
  "log",
@@ -3319,16 +3335,18 @@ checksum = "af150ab688ff2122fcef229be89cb50dd66af9e01a4ff320cc137eecc9bacc38"
 
 [[package]]
 name = "jni"
-version = "0.20.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "039022cdf4d7b1cf548d31f60ae783138e5fd42013f6271049d7df7afadef96c"
+checksum = "1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97"
 dependencies = [
  "cesu8",
+ "cfg-if",
  "combine",
  "jni-sys",
  "log",
  "thiserror",
  "walkdir",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -3655,7 +3673,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml 0.7.3",
+ "toml 0.7.6",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3691,7 +3709,7 @@ dependencies = [
  "spin 0.9.8",
  "thiserror",
  "tokio",
- "toml 0.7.3",
+ "toml 0.7.6",
  "tonic 0.9.2",
  "tracing",
 ]
@@ -4451,7 +4469,7 @@ dependencies = [
  "fnv",
  "futures-channel",
  "futures-util",
- "indexmap",
+ "indexmap 1.9.3",
  "once_cell",
  "pin-project-lite",
  "thiserror",
@@ -4735,7 +4753,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4dd7d28ee937e54fe3080c91faa1c3a46c06de6252988a7f4592ba2310ef22a4"
 dependencies = [
  "fixedbitset",
- "indexmap",
+ "indexmap 1.9.3",
 ]
 
 [[package]]
@@ -5141,6 +5159,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "procfs"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "943ca7f9f29bab5844ecd8fdb3992c5969b6622bb9609b9502fef9b4310e3f1f"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "hex",
+ "lazy_static",
+ "rustix 0.36.13",
+]
+
+[[package]]
 name = "prometheus"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5152,7 +5183,7 @@ dependencies = [
  "libc",
  "memchr",
  "parking_lot 0.12.1",
- "procfs",
+ "procfs 0.14.2",
  "protobuf",
  "thiserror",
 ]
@@ -5764,6 +5795,7 @@ dependencies = [
  "either",
  "futures",
  "futures-async-stream",
+ "futures-util",
  "hashbrown 0.14.0",
  "hytra",
  "itertools 0.11.0",
@@ -5821,7 +5853,7 @@ dependencies = [
  "risingwave_storage",
  "serde",
  "tokio-stream",
- "toml 0.7.3",
+ "toml 0.7.6",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -5926,7 +5958,7 @@ dependencies = [
  "paste",
  "postgres-types",
  "pretty_assertions",
- "procfs",
+ "procfs 0.15.1",
  "prometheus",
  "prost",
  "rand",
@@ -5951,7 +5983,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tinyvec",
- "toml 0.7.3",
+ "toml 0.7.6",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -6741,7 +6773,7 @@ dependencies = [
  "serde_with 3.1.0",
  "tokio-postgres",
  "tokio-stream",
- "toml 0.7.3",
+ "toml 0.7.6",
  "tracing",
  "workspace-hack",
 ]
@@ -6778,7 +6810,7 @@ dependencies = [
  "nix 0.25.1",
  "num-integer",
  "parking_lot 0.12.1",
- "procfs",
+ "procfs 0.15.1",
  "prometheus",
  "prost",
  "rand",
@@ -7328,9 +7360,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.1"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0efd8caf556a6cebd3b285caf480045fcc1ac04f6bd786b09a6f11af30c4fcf4"
+checksum = "96426c9936fd7a0124915f9185ea1d20aa9445cc9821142f0a73bc9207a2e186"
 dependencies = [
  "serde",
 ]
@@ -7366,7 +7398,7 @@ dependencies = [
  "base64 0.13.1",
  "chrono",
  "hex",
- "indexmap",
+ "indexmap 1.9.3",
  "serde",
  "serde_json",
  "serde_with_macros 2.3.3",
@@ -7382,7 +7414,7 @@ dependencies = [
  "base64 0.21.0",
  "chrono",
  "hex",
- "indexmap",
+ "indexmap 1.9.3",
  "serde",
  "serde_json",
  "serde_with_macros 3.1.0",
@@ -7431,7 +7463,7 @@ version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9d684e3ec7de3bf5466b32bd75303ac16f0736426e5a4e0d6e489559ce1249c"
 dependencies = [
- "indexmap",
+ "indexmap 1.9.3",
  "itoa",
  "ryu",
  "serde",
@@ -7648,12 +7680,11 @@ dependencies = [
 
 [[package]]
 name = "smallbitset"
-version = "0.6.1"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d93fb6dc506bf9247d497b1cd9748015f444b9b16da6da79484f54b20df49a7c"
+checksum = "e0b6c16e2970706b96c16d72f6d835d4758ddb2a0c471c9a7de8be4b1dde049b"
 dependencies = [
- "num",
- "paste",
+ "num-traits",
 ]
 
 [[package]]
@@ -8298,9 +8329,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.3"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b403acf6f2bb0859c93c7f0d967cb4a75a7ac552100f9322faf64dc047669b21"
+checksum = "c17e963a819c331dcacd7ab957d80bc2b9a9c1e71c804826d2f283dd65306542"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -8310,20 +8341,20 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.1"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ab8ed2edee10b50132aed5f331333428b011c99402b5a534154ed15746f9622"
+checksum = "7cda73e2f1397b1262d6dfdcef8aafae14d1de7748d66822d3bfeeb6d03e5e4b"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.19.8"
+version = "0.19.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239410c8609e8125456927e6707163a3b1fdb40561e4b803bc041f466ccfdc13"
+checksum = "f8123f27e969974a3dfba720fdb560be359f57b44302d280ba72e76a74480e8a"
 dependencies = [
- "indexmap",
+ "indexmap 2.0.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -8416,7 +8447,7 @@ checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
 dependencies = [
  "futures-core",
  "futures-util",
- "indexmap",
+ "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
  "rand",
@@ -9152,9 +9183,9 @@ checksum = "1a515f5799fe4961cb532f983ce2b23082366b898e52ffbce459c86f67c8378a"
 
 [[package]]
 name = "winnow"
-version = "0.4.6"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61de7bac303dc551fe038e2b3cef0f571087a47571ea6e79a87692ac99b99699"
+checksum = "8bd122eb777186e60c3fdf765a58ac76e41c582f1f535fbf3314434c6b58f3f7"
 dependencies = [
  "memchr",
 ]
@@ -9212,6 +9243,7 @@ dependencies = [
  "hashbrown 0.12.3",
  "hashbrown 0.14.0",
  "hyper",
+ "indexmap 1.9.3",
  "itertools 0.10.5",
  "lexical-core",
  "lexical-parse-float",
@@ -9226,9 +9258,7 @@ dependencies = [
  "madsim-tokio",
  "memchr",
  "multimap",
- "num",
  "num-bigint",
- "num-complex",
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",

@@ -27,16 +27,15 @@ pub struct PulsarSplit {
 }
 
 impl PulsarSplit {
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let start_offset = if start_offset.is_empty() {
             PulsarEnumeratorOffset::Earliest
         } else {
             PulsarEnumeratorOffset::MessageId(start_offset)
         };
-        Self {
-            topic: self.topic.clone(),
-            start_offset,
-        }
+
+        self.start_offset = start_offset;
+        Ok(())
     }
 }
 

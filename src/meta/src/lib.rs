@@ -259,6 +259,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
