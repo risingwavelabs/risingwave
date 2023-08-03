@@ -40,7 +40,9 @@ use futures::{pin_mut, stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use more_asserts::assert_ge;
-use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
+use risingwave_hummock_sdk::compact::{
+    compact_task_to_string, estimate_memory_for_compact_task, estimate_state_for_compaction,
+};
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::table_stats::{
     add_table_stats_map, to_prost_table_stats_map, TableStats, TableStatsMap,
@@ -252,10 +254,8 @@ impl Compactor {
             }
         }
 
-        let (input_memory, total_file_count, total_key_count) =
-            estimate_state_for_compaction(&compact_task);
 
-
+        let (_, total_file_count, total_key_count) = estimate_state_for_compaction(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -282,12 +282,22 @@ impl Compactor {
 
         let (capacity, total_file_size, total_file_size_uncompressed) =
             estimate_task_memory_capacity(context.clone(), &compact_task);
-        let task_memory_capacity_with_parallelism = capacity * parallelism;
+
+        let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
+            &compact_task,
+            (context.storage_opts.block_size_kb as u64) * (1 << 10),
+            context
+                .storage_opts
+                .object_store_recv_buffer_size
+                .unwrap_or(6 * 1024 * 1024) as u64,
+            capacity as u64,
+            context.sstable_store.store().support_streaming_upload(),
+        ) * compact_task.splits.len() as u64;
 
         tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {}",
                 compact_task.task_id,
-                need_quota,
+                task_memory_capacity_with_parallelism,
                 total_file_count,
                 total_file_size,
                 total_file_size_uncompressed,
@@ -295,37 +305,25 @@ impl Compactor {
                 compact_task.target_level,
                 compact_task.compression_algorithm,
                 parallelism,
-                task_memory_capacity_with_parallelism
             );
 
         // If the task does not have enough memory, it should cancel the task and let the meta
-        // reschedule it, so that it does not occupy the compactor's resources. Hold this memory
-        // until the compact task end.
-        let memory_holder = context
-            .output_memory_limiter
-            .try_require_memory(input_memory);
-        if memory_holder.is_none() {
+        // reschedule it, so that it does not occupy the compactor's resources.
+        let memory_detector = context
+            .memory_limiter
+            .try_require_memory(task_memory_capacity_with_parallelism);
+        if memory_detector.is_none() {
             tracing::warn!(
                 "Not enough memory to serve the task {} which need memory {}, current memory_usage {} memory_quota {}",
                 compact_task.task_id,
-                input_memory,
-                context.output_memory_limiter.get_memory_usage(),
-                context.output_memory_limiter.quota()
+                task_memory_capacity_with_parallelism,
+                context.memory_limiter.get_memory_usage(),
+                context.memory_limiter.quota()
             );
             task_status = TaskStatus::NoAvailResourceCanceled;
             return Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
         }
 
-        tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {}",
-                compact_task.task_id,
-                input_memory,
-                total_file_count,
-                total_key_count,
-                compact_task.target_level,
-                compact_task.compression_algorithm,
-                parallelism,
-            );
 
         context.compactor_metrics.compact_task_pending_num.inc();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
@@ -395,6 +393,8 @@ impl Compactor {
                 }
             }
         }
+
+        drop(memory_detector);
 
         if task_status != TaskStatus::Success {
             for abort_handle in abort_handles {
@@ -475,7 +475,6 @@ impl Compactor {
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        max_compactor_task_multiplier: f32,
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -489,8 +488,13 @@ impl Compactor {
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
 
-        assert_ge!(max_compactor_task_multiplier, 0.0);
-        let max_pull_task_count = (cpu_core_num as f32 * max_compactor_task_multiplier) as u32;
+        assert_ge!(
+            compactor_context.storage_opts.compactor_max_task_multiplier,
+            0.0
+        );
+        let max_pull_task_count = (cpu_core_num as f32
+            * compactor_context.storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32;
 
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
@@ -1000,13 +1004,11 @@ impl Compactor {
                 .start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
-            > self.context.storage_opts.min_sst_size_for_streaming_upload
-            && self
-                .context
-                .sstable_store
-                .store()
-                .support_streaming_upload()
+        let (split_table_outputs, table_stats_map) = if self
+            .context
+            .sstable_store
+            .store()
+            .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
             self.compact_key_range_impl::<_, Xor16FilterBuilder>(
@@ -1110,7 +1112,7 @@ impl Compactor {
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
-            limiter: self.context.output_memory_limiter.clone(),
+            limiter: self.context.memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),

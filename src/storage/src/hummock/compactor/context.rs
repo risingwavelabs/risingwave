@@ -48,7 +48,7 @@ pub struct CompactorContext {
 
     pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
-    pub output_memory_limiter: Arc<MemoryLimiter>,
+    pub memory_limiter: Arc<MemoryLimiter>,
 
     pub sstable_object_id_manager: SstableObjectIdManagerRef,
 

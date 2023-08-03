@@ -163,6 +163,7 @@ pub fn prune_nonoverlapping_ssts<'a>(
     ssts[start_table_idx..=end_table_idx].iter()
 }
 
+#[derive(Debug)]
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     notify: Notify,
@@ -244,6 +245,7 @@ impl MemoryLimiterInner {
     }
 }
 
+#[derive(Debug)]
 pub struct MemoryLimiter {
     inner: Arc<MemoryLimiterInner>,
 }

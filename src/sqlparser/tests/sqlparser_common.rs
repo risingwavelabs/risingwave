@@ -3095,7 +3095,7 @@ fn parse_create_materialized_view() {
 
 #[test]
 fn parse_create_materialized_view_emit_immediately() {
-    let sql = "CREATE MATERIALIZED VIEW myschema.myview EMIT IMMEDIATELY AS SELECT foo FROM bar";
+    let sql = "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT IMMEDIATELY";
     match verified_stmt(sql) {
         Statement::CreateView {
             if_not_exists,
@@ -3123,7 +3123,7 @@ fn parse_create_materialized_view_emit_immediately() {
 #[test]
 fn parse_create_materialized_view_emit_on_window_close() {
     let sql =
-        "CREATE MATERIALIZED VIEW myschema.myview EMIT ON WINDOW CLOSE AS SELECT foo FROM bar";
+        "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT ON WINDOW CLOSE";
     match verified_stmt(sql) {
         Statement::CreateView {
             if_not_exists,

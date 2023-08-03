@@ -212,7 +212,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql && 
+      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql &&
          sleep 10 &&
          mysql --password= -h tidb --port 4000 -u root test < tidb_prepare.sql"
     volumes:
