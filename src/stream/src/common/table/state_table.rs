@@ -791,7 +791,6 @@ where
             })
             .collect_vec();
 
-        // let (_, vis) = key_chunk.into_parts();
         let vis = key_chunk.vis();
         match vis {
             Vis::Bitmap(vis) => {
