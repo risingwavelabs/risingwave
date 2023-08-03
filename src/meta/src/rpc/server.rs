@@ -551,7 +551,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
-    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager, aws_cli);
+    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager.clone(), aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -579,6 +579,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     sub_tasks.push(
         start_fragment_info_monitor(
             cluster_manager.clone(),
+            catalog_manager,
             fragment_manager.clone(),
             meta_metrics.clone(),
         )
@@ -691,9 +692,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HummockManagerServiceServer::new(hummock_srv))
         .add_service(NotificationServiceServer::new(notification_srv))
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
-        .add_service(DdlServiceServer::new(ddl_srv))
+        .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))
-        .add_service(ScaleServiceServer::new(scale_srv))
+        .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
