@@ -66,7 +66,7 @@ where
         let batch_size = 64usize;
         let mut total_deleted = 0;
         loop {
-            if total_deleted != 0 {
+            if total_deleted != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
                 tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
                     .await;
             }
@@ -116,7 +116,7 @@ where
         let batch_size = 500usize;
         let mut sent_batch = Vec::with_capacity(objects_to_delete.len());
         while batch_idx < objects_to_delete.len() {
-            if batch_idx != 0 {
+            if batch_idx != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
                 tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
                     .await;
             }

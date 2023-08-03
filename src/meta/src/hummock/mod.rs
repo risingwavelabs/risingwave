@@ -48,6 +48,8 @@ pub fn start_hummock_workers<S>(
 where
     S: MetaStore,
 {
+    // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
+    // from blocking others.
     let workers = vec![
         start_checkpoint_loop(
             hummock_manager,

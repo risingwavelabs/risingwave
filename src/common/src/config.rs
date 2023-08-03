@@ -748,7 +748,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            100
+            10
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
