@@ -77,52 +77,51 @@ impl FilterExecutor {
             Vis::Bitmap(ref m) => m.len() == n,
         });
 
-        if let ArrayImpl::Bool(bool_array) = &*filter {
-            for (op, res) in ops.into_iter().zip_eq_fast(bool_array.iter()) {
-                // SAFETY: ops.len() == pred_output.len() == visibility.len()
-                let res = res.unwrap_or(false);
-                match op {
-                    Op::Insert | Op::Delete => {
-                        new_ops.push(op);
-                        if res {
-                            new_visibility.append(true);
-                        } else {
-                            new_visibility.append(false);
-                        }
-                    }
-                    Op::UpdateDelete => {
-                        last_res = res;
-                    }
-                    Op::UpdateInsert => match (last_res, res) {
-                        (true, false) => {
-                            new_ops.push(Op::Delete);
-                            new_ops.push(Op::UpdateInsert);
-                            new_visibility.append(true);
-                            new_visibility.append(false);
-                        }
-                        (false, true) => {
-                            new_ops.push(Op::UpdateDelete);
-                            new_ops.push(Op::Insert);
-                            new_visibility.append(false);
-                            new_visibility.append(true);
-                        }
-                        (true, true) => {
-                            new_ops.push(Op::UpdateDelete);
-                            new_ops.push(Op::UpdateInsert);
-                            new_visibility.append(true);
-                            new_visibility.append(true);
-                        }
-                        (false, false) => {
-                            new_ops.push(Op::UpdateDelete);
-                            new_ops.push(Op::UpdateInsert);
-                            new_visibility.append(false);
-                            new_visibility.append(false);
-                        }
-                    },
-                }
-            }
-        } else {
+        let ArrayImpl::Bool(bool_array) = &*filter else {
             panic!("unmatched type: filter expr returns a non-null array");
+        };
+        for (&op, res) in ops.iter().zip_eq_fast(bool_array.iter()) {
+            // SAFETY: ops.len() == pred_output.len() == visibility.len()
+            let res = res.unwrap_or(false);
+            match op {
+                Op::Insert | Op::Delete => {
+                    new_ops.push(op);
+                    if res {
+                        new_visibility.append(true);
+                    } else {
+                        new_visibility.append(false);
+                    }
+                }
+                Op::UpdateDelete => {
+                    last_res = res;
+                }
+                Op::UpdateInsert => match (last_res, res) {
+                    (true, false) => {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(true);
+                        new_visibility.append(false);
+                    }
+                    (false, true) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::Insert);
+                        new_visibility.append(false);
+                        new_visibility.append(true);
+                    }
+                    (true, true) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(true);
+                        new_visibility.append(true);
+                    }
+                    (false, false) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(false);
+                        new_visibility.append(false);
+                    }
+                },
+            }
         }
 
         let new_visibility = new_visibility.finish();

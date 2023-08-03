@@ -432,6 +432,8 @@ struct UserFunctionAttr {
     name: String,
     /// The last argument type is `&mut dyn Write`.
     write: bool,
+    /// The last argument type is `retract: bool`.
+    retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
     /// The return type.
@@ -472,6 +474,7 @@ impl FunctionAttr {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
             .replace("[]", "list")
             .replace(['<', '>', ' ', ','], "_")
+            .replace("__", "_")
     }
 }
 
