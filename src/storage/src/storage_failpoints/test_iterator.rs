@@ -432,14 +432,16 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
     let mut stats = StoreLocalStatistic::default();
 
+    let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
     let mut sstable_iter = SstableStreamIterator::new(
-        sstable_store.sstable(&info, &mut stats).await.unwrap(),
+        table.value().meta.block_metas.clone(),
         info,
         HashSet::from_iter(std::iter::once(0)),
         0,
         &stats,
         Arc::new(TaskProgress::default()),
         sstable_store,
+        0,
     );
     let mut cnt = 0;
     sstable_iter.seek(None).await.unwrap();
