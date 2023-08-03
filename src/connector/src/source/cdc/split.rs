@@ -95,8 +95,14 @@ impl MySqlCdcSplit {
     pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-                .map_err(|e| anyhow!("invalid mysql offset: {}, error: {}", start_offset, e))?;
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    "invalid mysql offset: {}, error: {}, split: {}",
+                    start_offset,
+                    e,
+                    self.inner.split_id
+                )
+            })?;
             snapshot_done = match dbz_offset.source_offset.snapshot {
                 Some(val) => !val,
                 None => true,
@@ -124,8 +130,14 @@ impl PostgresCdcSplit {
     pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-                .map_err(|e| anyhow!("invalid postgres offset: {}, error: {}", start_offset, e))?;
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    "invalid postgres offset: {}, error: {}, split: {}",
+                    start_offset,
+                    e,
+                    self.inner.split_id
+                )
+            })?;
             snapshot_done = dbz_offset
                 .source_offset
                 .last_snapshot_record
