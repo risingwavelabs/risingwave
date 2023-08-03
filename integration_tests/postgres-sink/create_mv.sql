@@ -18,7 +18,7 @@ FROM
     );
 
 -- ingest back to RW
-CREATE table rw_types (
+CREATE table rw_typed_data (
     id BIGINT PRIMARY KEY,
     varchar_column VARCHAR,
     text_column TEXT,

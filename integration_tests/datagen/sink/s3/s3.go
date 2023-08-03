@@ -28,7 +28,7 @@ func OpenS3Sink(cfg S3Config) (*S3Sink, error) {
 	ss := session.Must(session.NewSession())
 	config := aws.NewConfig().WithRegion(cfg.Region)
 	if cfg.Endpoint != "" {
-		config = config.WithEndpoint(cfg.Endpoint)
+		config = config.WithEndpoint(cfg.Endpoint).WithS3ForcePathStyle(true)
 	}
 	client := s3.New(ss, config)
 	return &S3Sink{
