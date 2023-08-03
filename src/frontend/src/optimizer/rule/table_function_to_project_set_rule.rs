@@ -36,6 +36,8 @@ use crate::optimizer::PlanRef;
 ///
 ///
 /// ```text
+///             LogicalProject (type alignment)
+///                   |
 ///            LogicalProjectSet
 ///                   |
 ///             LogicalValues
