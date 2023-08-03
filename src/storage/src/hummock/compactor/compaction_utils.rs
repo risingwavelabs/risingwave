@@ -195,9 +195,14 @@ pub async fn generate_splits(
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
+        let worker_num = context.compaction_executor.worker_num();
+
         let parallelism = std::cmp::min(
-            indexes.len() as u64,
-            context.storage_opts.max_sub_compaction as u64,
+            worker_num as u64,
+            std::cmp::min(
+                indexes.len() as u64,
+                context.storage_opts.max_sub_compaction as u64,
+            ),
         );
         let sub_compaction_data_size =
             std::cmp::max(compaction_size / parallelism, parallel_compact_size);

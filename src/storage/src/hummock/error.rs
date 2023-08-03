@@ -17,7 +17,6 @@ use std::backtrace::Backtrace;
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
-
 #[derive(Error, Debug)]
 enum HummockErrorInner {
     #[error("Magic number mismatch: expected {expected}, found: {found}.")]
