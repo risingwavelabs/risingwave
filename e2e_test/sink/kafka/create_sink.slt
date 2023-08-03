@@ -20,7 +20,7 @@ create sink sink_non_exist_broker from t_kafka with (
 );
 
 statement error topic invalid_topic not found
-create sink sink_non_exist_broker from t_kafka with (
+create sink sink_non_exist_topic from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'invalid_topic',
