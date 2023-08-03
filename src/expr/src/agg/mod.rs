@@ -43,13 +43,9 @@ pub trait Aggregator: Send + Sync + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
     /// Update the aggregator with multiple rows.
-    ///
-    /// This is used in streaming aggregation.
     async fn update(&mut self, input: &StreamChunk) -> Result<()>;
 
     /// Update the aggregator with a range of rows.
-    ///
-    /// This is used in batch aggregation.
     async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()>;
 
     /// Get the output value.
