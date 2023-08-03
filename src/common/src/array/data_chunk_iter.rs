@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::iter::{FusedIterator, TrustedLen};
+use std::ops::Range;
 
 use super::ArrayRef;
 use crate::array::DataChunk;
@@ -22,9 +23,14 @@ use crate::types::DatumRef;
 impl DataChunk {
     /// Get an iterator for visible rows.
     pub fn rows(&self) -> DataChunkRefIter<'_> {
+        self.rows_in(0..self.capacity())
+    }
+
+    /// Get an iterator for visible rows in range.
+    pub fn rows_in(&self, range: Range<usize>) -> DataChunkRefIter<'_> {
         DataChunkRefIter {
             chunk: self,
-            idx: Some(0),
+            idx: range,
         }
     }
 
@@ -39,40 +45,39 @@ impl DataChunk {
 
 pub struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
-    /// `None` means finished
-    idx: Option<usize>,
+    idx: Range<usize>,
 }
 
 impl<'a> Iterator for DataChunkRefIter<'a> {
     type Item = RowRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.idx {
-            None => None,
-            Some(idx) => {
-                self.idx = self.chunk.next_visible_row_idx(idx);
-                match self.idx {
-                    None => None,
-                    Some(idx) => {
-                        self.idx = Some(idx + 1);
-                        Some(RowRef {
-                            chunk: self.chunk,
-                            idx,
-                        })
-                    }
-                }
+        if self.idx.start == self.idx.end {
+            return None;
+        }
+        match self.chunk.next_visible_row_idx(self.idx.start) {
+            Some(idx) if idx < self.idx.end => {
+                self.idx.start = idx + 1;
+                Some(RowRef {
+                    chunk: self.chunk,
+                    idx,
+                })
+            }
+            _ => {
+                self.idx.start = self.idx.end;
+                None
             }
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if let Some(idx) = self.idx {
+        if self.idx.start != self.idx.end {
             (
                 // if all following rows are invisible
                 0,
                 // if all following rows are visible
                 Some(std::cmp::min(
-                    self.chunk.capacity() - idx,
+                    self.idx.end - self.idx.start,
                     self.chunk.cardinality(),
                 )),
             )
