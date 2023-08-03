@@ -43,6 +43,7 @@ pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
+mod pg_depend;
 
 pub use pg_am::*;
 pub use pg_attrdef::*;
@@ -75,3 +76,4 @@ pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
+pub use pg_depend::*;
