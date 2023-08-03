@@ -104,9 +104,10 @@ where
     ) -> Result<Response<ListTableFragmentsResponse>, Status> {
         let req = request.into_inner();
         let table_ids = HashSet::<u32>::from_iter(req.table_ids);
-        let table_fragments = self.fragment_manager.list_table_fragments().await;
-        let info = table_fragments
-            .into_iter()
+        let core = self.fragment_manager.get_fragment_read_guard().await;
+        let info = core
+            .table_fragments()
+            .values()
             .filter(|tf| table_ids.contains(&tf.table_id().table_id))
             .map(|tf| {
                 (
@@ -114,16 +115,16 @@ where
                     TableFragmentInfo {
                         fragments: tf
                             .fragments
-                            .into_iter()
-                            .map(|(id, fragment)| FragmentInfo {
+                            .iter()
+                            .map(|(&id, fragment)| FragmentInfo {
                                 id,
                                 actors: fragment
                                     .actors
-                                    .into_iter()
+                                    .iter()
                                     .map(|actor| ActorInfo {
                                         id: actor.actor_id,
-                                        node: actor.nodes,
-                                        dispatcher: actor.dispatcher,
+                                        node: actor.nodes.clone(),
+                                        dispatcher: actor.dispatcher.clone(),
                                     })
                                     .collect_vec(),
                             })
@@ -144,11 +145,12 @@ where
         &self,
         _request: Request<ListTableFragmentStatesRequest>,
     ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
-        let table_fragments = self.fragment_manager.list_table_fragments().await;
+        let core = self.fragment_manager.get_fragment_read_guard().await;
 
         Ok(Response::new(ListTableFragmentStatesResponse {
-            states: table_fragments
-                .into_iter()
+            states: core
+                .table_fragments()
+                .values()
                 .map(
                     |tf| list_table_fragment_states_response::TableFragmentState {
                         table_id: tf.table_id().table_id,
@@ -164,25 +166,24 @@ where
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let table_fragments = self.fragment_manager.list_table_fragments().await;
+        let core = self.fragment_manager.get_fragment_read_guard().await;
 
         Ok(Response::new(ListFragmentDistributionResponse {
-            distributions: table_fragments
-                .into_iter()
+            distributions: core
+                .table_fragments()
+                .values()
                 .flat_map(|tf| {
                     let table_id = tf.table_id().table_id;
-                    tf.fragments
-                        .into_iter()
-                        .map(move |(fragment_id, fragment)| {
-                            list_fragment_distribution_response::FragmentDistribution {
-                                fragment_id,
-                                table_id,
-                                distribution_type: fragment.distribution_type,
-                                state_table_ids: fragment.state_table_ids,
-                                upstream_fragment_ids: fragment.upstream_fragment_ids,
-                                fragment_type_mask: fragment.fragment_type_mask,
-                            }
-                        })
+                    tf.fragments.iter().map(move |(&fragment_id, fragment)| {
+                        list_fragment_distribution_response::FragmentDistribution {
+                            fragment_id,
+                            table_id,
+                            distribution_type: fragment.distribution_type,
+                            state_table_ids: fragment.state_table_ids.clone(),
+                            upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
+                            fragment_type_mask: fragment.fragment_type_mask,
+                        }
+                    })
                 })
                 .collect_vec(),
         }))
@@ -193,19 +194,20 @@ where
         &self,
         _request: Request<ListActorStatesRequest>,
     ) -> Result<Response<ListActorStatesResponse>, Status> {
-        let table_fragments = self.fragment_manager.list_table_fragments().await;
+        let core = self.fragment_manager.get_fragment_read_guard().await;
 
         Ok(Response::new(ListActorStatesResponse {
-            states: table_fragments
-                .into_iter()
+            states: core
+                .table_fragments()
+                .values()
                 .flat_map(|tf| {
                     let actor_to_fragment = tf.actor_fragment_mapping();
-                    tf.actor_status.into_iter().map(move |(actor_id, status)| {
+                    tf.actor_status.iter().map(move |(&actor_id, status)| {
                         list_actor_states_response::ActorState {
                             actor_id,
                             fragment_id: actor_to_fragment[&actor_id],
                             state: status.state,
-                            parallel_unit_id: status.parallel_unit.unwrap().id,
+                            parallel_unit_id: status.parallel_unit.as_ref().unwrap().id,
                         }
                     })
                 })
