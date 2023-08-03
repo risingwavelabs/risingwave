@@ -25,7 +25,7 @@ use fail::fail_point;
 use function_name::named;
 use futures::future::Either;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
@@ -2434,7 +2434,6 @@ where
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> (JoinHandle<()>, Sender<()>) {
-        use futures::StreamExt;
         let mut compactor_request_streams = FuturesUnordered::new();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let shutdown_rx_shared = shutdown_rx.shared();
@@ -2753,23 +2752,24 @@ async fn write_exclusive_cluster_id(
 ) -> Result<()> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
-
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    let metadata = object_store.list(&cluster_id_dir).await?;
-
-    if metadata.is_empty() {
-        object_store
-            .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
-            .await?;
-        Ok(())
-    } else {
-        let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
-        Err(ObjectError::internal(format!(
-            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `{:?}`.",
-            String::from_utf8(cluster_id.to_vec()).unwrap(), cluster_id_full_path,
+    match object_store.read(&cluster_id_full_path, None).await {
+        Ok(cluster_id) => Err(ObjectError::internal(format!(
+            "Data directory is already used by another cluster with id {:?}, path {}.",
+            String::from_utf8(cluster_id.to_vec()).unwrap(),
+            cluster_id_full_path,
         ))
-        .into())
+        .into()),
+        Err(e) => {
+            if e.is_object_not_found_error() {
+                object_store
+                    .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
+                    .await?;
+                return Ok(());
+            }
+            Err(e.into())
+        }
     }
 }
 
