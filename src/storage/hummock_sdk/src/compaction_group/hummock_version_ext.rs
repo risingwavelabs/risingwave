@@ -399,6 +399,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                 continue;
             }
 
+            // TODO(MrCroxx): At most one insert delta is allowed here. It's okay for now with the
+            // current `hummock::manager::gen_version_delta` implementation. Better refactor the
+            // struct to reduce conventions.
             for group_delta in &group_deltas.group_deltas {
                 if let DeltaType::IntraLevel(delta) = group_delta.get_delta_type().unwrap() {
                     if !delta.inserted_table_infos.is_empty() {

@@ -42,11 +42,11 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("pgwire", Level::INFO)
         .with_target(PGWIRE_QUERY_LOG, Level::OFF)
         // force a higher level for foyer logs
-        .with_target("foyer", Level::INFO)
-        .with_target("foyer_common", Level::INFO)
-        .with_target("foyer_intrusive", Level::INFO)
-        .with_target("foyer_memory", Level::INFO)
-        .with_target("foyer_storage", Level::INFO)
+        .with_target("foyer", Level::WARN)
+        .with_target("foyer_common", Level::WARN)
+        .with_target("foyer_intrusive", Level::WARN)
+        .with_target("foyer_memory", Level::WARN)
+        .with_target("foyer_storage", Level::WARN)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
