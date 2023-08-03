@@ -49,7 +49,7 @@ impl SysCatalogReaderImpl {
                         OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(view.id as i32)),
                             Some(ScalarImpl::Utf8(column.name.clone().into())),
-                            Some(ScalarImpl::Int16(index as i16 + 1)),
+                            Some(ScalarImpl::Int32(index as i32 + 1)),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                             Some(ScalarImpl::Int32(column.data_type().to_oid())),
                             Some(ScalarImpl::Int16(column.data_type().type_len())),
