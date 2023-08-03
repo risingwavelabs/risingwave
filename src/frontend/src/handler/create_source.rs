@@ -67,18 +67,12 @@ pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
-    schema: &AvroSchema,
+    info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let info = StreamSourceInfo {
-        row_schema_location: schema.row_schema_location.0.clone(),
-        use_schema_registry: schema.use_schema_registry,
-        ..Default::default()
-    };
-
     let parser_config = SpecificParserConfig::new(
         SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
-        &info,
+        info,
         with_properties,
     )?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
@@ -94,17 +88,12 @@ async fn extract_avro_table_schema(
 
 /// Map an Avro schema to a relational schema. And extract primary key columns.
 async fn extract_upsert_avro_table_schema(
-    schema: &AvroSchema,
+    info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let info = StreamSourceInfo {
-        row_schema_location: schema.row_schema_location.0.clone(),
-        use_schema_registry: schema.use_schema_registry,
-        ..Default::default()
-    };
     let parser_config = SpecificParserConfig::new(
         SourceStruct::new(SourceFormat::Upsert, SourceEncode::Avro),
-        &info,
+        info,
         with_properties,
     )?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
@@ -154,16 +143,12 @@ async fn extract_upsert_avro_table_schema(
 }
 
 async fn extract_debezium_avro_table_pk_columns(
-    schema: &DebeziumAvroSchema,
+    info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    let info = StreamSourceInfo {
-        row_schema_location: schema.row_schema_location.0.clone(),
-        ..Default::default()
-    };
     let parser_config = SpecificParserConfig::new(
         SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
-        &info,
+        info,
         with_properties,
     )?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
@@ -172,16 +157,12 @@ async fn extract_debezium_avro_table_pk_columns(
 
 // Map an Avro schema to a relational schema and return the pk_column_ids.
 async fn extract_debezium_avro_table_schema(
-    schema: &DebeziumAvroSchema,
+    info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let info = StreamSourceInfo {
-        row_schema_location: schema.row_schema_location.0.clone(),
-        ..Default::default()
-    };
     let parser_config = SpecificParserConfig::new(
         SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
-        &info,
+        info,
         with_properties,
     )?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
@@ -269,6 +250,16 @@ fn get_schema_location(row_options: &mut BTreeMap<String, String>) -> Result<(As
     }
 }
 
+#[inline]
+fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Option<i32>> {
+    match name_strategy {
+        None => Ok(None),
+        Some(name) => Ok(Some(PbSchemaRegistryNameStrategy::from_str_name(name.0.as_str())
+            .ok_or_else(|| RwError::from(ProtocolError(format!("\
+            expect strategy name in TopicNameStrategy, RecordNameStrategy and TopicRecordNameStrategy, but got {}", name))))? as i32)),
+    }
+}
+
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, pk_names, source info)`
 pub(crate) async fn try_bind_columns_from_source(
@@ -277,6 +268,9 @@ pub(crate) async fn try_bind_columns_from_source(
     sql_defined_columns: &[ColumnDef],
     with_properties: &HashMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, Vec<String>, StreamSourceInfo)> {
+    const MESSAGE_NAME_KEY: &str = "message";
+    const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
+
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let sql_defined_schema = !sql_defined_columns.is_empty();
     let is_kafka: bool = is_kafka_connector(with_properties);
@@ -299,10 +293,19 @@ pub(crate) async fn try_bind_columns_from_source(
             };
             let (row_schema_location, use_schema_registry) = get_schema_location(&mut options)?;
             let protobuf_schema = ProtobufSchema {
-                message_name: consume_string_from_options(&mut options, "message")?,
+                message_name: consume_string_from_options(&mut options, MESSAGE_NAME_KEY)?,
                 row_schema_location,
                 use_schema_registry,
             };
+            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
+                &mut options,
+                NAME_STRATEGY_KEY,
+            ))?;
+            if !protobuf_schema.use_schema_registry && name_strategy.is_some() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "schema registry name strategy only works with schema registry enabled"
+                ))));
+            }
             (
                 Some(
                     extract_protobuf_table_schema(&protobuf_schema, with_properties.clone())
@@ -315,6 +318,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
+                    name_strategy,
                     ..Default::default()
                 },
             )
@@ -338,22 +342,29 @@ pub(crate) async fn try_bind_columns_from_source(
                 return Err(RwError::from(ProtocolError(
     "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
-            let message_name = try_consume_string_from_options(&mut options, "message");
-            let x = try_consume_string_from_options(&mut options, "name.strategy");
-            let name_strategy =
-                PbSchemaRegistryNameStrategy::from_str(x.as_ref().map(|s| s.0.as_str()))
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
+            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
+                &mut options,
+                NAME_STRATEGY_KEY,
+            ))?;
+            if !avro_schema.use_schema_registry && name_strategy.is_some() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "schema registry name strategy only works with schema registry enabled"
+                ))));
+            }
+            let stream_source_info = StreamSourceInfo {
+                format: FormatType::Plain as i32,
+                row_encode: EncodeType::Avro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                use_schema_registry: avro_schema.use_schema_registry,
+                proto_message_name: message_name.unwrap_or(AstString("".into())).0,
+                name_strategy,
+                ..Default::default()
+            };
             (
-                Some(extract_avro_table_schema(&avro_schema, with_properties).await?),
+                Some(extract_avro_table_schema(&stream_source_info, with_properties).await?),
                 sql_defined_pk_names,
-                StreamSourceInfo {
-                    format: FormatType::Plain as i32,
-                    row_encode: EncodeType::Avro as i32,
-                    row_schema_location: avro_schema.row_schema_location.0.clone(),
-                    use_schema_registry: avro_schema.use_schema_registry,
-                    proto_message_name: message_name.unwrap_or("".into()).0,
-                    ..Default::default()
-                },
+                stream_source_info,
             )
         }
         (Format::Plain, Encode::Csv) => {
@@ -436,41 +447,49 @@ pub(crate) async fn try_bind_columns_from_source(
     "User-defined schema is not allowed with row format upsert avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
 
+            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
+                &mut options,
+                NAME_STRATEGY_KEY,
+            ))?;
+            if !avro_schema.use_schema_registry && name_strategy.is_some() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "schema registry name strategy only works with schema registry enabled"
+                ))));
+            }
+
             if sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
                         "upsert avro supports only one primary key column.".to_string(),
                     )));
                 }
-                let columns = extract_avro_table_schema(&avro_schema, with_properties).await?;
-
                 let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
-                (
-                    Some(columns),
-                    sql_defined_pk_names,
-                    StreamSourceInfo {
-                        format: FormatType::Upsert as i32,
-                        row_encode: EncodeType::Avro as i32,
-                        row_schema_location: avro_schema.row_schema_location.0.clone(),
-                        use_schema_registry: avro_schema.use_schema_registry,
-                        upsert_avro_primary_key,
-                        ..Default::default()
-                    },
-                )
+
+                let stream_source_info = StreamSourceInfo {
+                    format: FormatType::Upsert as i32,
+                    row_encode: EncodeType::Avro as i32,
+                    row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    use_schema_registry: avro_schema.use_schema_registry,
+                    upsert_avro_primary_key,
+                    name_strategy,
+                    ..Default::default()
+                };
+                let columns =
+                    extract_avro_table_schema(&stream_source_info, with_properties).await?;
+
+                (Some(columns), sql_defined_pk_names, stream_source_info)
             } else {
+                let stream_source_info = StreamSourceInfo {
+                    format: FormatType::Upsert as i32,
+                    row_encode: EncodeType::Avro as i32,
+                    row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    use_schema_registry: avro_schema.use_schema_registry,
+                    name_strategy,
+                    ..Default::default()
+                };
                 let (columns, pk_from_avro) =
-                    extract_upsert_avro_table_schema(&avro_schema, with_properties).await?;
-                (
-                    Some(columns),
-                    pk_from_avro,
-                    StreamSourceInfo {
-                        format: FormatType::Upsert as i32,
-                        row_encode: EncodeType::Avro as i32,
-                        row_schema_location: avro_schema.row_schema_location.0.clone(),
-                        use_schema_registry: avro_schema.use_schema_registry,
-                        ..Default::default()
-                    },
-                )
+                    extract_upsert_avro_table_schema(&stream_source_info, with_properties).await?;
+                (Some(columns), pk_from_avro, stream_source_info)
             }
         }
 
@@ -506,14 +525,33 @@ pub(crate) async fn try_bind_columns_from_source(
                     "User-defined schema is not allowed with row format debezium avro.".to_string(),
                 )));
             }
-            let full_columns =
-                extract_debezium_avro_table_schema(&avro_schema, with_properties).await?;
 
+            // no need to check whether works schema registry because debezium avro always work with
+            // schema registry
+            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
+                &mut options,
+                NAME_STRATEGY_KEY,
+            ))?;
+            let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
+
+            let stream_source_info = StreamSourceInfo {
+                use_schema_registry,
+                proto_message_name: message_name.unwrap_or(AstString("".into())).0,
+                name_strategy,
+                format: FormatType::Debezium as i32,
+                row_encode: EncodeType::Avro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                ..Default::default()
+            };
+
+            let full_columns =
+                extract_debezium_avro_table_schema(&stream_source_info, with_properties).await?;
             let pk_names = if sql_defined_pk {
                 sql_defined_pk_names
             } else {
                 let pk_names =
-                    extract_debezium_avro_table_pk_columns(&avro_schema, with_properties).await?;
+                    extract_debezium_avro_table_pk_columns(&stream_source_info, with_properties)
+                        .await?;
                 // extract pk(s) from schema registry
                 for pk_name in &pk_names {
                     full_columns
@@ -528,16 +566,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 }
                 pk_names
             };
-            (
-                Some(full_columns),
-                pk_names,
-                StreamSourceInfo {
-                    format: FormatType::Debezium as i32,
-                    row_encode: EncodeType::Avro as i32,
-                    row_schema_location: avro_schema.row_schema_location.0.clone(),
-                    ..Default::default()
-                },
-            )
+            (Some(full_columns), pk_names, stream_source_info)
         }
         (Format::DebeziumMongo, Encode::Json) => {
             let mut columns = vec![

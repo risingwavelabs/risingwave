@@ -696,7 +696,10 @@ impl SpecificParserConfig {
                     } else {
                         Some(info.proto_message_name.clone())
                     },
-                    name_strategy: info.name_strategy.unwrap_or(0) as PbSchemaRegistryNameStrategy,
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(
+                        info.name_strategy.unwrap_or(0),
+                    )
+                    .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     upsert_primary_key: info.upsert_avro_primary_key.clone(),
@@ -725,6 +728,10 @@ impl SpecificParserConfig {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(
+                        info.name_strategy.unwrap_or(0),
+                    )
+                    .unwrap(),
                     ..Default::default()
                 };
                 if info.use_schema_registry {
@@ -744,7 +751,10 @@ impl SpecificParserConfig {
                     } else {
                         Some(info.proto_message_name.clone())
                     },
-                    name_strategy: info.name_strategy.unwrap_or(0) as PbSchemaRegistryNameStrategy,
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(
+                        info.name_strategy.unwrap_or(0),
+                    )
+                    .unwrap(),
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: SchemaRegistryAuth::from(props),

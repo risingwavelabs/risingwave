@@ -35,7 +35,7 @@ pub fn get_subject_by_strategy(
             )))
         };
     match name_strategy {
-        ns @ PbSchemaRegistryNameStrategy::TopicNameStrategy => {
+        PbSchemaRegistryNameStrategy::TopicNameStrategy => {
             Ok((format!("{}-key", topic), format!("{}-value", topic)))
         }
         ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy => {

@@ -29,7 +29,7 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties};
@@ -84,12 +84,13 @@ impl ProtobufParserConfig {
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = if protobuf_config.use_schema_registry {
+            let (_schema_key, schema_value) = get_subject_by_strategy(
+                &protobuf_config.name_strategy,
+                protobuf_config.topic.as_str(),
+                Some(message_name.as_ref()),
+            )?;
             let client = Client::new(url, &protobuf_config.client_config)?;
-            compile_file_descriptor_from_schema_registry(
-                format!("{}-value", &protobuf_config.topic).as_str(),
-                &client,
-            )
-            .await?
+            compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
