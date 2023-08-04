@@ -427,8 +427,6 @@ impl LocalHummockStorage {
             .write_batch_size
             .with_label_values(&[table_id_label.as_str()])
             .observe(imm_size as _);
-        self.mem_table_size.set(imm_size as i64);
-        self.mem_table_item_count.set(imm_kv_count as i64);
         Ok(imm_size)
     }
 }
