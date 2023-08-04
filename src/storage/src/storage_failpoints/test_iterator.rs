@@ -441,7 +441,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
         &stats,
         Arc::new(TaskProgress::default()),
         sstable_store,
-        0,
+        100,
     );
     let mut cnt = 0;
     sstable_iter.seek(None).await.unwrap();
