@@ -29,7 +29,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -769,70 +769,55 @@ where
             &self.vnodes,
         );
 
-        let values = if let Some(ref value_indices) = self.value_indices {
-            chunk.project(value_indices).serialize_with(&self.row_serde)
+        let key_chunk = chunk.project(self.pk_indices());
+        let value_chunk = if let Some(ref value_indices) = self.value_indices {
+            chunk.project(value_indices)
         } else {
-            chunk.serialize_with(&self.row_serde)
+            chunk
         };
 
-        // TODO(kwannoel): Seems like we are doing vis check twice here.
-        // Once below, when using vis, and once here,
-        // when using vis to set rows empty or not.
-        // If we are to use the vis optimization, we should skip this.
-        let key_chunk = chunk.project(self.pk_indices());
-        let vnode_and_pks = key_chunk
-            .rows_with_holes()
-            .zip_eq_fast(vnodes.iter())
-            .map(|(r, vnode)| {
-                let mut buffer = BytesMut::new();
-                buffer.put_slice(&vnode.to_be_bytes()[..]);
-                if let Some(r) = r {
-                    self.pk_serde.serialize(r, &mut buffer);
-                }
-                (r, buffer.freeze())
-            })
-            .collect_vec();
+        // Correctness: We will use the `vis` map to determine which rows to insert/delete.
+        let keys_iter = key_chunk.rows_unchecked();
+        let values_iter = value_chunk.rows_unchecked();
 
-        let vis = key_chunk.vis();
-        match vis {
+        let mut encode_and_store = |op, vnode: VirtualNode, key, value| {
+            let mut buffer = BytesMut::new();
+            buffer.put_slice(&vnode.to_be_bytes()[..]);
+            self.pk_serde.serialize(key, &mut buffer);
+            let key_bytes = buffer.freeze();
+            let value_bytes = self.row_serde.serialize(value).into();
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    if USE_WATERMARK_CACHE {
+                        self.watermark_cache.insert(&key);
+                    }
+                    self.insert_inner(key_bytes, value_bytes);
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    if USE_WATERMARK_CACHE {
+                        self.watermark_cache.delete(&key);
+                    }
+                    self.delete_inner(key_bytes, value_bytes);
+                }
+            }
+        };
+
+        let iter = izip!(op.iter(), vnodes.into_iter(), keys_iter, values_iter);
+
+        match key_chunk.vis() {
             Vis::Bitmap(vis) => {
-                for ((op, (key, key_bytes), value), vis) in
-                    izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(vis.iter())
-                {
+                // Don't use rows_with_holes here,
+                // Otherwise we end up checking twice,
+                // once in the keys iterator and once in the values iterator.
+                for ((op, vnode, key, value), vis) in iter.zip_eq_debug(vis.iter()) {
                     if vis {
-                        match op {
-                            Op::Insert | Op::UpdateInsert => {
-                                if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.insert(pk);
-                                }
-                                self.insert_inner(key_bytes, value);
-                            }
-                            Op::Delete | Op::UpdateDelete => {
-                                if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.delete(pk);
-                                }
-                                self.delete_inner(key_bytes, value);
-                            }
-                        }
+                        encode_and_store(*op, vnode, key, value);
                     }
                 }
             }
             Vis::Compact(_) => {
-                for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => {
-                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.insert(pk);
-                            }
-                            self.insert_inner(key_bytes, value);
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.delete(pk);
-                            }
-                            self.delete_inner(key_bytes, value);
-                        }
-                    }
+                for (op, vnode, key, value) in iter {
+                    encode_and_store(*op, vnode, key, value);
                 }
             }
         }
