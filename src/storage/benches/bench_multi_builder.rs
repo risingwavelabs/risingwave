@@ -28,10 +28,9 @@ use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStor
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache, Xor16FilterBuilder,
-    DEFAULT_MAX_KEY_COUNT,
+    BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, FileCache, HummockResult,
+    MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
+    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder, DEFAULT_MAX_KEY_COUNT,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -144,7 +143,8 @@ fn bench_builder(
         64 << 20,
         128 << 20,
         0,
-        TieredCache::none(),
+        FileCache::none(),
+        FileCache::none(),
     ));
 
     let mut group = c.benchmark_group("bench_multi_builder");

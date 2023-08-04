@@ -65,6 +65,8 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
+
+    registry: Registry,
 }
 
 impl HummockStateStoreMetrics {
@@ -263,12 +265,17 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
+            registry,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 }
 
