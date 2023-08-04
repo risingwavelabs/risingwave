@@ -40,7 +40,9 @@ use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
 };
-use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{
+    PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
+};
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
     self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
@@ -318,7 +320,9 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
-                    name_strategy,
+                    name_strategy: name_strategy.unwrap_or(
+                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
+                    ),
                     ..Default::default()
                 },
             )
@@ -359,7 +363,8 @@ pub(crate) async fn try_bind_columns_from_source(
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
                 use_schema_registry: avro_schema.use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
-                name_strategy,
+                name_strategy: name_strategy
+                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
                 ..Default::default()
             };
             (
@@ -473,7 +478,9 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
                     upsert_avro_primary_key,
-                    name_strategy,
+                    name_strategy: name_strategy.unwrap_or(
+                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
+                    ),
                     ..Default::default()
                 };
                 let columns =
@@ -486,7 +493,9 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_encode: EncodeType::Avro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
-                    name_strategy,
+                    name_strategy: name_strategy.unwrap_or(
+                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
+                    ),
                     ..Default::default()
                 };
                 let (columns, pk_from_avro) =
@@ -539,7 +548,8 @@ pub(crate) async fn try_bind_columns_from_source(
             let stream_source_info = StreamSourceInfo {
                 use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
-                name_strategy,
+                name_strategy: name_strategy
+                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
                 format: FormatType::Debezium as i32,
                 row_encode: EncodeType::Avro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
