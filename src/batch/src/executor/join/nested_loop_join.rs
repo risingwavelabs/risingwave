@@ -125,12 +125,12 @@ impl NestedLoopJoinExecutor {
             self.right_child,
             self.shutdown_rx.clone(),
         ) {
-            yield chunk?.reorder_columns(&self.output_indices)
+            yield chunk?.project(&self.output_indices)
         }
 
         // Handle remaining chunk
         if let Some(chunk) = chunk_builder.consume_all() {
-            yield chunk.reorder_columns(&self.output_indices)
+            yield chunk.project(&self.output_indices)
         }
     }
 }

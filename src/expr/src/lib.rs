@@ -23,6 +23,7 @@
 #![feature(generators)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![feature(test)]
 
 pub mod agg;
 mod error;

@@ -18,9 +18,8 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::agg::{build, AggCall, BoxedAggState};
 
-use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use super::aggregation::{agg_call_filter_res, generate_agg_schema};
 use super::error::StreamExecutorError;
 use super::*;
@@ -56,37 +55,14 @@ impl StatelessSimpleAggExecutor {
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
-        aggregators: &mut [Box<dyn StreamingAggImpl>],
-        chunk: StreamChunk,
+        aggregators: &mut [BoxedAggState],
+        chunk: &StreamChunk,
     ) -> StreamExecutorResult<()> {
-        let capacity = chunk.capacity();
-        let (ops, columns, visibility) = chunk.into_inner();
-        let mut visibilities = Vec::with_capacity(agg_calls.len());
-        for agg_call in agg_calls {
-            let result = agg_call_filter_res(
-                ctx,
-                identity,
-                agg_call,
-                &columns,
-                visibility.as_ref(),
-                capacity,
-            )
-            .await?;
-            visibilities.push(result)
+        for (agg_call, state) in agg_calls.iter().zip_eq_fast(aggregators) {
+            let vis = agg_call_filter_res(ctx, identity, agg_call, chunk).await?;
+            let chunk = chunk.project_with_vis(agg_call.args.val_indices(), vis);
+            state.update(&chunk).await?;
         }
-        agg_calls
-            .iter()
-            .zip_eq_fast(visibilities)
-            .zip_eq_fast(aggregators)
-            .try_for_each(|((agg_call, visibility), state)| {
-                let col_refs = agg_call
-                    .args
-                    .val_indices()
-                    .iter()
-                    .map(|idx| columns[*idx].as_ref())
-                    .collect_vec();
-                state.apply_batch(&ops, visibility.as_ref(), &col_refs)
-            })?;
         Ok(())
     }
 
@@ -100,17 +76,7 @@ impl StatelessSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut aggregators: Vec<_> = agg_calls
-            .iter()
-            .map(|agg_call| {
-                create_streaming_agg_impl(
-                    agg_call.args.arg_types(),
-                    &agg_call.kind,
-                    &agg_call.return_type,
-                    None,
-                )
-            })
-            .try_collect()?;
+        let mut aggregators: Vec<_> = agg_calls.iter().map(build).try_collect()?;
 
         #[for_await]
         for msg in input {
@@ -118,7 +84,7 @@ impl StatelessSimpleAggExecutor {
             match msg {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, &chunk)
                         .await?;
                     is_dirty = true;
                 }
@@ -127,16 +93,13 @@ impl StatelessSimpleAggExecutor {
                         is_dirty = false;
 
                         let mut builders = info.schema.create_array_builders(1);
-                        aggregators
-                            .iter_mut()
-                            .zip_eq_fast(builders.iter_mut())
-                            .try_for_each(|(state, builder)| {
-                                let data = state.get_output()?;
-                                trace!("append: {:?}", data);
-                                builder.append(&data);
-                                state.reset();
-                                Ok::<_, StreamExecutorError>(())
-                            })?;
+                        for (state, builder) in
+                            aggregators.iter_mut().zip_eq_fast(builders.iter_mut())
+                        {
+                            let data = state.output()?;
+                            trace!("append: {:?}", data);
+                            builder.append(data);
+                        }
                         let columns = builders
                             .into_iter()
                             .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
