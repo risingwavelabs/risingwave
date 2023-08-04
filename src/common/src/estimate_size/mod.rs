@@ -186,7 +186,7 @@ impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct KvSize(usize);
 
 impl KvSize {

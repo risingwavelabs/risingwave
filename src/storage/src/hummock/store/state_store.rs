@@ -19,7 +19,6 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
-use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -85,10 +84,6 @@ pub struct LocalHummockStorage {
     stats: Arc<HummockStateStoreMetrics>,
 
     write_limiter: WriteLimiterRef,
-
-    mem_table_size: IntGauge,
-
-    mem_table_item_count: IntGauge,
 }
 
 impl LocalHummockStorage {
@@ -238,12 +233,8 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
         match old_val {
-            None => {
-                self.mem_table.insert(key, new_val)?;
-            }
-            Some(old_val) => {
-                self.mem_table.update(key, old_val, new_val)?;
-            }
+            None => self.mem_table.insert(key, new_val)?,
+            Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
         };
         Ok(())
     }
@@ -454,14 +445,6 @@ impl LocalHummockStorage {
         option: NewLocalOptions,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
-        let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
-            &option.table_id.to_string(),
-            &instance_guard.instance_id.to_string(),
-        ]);
-        let mem_table_item_count = stats.mem_table_item_count.with_label_values(&[
-            &option.table_id.to_string(),
-            &instance_guard.instance_id.to_string(),
-        ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
             epoch: None,
@@ -476,8 +459,6 @@ impl LocalHummockStorage {
             hummock_version_reader,
             stats,
             write_limiter,
-            mem_table_size,
-            mem_table_item_count,
         }
     }
 
