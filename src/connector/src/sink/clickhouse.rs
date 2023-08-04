@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use clickhouse::{Client, Row as ClickHouseRow};
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -291,7 +291,7 @@ impl ClickHouseSinkWriter {
             .collect_vec();
         let mut insert = self.client.insert_with_fields_name::<ClickHouseColumn>(
             &self.config.common.table,
-            Some(ck_fields_name),
+            ck_fields_name,
         )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
@@ -320,25 +320,46 @@ impl ClickHouseSinkWriter {
             .iter()
             .map(|(a, _)| a.clone())
             .collect_vec();
-        let pk_names = self
-            .schema
-            .names()
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter(|(index, _)| self.pk_indices.contains(index))
-            .map(|(_, b)| b)
-            .collect_vec();
 
-        let pk_index_0 = self.pk_indices.first().unwrap();
-        let pk_name_0 = pk_names.first().unwrap();
+        let get_pk_names_and_data = |row: RowRef<'_>, index: usize| {
+            let pk_names = self
+                .schema
+                .names()
+                .iter()
+                .cloned()
+                .enumerate()
+                .filter(|(index, _)| self.pk_indices.contains(index))
+                .map(|(_, b)| b)
+                .collect_vec();
+            let mut pk_data = vec![];
+            for pk_index in &self.pk_indices {
+                if let ClickHouseFieldWithNull::WithoutSome(v) =
+                    ClickHouseFieldWithNull::from_scalar_ref(
+                        row.datum_at(*pk_index),
+                        &self.column_correct_vec,
+                        index,
+                        false,
+                    )?
+                    .pop()
+                    .unwrap()
+                {
+                    pk_data.push(v)
+                } else {
+                    return Err(SinkError::ClickHouse("pk can not be null".to_string()));
+                }
+            }
+            Ok((pk_names, pk_data))
+        };
+
+        // let pk_index_0 = self.pk_indices.first().unwrap();
+        // let pk_name_0 = pk_names.first().unwrap();
 
         for (index, (op, row)) in chunk.rows().enumerate() {
             match op {
                 Op::Insert => {
                     let mut insert = self.client.insert_with_fields_name::<ClickHouseColumn>(
                         &self.config.common.table,
-                        Some(ck_fields_name.clone()),
+                        ck_fields_name.clone(),
                     )?;
                     let mut clickhouse_filed_vec = vec![];
                     for (index, data) in row.iter().enumerate() {
@@ -356,67 +377,43 @@ impl ClickHouseSinkWriter {
                     insert.end().await?;
                 }
                 Op::Delete => {
-                    if let ClickHouseFieldWithNull::WithoutSome(v) =
-                        ClickHouseFieldWithNull::from_scalar_ref(
-                            row.datum_at(*pk_index_0),
-                            &self.column_correct_vec,
-                            index,
-                            false,
-                        )?
-                        .get(0)
-                        .unwrap()
-                    {
-                        self.client
-                            .delete(&self.config.common.table, pk_name_0, 1)
-                            .delete(vec![v])
-                            .await?;
-                    } else {
-                        return Err(SinkError::ClickHouse("pk can not be null".to_string()));
-                    }
+                    let (delete_pk_names, delete_pk_data) = get_pk_names_and_data(row, index)?;
+                    self.client
+                        .delete(&self.config.common.table, delete_pk_names)
+                        .delete(delete_pk_data)
+                        .await?;
                 }
                 Op::UpdateDelete => continue,
                 Op::UpdateInsert => {
-                    if let ClickHouseFieldWithNull::WithoutSome(pk) =
-                        ClickHouseFieldWithNull::from_scalar_ref(
-                            row.datum_at(*pk_index_0),
-                            &self.column_correct_vec,
-                            index,
-                            false,
-                        )?
-                        .get(0)
-                        .unwrap()
-                    {
-                        let mut clickhouse_update_filed_vec = vec![];
-                        for (index, data) in row.iter().enumerate() {
-                            if !self.pk_indices.contains(&index) {
-                                clickhouse_update_filed_vec.extend(
-                                    ClickHouseFieldWithNull::from_scalar_ref(
-                                        data,
-                                        &self.column_correct_vec,
-                                        index,
-                                        false,
-                                    )?,
-                                );
-                            }
+                    let (update_pk_names, update_pk_data) = get_pk_names_and_data(row, index)?;
+                    let mut clickhouse_update_filed_vec = vec![];
+                    for (index, data) in row.iter().enumerate() {
+                        if !self.pk_indices.contains(&index) {
+                            clickhouse_update_filed_vec.extend(
+                                ClickHouseFieldWithNull::from_scalar_ref(
+                                    data,
+                                    &self.column_correct_vec,
+                                    index,
+                                    false,
+                                )?,
+                            );
                         }
-                        // Get the names of the columns excluding pk, and use them to update.
-                        let fields_name_update = ck_fields_name
-                            .iter()
-                            .filter(|n| !pk_names.contains(n))
-                            .map(|s| s.to_string())
-                            .collect_vec();
-
-                        let update = self.client.update(
-                            &self.config.common.table,
-                            pk_name_0,
-                            fields_name_update.clone(),
-                        );
-                        update
-                            .update_fields(clickhouse_update_filed_vec, pk)
-                            .await?;
-                    } else {
-                        return Err(SinkError::ClickHouse("pk can not be null".to_string()));
                     }
+                    // Get the names of the columns excluding pk, and use them to update.
+                    let fields_name_update = ck_fields_name
+                        .iter()
+                        .filter(|n| !update_pk_names.contains(n))
+                        .map(|s| s.to_string())
+                        .collect_vec();
+
+                    let update = self.client.update(
+                        &self.config.common.table,
+                        update_pk_names,
+                        fields_name_update.clone(),
+                    );
+                    update
+                        .update_fields(clickhouse_update_filed_vec, update_pk_data)
+                        .await?;
                 }
             }
         }
