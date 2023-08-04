@@ -756,6 +756,24 @@ where
         }
     }
 
+    fn encode_and_store(&mut self, op: Op, vnode: VirtualNode, key: impl Row, value: impl Row) {
+        if USE_WATERMARK_CACHE {
+            match op {
+                Op::Insert | Op::UpdateInsert => self.watermark_cache.insert(&key),
+                Op::Delete | Op::UpdateDelete => self.watermark_cache.delete(&key),
+            }
+        }
+        let mut buffer = BytesMut::new();
+        buffer.put_slice(&vnode.to_be_bytes()[..]);
+        self.pk_serde.serialize(key, &mut buffer);
+        let key_bytes = buffer.freeze();
+        let value_bytes = self.row_serde.serialize(value).into();
+        match op {
+            Op::Insert | Op::UpdateInsert => self.insert_inner(key_bytes, value_bytes),
+            Op::Delete | Op::UpdateDelete => self.delete_inner(key_bytes, value_bytes),
+        }
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
@@ -780,37 +798,19 @@ where
         let keys_iter = key_chunk.rows_unchecked();
         let values_iter = value_chunk.rows_unchecked();
 
-        let mut encode_and_store = |op, vnode: VirtualNode, key, value| {
-            let mut buffer = BytesMut::new();
-            buffer.put_slice(&vnode.to_be_bytes()[..]);
-            self.pk_serde.serialize(key, &mut buffer);
-            let key_bytes = buffer.freeze();
-            let value_bytes = self.row_serde.serialize(value).into();
-            if USE_WATERMARK_CACHE {
-                match op {
-                    Op::Insert | Op::UpdateInsert => self.watermark_cache.insert(&key),
-                    Op::Delete | Op::UpdateDelete => self.watermark_cache.delete(&key),
-                }
-            }
-            match op {
-                Op::Insert | Op::UpdateInsert => self.insert_inner(key_bytes, value_bytes),
-                Op::Delete | Op::UpdateDelete => self.delete_inner(key_bytes, value_bytes),
-            }
-        };
-
         let iter = izip!(op.iter(), vnodes.into_iter(), keys_iter, values_iter);
 
         match key_chunk.vis() {
             Vis::Bitmap(vis) => {
                 for ((op, vnode, key, value), vis) in iter.zip_eq_debug(vis.iter()) {
                     if vis {
-                        encode_and_store(*op, vnode, key, value);
+                        self.encode_and_store(*op, vnode, key, value);
                     }
                 }
             }
             Vis::Compact(_) => {
                 for (op, vnode, key, value) in iter {
-                    encode_and_store(*op, vnode, key, value);
+                    self.encode_and_store(*op, vnode, key, value);
                 }
             }
         }
