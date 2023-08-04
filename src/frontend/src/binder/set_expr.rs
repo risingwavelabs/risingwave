@@ -150,21 +150,19 @@ impl Binder {
 
                         // Handle type alignment for select union select
                         // E.g. Select 1 UNION ALL Select NULL
-                        match (&mut left, &mut right) {
-                            (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) => {
-                                for (i, (l, r)) in l_select
-                                    .select_items
-                                    .iter_mut()
-                                    .zip_eq_fast(r_select.select_items.iter_mut())
-                                    .enumerate()
-                                {
-                                    let column_type = align_types(vec![l, r].into_iter())?;
-                                    l_select.schema.fields[i].data_type = column_type.clone();
-                                    r_select.schema.fields[i].data_type = column_type;
-                                }
+                        if let (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) =
+                            (&mut left, &mut right)
+                        {
+                            for (i, (l, r)) in l_select
+                                .select_items
+                                .iter_mut()
+                                .zip_eq_fast(r_select.select_items.iter_mut())
+                                .enumerate()
+                            {
+                                let column_type = align_types(vec![l, r].into_iter())?;
+                                l_select.schema.fields[i].data_type = column_type.clone();
+                                r_select.schema.fields[i].data_type = column_type;
                             }
-                            // TODO: handle other cases
-                            _ => {}
                         }
 
                         for (a, b) in left
