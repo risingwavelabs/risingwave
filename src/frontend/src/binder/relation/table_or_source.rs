@@ -250,7 +250,16 @@ impl Binder {
                 view_catalog.name, view_catalog.sql, e
             ))
         })?;
+
         let columns = view_catalog.columns.clone();
+
+        if query.schema().fields() != columns {
+            return Err(ErrorCode::BindError(format!(
+                "failed to bind view {}. The SQL's schema is different from catalog's schema sql: {}, bound schema: {:?}, catalog schema: {:?}",
+                view_catalog.name, view_catalog.sql, query.schema(), columns
+            )).into());
+        }
+
         let share_id = match self.shared_views.get(&view_catalog.id) {
             Some(share_id) => *share_id,
             None => {
