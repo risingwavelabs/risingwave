@@ -114,10 +114,17 @@ impl Task for ComputeNodeService {
         Self::apply_command_args(&mut cmd, &self.config)?;
         if self.config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;
-            cmd.arg("--file-cache-dir").arg(
-                PathBuf::from(prefix_data)
-                    .join("filecache")
-                    .join(self.config.port.to_string()),
+            cmd.arg("--data-file-cache-dir").arg(
+                PathBuf::from(&prefix_data)
+                    .join("foyer")
+                    .join(self.config.port.to_string())
+                    .join("data"),
+            );
+            cmd.arg("--meta-file-cache-dir").arg(
+                PathBuf::from(&prefix_data)
+                    .join("foyer")
+                    .join(self.config.port.to_string())
+                    .join("meta"),
             );
         }
 

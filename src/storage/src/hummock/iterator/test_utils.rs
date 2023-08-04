@@ -32,8 +32,8 @@ use crate::hummock::test_utils::{
     create_small_table_cache, gen_test_sstable, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    DeleteRangeTombstone, HummockValue, Sstable, SstableBuilderOptions, SstableIterator,
-    SstableIteratorType, SstableStoreRef, TieredCache,
+    DeleteRangeTombstone, FileCache, HummockValue, Sstable, SstableBuilderOptions, SstableIterator,
+    SstableIteratorType, SstableStoreRef,
 };
 use crate::monitor::ObjectStoreMetrics;
 
@@ -65,7 +65,8 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         64 << 20,
         64 << 20,
         0,
-        TieredCache::none(),
+        FileCache::none(),
+        FileCache::none(),
     ))
 }
 
