@@ -20,9 +20,9 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
@@ -103,6 +103,10 @@ impl SourceStreamChunkBuilder {
 
     pub fn op_num(&self) -> usize {
         self.op_builder.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.op_builder.is_empty()
     }
 }
 
@@ -308,6 +312,11 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+pub enum TransactionControl {
+    Begin { id: Box<str> },
+    Commit { id: Box<str> },
+}
+
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
 /// the input data stream and return a stream of parsed msgs.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
@@ -324,6 +333,18 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<WriteGuard>> + Send + 'a;
+
+    /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
+    /// as a transaction control message.
+    fn parse_one_with_txn<'a>(
+        &'a mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> impl Future<Output = Result<Either<WriteGuard, TransactionControl>>> + Send + 'a {
+        // The default implementation is for non-transactional source.
+        self.parse_one(key, payload, writer).map_ok(Either::Left)
+    }
 
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
     ///
@@ -343,14 +364,29 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+    let columns = parser.columns().to_vec();
+    let reset = |capacity| {
+        (
+            SourceStreamChunkBuilder::with_capacity(columns.clone(), capacity),
+            HashMap::<SplitId, String>::new(),
+        )
+    };
+
+    let (mut builder, mut split_offset_mapping) = reset(0);
+    let mut current_transaction_id = None;
+    let mut enough = false;
+
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
-        let mut builder =
-            SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), batch.len());
-        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+        let batch_len = batch.len();
 
-        for msg in batch {
+        if builder.is_empty() {
+            assert!(enough == false);
+            (builder, split_offset_mapping) = reset(batch_len);
+        }
+
+        for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 continue;
             }
@@ -359,23 +395,18 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
             let old_op_num = builder.op_num();
 
-            if let Err(e) = parser
-                .parse_one(msg.key, msg.payload, builder.row_writer())
+            match parser
+                .parse_one_with_txn(msg.key, msg.payload, builder.row_writer())
                 .await
             {
-                tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                // This will throw an error for batch
-                parser.source_ctx().report_user_source_error(e)?;
-                continue;
-            }
+                Ok(Either::Left(WriteGuard(_))) => {
+                    let new_op_num = builder.op_num();
 
-            let new_op_num = builder.op_num();
-
-            // new_op_num - old_op_num is the number of rows added to the builder
-            for _ in old_op_num..new_op_num {
-                // TODO: support more kinds of SourceMeta
-                if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                    let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                    // new_op_num - old_op_num is the number of rows added to the builder
+                    for _ in old_op_num..new_op_num {
+                        // TODO: support more kinds of SourceMeta
+                        if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                            let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
                         if !desc.is_meta {
                             return None;
                         }
@@ -390,15 +421,58 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             }
                         }
                     };
-                    builder.row_writer().fulfill_meta_column(f)?;
+                            builder.row_writer().fulfill_meta_column(f)?;
+                        }
+                    }
+                }
+                Ok(Either::Right(TransactionControl::Begin { id })) => {
+                    tracing::debug!(id, "transaction begin");
+                    current_transaction_id = Some(id);
+                }
+                Ok(Either::Right(TransactionControl::Commit { id })) => {
+                    if current_transaction_id.as_ref() != Some(&id) {
+                        tracing::warn!(
+                            "transaction id mismatch, expected: {:?}, actual: {}",
+                            current_transaction_id,
+                            id
+                        );
+                    }
+                    tracing::debug!(id, "transaction commit");
+                    current_transaction_id = None;
+                    if enough {
+                        enough = false;
+                        let (new_builder, new_split_offset_mapping) = reset(batch_len - (i + 1));
+                        let builder = std::mem::replace(&mut builder, new_builder);
+                        let split_offset_mapping =
+                            std::mem::replace(&mut split_offset_mapping, new_split_offset_mapping);
+                        yield StreamChunkWithState {
+                            chunk: builder.finish(),
+                            split_offset_mapping: Some(split_offset_mapping),
+                        };
+                    }
+                }
+
+                Err(e) => {
+                    tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                    // This will throw an error for batch
+                    parser.source_ctx().report_user_source_error(e)?;
+                    continue;
                 }
             }
         }
 
-        yield StreamChunkWithState {
-            chunk: builder.finish(),
-            split_offset_mapping: Some(split_offset_mapping),
-        };
+        if current_transaction_id.is_none() {
+            let (new_builder, new_split_offset_mapping) = reset(0);
+            let builder = std::mem::replace(&mut builder, new_builder);
+            let split_offset_mapping =
+                std::mem::replace(&mut split_offset_mapping, new_split_offset_mapping);
+            yield StreamChunkWithState {
+                chunk: builder.finish(),
+                split_offset_mapping: Some(split_offset_mapping),
+            };
+        } else {
+            enough = true;
+        }
     }
 }
 
