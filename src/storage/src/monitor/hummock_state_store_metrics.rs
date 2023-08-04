@@ -165,7 +165,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
                 "state_store_write_batch_duration",
                 "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+                exponential_buckets(0.0001, 2.0, 21).unwrap() // min 1ms ~ max 104s
             );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -173,7 +173,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_write_batch_size",
             "Total size of batched write that have been issued to state store",
-            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
+            exponential_buckets(256.0, 2.0, 25).unwrap() // min 256B ~ max 4GB
         );
         let write_batch_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
