@@ -237,7 +237,7 @@
     Bind error: failed to bind expression: nullif(v1, 1, 2)
 
     Caused by:
-      Bind error: Nullif function must contain 2 arguments
+      Bind error: Function `nullif` must contain 2 arguments
 - sql: |
     create table t (v1 int);
     select nullif(v1, true) from t;
@@ -340,7 +340,7 @@
     Bind error: failed to bind expression: concat()
 
     Caused by:
-      Bind error: Function `Concat` takes at least 1 arguments (0 given)
+      Bind error: Function `concat` takes at least 1 arguments (0 given)
 - sql: |
     select concat(':', true);
   batch_plan: 'BatchValues { rows: [['':t'':Varchar]] }'
@@ -599,7 +599,7 @@
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
   stream_plan: |-
-    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [abs] }
+    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamValues { rows: [[Abs(-1:Int32), 0:Int64]] }
 - sql: |
     select * from range(1,2);

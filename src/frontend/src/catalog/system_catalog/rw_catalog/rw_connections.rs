@@ -13,23 +13,27 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_CONNECTIONS_TABLE_NAME: &str = "rw_connections";
-
-pub const RW_CONNECTIONS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Int32, "schema_id"),
-    (DataType::Int32, "owner"),
-    (DataType::Varchar, "type"),
-    (DataType::Varchar, "provider"),
-    (DataType::Varchar, "acl"),
-];
+pub const RW_CONNECTIONS: BuiltinTable = BuiltinTable {
+    name: "rw_connections",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Int32, "schema_id"),
+        (DataType::Int32, "owner"),
+        (DataType::Varchar, "type"),
+        (DataType::Varchar, "provider"),
+        (DataType::Varchar, "acl"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_connections_info(&self) -> Result<Vec<OwnedRow>> {

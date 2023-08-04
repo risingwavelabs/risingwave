@@ -195,7 +195,7 @@ start_kafka() {
 gen_events() {
   pushd nexmark-bench
   nexmark-server -c
-  NEXMARK_EVENTS=$((400 * 1000 * 1000))
+  NEXMARK_EVENTS=$((300 * 1000 * 1000))
   echo "Generating $NEXMARK_EVENTS events"
   nexmark-server \
     --event-rate 500000 \

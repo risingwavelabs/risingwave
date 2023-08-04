@@ -69,6 +69,8 @@ pub struct HummockStateStoreMetrics {
     // memory
     pub mem_table_memory_size: IntGaugeVec,
     pub mem_table_item_count: IntGaugeVec,
+
+    registry: Registry,
 }
 
 impl HummockStateStoreMetrics {
@@ -286,12 +288,17 @@ impl HummockStateStoreMetrics {
             uploader_uploading_task_size,
             mem_table_memory_size,
             mem_table_item_count,
+            registry,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 }
 
@@ -301,7 +308,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
-    fn get_uploading_memory_usage_ratio(&self) -> f64;
+    fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 struct StateStoreCollector {
@@ -392,7 +399,7 @@ impl Collector for StateStoreCollector {
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
         self.uploading_memory_usage_ratio
-            .set(self.memory_collector.get_uploading_memory_usage_ratio());
+            .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());

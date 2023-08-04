@@ -36,6 +36,7 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
+use risingwave_common::config::default::s3_objstore_config;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -64,10 +65,6 @@ const NUM_BUCKET_PREFIXES: u32 = 256;
 /// initiated. (Day is the smallest granularity)
 const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
-/// Retry config for compute node http timeout error.
-const DEFAULT_RETRY_INTERVAL: u64 = 20;
-const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
-const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
 ///
@@ -303,6 +300,8 @@ pub struct S3ObjectStore {
     part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
+
+    config: S3ObjectStoreConfig,
 }
 
 #[async_trait::async_trait]
@@ -360,7 +359,7 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
+            self.config.get_retry_strategy(),
             || async {
                 match self
                     .obj_store_request(path, start_pos, end_pos)
@@ -443,7 +442,7 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
+            self.config.get_retry_strategy(),
             || async {
                 match self.obj_store_request(path, start_pos, None).send().await {
                     Ok(resp) => Ok(resp),
@@ -566,6 +565,14 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
+    }
+
+    pub async fn new_with_config(
+        bucket: String,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: S3ObjectStoreConfig,
+    ) -> Self {
         // Customize http connector to set keepalive.
         let native_tls = || -> NativeTls {
             let mut tls = hyper_tls::native_tls::TlsConnector::builder();
@@ -574,7 +581,24 @@ impl S3ObjectStore {
                 .build()
                 .unwrap_or_else(|e| panic!("Error while creating TLS connector: {}", e));
             let mut http = hyper::client::HttpConnector::new();
-            http.set_keepalive(Some(Duration::from_secs(600)));
+
+            // connection config
+            if let Some(keepalive_ms) = config.keepalive_ms.as_ref() {
+                http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
+            }
+
+            if let Some(nodelay) = config.nodelay.as_ref() {
+                http.set_nodelay(*nodelay);
+            }
+
+            if let Some(recv_buffer_size) = config.recv_buffer_size.as_ref() {
+                http.set_recv_buffer_size(Some(*recv_buffer_size));
+            }
+
+            if let Some(send_buffer_size) = config.send_buffer_size.as_ref() {
+                http.set_send_buffer_size(Some(*send_buffer_size));
+            }
+
             http.enforce_http(false);
             hyper_tls::HttpsConnector::from((http, tls.into()))
         };
@@ -620,6 +644,7 @@ impl S3ObjectStore {
             bucket,
             part_size: S3_PART_SIZE,
             metrics,
+            config,
         }
     }
 
@@ -652,6 +677,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
+            config: S3ObjectStoreConfig::default(),
         }
     }
 
@@ -766,14 +792,6 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
-            .max_delay(DEFAULT_RETRY_MAX_DELAY)
-            .take(DEFAULT_RETRY_MAX_ATTEMPTS)
-            .map(jitter)
-    }
-
-    #[inline(always)]
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
@@ -782,6 +800,50 @@ impl S3ObjectStore {
             }
         }
         false
+    }
+}
+
+pub struct S3ObjectStoreConfig {
+    pub keepalive_ms: Option<u64>,
+    pub recv_buffer_size: Option<usize>,
+    pub send_buffer_size: Option<usize>,
+    pub nodelay: Option<bool>,
+
+    pub req_retry_interval_ms: Option<u64>,
+    pub req_retry_max_delay_ms: Option<u64>,
+    pub req_retry_max_attempts: Option<usize>,
+}
+
+impl Default for S3ObjectStoreConfig {
+    fn default() -> Self {
+        Self {
+            keepalive_ms: s3_objstore_config::object_store_keepalive_ms(),
+            recv_buffer_size: s3_objstore_config::object_store_recv_buffer_size(),
+            send_buffer_size: s3_objstore_config::object_store_send_buffer_size(),
+            nodelay: s3_objstore_config::object_store_nodelay(),
+            req_retry_interval_ms: Some(s3_objstore_config::object_store_req_retry_interval_ms()),
+            req_retry_max_delay_ms: Some(s3_objstore_config::object_store_req_retry_max_delay_ms()),
+            req_retry_max_attempts: Some(s3_objstore_config::object_store_req_retry_max_attempts()),
+        }
+    }
+}
+
+impl S3ObjectStoreConfig {
+    #[inline(always)]
+    fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(
+            self.req_retry_interval_ms
+                .unwrap_or(s3_objstore_config::object_store_req_retry_interval_ms()),
+        )
+        .max_delay(Duration::from_millis(
+            self.req_retry_max_delay_ms
+                .unwrap_or(s3_objstore_config::object_store_req_retry_max_delay_ms()),
+        ))
+        .take(
+            self.req_retry_max_attempts
+                .unwrap_or(s3_objstore_config::object_store_req_retry_max_attempts()),
+        )
+        .map(jitter)
     }
 }
 

@@ -6,7 +6,7 @@ Quick example on how to write a service.
 
 Add your service definition under `src/<component>/src/rcp/service/<service_name>.rs`, e.g. `src/meta/src/rpc/service/health_service.rs`.
 
-```rust 
+```rust
 pub struct HealthServiceImpl {}
 impl HealthServiceImpl {
     pub fn new() -> Self {
@@ -56,10 +56,10 @@ service Health {
 
 Make sure to lint your file using [buf](https://docs.buf.build/installation).
 
-## Use service 
+## Use service
 
 
-Add your module in `src/prost/src/lib.rs`, like so: 
+Add your module in `src/prost/src/lib.rs`, like so:
 
 ```rust
 #[rustfmt::skip]
@@ -71,7 +71,7 @@ Add your proto file `"health"` in `src/prost/build.rs`.
 
 Add the module in `src/meta/src/rpc/service/mod.rs`.
 
-Use your service in `src/meta/src/rpc/server.rs`, like 
+Use your service in `src/meta/src/rpc/server.rs`, like
 
 ```rust
 let health_srv = HealthServiceImpl::new();

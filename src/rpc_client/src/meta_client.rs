@@ -42,6 +42,8 @@ use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
+use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
+use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -337,9 +339,14 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
+    pub async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;
@@ -452,37 +459,40 @@ impl MetaClient {
         &self,
         source_id: Option<u32>,
         table_id: TableId,
+        cascade: bool,
     ) -> Result<CatalogVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
             table_id: table_id.table_id(),
+            cascade,
         };
 
         let resp = self.inner.drop_table(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_view(&self, view_id: u32) -> Result<CatalogVersion> {
-        let request = DropViewRequest { view_id };
+    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
-        let request = DropSourceRequest { source_id };
+    pub async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
-        let request = DropSinkRequest { sink_id };
+    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<CatalogVersion> {
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_index(&self, index_id: IndexId) -> Result<CatalogVersion> {
+    pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
+            cascade,
         };
         let resp = self.inner.drop_index(request).await?;
         Ok(resp.version)
@@ -1029,6 +1039,19 @@ impl MetaClient {
 
         Ok(())
     }
+
+    pub async fn rw_cloud_validate_source(
+        &self,
+        source_type: SourceType,
+        source_config: HashMap<String, String>,
+    ) -> Result<RwCloudValidateSourceResponse> {
+        let req = RwCloudValidateSourceRequest {
+            source_type: source_type.into(),
+            source_config,
+        };
+        let resp = self.inner.rw_cloud_validate_source(req).await?;
+        Ok(resp)
+    }
 }
 
 #[async_trait]
@@ -1205,6 +1228,7 @@ struct GrpcMetaClientCore {
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
     serving_client: ServingServiceClient<Channel>,
+    cloud_client: CloudServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1215,13 +1239,16 @@ impl GrpcMetaClientCore {
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
-        let stream_client = StreamManagerServiceClient::new(channel.clone());
+        let stream_client =
+            StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel.clone());
+        let scale_client =
+            ScaleServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
-        let serving_client = ServingServiceClient::new(channel);
+        let serving_client = ServingServiceClient::new(channel.clone());
+        let cloud_client = CloudServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1237,6 +1264,7 @@ impl GrpcMetaClientCore {
             telemetry_client,
             system_params_client,
             serving_client,
+            cloud_client,
         }
     }
 }
@@ -1505,9 +1533,8 @@ impl GrpcMetaClient {
     }
 
     fn addr_to_endpoint(addr: String) -> Result<Endpoint> {
-        Endpoint::from_shared(addr)
-            .map(|endpoint| endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
-            .map_err(RpcError::TransportError)
+        let endpoint = Endpoint::from_shared(addr)?;
+        Ok(endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
     }
 
     pub(crate) async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
@@ -1545,8 +1572,7 @@ impl GrpcMetaClient {
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
-            .await
-            .map_err(RpcError::TransportError)?
+            .await?
             .tracing_injected();
 
         Ok(channel)
@@ -1663,6 +1689,7 @@ macro_rules! for_all_meta_rpc {
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
+            ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
         }
     };
 }

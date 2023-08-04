@@ -186,7 +186,7 @@ providers:
     folderUid: ''
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 60 
+    updateIntervalSeconds: 60
     allowUiUpdates: true
     options:
       path: {s3_dashboard_path}
