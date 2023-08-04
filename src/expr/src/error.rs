@@ -109,9 +109,8 @@ pub enum ExprError {
     #[snafu(display("failed to build expression"), context(false))]
     BuildFromProto { source: PbFieldNotFound },
 
-    // TODO: remove this variant and make errors categorized
-    // TODO(snafu): use `whatever` once it gets more mature
-    #[snafu(display("uncategorized error"), context(false))]
+    // TODO(snafu): use `whatever` once it gets maturer
+    #[snafu(display("internal error"), context(false))]
     Internal { source: anyhow::Error },
 }
 
