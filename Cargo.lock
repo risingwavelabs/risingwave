@@ -9387,7 +9387,7 @@ dependencies = [
  "hashbrown 0.12.3",
  "hashbrown 0.14.0",
  "hyper",
- "indexmap 2.0.0",
+ "indexmap 1.9.3",
  "itertools 0.10.5",
  "lexical-core",
  "lexical-parse-float",
