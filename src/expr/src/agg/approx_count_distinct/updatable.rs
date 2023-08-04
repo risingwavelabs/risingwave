@@ -12,19 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module implements `UpdatableStreamingApproxCountDistinct`.
+use super::*;
 
-use std::mem;
-
-use risingwave_common::bail;
-use risingwave_common::estimate_size::EstimateSize;
-
-use super::approx_distinct_utils::{RegisterBucket, StreamingApproxCountDistinct};
-use crate::executor::error::StreamExecutorResult;
-
-pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `UpdatableRegisterBucket`
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 struct SparseCount {
     inner: Vec<(u8, u64)>,
 }
@@ -93,48 +83,50 @@ impl SparseCount {
 
 impl EstimateSize for SparseCount {
     fn estimated_heap_size(&self) -> usize {
-        self.inner.capacity() * mem::size_of::<(u8, u64)>()
+        self.inner.capacity() * std::mem::size_of::<(u8, u64)>()
     }
 }
 
 #[derive(Clone, Debug, EstimateSize)]
-pub(super) struct UpdatableRegisterBucket<const DENSE_BITS: usize> {
+pub(super) struct UpdatableBucket<const DENSE_BITS: usize = 16> {
     dense_counts: [u64; DENSE_BITS],
     sparse_counts: SparseCount,
 }
 
-impl<const DENSE_BITS: usize> UpdatableRegisterBucket<DENSE_BITS> {
-    fn get_bucket(&self, index: usize) -> StreamExecutorResult<u64> {
+impl<const DENSE_BITS: usize> UpdatableBucket<DENSE_BITS> {
+    fn get_bucket(&self, index: u8) -> Result<u64> {
         if index > 64 || index == 0 {
             bail!("HyperLogLog: Invalid bucket index");
         }
 
-        if index > DENSE_BITS {
-            Ok(self.sparse_counts.get(index as u8))
+        if index > DENSE_BITS as u8 {
+            Ok(self.sparse_counts.get(index))
         } else {
-            Ok(self.dense_counts[index - 1])
+            Ok(self.dense_counts[index as usize - 1])
         }
     }
 }
 
-impl<const DENSE_BITS: usize> RegisterBucket for UpdatableRegisterBucket<DENSE_BITS> {
-    fn new() -> Self {
+impl<const DENSE_BITS: usize> Default for UpdatableBucket<DENSE_BITS> {
+    fn default() -> Self {
         Self {
             dense_counts: [0u64; DENSE_BITS],
             sparse_counts: SparseCount::new(),
         }
     }
+}
 
-    fn update_bucket(&mut self, index: usize, is_insert: bool) -> StreamExecutorResult<()> {
+impl<const DENSE_BITS: usize> Bucket for UpdatableBucket<DENSE_BITS> {
+    fn update(&mut self, index: u8, retract: bool) -> Result<()> {
         if index > 64 || index == 0 {
             bail!("HyperLogLog: Invalid bucket index");
         }
 
         let count = self.get_bucket(index)?;
 
-        if is_insert {
-            if index > DENSE_BITS {
-                self.sparse_counts.add(index as u8);
+        if !retract {
+            if index > DENSE_BITS as u8 {
+                self.sparse_counts.add(index);
             } else if index >= 1 {
                 if count == u64::MAX {
                     bail!(
@@ -143,22 +135,22 @@ impl<const DENSE_BITS: usize> RegisterBucket for UpdatableRegisterBucket<DENSE_B
                         cardinality for approx_count_distinct to handle (max: 2^64 - 1)"
                     );
                 }
-                self.dense_counts[index - 1] = count + 1;
+                self.dense_counts[index as usize - 1] = count + 1;
             }
         } else {
             // We don't have to worry about the user deleting nonexistent elements, so the counts
             // can never go below 0.
-            if index > DENSE_BITS {
-                self.sparse_counts.subtract(index as u8);
+            if index > DENSE_BITS as u8 {
+                self.sparse_counts.subtract(index);
             } else if index >= 1 {
-                self.dense_counts[index - 1] = count - 1;
+                self.dense_counts[index as usize - 1] = count - 1;
             }
         }
 
         Ok(())
     }
 
-    fn get_max(&self) -> u8 {
+    fn max(&self) -> u8 {
         if !self.sparse_counts.is_empty() {
             return self.sparse_counts.last_key();
         }
@@ -171,59 +163,9 @@ impl<const DENSE_BITS: usize> RegisterBucket for UpdatableRegisterBucket<DENSE_B
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct UpdatableStreamingApproxCountDistinct<const DENSE_BITS: usize> {
-    // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
-    registers: Vec<UpdatableRegisterBucket<DENSE_BITS>>,
-    initial_count: i64,
-    heap_size: usize,
-}
-
-impl<const DENSE_BITS: usize> StreamingApproxCountDistinct
-    for UpdatableStreamingApproxCountDistinct<DENSE_BITS>
-{
-    type Bucket = UpdatableRegisterBucket<DENSE_BITS>;
-
-    fn with_i64(registers_num: u32, initial_count: i64) -> Self {
-        let bucket = UpdatableRegisterBucket::new();
-        let heap_size = bucket.estimated_heap_size() * registers_num as usize;
-        Self {
-            registers: vec![bucket; registers_num as usize],
-            initial_count,
-            heap_size,
-        }
-    }
-
-    fn get_initial_count(&self) -> i64 {
-        self.initial_count
-    }
-
-    fn reset_buckets(&mut self, registers_num: u32) {
-        self.registers = vec![UpdatableRegisterBucket::new(); registers_num as usize];
-    }
-
-    fn registers(&self) -> &[UpdatableRegisterBucket<DENSE_BITS>] {
-        &self.registers
-    }
-
-    fn registers_mut(&mut self) -> &mut [UpdatableRegisterBucket<DENSE_BITS>] {
-        &mut self.registers
-    }
-}
-
-impl<const DENSE_BITS: usize> EstimateSize for UpdatableStreamingApproxCountDistinct<DENSE_BITS> {
-    fn estimated_heap_size(&self) -> usize {
-        self.heap_size
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
-    use risingwave_common::array::*;
-
     use super::*;
-    use crate::executor::aggregation::agg_impl::StreamingAggImpl;
 
     #[test]
     fn test_streaming_approx_count_distinct_insert_and_delete() {
@@ -234,32 +176,22 @@ mod tests {
     }
 
     fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
-        let mut agg = UpdatableStreamingApproxCountDistinct::<DENSE_BITS>::with_no_initial();
-        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
+        let mut agg = Registers::<UpdatableBucket<DENSE_BITS>>::new();
+        assert_eq!(agg.calculate_result(), 0);
 
-        agg.apply_batch(
-            &[Op::Insert, Op::Insert, Op::Insert],
-            None,
-            &[&I64Array::from_iter([1, 2, 3]).into()],
-        )
-        .unwrap();
-        assert_matches!(agg.get_output().unwrap(), Some(_));
+        agg.update(1, false).unwrap();
+        agg.update(2, false).unwrap();
+        agg.update(3, false).unwrap();
+        assert_eq!(agg.calculate_result(), 4);
 
-        agg.apply_batch(
-            &[Op::Insert, Op::Delete, Op::Insert],
-            Some(&(vec![true, false, false]).into_iter().collect()),
-            &[&I64Array::from_iter([3, 3, 1]).into()],
-        )
-        .unwrap();
-        assert_matches!(agg.get_output().unwrap(), Some(_));
+        agg.update(3, false).unwrap();
+        assert_eq!(agg.calculate_result(), 4);
 
-        agg.apply_batch(
-            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![true, true, true, true]).into_iter().collect()),
-            &[&I64Array::from_iter([3, 3, 1, 2]).into()],
-        )
-        .unwrap();
-        assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
+        agg.update(3, true).unwrap();
+        agg.update(3, true).unwrap();
+        agg.update(1, true).unwrap();
+        agg.update(2, true).unwrap();
+        assert_eq!(agg.calculate_result(), 0);
     }
 
     #[test]
@@ -277,47 +209,44 @@ mod tests {
     /// error.
     #[test]
     fn test_error_ratio() {
-        let mut agg = UpdatableStreamingApproxCountDistinct::<16>::with_no_initial();
-        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
+        let mut agg = Registers::<UpdatableBucket<16>>::new();
+        assert_eq!(agg.calculate_result(), 0);
         let actual_ndv = 1000000;
         for i in 0..1000000 {
-            agg.apply_batch(
-                &[Op::Insert, Op::Insert, Op::Insert],
-                None,
-                &[&I64Array::from_iter([i, i, i]).into()],
-            )
-            .unwrap();
+            for _ in 0..3 {
+                agg.update(i, false).unwrap();
+            }
         }
 
-        let estimation = agg.get_output().unwrap().unwrap().into_int64();
+        let estimation = agg.calculate_result();
         let error_ratio = ((estimation - actual_ndv) as f64 / actual_ndv as f64).abs();
         assert!(error_ratio < 0.01);
     }
 
     fn test_register_bucket_get_and_update_inner<const DENSE_BITS: usize>() {
-        let mut rb = UpdatableRegisterBucket::<DENSE_BITS>::new();
+        let mut rb = UpdatableBucket::<DENSE_BITS>::default();
 
         for i in 0..20 {
-            rb.update_bucket(i % 2 + 1, true).unwrap();
+            rb.update(i % 2 + 1, false).unwrap();
         }
         assert_eq!(rb.get_bucket(1).unwrap(), 10);
         assert_eq!(rb.get_bucket(2).unwrap(), 10);
 
-        rb.update_bucket(1, false).unwrap();
+        rb.update(1, true).unwrap();
         assert_eq!(rb.get_bucket(1).unwrap(), 9);
         assert_eq!(rb.get_bucket(2).unwrap(), 10);
 
-        rb.update_bucket(64, true).unwrap();
+        rb.update(64, false).unwrap();
         assert_eq!(rb.get_bucket(64).unwrap(), 1);
     }
 
     #[test]
     fn test_register_bucket_invalid_register() {
-        let mut rb = UpdatableRegisterBucket::<0>::new();
+        let mut rb = UpdatableBucket::<0>::default();
 
-        assert_matches!(rb.get_bucket(0), Err(_));
-        assert_matches!(rb.get_bucket(65), Err(_));
-        assert_matches!(rb.update_bucket(0, true), Err(_));
-        assert_matches!(rb.update_bucket(65, true), Err(_));
+        assert!(rb.get_bucket(0).is_err());
+        assert!(rb.get_bucket(65).is_err());
+        assert!(rb.update(0, false).is_err());
+        assert!(rb.update(65, false).is_err());
     }
 }

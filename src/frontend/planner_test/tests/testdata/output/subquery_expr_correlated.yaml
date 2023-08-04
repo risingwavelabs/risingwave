@@ -674,10 +674,8 @@
     │ ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
     │ └─LogicalScan { table: t2, columns: [t2.b, t2.c] }
     └─LogicalProject { exprs: [t1.a, t1.a] }
-      └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalAgg { group_key: [t1.a], aggs: [] }
-        │ └─LogicalScan { table: t1, columns: [t1.a] }
-        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalAgg { group_key: [t1.a], aggs: [] }
+        └─LogicalScan { table: t1, columns: [t1.a] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
