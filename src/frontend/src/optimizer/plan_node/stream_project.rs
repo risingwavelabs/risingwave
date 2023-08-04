@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::{childless_record, watermark_fields_pretty, Distill};
+use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter, WatermarkDerivation};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -41,13 +41,10 @@ impl Distill for StreamProject {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let schema = self.schema();
         let mut vec = self.logical.fields_pretty(schema);
-        let watermark_derivations = &self.watermark_derivations;
-        if !watermark_derivations.is_empty() {
-            let wc = watermark_derivations
-                .iter()
-                .map(|(_, i)| *i)
-                .chain(self.nondecreasing_exprs.iter().copied());
-            vec.push(("output_watermarks", watermark_fields_pretty(wc, schema)));
+        if let Some(display_output_watermarks) =
+            watermark_pretty(&self.base.watermark_columns, schema)
+        {
+            vec.push(("output_watermarks", display_output_watermarks));
         }
         childless_record("StreamProject", vec)
     }
@@ -66,8 +63,10 @@ impl StreamProject {
         for (expr_idx, expr) in logical.exprs.iter().enumerate() {
             match try_derive_watermark(expr) {
                 WatermarkDerivation::Watermark(input_idx) => {
-                    watermark_derivations.push((input_idx, expr_idx));
-                    watermark_columns.insert(expr_idx);
+                    if input.watermark_columns().contains(input_idx) {
+                        watermark_derivations.push((input_idx, expr_idx));
+                        watermark_columns.insert(expr_idx);
+                    }
                 }
                 WatermarkDerivation::Nondecreasing => {
                     nondecreasing_exprs.push(expr_idx);
