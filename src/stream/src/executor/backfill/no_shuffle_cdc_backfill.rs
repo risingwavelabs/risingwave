@@ -107,7 +107,7 @@ where
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
-        _progress: CreateMviewProgress,
+        _progress: Option<CreateMviewProgress>,
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
