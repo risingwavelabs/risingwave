@@ -253,7 +253,10 @@ impl Binder {
 
         let columns = view_catalog.columns.clone();
 
-        if query.schema().fields() != columns {
+        if !itertools::equal(
+            query.schema().fields().iter().map(|f| &f.data_type),
+            view_catalog.columns.iter().map(|f| &f.data_type),
+        ) {
             return Err(ErrorCode::BindError(format!(
                 "failed to bind view {}. The SQL's schema is different from catalog's schema sql: {}, bound schema: {:?}, catalog schema: {:?}",
                 view_catalog.name, view_catalog.sql, query.schema(), columns
