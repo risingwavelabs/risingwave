@@ -44,6 +44,9 @@ echo "--- case: ${case}, format: ${format}"
 if [ -z "${RW_IMAGE_VERSION-}" ]; then
   export RW_IMAGE_VERSION=latest
 fi
+if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+  export RW_IMAGE_VERSION="nightly-$(date '+%Y%m%d')"
+fi
 echo Docker image version: $RW_IMAGE_VERSION
 
 echo "--- rewrite docker compose for protobuf"
