@@ -512,34 +512,27 @@ impl SstableStore {
         self.meta_cache.get_memory_usage() as u64
     }
 
-    pub async fn get_stream(
+    pub async fn get_stream_by_position(
         &self,
-        sst: &Sstable,
-        block_index: Option<usize>,
+        object_id: HummockSstableObjectId,
+        block_index: usize,
+        metas: &[BlockMeta],
     ) -> HummockResult<BlockStream> {
-        let start_pos = match block_index {
-            None => None,
-            Some(index) => {
-                let block_meta = sst
-                    .meta
-                    .block_metas
-                    .get(index)
-                    .ok_or_else(HummockError::invalid_block)?;
-
-                Some(block_meta.offset as usize)
-            }
-        };
-
-        let data_path = self.get_sst_data_path(sst.id);
+        fail_point!("get_stream_err");
+        let data_path = self.get_sst_data_path(object_id);
         let store = self.store().clone();
+        let block_meta = metas
+            .get(block_index)
+            .ok_or_else(HummockError::invalid_block)?;
+        let start_pos = block_meta.offset as usize;
 
         Ok(BlockStream::new(
             store
-                .streaming_read(&data_path, start_pos)
+                .streaming_read(&data_path, Some(start_pos))
                 .await
                 .map_err(HummockError::object_io_error)?,
-            block_index.unwrap_or(0),
-            &sst.meta,
+            block_index,
+            metas,
         ))
     }
 
@@ -947,19 +940,15 @@ impl BlockStream {
         block_index: usize,
 
         // Meta data of the SST that is streamed.
-        sst_meta: &SstableMeta,
+        metas: &[BlockMeta],
     ) -> Self {
-        let metas = &sst_meta.block_metas;
-
         // Avoids panicking if `block_index` is too large.
         let block_index = std::cmp::min(block_index, metas.len());
 
         let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
-        sst_meta.block_metas[block_index..]
-            .iter()
-            .for_each(|b_meta| {
-                block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
-            });
+        metas[block_index..].iter().for_each(|b_meta| {
+            block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
+        });
 
         Self {
             byte_stream,
@@ -978,6 +967,9 @@ impl BlockStream {
         let (block_stream_size, block_full_size) =
             *self.block_size_vec.get(self.block_idx).unwrap();
         let mut buffer = vec![0; block_stream_size];
+        fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
+            ObjectError::internal("stream read error")
+        )));
 
         let bytes_read = self
             .byte_stream
@@ -986,12 +978,10 @@ impl BlockStream {
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 
         if bytes_read != block_stream_size {
-            return Err(HummockError::object_io_error(ObjectError::internal(
-                format!(
-                    "unexpected number of bytes: expected: {} read: {}",
-                    block_stream_size, bytes_read
-                ),
-            )));
+            return Err(HummockError::decode_error(ObjectError::internal(format!(
+                "unexpected number of bytes: expected: {} read: {}",
+                block_stream_size, bytes_read
+            ))));
         }
 
         let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);

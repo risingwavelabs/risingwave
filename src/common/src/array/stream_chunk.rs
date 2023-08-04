@@ -18,6 +18,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use rand::prelude::SmallRng;
+use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
@@ -324,6 +326,15 @@ pub trait StreamChunkTestExt: Sized {
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
     ) -> Vec<Self>;
+
+    fn gen_stream_chunks_inner(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+        visibility_percent: f64, // % of rows that are visible
+        inserts_percent: f64,
+    ) -> Vec<Self>;
 }
 
 impl StreamChunkTestExt for StreamChunk {
@@ -460,13 +471,50 @@ impl StreamChunkTestExt for StreamChunk {
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
     ) -> Vec<StreamChunk> {
-        DataChunk::gen_data_chunks(num_of_chunks, chunk_size, data_types, varchar_properties)
-            .into_iter()
-            .map(|chunk| {
-                let ops = vec![Op::Insert; chunk_size];
-                StreamChunk::from_parts(ops, chunk)
-            })
-            .collect()
+        Self::gen_stream_chunks_inner(
+            num_of_chunks,
+            chunk_size,
+            data_types,
+            varchar_properties,
+            1.0,
+            1.0,
+        )
+    }
+
+    fn gen_stream_chunks_inner(
+        num_of_chunks: usize,
+        chunk_size: usize,
+        data_types: &[DataType],
+        varchar_properties: &VarcharProperty,
+        visibility_percent: f64, // % of rows that are visible
+        inserts_percent: f64,    // Rest will be deletes.
+    ) -> Vec<StreamChunk> {
+        let ops = if inserts_percent == 0.0 {
+            vec![Op::Delete; chunk_size]
+        } else if inserts_percent == 1.0 {
+            vec![Op::Insert; chunk_size]
+        } else {
+            let mut rng = SmallRng::from_seed([0; 32]);
+            let mut ops = vec![];
+            for _ in 0..chunk_size {
+                ops.push(if rng.gen_bool(inserts_percent) {
+                    Op::Insert
+                } else {
+                    Op::Delete
+                });
+            }
+            ops
+        };
+        DataChunk::gen_data_chunks(
+            num_of_chunks,
+            chunk_size,
+            data_types,
+            varchar_properties,
+            visibility_percent,
+        )
+        .into_iter()
+        .map(|chunk| StreamChunk::from_parts(ops.clone(), chunk))
+        .collect()
     }
 }
 
