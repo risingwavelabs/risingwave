@@ -38,10 +38,10 @@ pub enum ExprError {
     #[snafu(display("numeric out of range"))]
     NumericOutOfRange,
 
-    #[snafu(display("numeric out of range: underflow"))]
+    #[snafu(display("numeric out of range (underflow)"))]
     NumericUnderflow,
 
-    #[snafu(display("numeric out of range: overflow"))]
+    #[snafu(display("numeric out of range (overflow)"))]
     NumericOverflow,
 
     #[snafu(display("division by zero"))]
@@ -62,7 +62,7 @@ pub enum ExprError {
         source: Box<JsonbError>,
     },
 
-    #[snafu(display("parse error"))]
+    #[snafu(display("parse error"))] // other parse errors
     Parse { source: BoxedError },
 
     #[snafu(
@@ -72,9 +72,12 @@ pub enum ExprError {
     MemcmpEncoding { source: memcomparable::Error },
 
     #[snafu(display("failed to serialize/deserailize value"), context(false))]
-    ValueEncoding { source: ValueEncodingError },
+    ValueEncoding {
+        #[snafu(source(from(ValueEncodingError, Box::new)))]
+        source: Box<ValueEncodingError>,
+    },
 
-    #[snafu(display("invalid parameter `{name}`: {reason}"))] // TODO(snafu): refine this
+    #[snafu(display("invalid parameter `{name}`: {reason}"))]
     InvalidParam {
         name: &'static str,
         reason: Box<str>,
@@ -98,26 +101,16 @@ pub enum ExprError {
     #[snafu(display("field name must not be null"))]
     FieldNameNull,
 
-    // TODO(snafu): refine this
-    #[snafu(display("protobuf field not found"), context(false))]
-    PbFieldNotFound { source: PbFieldNotFound },
+    #[snafu(display("failed to build expression"), context(false))]
+    BuildFromProto { source: PbFieldNotFound },
 
-    // TODO(snafu): remove this and replace with whatever
+    // TODO: remove this variant and make errors categorized
+    // TODO(snafu): may use `whatever`
     #[snafu(display("uncategorized error"), context(false))]
-    Anyhow { source: anyhow::Error },
-
-    // TODO(snafu): size
-    #[snafu(whatever, display("uncategorized error"))]
-    Whatever {
-        message: String,
-        // Having a `source` is optional, but if it is present, it must
-        // have this specific attribute and type:
-        #[snafu(source(from(BoxedError, Some)), provide(false))]
-        source: Option<BoxedError>,
-    },
+    Internal { source: anyhow::Error },
 }
 
-static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 48);
+static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
 
 impl From<ExprError> for RwError {
     fn from(s: ExprError) -> Self {
@@ -136,7 +129,6 @@ impl From<regex::Error> for ExprError {
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
-        // TODO(snafu): refine this
         Self::Parse { source: e.into() }
     }
 }

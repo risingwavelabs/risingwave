@@ -80,10 +80,9 @@ where
 #[function("cast(int64) -> int256")]
 pub fn to_int256<T>(elem: T) -> Result<Int256>
 where
-    T: TryInto<Int256>,
-    <T as TryInto<Int256>>::Error: risingwave_common::error::Error,
+    T: Into<Int256>,
 {
-    elem.try_into().map_err(Into::into).context(ParseSnafu)
+    Ok(elem.into())
 }
 
 #[function("cast(jsonb) -> boolean")]

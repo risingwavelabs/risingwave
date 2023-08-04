@@ -116,6 +116,10 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        let non_constant_pattern = UnsupportedFunctionSnafu {
+            name: "regexp_match with non-constant pattern",
+        };
+
         ensure!(prost.get_function_type().unwrap() == Type::RegexpMatch);
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
@@ -143,7 +147,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                 }
             }
             _ => {
-                whatever!("non-constant pattern in regexp_match")
+                return non_constant_pattern.fail();
             }
         };
 
@@ -166,7 +170,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                     }
                 }
                 _ => {
-                    whatever!("non-constant pattern in regexp_match")
+                    return non_constant_pattern.fail();
                 }
             }
         } else {

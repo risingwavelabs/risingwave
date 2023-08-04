@@ -204,8 +204,7 @@ impl AccessOutput for Utf8ArrayBuilder {
             true => self.append_null(),
             false => {
                 let mut writer = self.writer().begin();
-                v.force_str(&mut writer)
-                    .whatever_context::<_, ExprError>("access jsonb as string")?;
+                v.force_str(&mut writer).unwrap();
                 writer.finish();
             }
         };
