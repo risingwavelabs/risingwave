@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
-use crate::expr::{CorrelatedId, Depth, align_types};
+use crate::expr::{align_types, CorrelatedId, Depth};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`s via set operators (e.g. union).
@@ -148,18 +148,23 @@ impl Binder {
                             .into());
                         }
 
-                        // Handle type alignment for values union values
+                        // Handle type alignment for select union select
                         // E.g. Select 1 UNION ALL Select NULL
                         match (&mut left, &mut right) {
                             (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) => {
-                                for (i, (l, r)) in l_select.select_items.iter_mut().zip_eq_fast(r_select.select_items.iter_mut()).enumerate() {
-                                    let expr = align_types(vec![l, r].into_iter())?;
-                                    l_select.schema.fields[i].data_type = expr.clone();
-                                    r_select.schema.fields[i].data_type = expr;
+                                for (i, (l, r)) in l_select
+                                    .select_items
+                                    .iter_mut()
+                                    .zip_eq_fast(r_select.select_items.iter_mut())
+                                    .enumerate()
+                                {
+                                    let column_type = align_types(vec![l, r].into_iter())?;
+                                    l_select.schema.fields[i].data_type = column_type.clone();
+                                    r_select.schema.fields[i].data_type = column_type;
                                 }
-                            },
+                            }
                             // TODO: handle other cases
-                            _ => {},
+                            _ => {}
                         }
 
                         for (a, b) in left
@@ -175,7 +180,7 @@ impl Binder {
                                     a.data_type.prost_type_name().as_str_name(),
                                     b.data_type.prost_type_name().as_str_name(),
                                 ))
-                                    .into());
+                                .into());
                             }
                         }
 
