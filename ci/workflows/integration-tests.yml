@@ -1,7 +1,14 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
     timeout_in_minutes: 30
+    retry: *auto-retry
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -82,6 +89,7 @@ steps:
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
     timeout_in_minutes: 30
+    retry: *auto-retry
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
