@@ -1,11 +1,12 @@
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
-from confluent_kafka.serialization import StringSerializer, SerializationContext, MessageField
+from confluent_kafka.serialization import SerializationContext, MessageField
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 import sys
 import json
 import os
+
 
 def create_topic(kafka_conf, topic_name):
     client = AdminClient(kafka_conf)
@@ -19,6 +20,7 @@ def delivery_report(err, msg):
     if err is not None:
         print("Delivery failed for User record {}: {}".format(msg.value(), err))
         return
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
@@ -41,32 +43,35 @@ if __name__ == '__main__':
     key_serializer = None
     value_serializer = None
     with open(file) as file:
-        for (i,line) in enumerate(file):
+        for (i, line) in enumerate(file):
             if i == 0:
                 parts = line.split("^")
                 if len(parts) > 1:
                     key_serializer = AvroSerializer(schema_registry_client=schema_registry_client, schema_str=parts[0])
-                    value_serializer = AvroSerializer(schema_registry_client=schema_registry_client, schema_str=parts[1])
+                    value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
+                                                      schema_str=parts[1])
                 else:
-                    value_serializer = AvroSerializer(schema_registry_client=schema_registry_client, schema_str=parts[0])
+                    value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
+                                                      schema_str=parts[0])
             else:
                 parts = line.split("^")
                 if len(parts) > 1:
                     if len(parts[1].strip()) > 0:
                         producer.produce(topic=topic, partition=0,
-                            key=key_serializer(json.loads(parts[0]) ,SerializationContext(topic, MessageField.KEY)),
-                            value=value_serializer(
-                                    json.loads(parts[1]), SerializationContext(topic, MessageField.VALUE)),
-                                on_delivery=delivery_report)
+                                         key=key_serializer(json.loads(parts[0]),
+                                                            SerializationContext(topic, MessageField.KEY)),
+                                         value=value_serializer(
+                                             json.loads(parts[1]), SerializationContext(topic, MessageField.VALUE)),
+                                         on_delivery=delivery_report)
                     else:
                         producer.produce(topic=topic, partition=0,
-                            key=key_serializer(json.loads(parts[0]) ,SerializationContext(topic, MessageField.KEY)),
-                                on_delivery=delivery_report)
+                                         key=key_serializer(json.loads(parts[0]),
+                                                            SerializationContext(topic, MessageField.KEY)),
+                                         on_delivery=delivery_report)
                 else:
                     producer.produce(topic=topic, partition=0,
-                        value=value_serializer(
-                                 json.loads(parts[0]), SerializationContext(topic, MessageField.VALUE)),
-                             on_delivery=delivery_report)
+                                     value=value_serializer(
+                                         json.loads(parts[0]), SerializationContext(topic, MessageField.VALUE)),
+                                     on_delivery=delivery_report)
 
     producer.flush()
-
