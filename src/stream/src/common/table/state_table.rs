@@ -802,9 +802,6 @@ where
 
         match key_chunk.vis() {
             Vis::Bitmap(vis) => {
-                // Don't use rows_with_holes here,
-                // Otherwise we end up checking twice,
-                // once in the keys iterator and once in the values iterator.
                 for ((op, vnode, key, value), vis) in iter.zip_eq_debug(vis.iter()) {
                     if vis {
                         encode_and_store(*op, vnode, key, value);
