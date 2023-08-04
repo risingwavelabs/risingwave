@@ -67,6 +67,7 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
+    current_transaction: Option<Box<str>>,
 }
 
 impl SourceStreamChunkBuilder {
@@ -75,10 +76,12 @@ impl SourceStreamChunkBuilder {
             .iter()
             .map(|desc| desc.data_type.create_array_builder(cap))
             .collect();
+
         Self {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
+            current_transaction: None,
         }
     }
 
@@ -101,12 +104,50 @@ impl SourceStreamChunkBuilder {
         )
     }
 
+    pub fn in_transaction(&self) -> bool {
+        self.current_transaction.is_some()
+    }
+
+    pub fn apply_transaction_control(&mut self, txn_ctl: TransactionControl) -> bool {
+        match txn_ctl {
+            TransactionControl::Begin { id } => {
+                if let Some(current_id) = &self.current_transaction {
+                    tracing::warn!(
+                        "already in transaction, current: {}, new: {}",
+                        current_id,
+                        id
+                    );
+                }
+                self.current_transaction = Some(id);
+            }
+            TransactionControl::Commit { id } => {
+                if self.current_transaction.as_ref() != Some(&id) {
+                    tracing::warn!(
+                        "transaction id mismatch, current: {:?}, actual: {}",
+                        self.current_transaction,
+                        id
+                    );
+                }
+                self.current_transaction = None;
+            }
+        }
+
+        self.in_transaction()
+    }
+
+    #[must_use]
+    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish()
+    }
+
     pub fn op_num(&self) -> usize {
         self.op_builder.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.op_builder.is_empty()
+    pub fn is_clean(&self) -> bool {
+        self.op_builder.is_empty() && !self.in_transaction()
     }
 }
 
@@ -365,25 +406,22 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
-    let reset = |capacity| {
-        (
-            SourceStreamChunkBuilder::with_capacity(columns.clone(), capacity),
-            HashMap::<SplitId, String>::new(),
-        )
-    };
 
-    let (mut builder, mut split_offset_mapping) = reset(0);
-    let mut current_transaction_id = None;
-    let mut enough = false;
+    let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut split_offset_mapping = HashMap::<SplitId, String>::new();
+    let mut yield_asap = false;
 
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
         let batch_len = batch.len();
 
-        if builder.is_empty() {
-            assert!(enough == false);
-            (builder, split_offset_mapping) = reset(batch_len);
+        if builder.is_clean() {
+            assert!(yield_asap == false);
+            assert!(split_offset_mapping.is_empty());
+            let _ = builder.take(batch_len);
+        } else {
+            yield_asap = true;
         }
 
         for (i, msg) in batch.into_iter().enumerate() {
@@ -425,29 +463,14 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         }
                     }
                 }
-                Ok(Either::Right(TransactionControl::Begin { id })) => {
-                    tracing::debug!(id, "transaction begin");
-                    current_transaction_id = Some(id);
-                }
-                Ok(Either::Right(TransactionControl::Commit { id })) => {
-                    if current_transaction_id.as_ref() != Some(&id) {
-                        tracing::warn!(
-                            "transaction id mismatch, expected: {:?}, actual: {}",
-                            current_transaction_id,
-                            id
-                        );
-                    }
-                    tracing::debug!(id, "transaction commit");
-                    current_transaction_id = None;
-                    if enough {
-                        enough = false;
-                        let (new_builder, new_split_offset_mapping) = reset(batch_len - (i + 1));
-                        let builder = std::mem::replace(&mut builder, new_builder);
-                        let split_offset_mapping =
-                            std::mem::replace(&mut split_offset_mapping, new_split_offset_mapping);
+                Ok(Either::Right(txn_ctl)) => {
+                    let in_transaction = builder.apply_transaction_control(txn_ctl);
+
+                    if !in_transaction && yield_asap {
+                        yield_asap = false;
                         yield StreamChunkWithState {
-                            chunk: builder.finish(),
-                            split_offset_mapping: Some(split_offset_mapping),
+                            chunk: builder.take(batch_len - (i + 1)),
+                            split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
                         };
                     }
                 }
@@ -461,17 +484,12 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             }
         }
 
-        if current_transaction_id.is_none() {
-            let (new_builder, new_split_offset_mapping) = reset(0);
-            let builder = std::mem::replace(&mut builder, new_builder);
-            let split_offset_mapping =
-                std::mem::replace(&mut split_offset_mapping, new_split_offset_mapping);
+        if !builder.in_transaction() {
+            yield_asap = false;
             yield StreamChunkWithState {
-                chunk: builder.finish(),
-                split_offset_mapping: Some(split_offset_mapping),
+                chunk: builder.take(0),
+                split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
             };
-        } else {
-            enough = true;
         }
     }
 }
