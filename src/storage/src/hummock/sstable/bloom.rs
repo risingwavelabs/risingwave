@@ -15,11 +15,13 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::f64;
+use std::sync::Arc;
 
 use bytes::BufMut;
 
 use super::filter::FilterBuilder;
 use super::Sstable;
+use crate::hummock::MemoryLimiter;
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;
@@ -150,7 +152,12 @@ impl FilterBuilder for BloomFilterBuilder {
         self.key_hash_entries.len() * 4
     }
 
-    fn finish(&mut self) -> Vec<u8> {
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
+        // FIXME: If Bloom is enabled, a more accurate memory calculation is used for Bloom
+        let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
+            memory_limit.must_require_memory(self.approximate_building_memory() as u64)
+        });
+
         // 0.69 is approximately ln(2)
         let k = ((self.bits_per_key as f64) * 0.69) as u32;
         // limit k in [1, 30]
@@ -179,6 +186,10 @@ impl FilterBuilder for BloomFilterBuilder {
     fn create(fpr: f64, capacity: usize) -> Self {
         BloomFilterBuilder::new(fpr, capacity)
     }
+
+    fn approximate_building_memory(&self) -> usize {
+        self.approximate_len()
+    }
 }
 
 #[cfg(test)]
@@ -195,7 +206,7 @@ mod tests {
         let mut builder = BloomFilterBuilder::new(0.01, 2);
         builder.add_key(b"hello", 0);
         builder.add_key(b"world", 0);
-        let buf = builder.finish();
+        let buf = builder.finish(None);
 
         let check_hash: Vec<u32> = vec![
             b"hello".to_vec(),
@@ -227,7 +238,7 @@ mod tests {
             builder.add_key(&k, 0);
         }
 
-        let data = builder.finish();
+        let data = builder.finish(None);
         let filter = BloomFilterReader::new(data);
 
         let mut true_count = 0;

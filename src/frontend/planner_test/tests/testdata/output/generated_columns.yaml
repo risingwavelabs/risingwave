@@ -41,7 +41,7 @@
   explain_output: |
     StreamMaterialize { columns: [v, w, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [w] }
     └─StreamRowIdGen { row_id_index: 2 }
-      └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 1, expr: $expr1 }] }
+      └─StreamWatermarkFilter { watermark_descs: [Desc { column: $expr1, expr: $expr1 }] }
         └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }
           └─StreamDml { columns: [v, _row_id] }
             └─StreamSource
