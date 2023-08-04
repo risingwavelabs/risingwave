@@ -18,6 +18,9 @@ use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::row::{Row, RowExt};
+use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::BoxedExpression;
 
 use super::*;
@@ -39,6 +42,10 @@ struct Inner {
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
+    /// Indices of nondecreasing expressions in the expression list.
+    nondecreasing_expr_indices: Vec<usize>,
+    /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
+    last_nondec_expr_values: Vec<Option<ScalarImpl>>,
 
     /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
@@ -53,6 +60,7 @@ impl ProjectExecutor {
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
+        nondecreasing_expr_indices: Vec<usize>,
         materialize_selectivity_threshold: f64,
     ) -> Self {
         let info = ExecutorInfo {
@@ -67,6 +75,9 @@ impl ProjectExecutor {
                 .map(|e| Field::unnamed(e.return_type()))
                 .collect_vec(),
         };
+
+        let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
+
         Self {
             input,
             inner: Inner {
@@ -78,6 +89,8 @@ impl ProjectExecutor {
                 },
                 exprs,
                 watermark_derivations,
+                nondecreasing_expr_indices,
+                last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 materialize_selectivity_threshold,
             },
         }
@@ -167,7 +180,7 @@ impl Inner {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(self, input: BoxedExecutor) {
+    async fn execute(mut self, input: BoxedExecutor) {
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
@@ -179,10 +192,42 @@ impl Inner {
                     }
                 }
                 Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
-                    Some(new_chunk) => yield Message::Chunk(new_chunk),
+                    Some(new_chunk) => {
+                        if !self.nondecreasing_expr_indices.is_empty() {
+                            if let Some((_, first_visible_row)) = new_chunk.rows().next() {
+                                // it's ok to use the first row here, just one chunk delay
+                                first_visible_row
+                                    .project(&self.nondecreasing_expr_indices)
+                                    .iter()
+                                    .enumerate()
+                                    .for_each(|(idx, value)| {
+                                        self.last_nondec_expr_values[idx] =
+                                            Some(value.to_owned_datum().expect(
+                                                "non-decreasing expression should never be NULL",
+                                            ));
+                                    });
+                            }
+                        }
+                        yield Message::Chunk(new_chunk)
+                    }
                     None => continue,
                 },
-                m => yield m,
+                barrier @ Message::Barrier(_) => {
+                    for (&expr_idx, value) in self
+                        .nondecreasing_expr_indices
+                        .iter()
+                        .zip_eq_fast(&mut self.last_nondec_expr_values)
+                    {
+                        if let Some(value) = std::mem::take(value) {
+                            yield Message::Watermark(Watermark::new(
+                                expr_idx,
+                                self.exprs[expr_idx].return_type(),
+                                value,
+                            ))
+                        }
+                    }
+                    yield barrier;
+                }
             }
         }
     }
@@ -231,6 +276,7 @@ mod tests {
             vec![test_expr],
             1,
             MultiMap::new(),
+            vec![],
             0.0,
         ));
         let mut project = project.execute();
@@ -286,6 +332,7 @@ mod tests {
             vec![a_expr, b_expr],
             1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+            vec![],
             0.0,
         ));
         let mut project = project.execute();
