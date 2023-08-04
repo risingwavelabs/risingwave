@@ -367,7 +367,7 @@ impl LocalHummockStorage {
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
 
-        let (imm_size, imm_kv_count) = if !kv_pairs.is_empty() || !delete_ranges.is_empty() {
+        let imm_size = if !kv_pairs.is_empty() || !delete_ranges.is_empty() {
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items)
                 + SharedBufferBatch::measure_delete_range_size(&delete_ranges);
@@ -407,7 +407,6 @@ impl LocalHummockStorage {
                 Some(tracker),
             );
             let imm_size = imm.size();
-            let imm_kv_count = imm.kv_count();
             self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
@@ -416,9 +415,9 @@ impl LocalHummockStorage {
                     .send(HummockEvent::ImmToUploader(imm))
                     .unwrap();
             }
-            (imm_size, imm_kv_count)
+            imm_size
         } else {
-            (0, 0)
+            0
         };
 
         timer.observe_duration();
