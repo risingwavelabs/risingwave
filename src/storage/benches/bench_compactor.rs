@@ -253,6 +253,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     KeyRange::inf(),
                     sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
+                    0,
                 ),
                 ConcatSstableIterator::new(
                     vec![0],
@@ -260,6 +261,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     KeyRange::inf(),
                     sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
+                    0,
                 ),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);

@@ -529,7 +529,7 @@ pub mod verify {
 }
 
 impl StateStoreImpl {
-    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
