@@ -1,14 +1,12 @@
 use std::future::Future;
 
-use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
-use risingwave_connector::source::external::{
-    BinlogOffset, ConnectorResult, ExternalTableReader, MySqlOffset,
-};
+use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -17,7 +15,7 @@ use risingwave_storage::StateStore;
 
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
-use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
+use crate::executor::{StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamTableRead {
     type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<BinlogOffset>>>
@@ -134,7 +132,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         impl Future<Output = StreamExecutorResult<Option<BinlogOffset>>> + 'a;
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
-    fn snapshot_read(&self, _args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
+    fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
         #[try_stream]
         async move {
             let primary_keys = self
@@ -153,7 +151,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 .snapshot_read(self.inner.schema_table_name(), primary_keys);
 
             pin_mut!(row_stream);
-            let mut chunk_stream = iter_chunks(row_stream, self.inner.schema(), 1000);
+            let chunk_stream = iter_chunks(row_stream, self.inner.schema(), args.chunk_size);
             #[for_await]
             for chunk in chunk_stream {
                 yield chunk?;
@@ -164,7 +162,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
         async move {
             let binlog = self.inner.table_reader().current_binlog_offset();
-            Ok(Some(binlog.await?))
+            let binlog = binlog.await?;
+            match &binlog {
+                BinlogOffset::Undefined => Ok(None),
+                _ => Ok(Some(binlog)),
+            }
         }
     }
 }

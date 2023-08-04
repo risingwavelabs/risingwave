@@ -22,7 +22,7 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk::StreamChunkMeta;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
@@ -33,13 +33,13 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqDebug};
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_connector::source::external::{BinlogOffset, ExternalTableReaderImpl, MySqlOffset};
+use risingwave_connector::source::external::{BinlogOffset, ExternalTableReaderImpl};
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, StateTableInner};
-use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
-use crate::executor::backfill::upstream_table::snapshot::UpstreamTableReader;
+
+
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -351,7 +351,7 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 
 pub(crate) async fn restore_backfill_progress<S: StateStore>(
     state_table: &StateTable<S>,
-    state_len: usize,
+    _state_len: usize,
 ) -> StreamExecutorResult<(Option<OwnedRow>, bool)> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     todo!("restore_backfill_progress");

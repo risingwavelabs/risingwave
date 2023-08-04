@@ -14,19 +14,12 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
-use risingwave_storage::row_serde::ColumnMapping;
-use risingwave_storage::table::{Distribution, TableIter};
-use risingwave_storage::StateStore;
+use risingwave_storage::table::Distribution;
 
 /// This struct represents an external table to be read during backfill
 pub struct ExternalStorageTable {

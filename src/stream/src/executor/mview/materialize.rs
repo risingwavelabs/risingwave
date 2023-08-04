@@ -136,7 +136,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    tracing::info!("[mv] chunk meta: {:?}", chunk.meta());
                     match self.conflict_behavior {
                         ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk

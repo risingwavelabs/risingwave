@@ -14,9 +14,11 @@
 
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
+#![feature(let_chains)]
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,7 +29,9 @@ use risingwave_batch::executor::{
     RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::stream_chunk::{Offset, StreamChunkMeta};
-use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray, StreamChunk};
+use risingwave_common::array::{
+    Array, DataChunk, F64Array, SerialArray, StreamChunk, StreamChunkTestExt,
+};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
@@ -42,6 +46,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::external::{
     DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MockExternalTableReader,
+    MySqlOffset,
 };
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
@@ -63,9 +68,9 @@ use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, BackfillExecutor, Barrier,
-    BoxedMessageStream, CdcBackfillExecutor, Executor, MaterializeExecutor, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, ActorContext, ActorContextRef, Barrier,
+    BoxedExecutor as StreamBoxedExecutor, BoxedMessageStream, CdcBackfillExecutor, Executor,
+    MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -110,7 +115,7 @@ impl SingleChunkExecutor {
 pub struct MockOffsetGenExecutor {
     ctx: ActorContextRef,
 
-    upstream: Option<BoxedExecutor>,
+    upstream: Option<StreamBoxedExecutor>,
 
     schema: Schema,
 
@@ -124,7 +129,7 @@ pub struct MockOffsetGenExecutor {
 impl MockOffsetGenExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        upstream: BoxedExecutor,
+        upstream: StreamBoxedExecutor,
         schema: Schema,
         pk_indices: PkIndices,
     ) -> Self {
@@ -138,7 +143,7 @@ impl MockOffsetGenExecutor {
         }
     }
 
-    fn next_offset(&mut self) -> Result<String> {
+    fn next_offset(&mut self) -> anyhow::Result<String> {
         let start_offset = self.start_offset;
         let dbz_offset = DebeziumOffset {
             source_partition: Default::default(),
@@ -178,7 +183,7 @@ impl MockOffsetGenExecutor {
                     assert!(bitmap.is_none());
 
                     for _ in 0..ops.len() {
-                        offsets.push(Offset(self.next_offset()?));
+                        offsets.push(Offset::new(self.next_offset()?));
                     }
                     yield Message::Chunk(StreamChunk::new_with_meta(
                         ops,
@@ -224,10 +229,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         Field::unnamed(DataType::Int64), // primary key
         Field::unnamed(DataType::Float64),
     ]);
-    let column_descs = vec![
-        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-        ColumnDesc::unnamed(ColumnId::new(1), DataType::Float64),
-    ];
+    let column_ids = vec![0.into(), 1.into()];
+
     let pk_indices = vec![0];
 
     let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
@@ -240,13 +243,20 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         pk_indices.clone(),
     );
 
+    let binlog_file = String::from("1.binlog");
+
+    let binlog_watermarks = vec![
+        MySqlOffset::new(binlog_file.clone(), 3),
+        MySqlOffset::new(binlog_file.clone(), 5),
+    ];
+
     let external_table = ExternalStorageTable::new(
         table_id,
         "mock_table".to_string(),
         "public".to_string(),
-        ExternalTableReaderImpl::MOCK(MockExternalTableReader::new(vec![])),
+        ExternalTableReaderImpl::MOCK(MockExternalTableReader::new(binlog_watermarks)),
         schema.clone(),
-        vec![],
+        vec![OrderType::ascending()],
         pk_indices,
         vec![0, 1],
         Distribution::fallback(),
@@ -261,7 +271,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         schema.clone(),
         vec![0],
         Arc::new(StreamingMetrics::unused()),
-        10,
+        4,
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.
@@ -270,14 +280,36 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         memory_state_store.clone(),
         table_id,
         vec![ColumnOrder::new(0, OrderType::ascending())],
-        all_column_ids.clone(),
+        column_ids.clone(),
         4,
         Arc::new(AtomicU64::new(0)),
-        ConflictBehavior::NoCheck,
+        ConflictBehavior::Overwrite,
     )
     .await
     .boxed()
     .execute();
+
+    // push upstream chunks
+    let stream_chunk1 = StreamChunk::from_pretty(
+        " I F
+            + 1 9.01
+            + 2 2.02
+            + 3 3.03
+            + 4 4.04
+            + 5 5.05
+            + 6 6.06",
+    );
+    let stream_chunk2 = StreamChunk::from_pretty(
+        " I F
+            + 6 10.08
+            + 199 40.5
+            + 978 72.6
+            + 134 41.7",
+    );
+
+    // The first barrier
+    let curr_epoch = 11;
+    tx.push_barrier(curr_epoch, false);
 
     // assert barrier is forwarded to mview
     assert!(matches!(
@@ -289,35 +321,50 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         }) if epoch.curr == curr_epoch
     ));
 
-    // Poll `Materialize`, should output the same insertion stream chunk.
-    let message = materialize.next().await.unwrap()?;
-    let mut col_row_ids = vec![];
-    match message {
-        Message::Watermark(_) => {
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
-        }
-        Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].as_serial();
-            col_row_ids.push(col_row_id.value_at(0).unwrap());
-            col_row_ids.push(col_row_id.value_at(1).unwrap());
+    // start the stream pipeline src -> backfill -> mview
+    let mview_handle = tokio::spawn(consume_message_stream(materialize));
 
-            let col_data = c.columns()[1].as_float64();
-            assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
-            assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
-        }
-        Message::Barrier(_) => panic!(),
-    }
+    // ingest data and barrier
+    let interval = Duration::from_millis(10);
+    tx.push_chunk(stream_chunk1);
+
+    tokio::time::sleep(interval).await;
+    tx.push_barrier(curr_epoch + 1, false);
+
+    tx.push_chunk(stream_chunk2);
+
+    tokio::time::sleep(interval).await;
+    tx.push_barrier(curr_epoch + 2, false);
+
+    tokio::time::sleep(interval).await;
+    tx.push_barrier(curr_epoch + 3, true);
+
+    mview_handle.await.unwrap()?;
 
     Ok(())
 }
 
-/// This test checks whether batch task and streaming task work together for `Table` creation,
-/// insertion, deletion, and materialization.
-/// TODO(siyuan):  
-/// 构造一个source exec，然后以mock的方式给它传入stream chunk,
-///
-#[tokio::test]
-async fn test_cdc_table_backfill() -> StreamResult<()> {}
+async fn consume_message_stream(mut stream: BoxedMessageStream) -> StreamResult<()> {
+    while let Some(message) = stream.next().await {
+        let message = message?;
+        match message {
+            Message::Watermark(_) => {
+                break;
+            }
+            Message::Chunk(c) => {
+                // let (d, ops) = c.into_parts();
+                println!("[output] chunk: {:#?}", c);
+            }
+            Message::Barrier(b) => {
+                if let Some(m) = b.mutation && matches!(*m, Mutation::Stop(_)) {
+                    println!("encounter stop barrier");
+                    break
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 /// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
