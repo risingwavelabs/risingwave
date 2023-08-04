@@ -417,7 +417,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         let batch_len = batch.len();
 
         if builder.is_clean() {
-            assert!(yield_asap == false);
+            assert!(!yield_asap);
             assert!(split_offset_mapping.is_empty());
             let _ = builder.take(batch_len);
         } else {

@@ -36,7 +36,7 @@
 
     CREATE VIEW PERSON as select (person).* from nexmark where event_type = 0;
     CREATE VIEW AUCTION as select (auction).* from nexmark where event_type = 1;
-    CREATE VIEW BID as select (bid).*, p_time from nexmark where event_type = 2 
+    CREATE VIEW BID as select (bid).*, p_time from nexmark where event_type = 2
       AND now() - interval '5' minute < p_time;
   expected_outputs: []
 - id: nexmark_q0
