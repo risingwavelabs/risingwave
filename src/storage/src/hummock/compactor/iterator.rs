@@ -102,7 +102,7 @@ impl SstableStreamIterator {
             .sstable_store
             .get_stream_by_position(
                 self.sstable_info.object_id,
-                Some(self.seek_block_idx),
+                self.seek_block_idx,
                 &self.block_metas,
             )
             .verbose_instrument_await("stream_iter_get_stream")

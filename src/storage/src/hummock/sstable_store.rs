@@ -515,37 +515,25 @@ impl SstableStore {
     pub async fn get_stream_by_position(
         &self,
         object_id: HummockSstableObjectId,
-        block_index: Option<usize>,
+        block_index: usize,
         metas: &[BlockMeta],
     ) -> HummockResult<BlockStream> {
         fail_point!("get_stream_err");
         let data_path = self.get_sst_data_path(object_id);
         let store = self.store().clone();
-        let start_pos = match block_index {
-            None => None,
-            Some(index) => {
-                let block_meta = metas.get(index).ok_or_else(HummockError::invalid_block)?;
-                Some(block_meta.offset as usize)
-            }
-        };
+        let block_meta = metas
+            .get(block_index)
+            .ok_or_else(HummockError::invalid_block)?;
+        let start_pos = block_meta.offset as usize;
 
         Ok(BlockStream::new(
             store
-                .streaming_read(&data_path, start_pos)
+                .streaming_read(&data_path, Some(start_pos))
                 .await
                 .map_err(HummockError::object_io_error)?,
-            block_index.unwrap_or(0),
+            block_index,
             metas,
         ))
-    }
-
-    pub async fn get_stream(
-        &self,
-        sst: &Sstable,
-        block_index: Option<usize>,
-    ) -> HummockResult<BlockStream> {
-        self.get_stream_by_position(sst.id, block_index, &sst.meta.block_metas)
-            .await
     }
 
     pub fn data_file_cache_refill_filter(
