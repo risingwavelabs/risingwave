@@ -19,10 +19,11 @@ import static io.grpc.Status.UNIMPLEMENTED;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.connector.api.sink.SinkWriterBase;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.apache.iceberg.*;
@@ -34,33 +35,21 @@ import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
 
-public class IcebergSink extends SinkWriterBase {
-    private final HadoopCatalog hadoopCatalog;
-    private final FileFormat fileFormat;
-    private final Schema rowSchema;
-    private final Table icebergTable;
+public class AppendOnlyIcebergSinkWriter extends IcebergSinkWriterBase {
     private Map<PartitionKey, DataWriter<Record>> dataWriterMap = new HashMap<>();
     private boolean closed = false;
 
-    public HadoopCatalog getHadoopCatalog() {
-        return this.hadoopCatalog;
-    }
-
-    public Table getIcebergTable() {
-        return this.icebergTable;
-    }
-
-    public IcebergSink(
+    public AppendOnlyIcebergSinkWriter(
             TableSchema tableSchema,
             HadoopCatalog hadoopCatalog,
             Table icebergTable,
             FileFormat fileFormat) {
-        super(tableSchema);
-        this.hadoopCatalog = hadoopCatalog;
-        this.icebergTable = icebergTable;
-        this.rowSchema =
-                icebergTable.schema().select(Arrays.asList(getTableSchema().getColumnNames()));
-        this.fileFormat = fileFormat;
+        super(
+                tableSchema,
+                icebergTable,
+                hadoopCatalog,
+                icebergTable.schema().select(Arrays.asList(tableSchema.getColumnNames())),
+                fileFormat);
     }
 
     @Override
@@ -70,7 +59,7 @@ public class IcebergSink extends SinkWriterBase {
                 switch (row.getOp()) {
                     case INSERT:
                         Record record = GenericRecord.create(rowSchema);
-                        if (row.size() != getTableSchema().getColumnNames().length) {
+                        if (row.size() != tableSchema.getColumnNames().length) {
                             throw INTERNAL.withDescription("row values do not match table schema")
                                     .asRuntimeException();
                         }
@@ -127,20 +116,18 @@ public class IcebergSink extends SinkWriterBase {
     }
 
     @Override
-    public void sync() {
+    protected IcebergMetadata collectSinkMetadata() {
         try {
-            Transaction transaction = icebergTable.newTransaction();
-            AppendFiles append = transaction.newAppend();
+            List<DataFile> dataFileList = new ArrayList<>();
             for (DataWriter<Record> dataWriter : dataWriterMap.values()) {
                 dataWriter.close();
                 DataFile dataFile = dataWriter.toDataFile();
-                append = append.appendFile(dataFile);
+                dataFileList.add(dataFile);
             }
-            append.commit();
-            transaction.commitTransaction();
             dataWriterMap.clear();
+            return new IcebergMetadata(dataFileList.toArray(new DataFile[0]), new DeleteFile[0]);
         } catch (Exception e) {
-            throw INTERNAL.withDescription(String.format("failed to commit transaction: %s", e))
+            throw INTERNAL.withDescription(String.format("failed to collect metadata: %s", e))
                     .withCause(e)
                     .asRuntimeException();
         }
