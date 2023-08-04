@@ -203,11 +203,21 @@ impl JsonbVal {
     pub fn as_serde_mut(&mut self) -> &mut Value {
         &mut self.0
     }
+
+    pub fn type_name(&self) -> &'static str {
+        self.as_scalar_ref().type_name()
+    }
 }
 
 impl From<Value> for JsonbVal {
     fn from(v: Value) -> Self {
         Self(v.into())
+    }
+}
+
+impl From<JsonbRef<'_>> for JsonbVal {
+    fn from(value: JsonbRef<'_>) -> Self {
+        value.0.to_owned().into()
     }
 }
 
@@ -247,23 +257,23 @@ impl<'a> JsonbRef<'a> {
         }
     }
 
-    pub fn array_len(&self) -> Result<usize, JsonbError> {
+    pub fn array_len(self) -> Result<usize, JsonbError> {
         match self.0 {
             Value::Array(v) => Ok(v.len()),
             _ => ActionSnafu {
                 action: "get array length of",
-                type_name: self.type_name(),
+                value: self,
             }
             .fail(),
         }
     }
 
-    pub fn as_bool(&self) -> Result<bool, JsonbError> {
+    pub fn as_bool(self) -> Result<bool, JsonbError> {
         match self.0 {
             Value::Bool(v) => Ok(*v),
             _ => CastSnafu {
                 to: "boolean",
-                type_name: self.type_name(),
+                value: self,
             }
             .fail(),
         }
@@ -273,12 +283,12 @@ impl<'a> JsonbRef<'a> {
     ///
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
-    pub fn as_number(&self) -> Result<f64, JsonbError> {
+    pub fn as_number(self) -> Result<f64, JsonbError> {
         match self.0 {
-            Value::Number(v) => v.as_f64().context(NumberOutOfRangeSnafu),
+            Value::Number(v) => v.as_f64().context(NumberOutOfRangeSnafu { value: self }),
             _ => CastSnafu {
                 to: "number",
-                type_name: self.type_name(),
+                value: self,
             }
             .fail(),
         }
@@ -323,7 +333,7 @@ impl<'a> JsonbRef<'a> {
             Value::Array(array) => Ok(array.iter().map(Self)),
             _ => ActionSnafu {
                 action: "extract elements from",
-                type_name: self.type_name(),
+                value: self,
             }
             .fail(),
         }
@@ -335,7 +345,7 @@ impl<'a> JsonbRef<'a> {
             Value::Object(object) => Ok(object.keys().map(|s| s.as_str())),
             _ => ActionSnafu {
                 action: "call `jsonb_object_keys` on",
-                type_name: self.type_name(),
+                value: self,
             }
             .fail(),
         }
@@ -349,7 +359,7 @@ impl<'a> JsonbRef<'a> {
             Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
             _ => ActionSnafu {
                 action: "deconstruct",
-                type_name: self.type_name(),
+                value: self,
             }
             .fail(),
         }
@@ -358,20 +368,17 @@ impl<'a> JsonbRef<'a> {
 
 #[derive(Snafu, Debug)]
 pub enum JsonbError {
-    #[snafu(display("cannot cast jsonb {type_name} to type {to}"))]
-    Cast {
-        to: &'static str,
-        type_name: &'static str,
-    },
+    #[snafu(display("cannot cast jsonb `{value}` (with type {}) to type {to}", value.type_name()))]
+    Cast { to: &'static str, value: JsonbVal },
 
-    #[snafu(display("cannot {action} a jsonb {type_name}"))]
+    #[snafu(display("cannot {action} jsonb `{value}` (with type {})", value.type_name()))]
     Action {
         action: &'static str,
-        type_name: &'static str,
+        value: JsonbVal,
     },
 
-    #[snafu(display("jsonb number out of range"))]
-    NumberOutOfRange,
+    #[snafu(display("jsonb number `{value}` out of range"))]
+    NumberOutOfRange { value: JsonbVal },
 }
 
 /// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra

@@ -18,7 +18,7 @@ use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
 use risingwave_expr_macro::function;
-use snafu::{OptionExt, ResultExt};
+use snafu::OptionExt;
 
 use crate::error::CastOutOfRangeSnafu;
 use crate::{ExprError, Result};

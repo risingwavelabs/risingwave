@@ -19,8 +19,10 @@ use futures_util::stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_udf::ArrowFlightUdfClient;
+use snafu::ResultExt;
 
 use super::*;
+use crate::error::UdfSnafu;
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
@@ -49,6 +51,10 @@ impl TableFunction for UserDefinedTableFunction {
 impl UserDefinedTableFunction {
     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+        let error_context = UdfSnafu {
+            ident: self.identifier.as_str(),
+        };
+
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
             let val = c.eval_checked(input).await?.as_ref().try_into()?;
@@ -64,9 +70,10 @@ impl UserDefinedTableFunction {
         for res in self
             .client
             .call_stream(&self.identifier, stream::once(async { input }))
-            .await?
+            .await
+            .context(error_context)?
         {
-            let output = DataChunk::try_from(&res?)?;
+            let output = DataChunk::try_from(&res.context(error_context)?)?;
             yield output;
         }
     }
@@ -86,7 +93,10 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                     "",
                     DataType::from(t)
                         .try_into()
-                        .map_err(risingwave_udf::Error::Unsupported)?,
+                        .map_err(risingwave_udf::Error::Unsupported)
+                        .context(UdfSnafu {
+                            ident: udtf.identifier.as_str(),
+                        })?,
                     true,
                 ))
             })

@@ -87,8 +87,12 @@ pub enum ExprError {
     #[snafu(display("array error"), context(false))]
     Array { source: ArrayError },
 
-    #[snafu(display("udf error"), context(false))]
-    Udf { source: risingwave_udf::Error },
+    #[snafu(display("failed to call udf `{ident}`"))]
+    Udf {
+        #[snafu(source(from(risingwave_udf::Error, Box::new)))]
+        source: Box<risingwave_udf::Error>,
+        ident: Box<str>,
+    },
 
     #[snafu(display("more than one row returned by {name} used as an expression"))]
     MaxOneRow { name: &'static str },

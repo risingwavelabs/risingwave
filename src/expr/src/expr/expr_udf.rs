@@ -23,8 +23,10 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
+use snafu::ResultExt;
 
 use super::{build_from_prost, BoxedExpression};
+use crate::error::UdfSnafu;
 use crate::expr::Expression;
 use crate::{bail, ExprError, Result};
 
@@ -90,7 +92,10 @@ impl UdfExpression {
             .client
             .call(&self.identifier, input)
             .instrument_await(self.span.clone())
-            .await?;
+            .await
+            .context(UdfSnafu {
+                ident: self.identifier.as_str(),
+            })?;
         if output.num_rows() != vis.len() {
             bail!(
                 "UDF returned {} rows, but expected {}",
@@ -123,7 +128,10 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
                         "",
                         DataType::from(t)
                             .try_into()
-                            .map_err(risingwave_udf::Error::Unsupported)?,
+                            .map_err(risingwave_udf::Error::Unsupported)
+                            .context(UdfSnafu {
+                                ident: udf.identifier.as_str(),
+                            })?,
                         true,
                     ))
                 })
@@ -157,9 +165,12 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         Ok(client)
     } else {
         // create new client
-        let client = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(link))
-        })?);
+        let client = Arc::new(
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(link))
+            })
+            .context(UdfSnafu { ident: link })?,
+        );
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
     }
