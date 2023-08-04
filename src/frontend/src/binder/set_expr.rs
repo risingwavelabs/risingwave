@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
-use crate::expr::{CorrelatedId, Depth};
+use crate::expr::{CorrelatedId, Depth, align_types};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`s via set operators (e.g. union).
@@ -134,11 +134,11 @@ impl Binder {
             } => {
                 match op {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
-                        let left = Box::new(self.bind_set_expr(*left)?);
+                        let mut left = self.bind_set_expr(*left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
                         self.context.cte_to_relation = new_context.cte_to_relation.clone();
-                        let right = Box::new(self.bind_set_expr(*right)?);
+                        let mut right = self.bind_set_expr(*right)?;
 
                         if left.schema().fields.len() != right.schema().fields.len() {
                             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -146,6 +146,20 @@ impl Binder {
                                 op
                             ))
                             .into());
+                        }
+
+                        // Handle type alignment for values union values
+                        // E.g. Select 1 UNION ALL Select NULL
+                        match (&mut left, &mut right) {
+                            (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) => {
+                                for (i, (l, r)) in l_select.select_items.iter_mut().zip_eq_fast(r_select.select_items.iter_mut()).enumerate() {
+                                    let expr = align_types(vec![l, r].into_iter())?;
+                                    l_select.schema.fields[i].data_type = expr.clone();
+                                    r_select.schema.fields[i].data_type = expr;
+                                }
+                            },
+                            // TODO: handle other cases
+                            _ => {},
                         }
 
                         for (a, b) in left
@@ -156,12 +170,10 @@ impl Binder {
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "{} types {} of column {} is different from types {} of column {}",
+                                    "{} types {} and {} cannot be matched",
                                     op,
                                     a.data_type.prost_type_name().as_str_name(),
-                                    a.name,
                                     b.data_type.prost_type_name().as_str_name(),
-                                    b.name,
                                 ))
                                     .into());
                             }
@@ -189,8 +201,8 @@ impl Binder {
                         Ok(BoundSetExpr::SetOperation {
                             op: op.into(),
                             all,
-                            left,
-                            right,
+                            left: Box::new(left),
+                            right: Box::new(right),
                         })
                     }
                 }
