@@ -21,6 +21,16 @@ use crate::row::Row;
 use crate::types::DatumRef;
 
 impl DataChunk {
+    /// Get an iterator for all rows.
+    /// # Safety
+    /// The caller should check visibility before invoking this function.
+    pub fn rows_unchecked(&self) -> DataChunkRefUncheckedIter<'_> {
+        DataChunkRefUncheckedIter {
+            chunk: self,
+            idx: 0,
+        }
+    }
+
     /// Get an iterator for visible rows.
     pub fn rows(&self) -> DataChunkRefIter<'_> {
         self.rows_in(0..self.capacity())
@@ -40,6 +50,34 @@ impl DataChunk {
             chunk: self,
             idx: 0,
         }
+    }
+}
+
+pub struct DataChunkRefUncheckedIter<'a> {
+    chunk: &'a DataChunk,
+    /// `None` means finished
+    idx: usize,
+}
+
+impl<'a> Iterator for DataChunkRefUncheckedIter<'a> {
+    type Item = RowRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx < self.chunk.cardinality() {
+            let row = Some(RowRef {
+                chunk: self.chunk,
+                idx: self.idx,
+            });
+            self.idx += 1;
+            row
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.chunk.cardinality() - self.idx;
+        (remaining, Some(remaining))
     }
 }
 
