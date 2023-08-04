@@ -100,13 +100,16 @@ int2	float8
 int2	int4
 int2	int8
 int2	numeric
+int2	rw_int256
 int4	float4
 int4	float8
 int4	int8
 int4	numeric
+int4	rw_int256
 int8	float4
 int8	float8
 int8	numeric
+int8	rw_int256
 numeric	float4
 numeric	float8
 time	interval
