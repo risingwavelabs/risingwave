@@ -36,13 +36,9 @@ pub struct PubsubSplit {
 }
 
 impl PubsubSplit {
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self {
-            start_offset: Some(start_offset),
-            index: self.index,
-            subscription: self.subscription.clone(),
-            stop_offset: None,
-        }
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        self.start_offset = Some(start_offset);
+        Ok(())
     }
 }
 
