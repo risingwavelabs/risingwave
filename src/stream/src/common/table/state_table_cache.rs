@@ -118,8 +118,10 @@ impl StateTableWatermarkCache {
 
     /// Delete a value
     /// If the watermark col is NULL, it will just be ignored.
-    pub fn delete(&mut self, key: &impl Row) -> Option<()> {
-        self.inner.delete(&DefaultOrdered(key.into_owned_row()))
+    pub fn delete(&mut self, key: &impl Row) {
+        if !key.is_null_at(0) {
+            self.inner.delete(&DefaultOrdered(key.into_owned_row()));
+        }
     }
 
     pub fn capacity(&self) -> usize {
@@ -275,8 +277,7 @@ mod tests {
             Some(Timestamptz::from_secs(1000).unwrap().to_scalar_value()),
             Some(Timestamptz::from_secs(1234).unwrap().to_scalar_value()),
         ];
-        let old_val = cache.delete(&v1);
-        assert!(old_val.is_none());
+        cache.delete(&v1);
     }
 
     /// With capacity 3, test the following sequence of inserts:

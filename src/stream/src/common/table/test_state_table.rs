@@ -1496,27 +1496,14 @@ async fn test_state_table_watermark_cache_ignore_null() {
             ]),
         ),
         (
-            Op::Insert, // mark 1
-            OwnedRow::new(vec![
-                Some(Timestamptz::from_secs(2000).unwrap().to_scalar_value()),
-                Some(4888i64.into()),
-            ]),
-        ),
-        // Watermark Partition here later.
-        (
-            Op::Insert, // mark 2
-            OwnedRow::new(vec![
-                Some(Timestamptz::from_secs(3000).unwrap().to_scalar_value()),
-                Some(1000i64.into()),
-            ]),
-        ),
-        (
-            Op::Insert, // update the row with `mark 1`
+            Op::Insert,
             OwnedRow::new(vec![
                 Some(Timestamptz::from_secs(4000).unwrap().to_scalar_value()),
                 Some(4888i64.into()),
             ]),
         ),
+        (Op::Insert, OwnedRow::new(vec![None, Some(4888i64.into())])),
+        (Op::Insert, OwnedRow::new(vec![None, Some(1000i64.into())])),
     ];
 
     let chunk = StreamChunk::from_rows(&rows, &data_types);
@@ -1548,16 +1535,35 @@ async fn test_state_table_watermark_cache_ignore_null() {
     epoch.inc();
     state_table.commit(epoch).await.unwrap();
 
-    // After the first barrier, watermark cache won't be filled.
     let cache = state_table.get_watermark_cache();
-    assert_eq!(cache.len(), 2);
+    assert_eq!(cache.len(), 1);
     assert_eq!(
         cache.lowest_key().unwrap(),
-        Timestamptz::from_secs(3000)
+        Timestamptz::from_secs(4000)
             .unwrap()
             .to_scalar_value()
             .as_scalar_ref_impl()
-    )
+    );
+
+    let rows = vec![
+        (Op::Delete, OwnedRow::new(vec![None, Some(4888i64.into())])),
+        // Watermark Partition here later.
+        (Op::Delete, OwnedRow::new(vec![None, Some(1000i64.into())])),
+    ];
+
+    let chunk = StreamChunk::from_rows(&rows, &data_types);
+    state_table.write_chunk(chunk);
+
+    // Cache contents should not be impacted.
+    let cache = state_table.get_watermark_cache();
+    assert_eq!(cache.len(), 1);
+    assert_eq!(
+        cache.lowest_key().unwrap(),
+        Timestamptz::from_secs(4000)
+            .unwrap()
+            .to_scalar_value()
+            .as_scalar_ref_impl()
+    );
 }
 
 // Commit state table to init cache.
