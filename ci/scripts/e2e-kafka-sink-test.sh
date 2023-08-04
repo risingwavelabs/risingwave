@@ -8,7 +8,7 @@ TOPICS=("test-rw-sink-append-only" "test-rw-sink-upsert" "test-rw-sink-debezium"
 
 for TOPIC_NAME in "${TOPICS[@]}"; do
   # Check if the topic already exists
-  EXISTING_TOPIC=$(./.risingwave/bin/kafka/bin/kafka-topic.sh --list --bootstrap-server $BROKER | grep "$TOPIC_NAME")
+  EXISTING_TOPIC=$(./.risingwave/bin/kafka/bin/kafka-topics.sh --list --bootstrap-server $BROKER | grep "$TOPIC_NAME")
 
   if [ -n "$EXISTING_TOPIC" ]; then
     echo "Topic $TOPIC_NAME already exists. Skipping creation."
