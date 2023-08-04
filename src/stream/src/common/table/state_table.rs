@@ -786,19 +786,15 @@ where
             self.pk_serde.serialize(key, &mut buffer);
             let key_bytes = buffer.freeze();
             let value_bytes = self.row_serde.serialize(value).into();
+            if USE_WATERMARK_CACHE {
+                match op {
+                    Op::Insert | Op::UpdateInsert => self.watermark_cache.insert(&key),
+                    Op::Delete | Op::UpdateDelete => self.watermark_cache.delete(&key),
+                }
+            }
             match op {
-                Op::Insert | Op::UpdateInsert => {
-                    if USE_WATERMARK_CACHE {
-                        self.watermark_cache.insert(&key);
-                    }
-                    self.insert_inner(key_bytes, value_bytes);
-                }
-                Op::Delete | Op::UpdateDelete => {
-                    if USE_WATERMARK_CACHE {
-                        self.watermark_cache.delete(&key);
-                    }
-                    self.delete_inner(key_bytes, value_bytes);
-                }
+                Op::Insert | Op::UpdateInsert => self.insert_inner(key_bytes, value_bytes),
+                Op::Delete | Op::UpdateDelete => self.delete_inner(key_bytes, value_bytes),
             }
         };
 
