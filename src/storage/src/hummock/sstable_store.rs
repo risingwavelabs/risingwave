@@ -538,7 +538,6 @@ impl SstableStore {
         ))
     }
 
-
     pub async fn get_stream(
         &self,
         sst: &Sstable,
@@ -548,7 +547,7 @@ impl SstableStore {
         self.get_stream_by_position(sst.id, block_index, &sst.meta.block_metas)
             .await
     }
-    
+
     pub fn data_file_cache_refill_filter(
         &self,
     ) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {

@@ -145,7 +145,7 @@ impl CompactorRunner {
             .compactor
             .context
             .storage_opts
-            .object_store_streaming_read_timeout_ms;
+            .compact_iter_recreate_timeout_ms;
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
