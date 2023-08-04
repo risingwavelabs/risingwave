@@ -14,7 +14,7 @@
 
 use risingwave_common::array::ListValue;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{Datum, ScalarRef};
+use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
 use risingwave_expr_macro::aggregate;
 
 #[aggregate("array_agg(*) -> list", state = "State")]
@@ -39,110 +39,58 @@ impl From<State> for ListValue {
     }
 }
 
+impl TryFrom<ScalarImpl> for State {
+    type Error = ();
+
+    fn try_from(state: ScalarImpl) -> Result<Self, Self::Error> {
+        state.try_into().map_err(|_| ())
+    }
+}
+
+impl From<State> for ScalarImpl {
+    fn from(state: State) -> Self {
+        ListValue::new(state.0).into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk, ListValue};
-    use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarRef};
+    use risingwave_common::array::{ListValue, StreamChunk};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use crate::agg::AggCall;
     use crate::Result;
 
     #[tokio::test]
     async fn test_array_agg_basic() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "i
-             123
-             456
-             789",
+        let chunk = StreamChunk::from_pretty(
+            " i
+            + 123
+            + 456
+            + 789",
         );
-        let return_type = DataType::List(Box::new(DataType::Int32));
-        let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
+        let mut agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        agg.update(&chunk).await?;
+        let actual = agg.output()?;
         assert_eq!(
             actual,
-            vec![Some(ListValue::new(vec![
-                Some(123.into()),
-                Some(456.into()),
-                Some(789.into())
-            ]))]
+            Some(ListValue::new(vec![Some(123.into()), Some(456.into()), Some(789.into())]).into())
         );
         Ok(())
     }
 
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
-        let return_type = DataType::List(Box::new(DataType::Int32));
-        let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        let mut builder = return_type.create_array_builder(0);
-        agg.output(&mut builder)?;
+        let mut agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
 
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
-        assert_eq!(actual, vec![None]);
+        assert_eq!(agg.output()?, None);
 
-        let chunk = DataChunk::from_pretty(
-            "i
-             .",
+        let chunk = StreamChunk::from_pretty(
+            " i
+            + .",
         );
-        let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
-        assert_eq!(actual, vec![Some(ListValue::new(vec![None]))]);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_array_agg_with_order() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "i    i
-             123  3
-             456  2
-             789  2
-             321  9",
-        );
-        let return_type = DataType::List(Box::new(DataType::Int32));
-        let mut agg = crate::agg::build(AggCall::from_pretty(
-            "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
-        ))?;
-        let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
-        assert_eq!(
-            actual,
-            vec![Some(ListValue::new(vec![
-                Some(789.into()),
-                Some(456.into()),
-                Some(123.into()),
-                Some(321.into())
-            ]))]
-        );
+        agg.update(&chunk).await?;
+        assert_eq!(agg.output()?, Some(ListValue::new(vec![None]).into()));
         Ok(())
     }
 }

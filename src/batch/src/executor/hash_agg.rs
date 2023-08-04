@@ -16,17 +16,18 @@ use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
+use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -83,7 +84,7 @@ impl HashAggExecutorBuilder {
         let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
+            .map(|agg| AggCall::from_protobuf(agg).and_then(|agg| build_agg(&agg)))
             .try_collect()?;
 
         let group_key_columns = hash_agg_node
@@ -221,7 +222,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = chunk?.compact();
+            let chunk = StreamChunk::from(chunk?.compact());
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
             for (row_id, key) in keys.into_iter().enumerate() {
@@ -236,7 +237,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     if !new_group {
                         memory_usage_diff -= state.estimated_size() as i64;
                     }
-                    state.update_single(&chunk, row_id).await?;
+                    state.update_range(&chunk, row_id..row_id + 1).await?;
                     memory_usage_diff += state.estimated_size() as i64;
                 }
             }
@@ -267,10 +268,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 has_next = true;
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
-                states
-                    .iter_mut()
-                    .zip_eq_fast(&mut agg_builders)
-                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
+                for (aggregator, builder) in states.iter_mut().zip_eq_fast(&mut agg_builders) {
+                    builder.append(aggregator.output()?);
+                }
             }
             if !has_next {
                 break; // exit loop

@@ -35,11 +35,8 @@ pub use block_cache::*;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::opts::StorageOpts;
 
-#[cfg(target_os = "linux")]
-pub mod file_cache;
-
-mod tiered_cache;
-pub use tiered_cache::*;
+mod file_cache;
+pub use file_cache::*;
 
 pub mod sstable;
 pub use sstable::*;
@@ -197,6 +194,11 @@ impl HummockStorage {
             pinned_version,
             compactor_context.clone(),
             state_store_metrics.clone(),
+            options
+                .data_file_cache_refill_levels
+                .iter()
+                .copied()
+                .collect(),
         );
 
         let instance = Self {

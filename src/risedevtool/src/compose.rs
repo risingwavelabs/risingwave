@@ -187,7 +187,8 @@ impl Compose for ComputeNodeConfig {
         let mut command = Command::new("compute-node");
         ComputeNodeService::apply_command_args(&mut command, self)?;
         if self.enable_tiered_cache {
-            command.arg("--file-cache-dir").arg("/filecache");
+            command.arg("--data-file-cache-dir").arg("/foyer/data");
+            command.arg("--meta-file-cache-dir").arg("/foyer/meta");
         }
 
         if let Some(c) = &config.rw_config_path {

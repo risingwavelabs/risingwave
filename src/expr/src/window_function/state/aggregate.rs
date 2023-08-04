@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use futures::FutureExt;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -85,7 +85,7 @@ impl WindowState for AggregateState {
     }
 
     fn curr_output(&self) -> Result<Datum> {
-        let wrapper = BatchAggregatorWrapper {
+        let wrapper = AggregatorWrapper {
             agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
         };
@@ -125,12 +125,12 @@ impl EstimateSize for AggregateState {
     }
 }
 
-struct BatchAggregatorWrapper<'a> {
+struct AggregatorWrapper<'a> {
     agg_call: &'a AggCall,
     arg_data_types: &'a [DataType],
 }
 
-impl BatchAggregatorWrapper<'_> {
+impl AggregatorWrapper<'_> {
     fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a [Datum]>) -> Result<Datum> {
         // TODO(rc): switch to a better general version of aggregator implementation
 
@@ -151,17 +151,14 @@ impl BatchAggregatorWrapper<'_> {
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
-        let chunk = DataChunk::new(columns, Vis::Compact(n_values));
+        let chunk = StreamChunk::from(DataChunk::new(columns, n_values));
 
-        let mut aggregator = builg_agg(self.agg_call.clone())?;
+        let mut aggregator = builg_agg(self.agg_call)?;
         aggregator
-            .update_multi(&chunk, 0, n_values)
+            .update(&chunk)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")?;
-
-        let mut ret_value_builder = aggregator.return_type().create_array_builder(1);
-        aggregator.output(&mut ret_value_builder)?;
-        Ok(ret_value_builder.finish().to_datum())
+        aggregator.output()
     }
 }
 
