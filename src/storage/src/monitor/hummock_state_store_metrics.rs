@@ -69,6 +69,8 @@ pub struct HummockStateStoreMetrics {
     // memory
     pub mem_table_memory_size: IntGaugeVec,
     pub mem_table_item_count: IntGaugeVec,
+
+    registry: Registry,
 }
 
 impl HummockStateStoreMetrics {
@@ -286,12 +288,17 @@ impl HummockStateStoreMetrics {
             uploader_uploading_task_size,
             mem_table_memory_size,
             mem_table_item_count,
+            registry,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 }
 

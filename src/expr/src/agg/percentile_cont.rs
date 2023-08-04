@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use risingwave_common::array::*;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
@@ -61,7 +64,7 @@ use crate::Result;
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_cont(float64) -> float64")]
-fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = agg.direct_args[0]
         .literal()
         .map(|x| (*x.as_float64()).into());
@@ -95,21 +98,22 @@ impl Aggregator for PercentileCont {
         DataType::Float64
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let array = input.column_at(0);
-        for row_id in start_row_id..end_row_id {
-            self.add_datum(array.value_at(row_id));
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        for (_, row) in input.rows() {
+            self.add_datum(row.datum_at(0));
         }
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let Some(fractions) = self.fractions && !self.data.is_empty() {
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+        for (_, row) in input.rows_in(range) {
+            self.add_datum(row.datum_at(0));
+        }
+        Ok(())
+    }
+
+    fn get_output(&self) -> Result<Datum> {
+        Ok(if let Some(fractions) = self.fractions && !self.data.is_empty() {
             let rn = fractions * (self.data.len() - 1) as f64;
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
@@ -119,11 +123,28 @@ impl Aggregator for PercentileCont {
                 (crn - rn) * self.data[frn as usize]
                     + (rn - frn) * self.data[crn as usize]
             };
-            builder.append(Some(ScalarImpl::Float64(result.into())));
+            Some(result.into())
         } else {
-            builder.append(Datum::None);
-        }
-        Ok(())
+            None
+        })
+    }
+
+    fn output(&mut self) -> Result<Datum> {
+        let result = self.get_output()?;
+        self.reset();
+        Ok(result)
+    }
+
+    fn reset(&mut self) {
+        self.data.clear();
+    }
+
+    fn get_state(&self) -> Datum {
+        unimplemented!()
+    }
+
+    fn set_state(&mut self, _: Datum) {
+        unimplemented!()
     }
 
     fn estimated_size(&self) -> usize {

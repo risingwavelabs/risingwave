@@ -44,7 +44,6 @@ pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 pub const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
-pub const STORAGE_FILE_CACHE_MEMORY_PROPORTION: f64 = 0.05;
 pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 
 /// `MemoryControlStats` contains the state from previous control loop
@@ -172,15 +171,19 @@ pub fn storage_memory_config(
             .ceil() as usize)
             >> 20,
     );
-    let file_cache_total_buffer_capacity_mb = storage_config
-        .file_cache
-        .total_buffer_capacity_mb
+    let data_file_cache_buffer_pool_capacity_mb = storage_config
+        .data_file_cache
+        .buffer_pool_size_mb
         .unwrap_or(
-            ((non_reserved_memory_bytes as f64
-                * storage_memory_proportion
-                * STORAGE_FILE_CACHE_MEMORY_PROPORTION)
-                .ceil() as usize)
-                >> 20,
+            storage_config.data_file_cache.file_capacity_mb
+                * storage_config.data_file_cache.flushers,
+        );
+    let meta_file_cache_buffer_pool_capacity_mb = storage_config
+        .meta_file_cache
+        .buffer_pool_size_mb
+        .unwrap_or(
+            storage_config.meta_file_cache.file_capacity_mb
+                * storage_config.meta_file_cache.flushers,
         );
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
@@ -189,7 +192,8 @@ pub fn storage_memory_config(
     let total_calculated_mb = block_cache_capacity_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
-        + file_cache_total_buffer_capacity_mb
+        + data_file_cache_buffer_pool_capacity_mb
+        + meta_file_cache_buffer_pool_capacity_mb
         + compactor_memory_limit_mb;
     let soft_limit_mb = (non_reserved_memory_bytes as f64
         * (storage_memory_proportion + compactor_memory_proportion).ceil())
@@ -208,7 +212,8 @@ pub fn storage_memory_config(
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        file_cache_total_buffer_capacity_mb,
+        data_file_cache_buffer_pool_capacity_mb,
+        meta_file_cache_buffer_pool_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }
@@ -243,19 +248,22 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 122);
+        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 256);
+        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);
         storage_config.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
-        storage_config.file_cache.total_buffer_capacity_mb = Some(128);
+        storage_config.data_file_cache.buffer_pool_size_mb = Some(1024);
+        storage_config.meta_file_cache.buffer_pool_size_mb = Some(1024);
         storage_config.compactor_memory_limit_mb = Some(512);
         let memory_config = storage_memory_config(0, true, &storage_config);
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
-        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 128);
+        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 1024);
+        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 1024);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
     }
 }
