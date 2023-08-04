@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::Int256;
+use risingwave_common::util::truncated_fmt::TruncatedFmt;
 use risingwave_expr_macro::function;
 use snafu::{ResultExt, Snafu};
 
@@ -20,25 +21,11 @@ use crate::{ExprError, Result};
 
 const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 
-struct Truncated<'a, const N: usize>(&'a str);
-
-impl<'a, const N: usize> std::fmt::Display for Truncated<'a, N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.0.len() <= N {
-            write!(f, "'{}'", self)
-        } else {
-            write!(
-                f,
-                "'{}...'(truncated, total {} bytes)",
-                &self.0[..N],
-                self.0.len(),
-            )
-        }
-    }
-}
-
 #[derive(Snafu, Debug)]
-#[snafu(display("failed to parse hex {}", Truncated::<MAX_AVAILABLE_HEX_STR_LEN>(from)))]
+#[snafu(display(
+    "failed to parse hex {}",
+    TruncatedFmt(from, MAX_AVAILABLE_HEX_STR_LEN)
+))]
 pub struct ParseInt256Error {
     from: Box<str>,
     source: std::num::ParseIntError,

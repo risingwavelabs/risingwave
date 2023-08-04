@@ -105,7 +105,7 @@ pub enum ExprError {
     BuildFromProto { source: PbFieldNotFound },
 
     // TODO: remove this variant and make errors categorized
-    // TODO(snafu): may use `whatever`
+    // TODO(snafu): use `whatever` once it gets more mature
     #[snafu(display("uncategorized error"), context(false))]
     Internal { source: anyhow::Error },
 }

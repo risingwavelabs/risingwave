@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod bytea;
-mod date_time;
+mod datetime;
 
 pub use bytea::*;
-pub use date_time::*;
+pub use datetime::*;

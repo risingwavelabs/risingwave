@@ -42,6 +42,7 @@ pub mod schema_check;
 pub mod sort_util;
 pub mod stream_graph_visitor;
 pub mod tracing;
+pub mod truncated_fmt;
 pub mod value_encoding;
 pub mod worker_util;
 

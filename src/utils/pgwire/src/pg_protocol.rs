@@ -28,6 +28,7 @@ use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
+use risingwave_common::util::truncated_fmt::TruncatedFmt;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -394,7 +395,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
+            sql = format_args!("{}", TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
         );
 
         result
@@ -418,10 +419,7 @@ where
             let span = tracing::info_span!(
                 "process_query_msg_one_stmt",
                 session_id = session.id().0,
-                stmt = format_args!(
-                    "{}",
-                    truncated_fmt::TruncatedFmt(&stmt, *RW_QUERY_LOG_TRUNCATE_LEN)
-                ),
+                stmt = format_args!("{}", TruncatedFmt(&stmt, *RW_QUERY_LOG_TRUNCATE_LEN)),
             );
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
@@ -519,7 +517,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
+            sql = format_args!("{}", TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
         );
 
         result
@@ -655,7 +653,7 @@ where
                 session = %session_id,
                 status = %if result.is_ok() { "ok" } else { "err" },
                 time = %format_args!("{}ms", mills),
-                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
+                sql = format_args!("{}", TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
             );
 
             let pg_response = result.map_err(PsqlError::ExecuteError)?;
@@ -984,62 +982,4 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     let acceptor = acceptor.build();
 
     Ok(acceptor.into_context())
-}
-
-mod truncated_fmt {
-    use std::fmt::*;
-
-    struct TruncatedFormatter<'a, 'b> {
-        remaining: usize,
-        finished: bool,
-        f: &'a mut Formatter<'b>,
-    }
-    impl<'a, 'b> Write for TruncatedFormatter<'a, 'b> {
-        fn write_str(&mut self, s: &str) -> Result {
-            if self.finished {
-                return Ok(());
-            }
-
-            if self.remaining < s.len() {
-                self.f.write_str(&s[0..self.remaining])?;
-                self.remaining = 0;
-                self.f.write_str("...(truncated)")?;
-                self.finished = true; // so that ...(truncated) is printed exactly once
-            } else {
-                self.f.write_str(s)?;
-                self.remaining -= s.len();
-            }
-            Ok(())
-        }
-    }
-
-    pub struct TruncatedFmt<'a, T>(pub &'a T, pub usize);
-
-    impl<'a, T> Debug for TruncatedFmt<'a, T>
-    where
-        T: Debug,
-    {
-        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-            TruncatedFormatter {
-                remaining: self.1,
-                finished: false,
-                f,
-            }
-            .write_fmt(format_args!("{:?}", self.0))
-        }
-    }
-
-    impl<'a, T> Display for TruncatedFmt<'a, T>
-    where
-        T: Display,
-    {
-        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-            TruncatedFormatter {
-                remaining: self.1,
-                finished: false,
-                f,
-            }
-            .write_fmt(format_args!("{}", self.0))
-        }
-    }
 }
