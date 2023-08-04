@@ -202,3 +202,60 @@ query T
 select array[array[1,true]]::bool[][];
 ----
 {{t,t}}
+
+# Type testing #
+
+query T
+select array[1]::int[];
+----
+{1}
+
+query T
+select array[1]::int8[];
+----
+{1}
+
+query T
+select array[1]::int4[];
+----
+{1}
+
+query T
+select array[true]::boolean[];
+----
+{t}
+
+query T
+select array[1]::float4[];
+----
+{1}
+
+query T
+select array[1]::float8[];
+----
+{1}
+
+query T
+select array['2013-01-01']::date[];
+----
+{2013-01-01}
+
+query T
+select array['2013-01-01 11:11:11']::timestamp[];
+----
+{"2013-01-01 11:11:11"}
+
+query T
+select array['11:11:11']::time[];
+----
+{11:11:11}
+
+query T
+select array[1]::numeric[];
+----
+{1}
+
+query T
+select array['1'::bytea]::bytea[];
+----
+{"\\x31"}

@@ -101,16 +101,27 @@ pub struct ComputeNodeOpts {
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 
-    /// Path to file cache data directory.
+    /// Path to data file cache data directory.
     /// Left empty to disable file cache.
-    #[clap(long, env = "RW_FILE_CACHE_DIR")]
-    #[override_opts(path = storage.file_cache.dir)]
-    pub file_cache_dir: Option<String>,
+    #[clap(long, env = "RW_DATA_FILE_CACHE_DIR")]
+    #[override_opts(path = storage.data_file_cache.dir)]
+    pub data_file_cache_dir: Option<String>,
+
+    /// Path to meta file cache data directory.
+    /// Left empty to disable file cache.
+    #[clap(long, env = "RW_META_FILE_CACHE_DIR")]
+    #[override_opts(path = storage.meta_file_cache.dir)]
+    pub meta_file_cache_dir: Option<String>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, env = "RW_AUTO_DUMP_HEAP_PROFILE_DIR")]
+    #[override_opts(path = server.auto_dump_heap_profile.dir)]
+    pub auto_dump_heap_profile_dir: Option<String>,
 
     #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
     #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]

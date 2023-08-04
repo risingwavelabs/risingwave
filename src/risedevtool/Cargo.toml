@@ -24,7 +24,7 @@ google-cloud-pubsub = "0.17"
 indicatif = "0.17"
 itertools = "0.11"
 rdkafka = { workspace = true }
-redis = "0.22"
+redis = "0.23"
 regex = "1"
 reqwest = "0.11"
 serde = { version = "1", features = ["derive"] }

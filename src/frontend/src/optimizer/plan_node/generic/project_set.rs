@@ -50,6 +50,10 @@ impl<PlanRef> ProjectSet<PlanRef> {
     pub(crate) fn output_len(&self) -> usize {
         self.select_list.len() + 1
     }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
+        (self.select_list, self.input)
+    }
 }
 
 impl<PlanRef> DistillUnit for ProjectSet<PlanRef> {
