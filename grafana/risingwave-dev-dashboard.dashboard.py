@@ -1970,7 +1970,7 @@ def section_hummock(panels):
             [
                 panels.target(
                     f"histogram_quantile(1.0, sum(rate({metric('state_store_write_batch_size_bucket')}[$__rate_interval])) by (le, table_id, job, instance))",
-                    f"pmax - {{table_id}} @ {{job}} @ {{instance}}",
+                    "pmax - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
