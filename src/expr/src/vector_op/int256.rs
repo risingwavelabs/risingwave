@@ -59,7 +59,6 @@ mod tests {
     use risingwave_common::types::Int256;
 
     use crate::vector_op::int256::hex_to_int256;
-    use crate::ExprError::Parse;
 
     #[test]
     fn test_hex_to_int256() {

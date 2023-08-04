@@ -38,7 +38,7 @@ use crate::expr::{
 };
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::sig::FuncSigDebug;
-use crate::{bail, ExprError, Result};
+use crate::{bail, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {

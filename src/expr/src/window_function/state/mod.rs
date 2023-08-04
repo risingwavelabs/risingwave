@@ -24,7 +24,7 @@ use super::WindowFuncCall;
 use crate::error::UnsupportedFunctionSnafu;
 use crate::function::window::WindowFuncKind;
 use crate::sig::FuncSigDebug;
-use crate::{ExprError, Result};
+use crate::Result;
 
 mod buffer;
 

@@ -25,7 +25,6 @@ use crate::error::UnsupportedFunctionSnafu;
 use crate::expr::template::{BinaryExpression, TernaryExpression};
 use crate::vector_op::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::vector_op::to_timestamp::{to_timestamp, to_timestamp_const_tmpl, to_timestamp_legacy};
-use crate::ExprError;
 
 #[derive(Debug)]
 struct ExprToTimestampConstTmplContext {

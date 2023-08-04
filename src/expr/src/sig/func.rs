@@ -20,10 +20,9 @@ use std::sync::LazyLock;
 
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_pb::expr::expr_node::PbType;
-use snafu::OptionExt;
 
 use super::FuncSigDebug;
-use crate::error::{Result, UnsupportedFunctionSnafu};
+use crate::error::Result;
 use crate::expr::BoxedExpression;
 
 pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {

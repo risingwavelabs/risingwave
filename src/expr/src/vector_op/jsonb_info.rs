@@ -17,7 +17,7 @@ use std::fmt::Write;
 use risingwave_common::types::JsonbRef;
 use risingwave_expr_macro::function;
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[function("jsonb_typeof(jsonb) -> varchar")]
 pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut dyn Write) {

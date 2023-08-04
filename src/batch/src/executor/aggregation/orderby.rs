@@ -14,7 +14,6 @@
 
 use std::ops::Range;
 
-use anyhow::anyhow;
 use futures_util::FutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
@@ -24,7 +23,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::agg::{Aggregator, BoxedAggState};
-use risingwave_expr::{ExprError, Result};
+use risingwave_expr::Result;
 
 /// `ProjectionOrderBy` is a wrapper of `Aggregator` that sorts rows by given columns and then
 /// projects columns.

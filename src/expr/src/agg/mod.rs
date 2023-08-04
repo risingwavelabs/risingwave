@@ -22,7 +22,7 @@ use snafu::OptionExt;
 
 use crate::error::UnsupportedFunctionSnafu;
 use crate::sig::FuncSigDebug;
-use crate::{ExprError, Result};
+use crate::Result;
 
 // aggregate definition
 mod def;

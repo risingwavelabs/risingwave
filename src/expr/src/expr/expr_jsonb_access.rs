@@ -21,10 +21,9 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, JsonbRef, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::build_function;
-use snafu::ResultExt;
 
 use super::{BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// This is forked from [`BinaryExpression`] for the following reasons:
 /// * Optimize for the case when rhs path is const. (not implemented yet)

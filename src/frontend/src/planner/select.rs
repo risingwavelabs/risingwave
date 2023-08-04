@@ -20,7 +20,6 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::{BoundDistinct, BoundSelect};

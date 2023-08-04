@@ -26,7 +26,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
-use snafu::whatever;
 
 use super::{build_from_prost as expr_build_from_prost, Expression};
 use crate::error::UnsupportedFunctionSnafu;
