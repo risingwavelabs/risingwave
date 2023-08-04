@@ -78,7 +78,7 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
     let values = array.iter();
     let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {
         name: "n",
-        reason: "less than zero".to_string(),
+        reason: "less than zero".into(),
     })?;
     let len_to_retain =
         values
@@ -86,7 +86,7 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
             .checked_sub(len_to_trim)
             .ok_or_else(|| ExprError::InvalidParam {
                 name: "n",
-                reason: "more than array length".to_string(),
+                reason: "more than array length".into(),
             })?;
     Ok(ListValue::new(
         values
