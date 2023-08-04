@@ -27,9 +27,7 @@ use crate::common::cache::{StateCache, TopNStateCache};
 ///
 /// TODO(kwannoel):
 /// We can also store bytes from encoded pk.
-/// However, we need to ignore NULL values in their encoded form.
-/// Additionally, we need to encode pk w/o vnode, to make sure watermark stays as the prefix.
-/// The benefit is we avoid the clone of Arc of pk indices.
+/// The benefit is we deserialization of PK when refiling the cache.
 type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 
 /// Cache Invariants
@@ -87,7 +85,7 @@ pub struct StateTableWatermarkCache {
 impl StateTableWatermarkCache {
     pub fn new(size: usize) -> Self {
         Self {
-            inner: TopNStateCache::new(size), // TODO: This number is arbitrary
+            inner: TopNStateCache::new(size),
         }
     }
 

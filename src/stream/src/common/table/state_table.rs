@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{pin_mut, Stream, StreamExt};
+use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
@@ -885,7 +886,7 @@ where
                             .iter_key_and_val_with_pk_range(
                                 &range,
                                 vnode,
-                                PrefetchOptions::new_for_exhaust_iter(),
+                                PrefetchOptions::default(),
                             )
                             .await?;
                         streams.push(Box::pin(stream));
@@ -893,7 +894,9 @@ where
                     let merged_stream = merge_sort(streams);
                     pin_mut!(merged_stream);
 
-                    while pks.len() < self.watermark_cache.capacity() && let Some((pk, _row)) = merged_stream.next().await.transpose()? {
+                    #[for_await]
+                    for entry in merged_stream.take(self.watermark_cache.capacity()) {
+                        let (pk, _row) = entry?;
                         let (_, pk) = deserialize_pk_with_vnode(&pk[..], &self.pk_serde)?;
                         if !pk.is_null_at(0) {
                             pks.push(pk);
@@ -1014,6 +1017,12 @@ where
         self.prev_cleaned_watermark = watermark;
 
         // Clear the watermark cache and force a resync.
+        // TODO(kwannoel): This can be further optimized:
+        // 1. Add a `cache.drain_until` interface, so we only clear the watermark cache
+        //    up to the largest end of delete ranges.
+        // 2. Mark the cache as not_synced, so we can still refill it later.
+        // 3. When refilling the cache,
+        //    we just refill from the largest value of the cache, as the lower bound.
         if USE_WATERMARK_CACHE && !delete_ranges.is_empty() {
             self.watermark_cache.clear();
         }
