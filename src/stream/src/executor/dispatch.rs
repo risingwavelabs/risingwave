@@ -479,7 +479,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
             self.cur += 1;
             self.cur %= self.outputs.len();
@@ -615,11 +615,14 @@ impl Dispatcher for HashDataDispatcher {
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             // Apply output indices after calculating the vnode.
-            let chunk = chunk.reorder_columns(&self.output_indices);
-            // TODO: refactor with `Vis`.
-            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk = chunk.project(&self.output_indices);
 
-            let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
+            for ((vnode, &op), visible) in vnodes
+                .iter()
+                .copied()
+                .zip_eq_fast(chunk.ops())
+                .zip_eq_fast(chunk.vis().iter())
+            {
                 // Build visibility map for every output chunk.
                 for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
                     vis_map.append(
@@ -629,7 +632,7 @@ impl Dispatcher for HashDataDispatcher {
 
                 if !visible {
                     new_ops.push(op);
-                    return;
+                    continue;
                 }
 
                 // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
@@ -648,28 +651,6 @@ impl Dispatcher for HashDataDispatcher {
                 } else {
                     new_ops.push(op);
                 }
-            };
-
-            match visibility {
-                None => {
-                    vnodes
-                        .iter()
-                        .copied()
-                        .zip_eq_fast(ops)
-                        .for_each(|(vnode, op)| {
-                            build_op_vis(vnode, op, true);
-                        });
-                }
-                Some(visibility) => {
-                    vnodes
-                        .iter()
-                        .copied()
-                        .zip_eq_fast(ops)
-                        .zip_eq_fast(visibility.iter())
-                        .for_each(|((vnode, op), visible)| {
-                            build_op_vis(vnode, op, visible);
-                        });
-                }
             }
 
             let ops = new_ops;
@@ -679,7 +660,7 @@ impl Dispatcher for HashDataDispatcher {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
-                    StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
+                    StreamChunk::new(ops.clone(), chunk.columns().into(), Some(vis_map));
                 if new_stream_chunk.cardinality() > 0 {
                     event!(
                         tracing::Level::TRACE,
@@ -745,7 +726,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             for output in self.outputs.values_mut() {
                 output.send(Message::Chunk(chunk.clone())).await?;
             }
@@ -854,7 +835,7 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             output.send(Message::Chunk(chunk)).await
         }
     }
