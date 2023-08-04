@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DEBUG: bool = false;
 
@@ -123,19 +123,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
 
-    compare_and_copy(&out_dir, &PathBuf::from("./src")).expect(&format!(
-        "Failed to copy generated files from {} to ./src",
-        out_dir.display()
-    ));
+    compare_and_copy(&out_dir, &PathBuf::from("./src")).unwrap_or_else(|_| {
+        panic!(
+            "Failed to copy generated files from {} to ./src",
+            out_dir.display()
+        )
+    });
 
     Ok(())
 }
 
 /// Copy all files from `src_dir` to `dst_dir` only if they are changed.
-fn compare_and_copy(
-    src_dir: &PathBuf,
-    dst_dir: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn compare_and_copy(src_dir: &Path, dst_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     debug!(
         "copying files from {} to {}",
         src_dir.display(),
