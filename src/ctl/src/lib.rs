@@ -418,11 +418,13 @@ enum MetaCommands {
 pub enum ProfileCommands {
     /// CPU profile
     Cpu {
+        /// The time to active profiling for (in seconds)
         #[clap(short, long = "sleep")]
         sleep: u64,
     },
     /// Heap profile
     Heap {
+        /// The output directory of the dumped file
         #[clap(long = "dir")]
         dir: String,
     },
