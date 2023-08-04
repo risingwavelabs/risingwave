@@ -180,7 +180,7 @@ macro_rules! meta_rpc_client_method_impl {
                     Ok(resp) => Ok(resp.into_inner()),
                     Err(e) => {
                         self.refresh_client_if_needed(e.code()).await;
-                        Err(RpcError::GrpcStatus(e))
+                        Err(RpcError::from(e))
                     }
                 }
             }
