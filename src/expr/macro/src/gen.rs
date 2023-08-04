@@ -72,7 +72,6 @@ impl FunctionAttr {
         };
         let deprecated = self.deprecated;
         Ok(quote! {
-            #[allow(non_snake_case)]
             #[ctor::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};

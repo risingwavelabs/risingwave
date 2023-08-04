@@ -21,9 +21,10 @@ use crate::{ExprError, Result};
 
 const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 
+/// Error type for parsing hex string to int256.
 #[derive(Snafu, Debug)]
 #[snafu(display(
-    "failed to parse hex {}",
+    "failed to parse hex `{}` to int256",
     TruncatedFmt(from, MAX_AVAILABLE_HEX_STR_LEN)
 ))]
 pub struct ParseInt256Error {

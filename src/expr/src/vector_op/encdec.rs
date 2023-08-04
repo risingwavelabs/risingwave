@@ -217,11 +217,11 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>, ByteaCastError> {
 #[inline]
 fn alphabet_decode(d: u8) -> Result<u8, ByteaCastError> {
     if d > 0x7A {
-        InvalidBase64Snafu { from: d as char }.fail()
+        InvalidBase64Snafu { from: d }.fail()
     } else {
         let p = PARSE_BASE64_ALPHABET_DECODE_TABLE[d as usize];
         if p == 0x7f {
-            InvalidBase64Snafu { from: d as char }.fail()
+            InvalidBase64Snafu { from: d }.fail()
         } else {
             Ok(p)
         }

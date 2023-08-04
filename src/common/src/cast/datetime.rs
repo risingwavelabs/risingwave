@@ -34,6 +34,7 @@ impl From<speedate::ParseError> for SpeedateParseError {
     }
 }
 
+/// Error type for casting to date/time/timestamp.
 #[derive(Snafu, Debug)]
 pub enum DateTimeCastError {
     #[snafu(display("can't cast `{from}` to date (expected format is YYYY-MM-DD)"))]

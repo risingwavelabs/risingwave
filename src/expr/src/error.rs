@@ -23,6 +23,7 @@ use snafu::Snafu;
 /// A specialized Result type for expression operations.
 pub type Result<T, E = ExprError> = std::result::Result<T, E>;
 
+/// The error type for expression operations.
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub(crate)))]
 pub enum ExprError {

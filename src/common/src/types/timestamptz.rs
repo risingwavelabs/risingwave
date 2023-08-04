@@ -141,6 +141,7 @@ impl From<Timestamptz> for chrono::DateTime<Utc> {
     }
 }
 
+/// Error type for parsing [`Timestamptz`] from string.
 #[derive(Snafu, Debug)]
 #[snafu(display("can't cast {} to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] followed by +hh:mm or literal Z)
 \nFor example: '2021-04-01 00:00:00+00:00'", from))]

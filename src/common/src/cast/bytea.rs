@@ -17,6 +17,7 @@ use snafu::{OptionExt, Snafu};
 
 type Result<T> = std::result::Result<T, ByteaCastError>;
 
+/// Error type for bytea cast.
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub))]
 pub enum ByteaCastError {
@@ -52,7 +53,7 @@ fn get_hex(c: u8) -> Result<u8> {
         b'A'..=b'F' => Ok(c - b'A' + 10),
         b'a'..=b'f' => Ok(c - b'a' + 10),
         b'0'..=b'9' => Ok(c - b'0'),
-        _ => InvalidHexDigitSnafu { from: c as char }.fail(),
+        _ => InvalidHexDigitSnafu { from: c }.fail(),
     }
 }
 
