@@ -196,8 +196,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
                 #[for_await]
                 for chunk in stream {
-                    for output_chunk in output_chunk_builder
-                        .append_chunk(chunk?.reorder_columns(&self.output_indices))
+                    for output_chunk in
+                        output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
                     {
                         yield output_chunk
                     }
@@ -218,7 +218,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                 };
                 #[for_await]
                 for chunk in stream {
-                    yield chunk?.reorder_columns(&self.output_indices)
+                    yield chunk?.project(&self.output_indices)
                 }
             }
 

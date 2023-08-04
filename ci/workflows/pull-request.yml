@@ -2,7 +2,7 @@ auto-retry: &auto-retry
   automatic:
     # Agent terminated because the AWS EC2 spot instance killed by AWS.
     - signal_reason: agent_stop
-      limit: 2
+      limit: 3
 
 steps:
   - label: "check ci image rebuild"
