@@ -113,7 +113,7 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<HeapProfilingResponse>, Status> {
         use std::ffi::CStr;
         use std::fs::create_dir_all;
-        use std::path::{Path, PathBuf};
+        use std::path::PathBuf;
 
         use tikv_jemalloc_ctl;
 
