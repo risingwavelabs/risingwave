@@ -45,6 +45,7 @@ impl StreamProjectSet {
                     watermark_columns.insert(expr_idx + 1);
                 }
             }
+            // XXX(rc): do we need to handle `WatermarkDerivation::Nondecreasing` here?
         }
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
