@@ -12,7 +12,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 arrow-array = "44"
-arrow-flight = "44"
+arrow-flight = "45"
 arrow-schema = "44"
 arrow-select = "44"
 futures-util = "0.3.25"
