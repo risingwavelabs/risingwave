@@ -144,7 +144,6 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
-        // let mut builder = DataChunkBuilder::new(schema.data_types(), self.chunk_size);
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
@@ -346,7 +345,8 @@ where
                 // - switch snapshot
 
                 // consume snapshot rows left in builder.
-                // FIXME(kwannoel): `zip_eq_debug` does not work here.
+                // NOTE(kwannoel): `zip_eq_debug` does not work here,
+                // we encounter "higher-ranked lifetime error".
                 for (vnode, chunk) in vnodes.iter_vnodes().zip_eq(builders.iter_mut().map(|b| {
                     let chunk = b.build_data_chunk();
                     let ops = vec![Op::Insert; chunk.capacity()];
