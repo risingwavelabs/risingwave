@@ -235,16 +235,19 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{self, AtomicI64};
+
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_pretty;
+    use risingwave_common::types::{DataType, Datum};
+    use risingwave_expr::expr::{self, build_from_pretty, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
+    use crate::executor::test_utils::StreamExecutorTestExt;
 
     #[tokio::test]
     async fn test_projection() {
@@ -312,6 +315,32 @@ mod tests {
         tx.push_barrier(2, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
+
+    static DUMMY_COUNTER: AtomicI64 = AtomicI64::new(0);
+
+    #[derive(Debug)]
+    struct DummyNondecreasingExpr;
+
+    #[async_trait::async_trait]
+    impl Expression for DummyNondecreasingExpr {
+        fn return_type(&self) -> DataType {
+            DataType::Int64
+        }
+
+        async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
+            let value = DUMMY_COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
+            Ok(ValueImpl::Scalar {
+                value: Some(value.into()),
+                capacity: input.capacity(),
+            })
+        }
+
+        async fn eval_row(&self, _input: &OwnedRow) -> expr::Result<Datum> {
+            let value = DUMMY_COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
+            Ok(Some(value.into()))
+        }
+    }
+
     #[tokio::test]
     async fn test_watermark_projection() {
         let schema = Schema {
@@ -324,15 +353,16 @@ mod tests {
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
+        let c_expr = DummyNondecreasingExpr.boxed();
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
             Box::new(source),
             vec![],
-            vec![a_expr, b_expr],
+            vec![a_expr, b_expr, c_expr],
             1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
-            vec![],
+            vec![2],
             0.0,
         ));
         let mut project = project.execute();
@@ -340,12 +370,9 @@ mod tests {
         tx.push_barrier(1, false);
         tx.push_int64_watermark(0, 100);
 
-        let b1 = project.next().await.unwrap().unwrap();
-        b1.as_barrier().unwrap();
-        let w1 = project.next().await.unwrap().unwrap();
-        let w1 = w1.as_watermark().unwrap();
-        let w2 = project.next().await.unwrap().unwrap();
-        let w2 = w2.as_watermark().unwrap();
+        project.expect_barrier().await;
+        let w1 = project.expect_watermark().await;
+        let w2 = project.expect_watermark().await;
         let (w1, w2) = if w1.col_idx < w2.col_idx {
             (w1, w2)
         } else {
@@ -354,23 +381,58 @@ mod tests {
 
         assert_eq!(
             w1,
-            &Watermark {
+            Watermark {
                 col_idx: 0,
                 data_type: DataType::Int64,
                 val: ScalarImpl::Int64(101)
             }
         );
-
         assert_eq!(
             w2,
-            &Watermark {
+            Watermark {
                 col_idx: 1,
                 data_type: DataType::Int64,
                 val: ScalarImpl::Int64(99)
             }
         );
+
+        // just push some random chunks
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I I
+            + 120 4
+            + 146 5
+            + 133 6",
+        ));
+        project.expect_chunk().await;
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I I
+            + 213 8
+            - 133 6",
+        ));
+        project.expect_chunk().await;
+
+        tx.push_barrier(2, false);
+        let w3 = project.expect_watermark().await;
+        project.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I I
+            + 100 3
+            + 104 5
+            + 187 3",
+        ));
+        project.expect_chunk().await;
+
+        tx.push_barrier(3, false);
+        let w4 = project.expect_watermark().await;
+        project.expect_barrier().await;
+
+        assert_eq!(w3.col_idx, w4.col_idx);
+        assert!(w3.val.default_cmp(&w4.val).is_le());
+
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(2, true);
+        tx.push_barrier(4, true);
+
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }
