@@ -518,6 +518,7 @@ impl SstableStore {
         block_index: Option<usize>,
         metas: &[BlockMeta],
     ) -> HummockResult<BlockStream> {
+        fail_point!("get_stream_err");
         let data_path = self.get_sst_data_path(object_id);
         let store = self.store().clone();
         let start_pos = match block_index {
@@ -543,7 +544,6 @@ impl SstableStore {
         sst: &Sstable,
         block_index: Option<usize>,
     ) -> HummockResult<BlockStream> {
-        fail_point!("get_stream_err");
         self.get_stream_by_position(sst.id, block_index, &sst.meta.block_metas)
             .await
     }
