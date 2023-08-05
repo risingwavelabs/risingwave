@@ -799,7 +799,7 @@ impl ConfigMap {
             VariableInfo{
                 name: StatementTimeout::entry_name().to_lowercase(),
                 setting: self.statement_timeout.to_string(),
-                description: String::from("Sets the maximum allowed duration of any statement."),
+                description: String::from("Sets the maximum allowed duration of any statement, currently just a mock varible and not adopted in RW"),
             },
             VariableInfo{
                 name: LockTimeout::entry_name().to_lowercase(),
