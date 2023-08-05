@@ -75,10 +75,26 @@ impl SinkCoordinatorManager {
     pub(crate) fn start_worker(
         connector_client: Option<ConnectorClient>,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
+        Self::start_worker_with_spawn_worker(
+            connector_client,
+            |writer_request, manager_request_stream, connector_client| {
+                tokio::spawn(CoordinatorWorker::run(
+                    writer_request,
+                    manager_request_stream,
+                    connector_client,
+                ))
+            },
+        )
+    }
+
+    fn start_worker_with_spawn_worker(
+        connector_client: Option<ConnectorClient>,
+        spawn_coordinator_worker: impl SpawnCoordinatorFn,
+    ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let (request_tx, request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
         let (shutdown_tx, shutdown_rx) = channel();
         let worker = ManagerWorker::new(request_rx, shutdown_rx, connector_client);
-        let join_handle = tokio::spawn(worker.execute());
+        let join_handle = tokio::spawn(worker.execute(spawn_coordinator_worker));
         (
             SinkCoordinatorManager { request_tx },
             (join_handle, shutdown_tx),
@@ -172,10 +188,12 @@ enum ManagerEvent {
 }
 
 trait SpawnCoordinatorFn = FnMut(
-    NewSinkWriterRequest,
-    UnboundedReceiver<NewSinkWriterRequest>,
-    Option<ConnectorClient>,
-) -> JoinHandle<()>;
+        NewSinkWriterRequest,
+        UnboundedReceiver<NewSinkWriterRequest>,
+        Option<ConnectorClient>,
+    ) -> JoinHandle<()>
+    + Send
+    + 'static;
 
 impl ManagerWorker {
     fn new(
@@ -192,23 +210,7 @@ impl ManagerWorker {
         }
     }
 
-    async fn execute(self) {
-        self.execute_with_spawn_coordinator_worker(
-            |writer_request, manager_request_stream, connector_client| {
-                tokio::spawn(CoordinatorWorker::run(
-                    writer_request,
-                    manager_request_stream,
-                    connector_client,
-                ))
-            },
-        )
-        .await
-    }
-
-    async fn execute_with_spawn_coordinator_worker(
-        mut self,
-        mut spawn_coordinator_worker: impl SpawnCoordinatorFn,
-    ) {
+    async fn execute(mut self, mut spawn_coordinator_worker: impl SpawnCoordinatorFn) {
         while let Some(event) = self.next_event().await {
             match event {
                 ManagerEvent::NewRequest(request) => match request {
@@ -358,5 +360,227 @@ impl ManagerWorker {
                 });
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{poll_fn, Future};
+    use std::pin::pin;
+    use std::task::Poll;
+
+    use async_trait::async_trait;
+    use futures::future::join;
+    use futures::{FutureExt, StreamExt};
+    use itertools::Itertools;
+    use rand::seq::SliceRandom;
+    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_connector::sink::catalog::{SinkId, SinkType};
+    use risingwave_connector::sink::{SinkCommitCoordinator, SinkParam};
+    use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
+    use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_rpc_client::CoordinatorStreamHandle;
+
+    use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
+    use crate::manager::sink_coordination::{NewSinkWriterRequest, SinkCoordinatorManager};
+
+    struct MockCoordinator<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C)> {
+        context: C,
+        f: F,
+    }
+
+    impl<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C)> MockCoordinator<C, F> {
+        fn new(context: C, f: F) -> Self {
+            MockCoordinator { context, f }
+        }
+    }
+
+    #[async_trait]
+    impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) + Send> SinkCommitCoordinator
+        for MockCoordinator<C, F>
+    {
+        async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+            Ok(())
+        }
+
+        async fn commit(
+            &mut self,
+            epoch: u64,
+            metadata: Vec<SinkMetadata>,
+        ) -> risingwave_connector::sink::Result<()> {
+            (self.f)(epoch, metadata, &mut self.context);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_basic() {
+        let sink_id = SinkId::from(1);
+        let param = SinkParam {
+            sink_id,
+            properties: Default::default(),
+            columns: vec![],
+            pk_indices: vec![],
+            sink_type: SinkType::AppendOnly,
+        };
+
+        let epoch1 = 233;
+        let epoch2 = 234;
+
+        let mut all_vnode = (0..VirtualNode::COUNT).collect_vec();
+        all_vnode.shuffle(&mut rand::thread_rng());
+        let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            for i in indexes.iter() {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode1 = build_bitmap(first);
+        let vnode2 = build_bitmap(second);
+
+        let metadata = [
+            [vec![1u8, 2u8], vec![3u8, 4u8]],
+            [vec![5u8, 6u8], vec![7u8, 8u8]],
+        ];
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
+                let param = param.clone();
+                let metadata = metadata.clone();
+                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                    let param = param.clone();
+                    let metadata = metadata.clone();
+                    tokio::spawn(async move {
+                        // validate the start request
+                        assert_eq!(first_request.param, param);
+                        CoordinatorWorker::execute_coordinator(
+                            first_request,
+                            new_writer_rx,
+                            MockCoordinator::new(0, |epoch, metadata_list, count: &mut usize| {
+                                *count += 1;
+                                let mut metadata_list = metadata_list
+                                    .into_iter()
+                                    .map(|metadata| match metadata {
+                                        SinkMetadata {
+                                            metadata:
+                                                Some(Metadata::Serialized(SerializedMetadata {
+                                                    metadata,
+                                                })),
+                                        } => metadata,
+                                        _ => unreachable!(),
+                                    })
+                                    .collect_vec();
+                                metadata_list.sort();
+                                match *count {
+                                    1 => {
+                                        assert_eq!(epoch, epoch1);
+                                        assert_eq!(2, metadata_list.len());
+                                        assert_eq!(metadata[0][0], metadata_list[0]);
+                                        assert_eq!(metadata[0][1], metadata_list[1]);
+                                    }
+                                    2 => {
+                                        assert_eq!(epoch, epoch2);
+                                        assert_eq!(2, metadata_list.len());
+                                        assert_eq!(metadata[1][0], metadata_list[0]);
+                                        assert_eq!(metadata[1][1], metadata_list[1]);
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }),
+                        )
+                        .await;
+                    })
+                }
+            });
+
+        let build_client = |vnode| async {
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                |stream_req| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(stream_req.into_inner().map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
+            .await
+            .unwrap()
+        };
+
+        let mut build_client_future1 = pin!(build_client(vnode1));
+        assert!(
+            poll_fn(|cx| Poll::Ready(build_client_future1.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        let (mut client1, mut client2) =
+            join(build_client_future1, pin!(build_client(vnode2))).await;
+
+        {
+            // commit epoch1
+            let mut commit_future = pin!(client2
+                .commit(
+                    epoch1,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[0][1].clone(),
+                        })),
+                    },
+                )
+                .map(|result| result.unwrap()));
+            assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+            join(
+                commit_future,
+                client1
+                    .commit(
+                        epoch1,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata[0][0].clone(),
+                            })),
+                        },
+                    )
+                    .map(|result| result.unwrap()),
+            )
+            .await;
+        }
+
+        // commit epoch2
+        let mut commit_future = pin!(client1
+            .commit(
+                epoch2,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata[1][0].clone(),
+                    })),
+                },
+            )
+            .map(|result| result.unwrap()));
+        assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+            .await
+            .is_pending());
+        join(
+            commit_future,
+            client2
+                .commit(
+                    epoch2,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[1][1].clone(),
+                        })),
+                    },
+                )
+                .map(|result| result.unwrap()),
+        )
+        .await;
     }
 }

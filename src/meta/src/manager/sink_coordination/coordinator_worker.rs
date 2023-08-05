@@ -23,7 +23,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
-use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::StartCoordinationResponse;
+use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::{
+    CommitResponse, StartCoordinationResponse,
+};
 use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::CommitRequest;
 use risingwave_pb::connector_service::{
     sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
@@ -88,27 +90,35 @@ impl CoordinatorWorker {
                     return;
                 }
             };
-            let mut worker = CoordinatorWorker {
-                param: first_writer_request.param,
-                request_streams: vec![first_writer_request.request_stream],
-                response_senders: vec![first_writer_request.response_tx],
-                request_rx,
-            };
-
-            if let Err(e) = worker
-                .wait_for_writers(first_writer_request.vnode_bitmap)
-                .await
-            {
-                error!("failed to wait for all writers: {:?}", e);
-                worker
-                    .send_to_all_sink_writers(|| {
-                        Err(Status::cancelled("failed to wait for all writers"))
-                    })
-                    .await;
-            }
-
-            worker.start_coordination(coordinator).await;
+            Self::execute_coordinator(first_writer_request, request_rx, coordinator).await
         });
+    }
+
+    pub(crate) async fn execute_coordinator(
+        first_writer_request: NewSinkWriterRequest,
+        request_rx: UnboundedReceiver<NewSinkWriterRequest>,
+        coordinator: impl SinkCommitCoordinator,
+    ) {
+        let mut worker = CoordinatorWorker {
+            param: first_writer_request.param,
+            request_streams: vec![first_writer_request.request_stream],
+            response_senders: vec![first_writer_request.response_tx],
+            request_rx,
+        };
+
+        if let Err(e) = worker
+            .wait_for_writers(first_writer_request.vnode_bitmap)
+            .await
+        {
+            error!("failed to wait for all writers: {:?}", e);
+            worker
+                .send_to_all_sink_writers(|| {
+                    Err(Status::cancelled("failed to wait for all writers"))
+                })
+                .await;
+        }
+
+        worker.start_coordination(coordinator).await;
     }
 
     async fn send_to_all_sink_writers(
@@ -293,10 +303,19 @@ impl CoordinatorWorker {
                     .commit(epoch, metadata_list)
                     .await
                     .map_err(|e| error!("failed to commit metadata of epoch {}: {:?}", epoch, e))?;
+
+                self.send_to_all_sink_writers(|| {
+                    Ok(SinkCoordinatorToWriterMsg {
+                        msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(
+                            CommitResponse { epoch },
+                        )),
+                    })
+                })
+                .await;
             }
         };
 
-        if let Err(_) = result {
+        if result.is_err() {
             self.send_to_all_sink_writers(|| Err(Status::aborted("failed to run coordination")))
                 .await;
         }
