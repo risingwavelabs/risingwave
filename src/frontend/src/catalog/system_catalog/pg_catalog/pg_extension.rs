@@ -32,7 +32,7 @@ pub static PG_EXTENSION_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
     ]
 });
 
-/// The catalog pg_extension stores information about the installed extensions. See Section 38.17
+/// The catalog `pg_extension` stores information about the installed extensions. See Section 38.17
 /// for details about extensions.
 ///
 /// Reference: <https://www.postgresql.org/docs/current/catalog-pg-extension.html>.
