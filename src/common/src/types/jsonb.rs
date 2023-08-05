@@ -176,12 +176,6 @@ impl std::str::FromStr for JsonbVal {
 }
 
 impl JsonbVal {
-    /// Avoid this function (or `impl From<Value>`) which is leak of abstraction.
-    /// In most cases you would be using `JsonbRef`.
-    pub fn from_serde(v: Value) -> Self {
-        Self(v.into())
-    }
-
     /// Constructs a value without specific meaning. Usually used as a lightweight placeholder.
     pub fn dummy() -> Self {
         Self(Value::Null.into())
@@ -203,6 +197,10 @@ impl JsonbVal {
 
     pub fn take(mut self) -> Value {
         self.0.take()
+    }
+
+    pub fn as_serde_mut(&mut self) -> &mut Value {
+        &mut self.0
     }
 }
 

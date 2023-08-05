@@ -188,7 +188,7 @@ macro_rules! meta_rpc_client_method_impl {
                     Ok(resp) => Ok(resp.into_inner()),
                     Err(e) => {
                         self.refresh_client_if_needed(e.code()).await;
-                        Err(RpcError::GrpcStatus(e))
+                        Err(RpcError::from(e))
                     }
                 }
             }
@@ -237,8 +237,7 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
 
         let mut response_stream =
             init_stream_fn(Request::new(ReceiverStream::new(request_receiver)))
-                .await
-                .map_err(RpcError::GrpcStatus)?
+                .await?
                 .into_inner();
 
         let first_response = response_stream

@@ -53,7 +53,7 @@ compute-node.266187.119.i119.heap
 <details>
 <summary>1.2. Profile RisingWave in testing pipelines</summary>
 
-Currently, some testing pipelines such as longevity tests have enabled memory profiling by default, but some are not, such as performance benchmarks. 
+Currently, some testing pipelines such as longevity tests have enabled memory profiling by default, but some are not, such as performance benchmarks.
 
 To enable heap profiling of compute nodes in benchmark pipelines, set environment variable when starting a job:
 
@@ -61,7 +61,7 @@ To enable heap profiling of compute nodes in benchmark pipelines, set environmen
 ENABLE_MEMORY_PROFILING=true
 ```
 
-Under the hood, the pipeline script passes the value to kube-bench's parameter `benchmark.risingwave.compute.memory_profiling.enable` ([code here](https://github.com/risingwavelabs/risingwave-test/blob/cff0b432b15abd99ac4b13cf1db375d7d8907371/benchmarks/set_bench_configs.sh#L46), and then kube-bench sets the environment to RisingWave Pods ([code here](https://github.com/risingwavelabs/kube-bench/blob/5392fc8fba02fad044d6ce1eb35eb84cb22a029c/manifests/risingwave/risingwave.template.yaml#L124)). 
+Under the hood, the pipeline script passes the value to kube-bench's parameter `benchmark.risingwave.compute.memory_profiling.enable` ([code here](https://github.com/risingwavelabs/risingwave-test/blob/cff0b432b15abd99ac4b13cf1db375d7d8907371/benchmarks/set_bench_configs.sh#L46), and then kube-bench sets the environment to RisingWave Pods ([code here](https://github.com/risingwavelabs/kube-bench/blob/5392fc8fba02fad044d6ce1eb35eb84cb22a029c/manifests/risingwave/risingwave.template.yaml#L124)).
 
 Note that this is only for compute nodes. If you need to run profiling on other nodes, or need to tune the parameters of profiling, you may modify the parameters in risingwave-test's [env.override.toml](https://github.com/risingwavelabs/risingwave-test/blob/d3edb85a9cbc61b3848bc7f7920603a5b89d1e9b/benchmarks/ch-benchmark/env.override.toml) manually and run the job with that branch. ([Example](https://github.com/risingwavelabs/risingwave-test/commit/cff0b432b15abd99ac4b13cf1db375d7d8907371))
 
@@ -70,7 +70,7 @@ Note that this is only for compute nodes. If you need to run profiling on other 
 <details>
 <summary>1.3. Profile RisingWave in Kubernetes/EKS</summary>
 
-If you run into an OOM issue in Kukernetes, now you will need to enable memory profiling first and reproduce the problem.  
+If you run into an OOM issue in Kukernetes, now you will need to enable memory profiling first and reproduce the problem.
 
 To enable memory profiling, set the environment variables `MALLOC_CONF` to Pods.
 
@@ -92,7 +92,7 @@ env:
 The suggested values of `lg_prof_interval` are different for different nodes. See `risedev` code: [compactor_service](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/compactor_service.rs#L99), [compute_node_service.rs](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/compute_node_service.rs#L107), [meta_node_service.rs](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/meta_node_service.rs#L190).
 
 
-Afterwards, the memory dump should be outputted to the specified folder. Use `kubectl cp` to download it to local. 
+Afterwards, the memory dump should be outputted to the specified folder. Use `kubectl cp` to download it to local.
 
 
 </details>
@@ -109,7 +109,7 @@ Note that the heap profiler dump file must be analyzed along with exactly the sa
 
 <details>
 <summary>2.1. Use jeprof locally</summary>
-  
+
 `jeprof` is already compiled in jemallocator and should be compiled by cargo, use it as follows:
 
 ```shell

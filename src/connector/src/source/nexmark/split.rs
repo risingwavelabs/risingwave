@@ -49,11 +49,8 @@ impl NexmarkSplit {
         }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(
-            self.split_index,
-            self.split_num,
-            Some(start_offset.as_str().parse::<u64>().unwrap()),
-        )
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        self.start_offset = Some(start_offset.as_str().parse::<u64>().unwrap());
+        Ok(())
     }
 }

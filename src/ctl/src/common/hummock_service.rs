@@ -20,9 +20,7 @@ use anyhow::{anyhow, bail, Result};
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -136,7 +134,6 @@ For `./risedev apply-compose-deploy` users,
             )),
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
-            TieredCacheMetricsBuilder::unused(),
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
         )
@@ -170,7 +167,8 @@ For `./risedev apply-compose-deploy` users,
             opts.block_cache_capacity_mb * (1 << 20),
             opts.meta_cache_capacity_mb * (1 << 20),
             0,
-            TieredCache::none(),
+            FileCache::none(),
+            FileCache::none(),
         )))
     }
 }

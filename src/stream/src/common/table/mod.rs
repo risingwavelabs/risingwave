@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod state_table;
+mod state_table_cache;
 mod watermark;
 
 #[cfg(test)]

@@ -52,7 +52,7 @@ pub fn encode(data: &[u8], format: &str, writer: &mut dyn Write) -> Result<()> {
         _ => {
             return Err(ExprError::InvalidParam {
                 name: "format",
-                reason: format!("unrecognized encoding: \"{}\"", format),
+                reason: format!("unrecognized encoding: \"{}\"", format).into(),
             });
         }
     }
@@ -71,7 +71,7 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
             .into()),
         _ => Err(ExprError::InvalidParam {
             name: "format",
-            reason: format!("unrecognized encoding: \"{}\"", format),
+            reason: format!("unrecognized encoding: \"{}\"", format).into(),
         }),
     }
 }
