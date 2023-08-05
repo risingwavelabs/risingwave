@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::sink_manager::SinkManager;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
     IdCategoryType, MetaSrvEnv, StreamingJob,
@@ -49,7 +49,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
-    sink_manager: SinkManager,
+    sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController<S>,
     aws_client: Arc<Option<AwsEc2Client>>,
 }
@@ -68,7 +68,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
-        sink_manager: SinkManager,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(

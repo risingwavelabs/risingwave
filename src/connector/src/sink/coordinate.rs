@@ -12,78 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Instant;
-
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{
-    CommitRequest, StartCoordinationRequest,
-};
-use risingwave_pb::connector_service::{
-    sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
-    SinkMetadata, SinkWriterToCoordinatorMsg,
-};
-use risingwave_rpc_client::{BidiStreamHandle, SinkCoordinationRpcClient};
-use tracing::{debug, warn};
+use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};
+use tracing::warn;
 
 use crate::sink::{Result, SinkError, SinkParam, SinkWriter};
-
-struct CoordinatorStreamHandle(
-    BidiStreamHandle<SinkWriterToCoordinatorMsg, SinkCoordinatorToWriterMsg>,
-);
-
-impl CoordinatorStreamHandle {
-    async fn new(
-        mut client: SinkCoordinationRpcClient,
-        param: SinkParam,
-        vnode_bitmap: Bitmap,
-    ) -> Result<Self> {
-        let (stream_handle, first_response) = BidiStreamHandle::initialize(
-            SinkWriterToCoordinatorMsg {
-                msg: Some(sink_writer_to_coordinator_msg::Msg::StartRequest(
-                    StartCoordinationRequest {
-                        vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
-                        param: Some(param.to_proto()),
-                    },
-                )),
-            },
-            |req_stream| async move { client.coordinate(req_stream).await },
-        )
-        .await?;
-        match first_response {
-            SinkCoordinatorToWriterMsg {
-                msg: Some(sink_coordinator_to_writer_msg::Msg::StartResponse(_)),
-            } => Ok(Self(stream_handle)),
-            msg => Err(SinkError::Coordinator(anyhow!(
-                "should get start response but get {:?}",
-                msg
-            ))),
-        }
-    }
-
-    async fn commit(&mut self, epoch: u64, metadata: SinkMetadata) -> Result<()> {
-        self.0
-            .send_request(SinkWriterToCoordinatorMsg {
-                msg: Some(sink_writer_to_coordinator_msg::Msg::CommitRequest(
-                    CommitRequest {
-                        epoch,
-                        metadata: Some(metadata),
-                    },
-                )),
-            })
-            .await?;
-        match self.0.next_response().await? {
-            SinkCoordinatorToWriterMsg {
-                msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(_)),
-            } => Ok(()),
-            msg => Err(SinkError::Coordinator(anyhow!(
-                "should get commit response but get {:?}",
-                msg
-            ))),
-        }
-    }
-}
 
 pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     epoch: u64,
@@ -100,8 +36,12 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter
     ) -> Result<Self> {
         Ok(Self {
             epoch: 0,
-            coordinator_stream_handle: CoordinatorStreamHandle::new(client, param, vnode_bitmap)
-                .await?,
+            coordinator_stream_handle: CoordinatorStreamHandle::new(
+                client,
+                param.to_proto(),
+                vnode_bitmap,
+            )
+            .await?,
             inner,
         })
     }
@@ -119,20 +59,15 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        let start_time = Instant::now();
         let metadata = self.inner.barrier(is_checkpoint).await?;
-        if is_checkpoint {
-            debug!("take {:?} to fetch metadata", start_time.elapsed());
-        }
         if is_checkpoint {
             let metadata = metadata.ok_or(SinkError::Coordinator(anyhow!(
                 "should get metadata on checkpoint barrier"
             )))?;
-            let start_time = Instant::now();
+            // TODO: add metrics to measure time to commit
             self.coordinator_stream_handle
                 .commit(self.epoch, metadata)
                 .await?;
-            debug!("take {:?} to commit metadata", start_time.elapsed());
             Ok(())
         } else {
             if metadata.is_some() {

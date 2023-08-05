@@ -17,15 +17,15 @@ use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoor
 use risingwave_pb::connector_service::{SinkCoordinatorToWriterMsg, SinkWriterToCoordinatorMsg};
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::manager::sink_manager::SinkManager;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 
 #[derive(Clone)]
 pub(crate) struct SinkCoordinationServiceImpl {
-    sink_manager: SinkManager,
+    sink_manager: SinkCoordinatorManager,
 }
 
 impl SinkCoordinationServiceImpl {
-    pub(crate) fn new(sink_manager: SinkManager) -> Self {
+    pub(crate) fn new(sink_manager: SinkCoordinatorManager) -> Self {
         Self { sink_manager }
     }
 }

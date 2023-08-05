@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::time::Instant;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -38,7 +37,7 @@ use risingwave_rpc_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWr
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 #[cfg(test)]
 use tonic::Status;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
@@ -280,7 +279,7 @@ impl<SM> RemoteSinkWriterInner<SM> {
         use futures::StreamExt;
         use tokio_stream::wrappers::UnboundedReceiverStream;
 
-        let stream_handle = SinkWriterStreamHandle::new(
+        let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
             UnboundedReceiverStream::new(response_receiver).boxed(),
         );
@@ -398,9 +397,8 @@ where
             ))
         })?;
         if is_checkpoint {
-            let start_time = Instant::now();
+            // TODO: add metrics to measure commit time
             let rsp = self.stream_handle.commit(epoch).await?;
-            debug!("sink writer commit takes {:?}", start_time.elapsed());
             Ok(<Self as HandleBarrierResponse>::handle_commit_response(
                 rsp,
             )?)
