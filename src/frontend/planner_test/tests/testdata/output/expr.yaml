@@ -237,7 +237,7 @@
     Bind error: failed to bind expression: nullif(v1, 1, 2)
 
     Caused by:
-      Bind error: Nullif function must contain 2 arguments
+      Bind error: Function `nullif` must contain 2 arguments
 - sql: |
     create table t (v1 int);
     select nullif(v1, true) from t;
@@ -340,7 +340,7 @@
     Bind error: failed to bind expression: concat()
 
     Caused by:
-      Bind error: Function `Concat` takes at least 1 arguments (0 given)
+      Bind error: Function `concat` takes at least 1 arguments (0 given)
 - sql: |
     select concat(':', true);
   batch_plan: 'BatchValues { rows: [['':t'':Varchar]] }'

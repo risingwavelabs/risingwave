@@ -24,7 +24,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
-use pgwire::types::Format;
+use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
@@ -41,6 +41,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -1034,7 +1035,16 @@ impl Session for SessionImpl {
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
             Portal::Empty => Ok(vec![]),
-            Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
+            Portal::Portal(portal) => {
+                let mut columns = infer(Some(portal.bound_result.bound), portal.statement)?;
+                let formats = FormatIterator::new(&portal.result_formats, columns.len())?;
+                columns.iter_mut().zip_eq_fast(formats).for_each(|(c, f)| {
+                    if f == Format::Binary {
+                        c.set_to_binary()
+                    }
+                });
+                Ok(columns)
+            }
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
     }

@@ -54,21 +54,21 @@ public class IcebergSinkCoordinator implements SinkCoordinator {
         }
         boolean nonEmpty = false;
         Transaction txn = icebergTable.newTransaction();
-        if (!dataFileList.isEmpty()) {
-            AppendFiles append = txn.newAppend();
-            for (DataFile dataFile : dataFileList) {
-                append.appendFile(dataFile);
-            }
-            append.commit();
-            nonEmpty = true;
-        }
-
         if (!deleteFileList.isEmpty()) {
             RowDelta rowDelta = txn.newRowDelta();
             for (DeleteFile deleteFile : deleteFileList) {
                 rowDelta.addDeletes(deleteFile);
             }
             rowDelta.commit();
+            nonEmpty = true;
+        }
+
+        if (!dataFileList.isEmpty()) {
+            AppendFiles append = txn.newAppend();
+            for (DataFile dataFile : dataFileList) {
+                append.appendFile(dataFile);
+            }
+            append.commit();
             nonEmpty = true;
         }
 

@@ -163,7 +163,8 @@ impl HopWindowExecutor {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
 

@@ -334,76 +334,56 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         )
         .await?;
 
-        // Decompose the input chunk.
-        let capacity = chunk.capacity();
-        let (ops, columns, visibility) = chunk.into_inner();
-
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let agg_call_filter_res = agg_call_filter_res(
-                &this.actor_ctx,
-                &this.info.identity,
-                agg_call,
-                &columns,
-                visibility.as_ref(),
-                capacity,
-            )
-            .await?;
+            let agg_call_filter_res =
+                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 
         // Materialize input chunk if needed and possible.
-        let materialized: Bitmap = this
-            .agg_calls
-            .iter()
+        // For aggregations without distinct, we can materialize before grouping.
+        for ((call, storage), visibility) in (this.agg_calls.iter())
             .zip_eq_fast(&mut this.storages)
-            .zip_eq_fast(call_visibilities.iter().map(Option::as_ref))
-            .map(|((call, storage), visibility)| {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
-                    let needed_columns = mapping
-                        .upstream_columns()
-                        .iter()
-                        .map(|col_idx| columns[*col_idx].clone())
-                        .collect();
-                    table.write_chunk(StreamChunk::new(
-                        ops.clone(),
-                        needed_columns,
-                        visibility.cloned(),
-                    ));
-                    true
-                } else {
-                    false
-                }
-            }).collect();
+            .zip_eq_fast(call_visibilities.iter())
+        {
+            if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
+                let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
+                table.write_chunk(chunk);
+            }
+        }
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
             let mut agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
             let visibilities = call_visibilities
                 .iter()
-                .map(Option::as_ref)
-                .map(|call_vis| call_vis.map_or_else(|| visibility.clone(), |v| v & &visibility))
-                .map(Some)
+                .map(|call_vis| call_vis & &visibility)
                 .collect();
             let visibilities = vars
                 .distinct_dedup
                 .dedup_chunk(
-                    &ops,
-                    &columns,
+                    chunk.ops(),
+                    chunk.columns(),
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
                     this.actor_ctx.clone(),
                 )
                 .await?;
-            agg_group.apply_chunk(
-                &mut this.storages,
-                &ops,
-                &columns,
-                visibilities,
-                &materialized,
-            )?;
+            for ((call, storage), visibility) in (this.agg_calls.iter())
+                .zip_eq_fast(&mut this.storages)
+                .zip_eq_fast(visibilities.iter())
+            {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage && call.distinct {
+                    let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
+                    table.write_chunk(chunk);
+                }
+            }
+            agg_group
+                .apply_chunk(&chunk, &this.agg_calls, visibilities)
+                .await?;
             // Mark the group as changed.
             vars.group_change_set.insert(key);
         }
