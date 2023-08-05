@@ -135,9 +135,10 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
-            &function_name,
-            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        if let Ok(schema) = self.first_valid_schema() &&
+            let Some(func) = schema.get_function_by_name_args(
+                &function_name,
+                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
         ) {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
