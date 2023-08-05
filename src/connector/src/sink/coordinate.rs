@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Instant;
-
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -25,7 +23,7 @@ use risingwave_pb::connector_service::{
     SinkMetadata, SinkWriterToCoordinatorMsg,
 };
 use risingwave_rpc_client::{BidiStreamHandle, SinkCoordinationRpcClient};
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::sink::{Result, SinkError, SinkParam, SinkWriter};
 
@@ -119,20 +117,15 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        let start_time = Instant::now();
         let metadata = self.inner.barrier(is_checkpoint).await?;
-        if is_checkpoint {
-            debug!("take {:?} to fetch metadata", start_time.elapsed());
-        }
         if is_checkpoint {
             let metadata = metadata.ok_or(SinkError::Coordinator(anyhow!(
                 "should get metadata on checkpoint barrier"
             )))?;
-            let start_time = Instant::now();
+            // TODO: add metrics to measure time to commit
             self.coordinator_stream_handle
                 .commit(self.epoch, metadata)
                 .await?;
-            debug!("take {:?} to commit metadata", start_time.elapsed());
             Ok(())
         } else {
             if metadata.is_some() {

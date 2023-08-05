@@ -60,7 +60,7 @@ use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::HummockManager;
-use crate::manager::sink_manager::SinkManager;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
@@ -439,7 +439,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .unwrap(),
     );
 
-    let (sink_manager, shutdown_handle) = SinkManager::start_worker(env.connector_client());
+    let (sink_manager, shutdown_handle) =
+        SinkCoordinatorManager::start_worker(env.connector_client());
     let mut sub_tasks = vec![shutdown_handle];
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(

@@ -18,7 +18,7 @@ mod env;
 mod id;
 mod idle;
 mod notification;
-pub(crate) mod sink_manager;
+pub(crate) mod sink_coordination;
 mod streaming_job;
 mod system_param;
 

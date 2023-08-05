@@ -578,7 +578,7 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::sink_manager::SinkManager;
+    use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
         RelationIdEnum, StreamingClusterInfo,
@@ -775,7 +775,7 @@ mod tests {
                 .await?,
             );
 
-            let (sink_manager, _) = SinkManager::start_worker(None);
+            let (sink_manager, _) = SinkCoordinatorManager::start_worker(None);
 
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
