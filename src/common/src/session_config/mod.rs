@@ -129,9 +129,17 @@ impl<const NAME: usize, const DEFAULT: bool> TryFrom<&[&str]> for ConfigBool<NAM
         }
 
         let s = value[0];
-        if s.eq_ignore_ascii_case("true") {
+        if s.eq_ignore_ascii_case("true")
+            || s.eq_ignore_ascii_case("on")
+            || s.eq_ignore_ascii_case("yes")
+            || s.eq_ignore_ascii_case("1")
+        {
             Ok(ConfigBool(true))
-        } else if s.eq_ignore_ascii_case("false") {
+        } else if s.eq_ignore_ascii_case("false")
+            || s.eq_ignore_ascii_case("off")
+            || s.eq_ignore_ascii_case("no")
+            || s.eq_ignore_ascii_case("0")
+        {
             Ok(ConfigBool(false))
         } else {
             Err(ErrorCode::InvalidConfigValue {
