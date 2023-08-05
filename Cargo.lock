@@ -1072,9 +1072,15 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.2.1"
+version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a6904aef64d73cf10ab17ebace7befb918b82164785cb89907993be7f83813"
+checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
+
+[[package]]
+name = "bitmaps"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "703642b98a00b3b90513279a8ede3fcfa479c126c5fb46e78f3051522f021403"
 
 [[package]]
 name = "bk-tree"
@@ -1484,6 +1490,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmsketch"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "467e460587e81453bf9aeb43cd534e9c5ad670042023bd6c3f377c23b76cc2f0"
+dependencies = [
+ "paste",
+]
+
+[[package]]
 name = "coarsetime"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1874,12 +1889,12 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "0.1.26"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d2301688392eb071b0bf1a37be05c469d3cc4dbbd95df672fe28ab021e6a096"
+checksum = "1f34ba9a9bcb8645379e9de8cb3ecfcf4d1c85ba66d90deb3259206fa5aa193b"
 dependencies = [
  "quote",
- "syn 1.0.109",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -2517,6 +2532,122 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a62bc1cf6f830c2ec14a513a9fb124d0a213a629668a4186f329db21fe045652"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "foyer"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "cmsketch",
+ "crossbeam",
+ "foyer-common",
+ "foyer-intrusive",
+ "foyer-storage",
+ "foyer-workspace-hack",
+ "futures",
+ "itertools 0.10.5",
+ "libc",
+ "memoffset 0.8.0",
+ "nix 0.26.2",
+ "parking_lot 0.12.1",
+ "paste",
+ "prometheus",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-common"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+dependencies = [
+ "bytes",
+ "foyer-workspace-hack",
+ "parking_lot 0.12.1",
+ "paste",
+ "rand",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "foyer-intrusive"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+dependencies = [
+ "bytes",
+ "cmsketch",
+ "foyer-common",
+ "foyer-workspace-hack",
+ "itertools 0.10.5",
+ "memoffset 0.8.0",
+ "parking_lot 0.12.1",
+ "paste",
+ "thiserror",
+ "tracing",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-storage"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-trait",
+ "bitflags 2.3.3",
+ "bitmaps",
+ "bytes",
+ "cmsketch",
+ "foyer-common",
+ "foyer-intrusive",
+ "foyer-workspace-hack",
+ "futures",
+ "itertools 0.10.5",
+ "libc",
+ "memoffset 0.8.0",
+ "nix 0.26.2",
+ "parking_lot 0.12.1",
+ "paste",
+ "pin-project",
+ "prometheus",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-workspace-hack"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "either",
+ "futures-channel",
+ "futures-core",
+ "futures-sink",
+ "itertools 0.10.5",
+ "libc",
+ "memchr",
+ "miniz_oxide 0.7.1",
+ "parking_lot 0.12.1",
+ "parking_lot_core 0.9.8",
+ "proc-macro2",
+ "quote",
+ "rand",
+ "syn 2.0.26",
+ "tokio",
+ "tracing-core",
 ]
 
 [[package]]
@@ -3874,6 +4005,15 @@ dependencies = [
 
 [[package]]
 name = "memoffset"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "memoffset"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d61c719bcfbcf5d62b3a09efa6088de8c54bc0bfcd3ea7ae39fcc186108b8de1"
@@ -4067,6 +4207,8 @@ dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
+ "memoffset 0.7.1",
+ "pin-utils",
  "static_assertions",
 ]
 
@@ -5525,15 +5667,16 @@ dependencies = [
 
 [[package]]
 name = "redis"
-version = "0.22.3"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa8455fa3621f6b41c514946de66ea0531f57ca017b2e6c7cc368035ea5b46df"
+checksum = "ff5d95dd18a4d76650f0c2607ed8ebdbf63baf9cb934e1c233cd220c694db1d7"
 dependencies = [
  "combine",
  "itoa",
  "percent-encoding",
  "ryu",
  "sha1_smol",
+ "socket2 0.4.9",
  "url",
 ]
 
@@ -5919,7 +6062,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
- "bitflags 2.2.1",
+ "bitflags 2.3.3",
  "byteorder",
  "bytes",
  "chrono",
@@ -6782,6 +6925,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.0.0-alpha"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "async-trait",
  "auto_enums",
@@ -6796,6 +6940,7 @@ dependencies = [
  "enum-as-inner",
  "fail",
  "fiemap",
+ "foyer",
  "futures",
  "futures-async-stream",
  "hex",
@@ -7331,9 +7476,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.103"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d03b412469450d4404fe8499a268edd7f8b79fecb074b0d812ad64ca21f4031b"
+checksum = "076066c5f1078eac5b722a31827a8832fe108bed65dfa75e233c89f8206e976c"
 dependencies = [
  "itoa",
  "ryu",
@@ -9258,6 +9403,7 @@ dependencies = [
  "madsim-tokio",
  "memchr",
  "multimap",
+ "nix 0.26.2",
  "num-bigint",
  "num-integer",
  "num-traits",

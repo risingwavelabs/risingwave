@@ -40,7 +40,7 @@ risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
 serde = "1.0.177"
 serde_derive = "1.0.152"
-serde_json = "1.0.103"
+serde_json = "1.0.104"
 sqllogictest = "0.15.1"
 tempfile = "3"
 tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", features = ["profiling"], rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }

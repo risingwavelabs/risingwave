@@ -38,9 +38,9 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, SstableBuilder,
-    SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, TieredCache,
-    Xor16FilterBuilder, DEFAULT_MAX_KEY_COUNT,
+    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, FileCache, SstableBuilder,
+    SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
+    DEFAULT_MAX_KEY_COUNT,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -54,7 +54,8 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         64 << 20,
         128 << 20,
         0,
-        TieredCache::none(),
+        FileCache::none(),
+        FileCache::none(),
     ))
 }
 
@@ -252,6 +253,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     KeyRange::inf(),
                     sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
+                    0,
                 ),
                 ConcatSstableIterator::new(
                     vec![0],
@@ -259,6 +261,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     KeyRange::inf(),
                     sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
+                    0,
                 ),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
