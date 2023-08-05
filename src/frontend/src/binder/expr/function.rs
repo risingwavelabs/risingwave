@@ -978,6 +978,7 @@ impl Binder {
                 ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
