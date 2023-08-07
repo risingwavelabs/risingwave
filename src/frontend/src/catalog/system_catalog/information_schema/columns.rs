@@ -35,7 +35,7 @@ pub static INFORMATION_SCHEMA_COLUMNS: LazyLock<BuiltinView> = LazyLock::new(|| 
         (DataType::Varchar, "column_name"),
         (DataType::Varchar, "column_default"),
         (DataType::Int32, "character_maximum_length"),
-        (DataType::Int16, "ordinal_position"),
+        (DataType::Int32, "ordinal_position"),
         (DataType::Varchar, "is_nullable"),
         (DataType::Varchar, "collation_name"),
         (DataType::Varchar, "udt_schema"),
