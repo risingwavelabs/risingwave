@@ -15,16 +15,15 @@ statement ok
 set streaming_parallelism = 0;
 
 statement ok
-create materialized view mv
-emit on window close
-as
+create materialized view mv as
 select window_start, foo
 from (
     select
         *, row_number() over (partition by window_start order by foo) as rownum
     from tumble(t, tm, interval '1 hour')
 )
-where rownum <= 1;
+where rownum <= 1
+emit on window close;
 
 statement ok
 insert into t values

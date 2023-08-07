@@ -15,13 +15,13 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
+use risingwave_batch::executor::aggregation::build as build_agg;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::agg;
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
@@ -77,7 +77,7 @@ fn create_hash_agg_executor(
 
     let agg_init_states: Vec<_> = agg_calls
         .iter()
-        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(agg::build))
+        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(|agg| build_agg(&agg)))
         .try_collect()
         .unwrap();
 

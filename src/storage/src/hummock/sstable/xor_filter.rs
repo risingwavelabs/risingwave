@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use xorf::{Filter, Xor16, Xor8};
 
 use super::{FilterBuilder, Sstable};
+use crate::hummock::MemoryLimiter;
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
@@ -61,9 +64,14 @@ impl FilterBuilder for Xor16FilterBuilder {
         self.key_hash_entries.len() * 4
     }
 
-    fn finish(&mut self) -> Vec<u8> {
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         self.key_hash_entries.sort();
         self.key_hash_entries.dedup();
+
+        let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
+            memory_limit.must_require_memory(self.approximate_building_memory() as u64)
+        });
+
         let xor_filter = Xor16::from(&self.key_hash_entries);
         let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
         buf.put_u64_le(xor_filter.seed);
@@ -82,6 +90,12 @@ impl FilterBuilder for Xor16FilterBuilder {
     fn create(_fpr: f64, capacity: usize) -> Self {
         Xor16FilterBuilder::new(capacity)
     }
+
+    fn approximate_building_memory(&self) -> usize {
+        // related to https://github.com/ayazhafiz/xorf/blob/master/src/xor16.rs
+        const XOR_MEMORY_PROPORTION: usize = 123;
+        self.key_hash_entries.len() * XOR_MEMORY_PROPORTION
+    }
 }
 
 impl FilterBuilder for Xor8FilterBuilder {
@@ -90,9 +104,14 @@ impl FilterBuilder for Xor8FilterBuilder {
             .push(Sstable::hash_for_bloom_filter(key, table_id));
     }
 
-    fn finish(&mut self) -> Vec<u8> {
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         self.key_hash_entries.sort();
         self.key_hash_entries.dedup();
+
+        let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
+            memory_limit.must_require_memory(self.approximate_building_memory() as u64)
+        });
+
         let xor_filter = Xor8::from(&self.key_hash_entries);
         let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
         buf.put_u64_le(xor_filter.seed);
@@ -109,6 +128,11 @@ impl FilterBuilder for Xor8FilterBuilder {
 
     fn create(_fpr: f64, capacity: usize) -> Self {
         Xor8FilterBuilder::new(capacity)
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        const XOR_MEMORY_PROPORTION: usize = 123;
+        self.key_hash_entries.len() * XOR_MEMORY_PROPORTION
     }
 }
 
