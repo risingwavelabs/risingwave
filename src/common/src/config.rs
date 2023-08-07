@@ -912,10 +912,6 @@ pub mod default {
             2 * 1024 * 1024 // 200w
         }
 
-        pub fn compact_iter_recreate_timeout_ms() -> u64 {
-            10 * 60 * 1000
-        }
-
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
