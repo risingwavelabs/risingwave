@@ -39,7 +39,7 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", features = ["time"] }
 csv = "1.2"
-duration-str = "0.5.0"
+duration-str = "0.5.1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }

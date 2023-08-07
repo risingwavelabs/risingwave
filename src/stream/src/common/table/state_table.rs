@@ -706,14 +706,13 @@ where
             &self.vnodes,
         );
 
-        let value_chunk = if let Some(ref value_indices) = self.value_indices {
-            chunk.clone().reorder_columns(value_indices)
+        let values = if let Some(ref value_indices) = self.value_indices {
+            chunk.project(value_indices).serialize_with(&self.row_serde)
         } else {
-            chunk.clone()
+            chunk.serialize_with(&self.row_serde)
         };
-        let values = value_chunk.serialize_with(&self.row_serde);
 
-        let key_chunk = chunk.reorder_columns(self.pk_indices());
+        let key_chunk = chunk.project(self.pk_indices());
         let vnode_and_pks = key_chunk
             .rows_with_holes()
             .zip_eq_fast(vnodes.iter())
@@ -731,7 +730,7 @@ where
         match vis {
             Vis::Bitmap(vis) => {
                 for ((op, key, value), vis) in
-                    izip!(op, vnode_and_pks, values).zip_eq_debug(vis.iter())
+                    izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(vis.iter())
                 {
                     if vis {
                         match op {
@@ -742,7 +741,7 @@ where
                 }
             }
             Vis::Compact(_) => {
-                for (op, key, value) in izip!(op, vnode_and_pks, values) {
+                for (op, key, value) in izip!(op.iter(), vnode_and_pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => self.insert_inner(key, value),
                         Op::Delete | Op::UpdateDelete => self.delete_inner(key, value),
