@@ -502,14 +502,6 @@ impl WatermarkAnalyzer {
                     _ => WatermarkDerivation::None,
                 }
             }
-            ExprType::Multiply | ExprType::Divide => match self.visit_binary_op(func_call.inputs())
-            {
-                (Constant, Constant) => Constant,
-                // TODO: Cannot derive watermark/nondecreasing if the constant argument is negative,
-                // currently we be conservative and return None here. See #11480.
-                _ => WatermarkDerivation::None,
-            },
-            ExprType::Modulus => WatermarkDerivation::None,
             ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
                 (Constant, Constant) => Constant,
                 (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
@@ -586,6 +578,8 @@ impl WatermarkAnalyzer {
                 WatermarkDerivation::None
             }
             ExprType::Proctime => Nondecreasing,
+            // not meaningful to derive watermark for these functions
+            ExprType::Multiply | ExprType::Divide | ExprType::Modulus => WatermarkDerivation::None,
             _ => WatermarkDerivation::None,
         }
     }
