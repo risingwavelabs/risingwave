@@ -499,6 +499,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     use_schema_registry: avro_schema.use_schema_registry,
                     proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                     name_strategy,
+                    key_message_name,
                     ..Default::default()
                 };
                 let (columns, pk_from_avro) =
@@ -542,10 +543,7 @@ pub(crate) async fn try_bind_columns_from_source(
 
             // no need to check whether works schema registry because debezium avro always work with
             // schema registry
-            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
-                &mut options,
-                NAME_STRATEGY_KEY,
-            ))?;
+            let name_strategy = get_sr_name_strategy_check(&mut options, true)?;
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
             let key_message_name = get_key_message_name(&mut options);
 
