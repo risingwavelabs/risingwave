@@ -270,12 +270,33 @@ pub(crate) async fn try_bind_columns_from_source(
     with_properties: &HashMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, Vec<String>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
+    const KEY_MESSAGE_NAME_KEY: &str = "key.message";
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let sql_defined_schema = !sql_defined_columns.is_empty();
     let is_kafka: bool = is_kafka_connector(with_properties);
     let mut options = source_schema.gen_options().map_err(|e| anyhow!(e))?;
+
+    let get_key_message_name = |options: &mut BTreeMap<String, String>| -> Option<String> {
+        consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
+            .map(|ele| Some(ele.0))
+            .unwrap_or(None)
+    };
+    let get_sr_name_strategy_check = |options: &mut BTreeMap<String, String>,
+                                      use_sr: bool|
+     -> Result<Option<i32>> {
+        let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
+            options,
+            NAME_STRATEGY_KEY,
+        ))?;
+        if !use_sr && name_strategy.is_some() {
+            return Err(RwError::from(ProtocolError(
+                "schema registry name strategy only works with schema registry enabled".to_string(),
+            )));
+        }
+        Ok(name_strategy)
+    };
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) => (
@@ -298,16 +319,9 @@ pub(crate) async fn try_bind_columns_from_source(
                 row_schema_location,
                 use_schema_registry,
             };
-            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
-                &mut options,
-                NAME_STRATEGY_KEY,
-            ))?;
-            if !protobuf_schema.use_schema_registry && name_strategy.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "schema registry name strategy only works with schema registry enabled"
-                        .to_string(),
-                )));
-            }
+            let name_strategy =
+                get_sr_name_strategy_check(&mut options, protobuf_schema.use_schema_registry)?;
+
             (
                 Some(
                     extract_protobuf_table_schema(&protobuf_schema, with_properties.clone())
@@ -320,6 +334,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
+                    key_message_name: get_key_message_name(&mut options),
                     name_strategy: name_strategy.unwrap_or(
                         PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
                     ),
@@ -347,16 +362,8 @@ pub(crate) async fn try_bind_columns_from_source(
     "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
-            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
-                &mut options,
-                NAME_STRATEGY_KEY,
-            ))?;
-            if !avro_schema.use_schema_registry && name_strategy.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "schema registry name strategy only works with schema registry enabled"
-                        .to_string(),
-                )));
-            }
+            let name_strategy =
+                get_sr_name_strategy_check(&mut options, avro_schema.use_schema_registry)?;
             let stream_source_info = StreamSourceInfo {
                 format: FormatType::Plain as i32,
                 row_encode: EncodeType::Avro as i32,
@@ -544,6 +551,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 NAME_STRATEGY_KEY,
             ))?;
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
+            let key_message_name = get_key_message_name(&mut options);
 
             let stream_source_info = StreamSourceInfo {
                 use_schema_registry,
@@ -553,6 +561,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 format: FormatType::Debezium as i32,
                 row_encode: EncodeType::Avro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
+                key_message_name,
                 ..Default::default()
             };
 

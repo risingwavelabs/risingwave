@@ -586,6 +586,7 @@ pub struct AvroProperties {
     pub topic: String,
     pub enable_upsert: bool,
     pub record_name: Option<String>,
+    pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
@@ -596,7 +597,9 @@ pub struct ProtobufProperties {
     pub row_schema_location: String,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub client_config: SchemaRegistryAuth,
+    pub enable_upsert: bool,
     pub topic: String,
+    pub key_message_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
@@ -717,7 +720,8 @@ impl SpecificParserConfig {
                 }
                 EncodingProperties::Avro(config)
             }
-            (SourceFormat::Plain, SourceEncode::Protobuf) => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
+            | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
                 if info.row_schema_location.is_empty() {
                     return Err(
                         ProtocolError("protobuf file location not provided".to_string()).into(),
@@ -731,6 +735,9 @@ impl SpecificParserConfig {
                         .unwrap(),
                     ..Default::default()
                 };
+                if format == SourceFormat::Upsert {
+                    config.enable_upsert = true;
+                }
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);

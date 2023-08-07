@@ -84,11 +84,18 @@ impl ProtobufParserConfig {
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = if protobuf_config.use_schema_registry {
-            let (_schema_key, schema_value) = get_subject_by_strategy(
+            let (schema_key, schema_value) = get_subject_by_strategy(
                 &protobuf_config.name_strategy,
                 protobuf_config.topic.as_str(),
+                protobuf_config.key_message_name.as_deref(),
                 Some(message_name.as_ref()),
+                protobuf_config.enable_upsert,
             )?;
+            tracing::debug!(
+                "infer key subject {}, value subject {}",
+                schema_key,
+                schema_value,
+            );
             let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {

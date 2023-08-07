@@ -32,7 +32,9 @@ pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrateg
 pub fn get_subject_by_strategy(
     name_strategy: &PbSchemaRegistryNameStrategy,
     topic: &str,
+    key_record_name: Option<&str>,
     record: Option<&str>,
+    require_key: bool,
 ) -> Result<(String, String), RwError> {
     let build_error =
         |ns: &PbSchemaRegistryNameStrategy, expect: &[&str], got: &[Option<&str>]| -> RwError {
@@ -43,31 +45,46 @@ pub fn get_subject_by_strategy(
                 got
             )))
         };
-    match name_strategy {
-        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified => {
+    match (name_strategy, require_key) {
+        (PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified, _) => {
             // default behavior
             Ok((format!("{}-key", topic), format!("{}-value", topic)))
         }
-        ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy => {
-            if let Some(record_name) = record {
-                Ok((
-                    format!("{}-key", record_name),
-                    format!("{}-value", record_name),
-                ))
+        (ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy, true) => {
+            if let Some(record_name) = record && let Some(key_rec_name) = key_record_name {
+                Ok((format!("{}", key_rec_name), format!("{}", record_name)))
             } else {
-                Err(build_error(ns, &["record"], &[record]))
+                Err(build_error(ns, &["key.message","message"], &[key_record_name, record]))
             }
         }
-        ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy => {
+        (ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy, false) => {
             if let Some(record_name) = record {
+                Ok(("".to_string(), format!("{}", record_name)))
+            } else {
+                Err(build_error(ns, &["message"], &[record]))
+            }
+        }
+        (ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy, true) => {
+            if let Some(record_name) = record && let Some(key_rec_name) = key_record_name {
                 Ok((
-                    format!("{}-{}-key", topic, record_name),
-                    format!("{}-{}-value", topic, record_name),
+                    format!("{}-{}", topic, key_rec_name),
+                    format!("{}-{}", topic, record_name),
                 ))
             } else {
                 Err(build_error(
                     ns,
-                    &["topic", "record"],
+                    &["topic", "key.message","message"],
+                    &[Some(topic), key_record_name, record],
+                ))
+            }
+        }
+        (ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy, false) => {
+            if let Some(record_name) = record {
+                Ok(("".to_string(), format!("{}-{}", topic, record_name)))
+            } else {
+                Err(build_error(
+                    ns,
+                    &["topic","message"],
                     &[Some(topic), record],
                 ))
             }

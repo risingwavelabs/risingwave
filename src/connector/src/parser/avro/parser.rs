@@ -129,8 +129,15 @@ impl AvroParserConfig {
             let (subject_key, subject_value) = get_subject_by_strategy(
                 &avro_config.name_strategy,
                 avro_config.topic.as_str(),
+                avro_config.key_record_name.as_deref(),
                 avro_config.record_name.as_deref(),
+                enable_upsert,
             )?;
+            tracing::debug!(
+                "infer key subject {}, value subject {}",
+                subject_key,
+                subject_value
+            );
 
             Ok(Self {
                 schema: resolver.get_by_subject_name(&subject_value).await?,
