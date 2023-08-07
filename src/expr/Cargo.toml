@@ -17,7 +17,7 @@ normal = ["workspace-hack", "ctor"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-array = "44"
+arrow-array = "45"
 arrow-schema = "44"
 async-trait = "0.1"
 auto_enums = "0.8"
