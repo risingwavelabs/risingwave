@@ -314,8 +314,6 @@ pub mod agg_kinds {
         () => {
             AggKind::BitAnd
                 | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
                 | AggKind::JsonbAgg
                 | AggKind::JsonbObjectAgg
                 | AggKind::PercentileCont
@@ -422,6 +420,8 @@ pub mod agg_kinds {
                 | AggKind::Sum0
                 | AggKind::Count
                 | AggKind::BitXor
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
                 | AggKind::ApproxCountDistinct
         };
     }

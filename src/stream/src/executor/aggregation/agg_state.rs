@@ -43,7 +43,7 @@ pub enum AggStateStorage<S: StateStore> {
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
 pub enum AggState {
-    /// State as single scalar value.
+    /// State as a single scalar value.
     /// e.g. `count`, `sum`, append-only `min`/`max`.
     Value(AggregateState),
 

@@ -296,7 +296,10 @@ impl FunctionAttr {
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}", self.ident_name());
+        let ctor_name = match self.user_fn.retract {
+            true => format_ident!("{}", self.ident_name()),
+            false => format_ident!("{}_append_only", self.ident_name()),
+        };
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
@@ -398,7 +401,10 @@ impl FunctionAttr {
                 1 => {
                     let first_state = match &self.init_state {
                         Some(_) => quote! { unreachable!() },
-                        _ => quote! { Some(v0.into()) },
+                        _ => quote! {{
+                            assert_eq!(op, Op::Insert, "can not retract from null state");
+                            Some(v0.into())
+                        }},
                     };
                     next_state = quote! {
                         match (state, v0) {

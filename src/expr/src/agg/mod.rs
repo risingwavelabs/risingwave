@@ -29,6 +29,8 @@ mod def;
 // concrete AggregateFunctions
 mod approx_count_distinct;
 mod array_agg;
+mod bool_and;
+mod bool_or;
 mod general;
 mod jsonb_agg;
 mod mode;
