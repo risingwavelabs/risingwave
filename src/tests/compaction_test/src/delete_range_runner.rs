@@ -588,7 +588,6 @@ fn run_compactor_thread(
 mod tests {
 
     use risingwave_common::config::RwConfig;
-    use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 
     use super::compaction_test;
 

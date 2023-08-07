@@ -32,7 +32,6 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-    use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env, setup_compute_env_with_config,

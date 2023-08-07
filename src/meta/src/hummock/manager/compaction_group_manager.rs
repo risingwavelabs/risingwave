@@ -553,7 +553,7 @@ impl<S: MetaStore> HummockManager<S> {
                 // The new config will be persisted later.
                 let manager = self.compaction_group_manager.read().await;
                 let opts = manager.default_compaction_config();
-                let mut config = CompactionConfigBuilder::with_opt(&opts).build();
+                let mut config = CompactionConfigBuilder::with_opt(opts).build();
                 config.split_by_state_table = allow_split_by_table;
                 if !allow_split_by_table {
                     // TODO: remove it after we increase `max_bytes_for_level_base` for all group.

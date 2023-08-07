@@ -117,19 +117,25 @@ impl OverlapInfo for RangeOverlapInfo {
     fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize> {
         match self.target_range.as_ref() {
             Some(key_range) => {
-                let overlap_begin = others.partition_point(|table_status| {
-                    KeyComparator::compare_encoded_full_key(
-                        &table_status.key_range.as_ref().unwrap().left,
-                        &key_range.left,
-                    ) == cmp::Ordering::Less
+                let overlap_begin = others.partition_point(|sst| {
+                    let ord = if key_range.left.is_empty() {
+                        cmp::Ordering::Greater
+                    } else {
+                        KeyComparator::compare_encoded_full_key(
+                            &sst.key_range.as_ref().unwrap().left,
+                            &key_range.left,
+                        )
+                    };
+                    ord == cmp::Ordering::Less
                 });
                 if overlap_begin >= others.len() {
                     return overlap_begin..overlap_begin;
                 }
                 let mut overlap_end = overlap_begin;
-                for table in &others[overlap_begin..] {
-                    if key_range.compare_right_with(&table.key_range.as_ref().unwrap().right)
-                        == cmp::Ordering::Less
+                for sst in &others[overlap_begin..] {
+                    if !key_range.right.is_empty()
+                        && key_range.compare_right_with(&sst.key_range.as_ref().unwrap().right)
+                            == cmp::Ordering::Less
                     {
                         break;
                     }
