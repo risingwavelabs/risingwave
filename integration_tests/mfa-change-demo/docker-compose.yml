@@ -1,0 +1,71 @@
+---
+version: "3"
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper
+    volumes:
+      - ./data:/data
+    ports:
+      - 2182:2181
+       
+  kafka9094:
+    image: wurstmeister/kafka
+    ports:
+      - 9092:9092
+    environment:
+      KAFKA_BROKER_ID: 0
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.1.60:9092
+      KAFKA_CREATE_TOPICS: "kafeidou:2:0"   
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+    volumes:
+      - ./kafka-logs:/kafka
+    depends_on:
+      - zookeeper
+
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: prometheus-0
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose-nightly.yml
+      service: connector-node
+volumes:
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

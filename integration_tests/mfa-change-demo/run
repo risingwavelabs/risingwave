@@ -1,0 +1,46 @@
+#!/bin/bash
+
+
+set -ex
+
+echo "starting zookeeper"
+/usr/local/kafka/bin/zookeeper-server-start.sh zookeeper.properties > /dev/null 2>&1 &
+sleep 5
+lsof -i:2181  > /dev/null || {
+  echo "failed to start zookeeper"
+  exit 1
+}
+echo "zookeeper started. starting kafka"
+/usr/local/kafka/bin/kafka-server-start.sh kafka.properties > /dev/null 2>&1 &
+sleep 5
+lsof -i:9092 > /dev/null || {
+  echo "kafka start failed"
+  exit 1
+}
+
+/usr/local/kafka/bin/kafka-topics.sh --create --topic recwave --partitions 1 --replication-factor 1 --bootstrap-server=127.0.0.1:9092 \
+  --if-not-exists  > /dev/null 2>&1 || {
+  echo "kafka topic creation failed"
+  exit 1
+}
+sleep 3
+
+/risingwave/bin/risingwave playground > /dev/null &
+sleep 5
+
+python3 recommender/udf.py
+
+sleep 1
+
+psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f recwave-start.sql || {
+  echo "failed to initialize db for recwave"
+  exit 1
+}
+sleep 2
+
+export GENERATOR_PATH=generator
+
+python3 generator --num-users=15 \
+  --dump-users="$GENERATOR_PATH/users.json" \
+
+
