@@ -37,7 +37,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", branch = "xxh/add_schema_build_v2", features = ["time"] }
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", features = ["time"] }
 csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.6"

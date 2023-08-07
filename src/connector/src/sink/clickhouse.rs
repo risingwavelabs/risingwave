@@ -128,7 +128,9 @@ impl ClickHouseSink {
             }
             risingwave_common::types::DataType::Float32 => Ok(ck_column.r#type.contains("Float32")),
             risingwave_common::types::DataType::Float64 => Ok(ck_column.r#type.contains("Float64")),
-            risingwave_common::types::DataType::Decimal => todo!(),
+            risingwave_common::types::DataType::Decimal => {
+                Err(SinkError::ClickHouse("can not support Decimal".to_string()))
+            }
             risingwave_common::types::DataType::Date => Ok(ck_column.r#type.contains("Date32")),
             risingwave_common::types::DataType::Varchar => Ok(ck_column.r#type.contains("String")),
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
@@ -153,7 +155,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "clickhouse can not support Bytea".to_string(),
             )),
-            risingwave_common::types::DataType::Jsonb => todo!(),
+            risingwave_common::types::DataType::Jsonb => Err(SinkError::ClickHouse(
+                "clickhouse rust can not support Json".to_string(),
+            )),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -221,10 +225,12 @@ pub struct ClickHouseSinkWriter {
     is_append_only: bool,
     // Save some features of the clickhouse column type
     column_correct_vec: Vec<ClickHouseSchemaFeature>,
+    clickhouse_fields_name: Vec<String>,
 }
 #[derive(Debug)]
 struct ClickHouseSchemaFeature {
     can_null: bool,
+    // Time accuracy in clickhouse for rw and ck conversions
     accuracy_time: u8,
 }
 
@@ -250,6 +256,10 @@ impl ClickHouseSinkWriter {
             .iter()
             .map(Self::build_column_correct_vec)
             .collect();
+        let clickhouse_fields_name = build_fields_name_type_from_schema(&schema)?
+            .iter()
+            .map(|(a, _)| a.clone())
+            .collect_vec();
         Ok(Self {
             config,
             schema,
@@ -257,6 +267,7 @@ impl ClickHouseSinkWriter {
             client,
             is_append_only,
             column_correct_vec: column_correct_vec?,
+            clickhouse_fields_name,
         })
     }
 
@@ -285,13 +296,9 @@ impl ClickHouseSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?
-            .iter()
-            .map(|(a, _)| a.clone())
-            .collect_vec();
-        let mut insert = self.client.insert_with_fields_name::<ClickHouseColumn>(
+        let mut insert = self.client.insert_with_fields_name(
             &self.config.common.table,
-            ck_fields_name,
+            self.clickhouse_fields_name.clone(),
         )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
@@ -316,11 +323,6 @@ impl ClickHouseSinkWriter {
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?
-            .iter()
-            .map(|(a, _)| a.clone())
-            .collect_vec();
-
         let get_pk_names_and_data = |row: RowRef<'_>, index: usize| {
             let pk_names = self
                 .schema
@@ -351,15 +353,12 @@ impl ClickHouseSinkWriter {
             Ok((pk_names, pk_data))
         };
 
-        // let pk_index_0 = self.pk_indices.first().unwrap();
-        // let pk_name_0 = pk_names.first().unwrap();
-
         for (index, (op, row)) in chunk.rows().enumerate() {
             match op {
                 Op::Insert => {
-                    let mut insert = self.client.insert_with_fields_name::<ClickHouseColumn>(
+                    let mut insert = self.client.insert_with_fields_name(
                         &self.config.common.table,
-                        ck_fields_name.clone(),
+                        self.clickhouse_fields_name.clone(),
                     )?;
                     let mut clickhouse_filed_vec = vec![];
                     for (index, data) in row.iter().enumerate() {
@@ -400,7 +399,8 @@ impl ClickHouseSinkWriter {
                         }
                     }
                     // Get the names of the columns excluding pk, and use them to update.
-                    let fields_name_update = ck_fields_name
+                    let fields_name_update = self
+                        .clickhouse_fields_name
                         .iter()
                         .filter(|n| !update_pk_names.contains(n))
                         .map(|s| s.to_string())
@@ -448,8 +448,6 @@ impl SinkWriter for ClickHouseSinkWriter {
         Ok(())
     }
 }
-#[derive(ClickHouseRow)]
-struct Rows {}
 
 #[derive(ClickHouseRow, Deserialize)]
 struct SystemColumn {
@@ -518,7 +516,9 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Float64(v) => ClickHouseField::Float64(v.into_inner()),
             ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_string()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
-            ScalarRefImpl::Decimal(_) => todo!(),
+            ScalarRefImpl::Decimal(_) => {
+                return Err(SinkError::ClickHouse("can not support Decimal".to_string()))
+            }
             ScalarRefImpl::Interval(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Interval".to_string(),
@@ -548,7 +548,11 @@ impl ClickHouseFieldWithNull {
                     "clickhouse can not support Timestamptz".to_string(),
                 ))
             }
-            ScalarRefImpl::Jsonb(_) => todo!(),
+            ScalarRefImpl::Jsonb(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse rust interface can not support Json".to_string(),
+                ))
+            }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];
                 for (index, field) in v.iter_fields_ref().enumerate() {
