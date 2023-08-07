@@ -276,18 +276,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
                 self.last_extract_key.clear();
-            }
-            let mut extract_key = user_key(&self.raw_key);
-            extract_key = self.filter_key_extractor.extract(extract_key);
-
-            // add bloom_filter check
-            // 1. not empty_key
-            // 2. extract_key key is not duplicate
-            if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
-                // avoid duplicate add to bloom filter
-                self.filter_builder.add_key(extract_key, table_id);
-                self.last_extract_key.clear();
-                self.last_extract_key.extend_from_slice(extract_key);
+                if !self.block_builder.is_empty() {
+                    self.build_block().await?;
+                }
+            } else if self.block_builder.approximate_len() >= self.options.block_capacity {
+                self.build_block().await?;
             }
         } else {
             self.stale_key_count += 1;
@@ -311,6 +304,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             })
         }
 
+        let table_id = full_key.user_key.table_id.table_id();
+        let mut extract_key = user_key(&self.raw_key);
+        extract_key = self.filter_key_extractor.extract(extract_key);
+        // add bloom_filter check
+        if !extract_key.is_empty() {
+            self.filter_builder.add_key(extract_key, table_id);
+        }
         self.block_builder.add(full_key, self.raw_value.as_ref());
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
@@ -320,11 +320,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.raw_key.clear();
         self.raw_value.clear();
-
-        if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block().await?;
-        }
-
         Ok(())
     }
 
@@ -535,6 +530,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
+            self.block_metas.pop();
             return Ok(());
         }
 
@@ -559,10 +555,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
-    }
-
-    pub fn reach_key_count(&self) -> bool {
-        self.total_key_count >= self.options.max_key_count
     }
 
     fn finalize_last_table_stats(&mut self) {

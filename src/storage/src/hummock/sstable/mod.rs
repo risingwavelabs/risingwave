@@ -28,7 +28,7 @@ mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
 use xor_filter::XorFilterReader;
-pub use xor_filter::{Xor16FilterBuilder, Xor8FilterBuilder};
+pub use xor_filter::{BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder};
 pub mod builder;
 pub use builder::*;
 pub mod writer;

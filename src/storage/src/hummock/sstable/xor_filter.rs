@@ -22,12 +22,12 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use xorf::{Filter, Xor16, Xor8};
 
 use super::{FilterBuilder, Sstable};
-use crate::hummock::BlockMeta;
-use crate::hummock::MemoryLimiter;
+use crate::hummock::{BlockMeta, MemoryLimiter};
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
 const FOOTER_BLOCKED_XOR16: u8 = 253;
+const MAX_KV_COUNT_FOR_XOR16: usize = 256 * 1024;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -72,9 +72,6 @@ impl FilterBuilder for Xor16FilterBuilder {
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         self.key_hash_entries.sort();
         self.key_hash_entries.dedup();
-        if self.key_hash_entries.is_empty() {
-            return vec![];
-        }
 
         let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
             memory_limit.must_require_memory(self.approximate_building_memory() as u64)
@@ -154,6 +151,10 @@ pub struct BlockedXor16FilterBuilder {
 const BLOCK_FILTER_CAPACITY: usize = 16 * 1024; // 16KB means 2K key count.
 
 impl BlockedXor16FilterBuilder {
+    pub fn is_kv_count_too_large(kv_count: usize) -> bool {
+        kv_count > MAX_KV_COUNT_FOR_XOR16
+    }
+
     pub fn new(capacity: usize) -> Self {
         Self {
             current: Xor16FilterBuilder::new(BLOCK_FILTER_CAPACITY),
@@ -168,7 +169,7 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
         self.current.add_key(key, table_id)
     }
 
-    fn finish(&mut self) -> Vec<u8> {
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR16);
@@ -184,10 +185,14 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
     }
 
     fn switch_builder(&mut self) {
-        let block = self.current.finish();
+        let block = self.current.finish(None);
         self.data.put_u32_le(block.len() as u32);
         self.data.extend(block);
         self.block_count += 1;
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        0
     }
 }
 
@@ -204,7 +209,7 @@ impl Clone for BlockBasedXorFilter {
                 Xor16 {
                     seed: filter.seed,
                     block_length: filter.block_length,
-                    fingerprints: filter.fingerrints.clone(),
+                    fingerprints: filter.fingerprints.clone(),
                 },
             ));
         }

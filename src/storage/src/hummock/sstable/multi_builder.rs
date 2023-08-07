@@ -179,7 +179,7 @@ where
             if is_new_user_key {
                 if switch_builder {
                     need_seal_current = true;
-                } else if builder.reach_capacity() || builder.reach_key_count() {
+                } else if builder.reach_capacity() {
                     need_seal_current = self.split_weight_by_vnode == 0
                         || (self.is_target_level_l0_or_lbase && vnode_changed);
                 }
