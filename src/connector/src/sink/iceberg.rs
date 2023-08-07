@@ -27,6 +27,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
+use url::Url;
 
 use super::{
     DummySinkCommitCoordinator, Sink, SinkError, SinkWriter, SinkWriterParam,
@@ -146,27 +147,38 @@ impl IcebergSink {
         Ok(table)
     }
 
+    /// Parse bucket name and table root path.
+    ///
+    /// return (bucket name, table root path)
     fn parse_bucket_and_root_from_path(config: &IcebergConfig) -> Result<(String, String)> {
-        let path = &config.path;
-        let prefix = if path.starts_with("s3://") {
-            "s3://"
-        } else if path.starts_with("s3a://") {
-            "s3a://"
-        } else if path.starts_with("s3n://") {
-            "s3n://"
-        } else {
+        let url = Url::parse(&config.path).map_err(|err| {
+            SinkError::Config(anyhow!(
+                "Fail to parse Invalid path: {}, caused by: {}",
+                &config.path,
+                err
+            ))
+        })?;
+
+        let scheme = url.scheme();
+        if scheme != "s3a" && scheme != "s3" && scheme != "s3n" {
             return Err(SinkError::Config(anyhow!(
-                "Invalid path prefix: {}. Only support s3://, s3a://, s3n:// now.",
-                path
+                "Invalid path: {}, only support s3a,s3,s3n prefix",
+                &config.path
             )));
+        }
+
+        let bucket = url
+            .host_str()
+            .ok_or_else(|| SinkError::Config(anyhow!("Invalid path: {}", &config.path)))?;
+        let root = url.path();
+
+        let table_root_path = if root.is_empty() {
+            format!("/{}/{}", config.database_name, config.table_name)
+        } else {
+            format!("{}/{}/{}", root, config.database_name, config.table_name)
         };
 
-        let path = path.trim_start_matches(prefix);
-        let (bucket, root) = path.split_once('/').unwrap_or((path, ""));
-        Ok((
-            bucket.to_string(),
-            format!("/{}/{}/{}", root, config.database_name, config.table_name),
-        ))
+        Ok((bucket.to_string(), table_root_path))
     }
 
     pub fn new(config: IcebergConfig, schema: Schema) -> Result<Self> {
@@ -298,9 +310,8 @@ impl SinkWriter for IcebergWriter {
 
     /// Clean up
     async fn abort(&mut self) -> Result<()> {
-        return Err(SinkError::Iceberg(
-            "Iceberg sink can't support abort now".to_string(),
-        ));
+        // TODO: abort should clean up all the data written in this epoch.
+        Ok(())
     }
 
     /// Update the vnode bitmap of current sink writer

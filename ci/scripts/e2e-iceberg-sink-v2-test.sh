@@ -23,14 +23,8 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-echo "--- Download connector node package"
-buildkite-agent artifact download risingwave-connector.tar.gz ./
-mkdir ./connector-node
-tar xf ./risingwave-connector.tar.gz -C ./connector-node
-
-echo "--- starting risingwave cluster with connector node"
+echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
-./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
 sleep 1
 
@@ -49,8 +43,20 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
     --S --e "CREATE TABLE demo.demo_db.demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');"
 
+# Used to create a snapshot in iceberg.
+# For now iceberg v2 sink can't support to insert in a new table without snapshot.
+# Fix it later.
+spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
+    --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
+    --conf spark.sql.catalog.demo.type=hadoop \
+    --conf spark.sql.catalog.demo.warehouse=s3a://iceberg/ \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
+    --S --e "INSERT INTO demo.demo_db.demo_table values (3,1,'b')"
+
 echo "--- testing sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/iceberg_sink.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/iceberg_sink_v2.slt'
 sleep 1
 
 # check sink destination iceberg
@@ -81,4 +87,3 @@ fi
 
 echo "--- Kill cluster"
 cargo make ci-kill
-pkill -f connector-node
