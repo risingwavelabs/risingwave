@@ -60,11 +60,11 @@ impl CompactorRunner {
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|sst| sst.total_key_count)
-            .sum::<u64>();
+            .sum::<u64>() as usize;
         let multiplier = total_input_file_size / (capacity + 1);
         let single_file_kv_count = kv_count / std::cmp::max(multiplier, 1);
         let use_block_based_filter =
-            BlockedXor16FilterBuilder::is_kv_count_too_large(single_file_kv_count as usize)
+            BlockedXor16FilterBuilder::is_kv_count_too_large(single_file_kv_count)
                 || task.target_level > 0;
 
         let key_range = KeyRange {

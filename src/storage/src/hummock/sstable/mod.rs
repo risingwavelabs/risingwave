@@ -41,7 +41,9 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{
+    FullKey, KeyPayloadType, PointRange, TableKey, UserKey, UserKeyRangeRef,
+};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -283,11 +285,7 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn may_match_hash(
-        &self,
-        user_key_range: &(Bound<UserKey<&[u8]>>, Bound<UserKey<&[u8]>>),
-        hash: u64,
-    ) -> bool {
+    pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
         self.filter_reader.may_match(user_key_range, hash)
     }
 

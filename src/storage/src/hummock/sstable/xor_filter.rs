@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use xorf::{Filter, Xor16, Xor8};
 
 use super::{FilterBuilder, Sstable};
@@ -218,11 +218,7 @@ impl Clone for BlockBasedXorFilter {
 }
 
 impl BlockBasedXorFilter {
-    pub fn may_exist(
-        &self,
-        user_key_range: &(Bound<UserKey<&[u8]>>, Bound<UserKey<&[u8]>>),
-        h: u64,
-    ) -> bool {
+    pub fn may_exist(&self, user_key_range: &UserKeyRangeRef<'_>, h: u64) -> bool {
         let mut block_idx = match user_key_range.0 {
             Bound::Unbounded => 0,
             Bound::Included(left) | Bound::Excluded(left) => self
@@ -294,11 +290,11 @@ impl XorFilterReader {
             assert_eq!(block_count, metas.len());
             let reader = &mut data;
             let mut filters = Vec::with_capacity(block_count);
-            for idx in 0..block_count {
+            for meta in metas {
                 let len = reader.get_u32_le() as usize;
                 let xor16 = Self::to_xor16(&reader[..len]);
                 reader.advance(len);
-                filters.push((metas[idx].smallest_key.clone(), xor16));
+                filters.push((meta.smallest_key.clone(), xor16));
             }
             XorFilter::BlockXor16(BlockBasedXorFilter { filters })
         } else if kind == FOOTER_XOR16 {
@@ -366,11 +362,7 @@ impl XorFilterReader {
     ///     the hash;
     ///   - if the return value is true, then the table may or may not have the user key that has
     ///     the hash actually, a.k.a. we don't know the answer.
-    pub fn may_match(
-        &self,
-        user_key_range: &(Bound<UserKey<&[u8]>>, Bound<UserKey<&[u8]>>),
-        h: u64,
-    ) -> bool {
+    pub fn may_match(&self, user_key_range: &UserKeyRangeRef<'_>, h: u64) -> bool {
         if self.is_empty() {
             true
         } else {
