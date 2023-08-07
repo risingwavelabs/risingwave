@@ -462,19 +462,11 @@ pub(crate) async fn try_bind_columns_from_source(
     "User-defined schema is not allowed with row format upsert avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
 
-            let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
-                &mut options,
-                NAME_STRATEGY_KEY,
-            ))?
-            .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32);
+            let name_strategy =
+                get_sr_name_strategy_check(&mut options, avro_schema.use_schema_registry)?
+                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32);
             let key_message_name = get_key_message_name(&mut options);
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
-            if !avro_schema.use_schema_registry && name_strategy.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "schema registry name strategy only works with schema registry enabled"
-                        .to_string(),
-                )));
-            }
 
             if sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
