@@ -227,7 +227,8 @@ CREATE SINK test_sink from test WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://localhost:5432/postgres?user=postgres&password=abc',
     table.name='test3',
-    type='upsert'
+    type='upsert',
+    primary_key='obj_id'
 );
 
 insert into test values (1, '123', 1);
