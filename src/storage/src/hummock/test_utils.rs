@@ -28,7 +28,7 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
     create_monotonic_events, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
-    SstableWriterOptions, DEFAULT_MAX_KEY_COUNT, DEFAULT_RESTART_INTERVAL,
+    SstableWriterOptions, DEFAULT_MAX_KEY_COUNT, DEFAULT_MAX_SST_SIZE, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
@@ -129,6 +129,7 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         bloom_false_positive: 0.1,
         compression_algorithm: CompressionAlgorithm::None,
         max_key_count: DEFAULT_MAX_KEY_COUNT,
+        max_sst_size: DEFAULT_MAX_SST_SIZE,
     }
 }
 

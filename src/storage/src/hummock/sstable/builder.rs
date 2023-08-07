@@ -35,7 +35,8 @@ use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
-pub const DEFAULT_MAX_KEY_COUNT: u64 = 200 * 10000;
+pub const DEFAULT_MAX_KEY_COUNT: u64 = 2 * 1024 * 1024;
+pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
@@ -51,6 +52,7 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
     /// Limit the number of keys inside a single sst to avoid excessive memory usage.
     pub max_key_count: u64,
+    pub max_sst_size: u64,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -63,6 +65,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
             max_key_count: options.compactor_max_sst_key_count,
+            max_sst_size: options.compactor_max_sst_size,
         }
     }
 }
@@ -76,6 +79,7 @@ impl Default for SstableBuilderOptions {
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
             max_key_count: DEFAULT_MAX_KEY_COUNT,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         }
     }
 }
@@ -564,8 +568,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.approximate_len() >= self.options.capacity
     }
 
-    pub fn reach_key_count(&self) -> bool {
+    pub fn reach_max_key_count(&self) -> bool {
         self.total_key_count >= self.options.max_key_count
+    }
+
+    pub fn reach_max_sst_size(&self) -> bool {
+        self.approximate_len() as u64 >= self.options.max_sst_size
     }
 
     fn finalize_last_table_stats(&mut self) {
@@ -602,6 +610,7 @@ pub(super) mod tests {
             bloom_false_positive: 0.001,
             compression_algorithm: CompressionAlgorithm::None,
             max_key_count: DEFAULT_MAX_KEY_COUNT,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         };
 
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -618,6 +627,7 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             max_key_count: DEFAULT_MAX_KEY_COUNT,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -680,6 +690,7 @@ pub(super) mod tests {
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
             max_key_count: DEFAULT_MAX_KEY_COUNT,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         };
 
         // build remote table

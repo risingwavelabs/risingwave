@@ -40,7 +40,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, FileCache, SstableBuilder,
     SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
-    DEFAULT_MAX_KEY_COUNT,
+    DEFAULT_MAX_KEY_COUNT, DEFAULT_MAX_SST_SIZE,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -94,6 +94,7 @@ async fn build_table(
         bloom_false_positive: 0.001,
         compression_algorithm: CompressionAlgorithm::None,
         max_key_count: DEFAULT_MAX_KEY_COUNT,
+        max_sst_size: DEFAULT_MAX_SST_SIZE,
     };
     let writer = sstable_store.create_sst_writer(
         sstable_object_id,
@@ -184,6 +185,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         bloom_false_positive: 0.001,
         compression_algorithm: CompressionAlgorithm::None,
         max_key_count: DEFAULT_MAX_KEY_COUNT,
+        max_sst_size: DEFAULT_MAX_SST_SIZE,
     };
     let mut builder =
         CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(32, sstable_store, opt));
