@@ -52,14 +52,14 @@ pub fn get_subject_by_strategy(
         }
         (ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy, true) => {
             if let Some(record_name) = record && let Some(key_rec_name) = key_record_name {
-                Ok((format!("{}", key_rec_name), format!("{}", record_name)))
+                Ok((key_rec_name.to_string(), record_name.to_string()))
             } else {
                 Err(build_error(ns, &["key.message","message"], &[key_record_name, record]))
             }
         }
         (ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy, false) => {
             if let Some(record_name) = record {
-                Ok(("".to_string(), format!("{}", record_name)))
+                Ok(("".to_string(), record_name.to_string()))
             } else {
                 Err(build_error(ns, &["message"], &[record]))
             }
