@@ -36,7 +36,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
+use risingwave_pb::hummock::CompactionGroupInfo;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::{
