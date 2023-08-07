@@ -1239,9 +1239,11 @@ impl GrpcMetaClientCore {
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
-        let stream_client = StreamManagerServiceClient::new(channel.clone());
+        let stream_client =
+            StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel.clone());
+        let scale_client =
+            ScaleServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
@@ -1531,9 +1533,8 @@ impl GrpcMetaClient {
     }
 
     fn addr_to_endpoint(addr: String) -> Result<Endpoint> {
-        Endpoint::from_shared(addr)
-            .map(|endpoint| endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
-            .map_err(RpcError::TransportError)
+        let endpoint = Endpoint::from_shared(addr)?;
+        Ok(endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
     }
 
     pub(crate) async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
@@ -1571,8 +1572,7 @@ impl GrpcMetaClient {
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
-            .await
-            .map_err(RpcError::TransportError)?
+            .await?
             .tracing_injected();
 
         Ok(channel)

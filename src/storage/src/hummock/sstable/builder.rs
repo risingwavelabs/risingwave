@@ -30,11 +30,13 @@ use super::{
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::sstable::FilterBuilder;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, Xor16FilterBuilder};
+use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder};
 use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
+pub const DEFAULT_MAX_KEY_COUNT: u64 = 200 * 10000;
+
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
@@ -47,17 +49,20 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
+    /// Limit the number of keys inside a single sst to avoid excessive memory usage.
+    pub max_key_count: u64,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
     fn from(options: &StorageOpts) -> SstableBuilderOptions {
-        let capacity = (options.sstable_size_mb as usize) * (1 << 20);
+        let capacity: usize = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: options.compactor_max_sst_key_count,
         }
     }
 }
@@ -70,6 +75,7 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         }
     }
 }
@@ -131,6 +137,8 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     filter_builder: F,
 
     epoch_set: BTreeSet<u64>,
+
+    memory_limiter: Option<Arc<MemoryLimiter>>,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -141,6 +149,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
             Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            None,
         )
     }
 }
@@ -152,6 +161,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         filter_builder: F,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
         Self {
             options: options.clone(),
@@ -178,6 +188,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             last_table_stats: Default::default(),
             range_tombstone_size: 0,
             epoch_set: BTreeSet::default(),
+            memory_limiter,
         }
     }
 
@@ -392,7 +403,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
         let bloom_filter = if self.options.bloom_false_positive > 0.0 {
-            self.filter_builder.finish()
+            self.filter_builder.finish(self.memory_limiter.clone())
         } else {
             vec![]
         };
@@ -550,6 +561,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.approximate_len() >= self.options.capacity
     }
 
+    pub fn reach_key_count(&self) -> bool {
+        self.total_key_count >= self.options.max_key_count
+    }
+
     fn finalize_last_table_stats(&mut self) {
         if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
@@ -586,6 +601,7 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: 0.001,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
 
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -601,6 +617,7 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -662,6 +679,7 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
+            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
 
         // build remote table

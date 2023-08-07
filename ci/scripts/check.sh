@@ -17,6 +17,9 @@ done
 
 source ci/scripts/common.sh
 
+echo "--- Run trailing spaces check"
+scripts/check/check-trailing-spaces.sh
+
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
@@ -31,3 +34,4 @@ cargo test --doc
 
 echo "--- Run audit check"
 cargo audit
+

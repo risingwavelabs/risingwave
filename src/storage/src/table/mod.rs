@@ -24,6 +24,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
@@ -85,7 +86,6 @@ pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
-/// Collects data chunks from stream of rows.
 pub async fn collect_data_chunk<E, S>(
     stream: &mut S,
     schema: &Schema,
@@ -95,7 +95,6 @@ where
     S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
-
     let mut row_count = 0;
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
@@ -117,6 +116,33 @@ where
             .collect();
         DataChunk::new(columns, row_count)
     };
+
+    if chunk.cardinality() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(chunk))
+    }
+}
+
+/// Collects data chunks from stream of rows.
+pub async fn collect_data_chunk_with_builder<E, S>(
+    stream: &mut S,
+    chunk_size: Option<usize>,
+    builder: &mut DataChunkBuilder,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+{
+    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+        match stream.next().await.transpose()? {
+            Some(row) => {
+                builder.append_one_row_no_finish(row);
+            }
+            None => break,
+        }
+    }
+
+    let chunk = builder.build_data_chunk();
 
     if chunk.cardinality() == 0 {
         Ok(None)
