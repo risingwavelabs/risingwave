@@ -775,6 +775,13 @@ where
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
+    /// TODO(kwannoel): In the case where stream chunk has high vis (`0.99`, `1.00`), we can
+    /// optimize it further.
+    /// This can be done by grouping the serializing function calls together,
+    /// so it's more friendly to the instruction cache.
+    /// Alternatively, we can also do vectorized serializing, similar to
+    /// `HashKey::build`, or vnode computation (`compute_chunk_vnode`).
+    /// Then running the store instructions later.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
