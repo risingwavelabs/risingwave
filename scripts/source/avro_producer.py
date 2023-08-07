@@ -1,7 +1,8 @@
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka.serialization import SerializationContext, MessageField
-from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry import SchemaRegistryClient, record_subject_name_strategy, \
+    topic_record_subject_name_strategy
 from confluent_kafka.schema_registry.avro import AvroSerializer
 import sys
 import json
@@ -24,17 +25,27 @@ def delivery_report(err, msg):
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print("datagen.py <brokerlist> <schema-registry-url> <file>")
+        print("datagen.py <brokerlist> <schema-registry-url> <file> <name-strategy>")
     broker_list = sys.argv[1]
     schema_registry_url = sys.argv[2]
     file = sys.argv[3]
     topic = os.path.basename(file).split(".")[0]
+    if sys.argv[4] not in ['topic', 'record', 'topic-record', '', None]:
+        print("name strategy must be one of: topic, record, topic_record")
+        exit(1)
+    if sys.argv[4] != 'topic':
+        topic = topic + "-" + sys.argv[4]
 
     print("broker_list: {}".format(broker_list))
     print("schema_registry_url: {}".format(schema_registry_url))
     print("topic: {}".format(topic))
+    print("name strategy: {}".format(sys.argv[4] if sys.argv[4] is not None else 'topic'))
 
     schema_registry_conf = {'url': schema_registry_url}
+    if sys.argv[4] == 'record':
+        schema_registry_conf['subject.name.strategy'] = record_subject_name_strategy
+    elif sys.argv[4] == 'topic-record':
+        schema_registry_conf['subject.name.strategy'] = topic_record_subject_name_strategy
     kafka_conf = {'bootstrap.servers': broker_list}
     schema_registry_client = SchemaRegistryClient(schema_registry_conf)
 

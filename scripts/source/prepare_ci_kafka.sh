@@ -71,4 +71,13 @@ for filename in $kafka_data_files; do
     fi
     ) &
 done
+
+# write schema with name strategy
+
+## topic: upsert_avro_json-record, key subject: string, value subject: CPLM.OBJ_ATTRIBUTE_VALUE
+(python3 source/avro_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "record") &
+## topic: upsert_avro_json-topic-record,
+## key subject: upsert_avro_json-topic-record-string
+## value subject: upsert_avro_json-topic-record-CPLM.OBJ_ATTRIBUTE_VALUE
+(python3 source/avro_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "topic-record") &
 wait
