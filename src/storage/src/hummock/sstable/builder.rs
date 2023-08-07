@@ -425,7 +425,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             meta_offset,
             monotonic_tombstone_events: self.monotonic_deletes,
         };
-        meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
+
+        // FIXME: just workaround
+        let encoded_size_u32 = u32::try_from(meta.encoded_size()).unwrap();
+        let meta_offset_u32 = u32::try_from(meta_offset).unwrap();
+        meta.estimated_size = encoded_size_u32.checked_add(meta_offset_u32).unwrap();
 
         // Expand the epoch of the whole sst by tombstone epoch
         let (tombstone_min_epoch, tombstone_max_epoch) = {
