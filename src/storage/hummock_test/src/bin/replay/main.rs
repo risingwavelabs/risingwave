@@ -28,7 +28,7 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, StorageConfig, NO_OVERRIDE,
+    extract_storage_memory_config, load_config, NoOverride, StorageConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -40,7 +40,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, FilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
@@ -83,7 +83,7 @@ async fn run_replay(args: Args) -> Result<()> {
 }
 
 async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
-    let config = load_config(&args.config, NO_OVERRIDE);
+    let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
     let system = config.system.clone();
     let system_params_reader = SystemParamsReader::from(system.into_init_system_params());
@@ -103,14 +103,14 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
 
     let sstable_store = {
-        let tiered_cache = TieredCache::none();
         Arc::new(SstableStore::new(
             Arc::new(object_store),
             storage_opts.data_directory.to_string(),
             storage_opts.block_cache_capacity_mb * (1 << 20),
             storage_opts.meta_cache_capacity_mb * (1 << 20),
             storage_opts.high_priority_ratio,
-            tiered_cache,
+            FileCache::none(),
+            FileCache::none(),
         ))
     };
 

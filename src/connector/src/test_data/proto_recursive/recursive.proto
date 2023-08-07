@@ -1,5 +1,10 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/wrappers.proto";
+
 package recursive;
 
 message ComplexRecursiveMessage {
@@ -23,3 +28,68 @@ message ComplexRecursiveMessage {
   repeated ComplexRecursiveMessage children = 5;
 }
 
+message AllTypes {
+  // standard types
+  double double_field = 1;
+  float float_field = 2;
+  int32 int32_field = 3;
+  int64 int64_field = 4;
+  uint32 uint32_field = 5;
+  uint64 uint64_field = 6;
+  sint32 sint32_field = 7;
+  sint64 sint64_field = 8;
+  fixed32 fixed32_field = 9;
+  fixed64 fixed64_field = 10;
+  sfixed32 sfixed32_field = 11;
+  sfixed64 sfixed64_field = 12;
+  bool bool_field = 13;
+  string string_field = 14;
+
+  bytes bytes_field = 15;
+
+  // enum
+  enum EnumType {
+    DEFAULT = 0;
+    OPTION1 = 1;
+    OPTION2 = 2;
+  }
+  EnumType enum_field = 16;
+
+  // nested message
+  message NestedMessage {
+    int32 id = 1;
+    string name = 2;
+  }
+  NestedMessage nested_message_field = 17;
+
+  // repeated field
+  repeated int32 repeated_int_field = 18;
+
+  // oneof field
+  oneof example_oneof {
+    string oneof_string = 19;
+    int32 oneof_int32 = 20;
+    EnumType oneof_enum = 21;
+  }
+
+  // map field
+  map<string, int32> map_field = 22;
+
+  // timestamp
+  google.protobuf.Timestamp timestamp_field = 23;
+
+  // duration
+  google.protobuf.Duration duration_field = 24;
+
+  // any
+  google.protobuf.Any any_field = 25;
+
+  // -- Unsupported
+  // // struct
+  // import "google/protobuf/struct.proto";
+  // google.protobuf.Struct struct_field = 26;
+
+  // wrapper types
+  google.protobuf.Int32Value int32_value_field = 27;
+  google.protobuf.StringValue string_value_field = 28;
+}

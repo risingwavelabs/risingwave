@@ -19,3 +19,57 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: grouping agg calls
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales), grouping(brand) g1, grouping(size) g2, grouping(brand,size) g3, count(distinct sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: too many arguments for grouping error
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales), grouping(brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, brand, size, size) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
+  expected_outputs:
+    - planner_error
+- name: currently not support using grouping in query without grouping sets.
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales), grouping(size) FROM items_sold GROUP BY brand, size;
+  expected_outputs:
+    - planner_error
+- name: rollup1
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP(brand, size);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: rollup2
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP((brand, size));
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: cube1
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY CUBE(brand, size);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: cube2
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY CUBE(brand, size, size);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: cube3
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY CUBE((brand, size), size);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

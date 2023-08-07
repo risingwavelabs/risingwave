@@ -44,7 +44,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// [`FsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
-    ctx: ActorContextRef,
+    actor_ctx: ActorContextRef,
 
     identity: String,
 
@@ -81,7 +81,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         source_ctrl_opts: SourceCtrlOpts,
     ) -> StreamResult<Self> {
         Ok(Self {
-            ctx,
+            actor_ctx: ctx,
             identity: format!("SourceExecutor {:X}", executor_id),
             schema,
             pk_indices,
@@ -103,14 +103,15 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let mut source_ctx = SourceContext::new(
-            self.ctx.id,
+        let source_ctx = SourceContext::new_with_suppressor(
+            self.actor_ctx.id,
             self.stream_source_core.source_id,
-            self.ctx.fragment_id,
+            self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
+            None,
+            self.actor_ctx.error_suppressor.clone(),
         );
-        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         let stream_reader = source_desc
             .source
             .stream_reader(state, column_ids, Arc::new(source_ctx))
@@ -125,10 +126,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
-        if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
+        if let Some(target_splits) = mapping.get(&self.actor_ctx.id).cloned() {
             if let Some(target_state) = self.get_diff(target_splits).await? {
                 tracing::info!(
-                    actor_id = self.ctx.id,
+                    actor_id = self.actor_ctx.id,
                     state = ?target_state,
                     "apply split change"
                 );
@@ -147,7 +148,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let core = &mut self.stream_source_core;
         let all_completed: HashSet<SplitId> = core.split_state_store.get_all_completed().await?;
 
-        tracing::debug!(actor = self.ctx.id, all_completed = ?all_completed , "get diff");
+        tracing::debug!(actor = self.actor_ctx.id, all_completed = ?all_completed , "get diff");
 
         let mut target_state: Vec<SplitImpl> = Vec::new();
         let mut no_change_flag = true;
@@ -193,7 +194,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
-            self.ctx.id,
+            self.actor_ctx.id,
             target_state
         );
 
@@ -241,12 +242,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .collect_vec();
 
         if !incompleted.is_empty() {
-            tracing::debug!(actor_id = self.ctx.id, incompleted = ?incompleted, "take snapshot");
+            tracing::debug!(actor_id = self.actor_ctx.id, incompleted = ?incompleted, "take snapshot");
             core.split_state_store.take_snapshot(incompleted).await?
         }
 
         if !completed.is_empty() {
-            tracing::debug!(actor_id = self.ctx.id, completed = ?completed, "take snapshot");
+            tracing::debug!(actor_id = self.actor_ctx.id, completed = ?completed, "take snapshot");
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
@@ -266,7 +267,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
-                    self.ctx.id,
+                    self.actor_ctx.id,
                     self.stream_source_core.source_id
                 ))
             })?;
@@ -276,7 +277,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         let source_desc = source_desc_builder
             .build_fs_source_desc()
-            .await
             .map_err(StreamExecutorError::connector_error)?;
 
         // If the first barrier is configuration change, then the source executor must be newly
@@ -291,7 +291,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     actor_splits: splits,
                     ..
                 } => {
-                    if let Some(splits) = splits.get(&self.ctx.id) {
+                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
                         boot_state = splits.clone();
                     }
                 }
@@ -308,18 +308,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .split_state_store
             .get_all_completed()
             .await?;
-        tracing::debug!(actor = self.ctx.id, all_completed = ?all_completed , "get diff");
+        tracing::debug!(actor = self.actor_ctx.id, all_completed = ?all_completed , "get diff");
 
         let mut boot_state = boot_state
             .into_iter()
             .filter(|split| !all_completed.contains(&split.id()))
             .collect_vec();
-
-        self.stream_source_core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
 
         // restore the newest split info
         for ele in &mut boot_state {
@@ -333,8 +327,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             }
         }
 
+        // init in-memory split states with persisted state if any
+        self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
+        tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
@@ -397,7 +393,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         self.metrics
                             .source_row_per_barrier
                             .with_label_values(&[
-                                self.ctx.id.to_string().as_str(),
+                                self.actor_ctx.id.to_string().as_str(),
                                 self.stream_source_core.source_id.to_string().as_ref(),
                             ])
                             .inc_by(metric_row_per_barrier);
@@ -435,11 +431,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .iter()
                             .flat_map(|(id, offset)| {
                                 let origin_split =
-                                    self.stream_source_core.stream_source_splits.get(id);
+                                    self.stream_source_core.stream_source_splits.get_mut(id);
 
-                                origin_split.map(|split| (id.clone(), split.update(offset.clone())))
+                                origin_split.map(|split| {
+                                    split.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((id.clone(), split.clone()))
+                                })
                             })
-                            .collect_vec();
+                            .try_collect()?;
 
                         self.stream_source_core.state_cache.extend(state);
                     }
@@ -449,7 +448,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         .with_label_values(&[
                             self.stream_source_core.source_id.to_string().as_ref(),
                             self.stream_source_core.source_name.as_ref(),
-                            self.ctx.id.to_string().as_str(),
+                            self.actor_ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
@@ -459,7 +458,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // The source executor should only be stopped by the actor when finding a `Stop` mutation.
         tracing::error!(
-            actor_id = self.ctx.id,
+            actor_id = self.actor_ctx.id,
             "source executor exited unexpectedly"
         )
     }

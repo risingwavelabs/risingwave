@@ -19,8 +19,8 @@ use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprRewriter, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -69,11 +69,10 @@ impl Distill for LogicalTableFunction {
     }
 }
 
-// the leaf node don't need colprunable
 impl ColPrunable for LogicalTableFunction {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        let _ = required_cols;
-        self.clone().into()
+        // No pruning.
+        LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().copied()).into()
     }
 }
 

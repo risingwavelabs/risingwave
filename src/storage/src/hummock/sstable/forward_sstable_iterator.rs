@@ -280,12 +280,11 @@ impl HummockIterator for SstableIterator {
         self.stats.total_key_count += 1;
         async move {
             let block_iter = self.block_iter.as_mut().expect("no block iter");
-            if block_iter.try_next() {
-                Ok(())
-            } else {
+            if !block_iter.try_next() {
                 // seek to next block
-                self.seek_idx(self.cur_idx + 1, None).await
+                self.seek_idx(self.cur_idx + 1, None).await?;
             }
+            Ok(())
         }
     }
 
@@ -306,7 +305,8 @@ impl HummockIterator for SstableIterator {
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
             self.init_block_fetcher(0);
-            self.seek_idx(0, None).await
+            self.seek_idx(0, None).await?;
+            Ok(())
         }
     }
 
@@ -332,7 +332,6 @@ impl HummockIterator for SstableIterator {
                 // seek to next block
                 self.seek_idx(block_idx + 1, None).await?;
             }
-
             Ok(())
         }
     }

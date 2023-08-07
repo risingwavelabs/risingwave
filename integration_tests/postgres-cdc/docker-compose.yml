@@ -3,35 +3,35 @@ version: "3"
 services:
   compactor-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
   minio-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: prometheus-0
   # Use this command to connect to the DB from outside the container:
   #   docker exec postgres psql --username=myuser --dbname=mydb
@@ -53,18 +53,18 @@ services:
     container_name: postgres
   connector-node:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: connector-node
   postgres_prepare:
     image: postgres
-    depends_on: 
+    depends_on:
       - postgres
     command:
       - /bin/sh
       - -c
       - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql"
     volumes:
-      - "./postgres_prepare.sql:/postgres_prepare.sql"      
+      - "./postgres_prepare.sql:/postgres_prepare.sql"
     container_name: postgres_prepare
     restart: on-failure
   datagen_tpch:
@@ -84,7 +84,7 @@ services:
     container_name: datagen_kafka
   message_queue:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-nightly.yml
       service: message_queue
 volumes:
   compute-node-0:

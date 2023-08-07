@@ -27,23 +27,30 @@
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 
+use std::any::type_name;
 #[cfg(madsim)]
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::iter::repeat;
 use std::sync::Arc;
 
-#[cfg(not(madsim))]
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
+use futures::stream::BoxStream;
+use futures::StreamExt;
 #[cfg(not(madsim))]
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
+use tokio::sync::mpsc::{channel, Sender};
 #[cfg(madsim)]
 use tokio::sync::Mutex;
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Request, Response, Status, Streaming};
 
 pub mod error;
 use error::{Result, RpcError};
@@ -58,8 +65,8 @@ mod tracing;
 
 pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::{ConnectorClient, SinkWriterStreamHandle};
-pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
+pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
@@ -180,10 +187,81 @@ macro_rules! meta_rpc_client_method_impl {
                     Ok(resp) => Ok(resp.into_inner()),
                     Err(e) => {
                         self.refresh_client_if_needed(e.code()).await;
-                        Err(RpcError::GrpcStatus(e))
+                        Err(RpcError::from(e))
                     }
                 }
             }
         )*
+    }
+}
+
+pub struct BidiStreamHandle<REQ: 'static, RSP: 'static> {
+    request_sender: Sender<REQ>,
+    response_stream: BoxStream<'static, std::result::Result<RSP, Status>>,
+}
+
+impl<REQ: 'static, RSP: 'static> Debug for BidiStreamHandle<REQ, RSP> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(type_name::<Self>())
+    }
+}
+
+impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
+    pub fn new(
+        request_sender: Sender<REQ>,
+        response_stream: BoxStream<'static, std::result::Result<RSP, Status>>,
+    ) -> Self {
+        Self {
+            request_sender,
+            response_stream,
+        }
+    }
+
+    pub async fn initialize<
+        F: FnOnce(Request<ReceiverStream<REQ>>) -> Fut,
+        Fut: Future<Output = std::result::Result<Response<Streaming<RSP>>, Status>> + Send,
+    >(
+        first_request: REQ,
+        init_stream_fn: F,
+    ) -> Result<(Self, RSP)> {
+        const SINK_WRITER_REQUEST_BUFFER_SIZE: usize = 16;
+        let (request_sender, request_receiver) = channel(SINK_WRITER_REQUEST_BUFFER_SIZE);
+
+        // Send initial request in case of the blocking receive call from creating streaming request
+        request_sender
+            .send(first_request)
+            .await
+            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+
+        let mut response_stream =
+            init_stream_fn(Request::new(ReceiverStream::new(request_receiver)))
+                .await?
+                .into_inner();
+
+        let first_response = response_stream
+            .next()
+            .await
+            .ok_or(RpcError::Internal(anyhow!(
+                "get empty response from start sink request"
+            )))??;
+
+        Ok((
+            Self::new(request_sender, response_stream.boxed()),
+            first_response,
+        ))
+    }
+
+    pub async fn next_response(&mut self) -> Result<RSP> {
+        Ok(self
+            .response_stream
+            .next()
+            .await
+            .ok_or(RpcError::Internal(anyhow!("end of response stream")))??)
+    }
+
+    pub async fn send_request(&mut self, request: REQ) -> Result<()> {
+        self.request_sender.send(request).await.map_err(|_| {
+            RpcError::Internal(anyhow!("unable to send request {}", type_name::<REQ>()))
+        })
     }
 }

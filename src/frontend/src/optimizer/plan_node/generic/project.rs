@@ -292,6 +292,10 @@ impl ProjectBuilder {
     pub fn build<PlanRef: GenericPlanRef>(self, input: PlanRef) -> Project<PlanRef> {
         Project::new(self.exprs, input)
     }
+
+    pub fn exprs_len(&self) -> usize {
+        self.exprs.len()
+    }
 }
 
 /// Auxiliary struct for displaying `expr AS alias`

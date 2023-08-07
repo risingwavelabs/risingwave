@@ -91,8 +91,13 @@ impl TableRevision {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParallelUnitReschedule {
-    pub added_parallel_units: Vec<ParallelUnitId>,
-    pub removed_parallel_units: Vec<ParallelUnitId>,
+    pub added_parallel_units: BTreeSet<ParallelUnitId>,
+    pub removed_parallel_units: BTreeSet<ParallelUnitId>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RescheduleOptions {
+    pub resolve_no_shuffle_upstream: bool,
 }
 
 pub(crate) struct RescheduleContext {
@@ -352,6 +357,7 @@ where
     async fn build_reschedule_context(
         &self,
         reschedule: &mut HashMap<FragmentId, ParallelUnitReschedule>,
+        options: RescheduleOptions,
     ) -> MetaResult<RescheduleContext> {
         // Index worker node, used to create actor
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
@@ -406,6 +412,7 @@ where
             })
             .collect();
 
+        // FIXME: the same as anther place calling `list_table_fragments` in scaling.
         // Index for StreamActor
         let mut actor_map = HashMap::new();
         // Index for Fragment
@@ -433,6 +440,15 @@ where
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
         );
+
+        if options.resolve_no_shuffle_upstream {
+            Self::resolve_no_shuffle_upstream(
+                reschedule,
+                &fragment_map,
+                &no_shuffle_source_fragment_ids,
+                &no_shuffle_target_fragment_ids,
+            )?;
+        }
 
         let mut fragment_dispatcher_map = HashMap::new();
         Self::build_fragment_dispatcher_index(&actor_map, &mut fragment_dispatcher_map);
@@ -612,6 +628,56 @@ where
         })
     }
 
+    fn resolve_no_shuffle_upstream<T>(
+        reschedule: &mut HashMap<FragmentId, T>,
+        fragment_map: &HashMap<FragmentId, Fragment>,
+        no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
+        no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
+    ) -> MetaResult<()>
+    where
+        T: Clone + Eq,
+    {
+        let mut queue: VecDeque<FragmentId> = reschedule.keys().cloned().collect();
+
+        // We trace the upstreams of each downstream under the hierarchy until we reach the top
+        // for every no_shuffle relation.
+        while let Some(fragment_id) = queue.pop_front() {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
+                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
+            {
+                continue;
+            }
+
+            // for upstream
+            for upstream_fragment_id in &fragment_map
+                .get(&fragment_id)
+                .unwrap()
+                .upstream_fragment_ids
+            {
+                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
+                    continue;
+                }
+
+                let reschedule_plan = reschedule.get(&fragment_id).unwrap();
+
+                if let Some(upstream_reschedule_plan) = reschedule.get(upstream_fragment_id) {
+                    if upstream_reschedule_plan != reschedule_plan {
+                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
+                    }
+
+                    continue;
+                }
+
+                reschedule.insert(*upstream_fragment_id, reschedule_plan.clone());
+                queue.push_back(*upstream_fragment_id);
+            }
+        }
+
+        reschedule.retain(|fragment_id, _| !no_shuffle_target_fragment_ids.contains(fragment_id));
+
+        Ok(())
+    }
+
     fn build_fragment_dispatcher_index(
         actor_map: &HashMap<ActorId, StreamActor>,
         fragment_dispatcher_map: &mut HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
@@ -657,10 +723,11 @@ where
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        options: RescheduleOptions,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules)
+            .reschedule_actors_impl(&mut revert_funcs, reschedules, options)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -676,8 +743,11 @@ where
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        options: RescheduleOptions,
     ) -> MetaResult<()> {
-        let ctx = self.build_reschedule_context(&mut reschedules).await?;
+        let ctx = self
+            .build_reschedule_context(&mut reschedules, options)
+            .await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
 
@@ -1572,12 +1642,14 @@ where
 
         let all_table_fragments = self.fragment_manager.list_table_fragments().await;
 
+        // FIXME: only need actor id and dispatcher info, avoid clone it.
         let mut actor_map = HashMap::new();
         let mut actor_status = HashMap::new();
+        // FIXME: only need fragment distribution info, should avoid clone it.
         let mut fragment_map = HashMap::new();
 
-        for table_fragments in &all_table_fragments {
-            for (fragment_id, fragment) in &table_fragments.fragments {
+        for table_fragments in all_table_fragments {
+            for (fragment_id, fragment) in table_fragments.fragments {
                 fragment
                     .actors
                     .iter()
@@ -1586,10 +1658,10 @@ where
                         actor_map.insert(id as ActorId, actor.clone());
                     });
 
-                fragment_map.insert(*fragment_id, fragment.clone());
+                fragment_map.insert(fragment_id, fragment);
             }
 
-            actor_status.extend(table_fragments.actor_status.clone());
+            actor_status.extend(table_fragments.actor_status);
         }
 
         let mut no_shuffle_source_fragment_ids = HashSet::new();
@@ -1623,45 +1695,12 @@ where
             })
             .collect();
 
-        let mut queue: VecDeque<FragmentId> = fragment_worker_changes.keys().cloned().collect();
-
-        // We trace the upstreams of each downstream under the hierarchy until we reach the top for
-        // every no_shuffle relation.
-        while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
-                continue;
-            }
-
-            // for upstream
-            for upstream_fragment_id in &fragment_map
-                .get(&fragment_id)
-                .unwrap()
-                .upstream_fragment_ids
-            {
-                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
-                    continue;
-                }
-
-                let change = fragment_worker_changes.get(&fragment_id).unwrap();
-
-                if let Some(upstream_change) = fragment_worker_changes.get(upstream_fragment_id) {
-                    if upstream_change != change {
-                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
-                    }
-
-                    continue;
-                }
-
-                fragment_worker_changes.insert(*upstream_fragment_id, change.clone());
-
-                queue.push_back(*upstream_fragment_id);
-            }
-        }
-
-        fragment_worker_changes
-            .retain(|worker_id, _| !no_shuffle_target_fragment_ids.contains(worker_id));
+        Self::resolve_no_shuffle_upstream(
+            &mut fragment_worker_changes,
+            &fragment_map,
+            &no_shuffle_source_fragment_ids,
+            &no_shuffle_target_fragment_ids,
+        )?;
 
         for (
             fragment_id,
@@ -1737,8 +1776,10 @@ where
                         target_plan.insert(
                             fragment_id,
                             ParallelUnitReschedule {
-                                added_parallel_units: vec![chosen_target_parallel_unit_id],
-                                removed_parallel_units: vec![*single_parallel_unit_id],
+                                added_parallel_units: BTreeSet::from([
+                                    chosen_target_parallel_unit_id,
+                                ]),
+                                removed_parallel_units: BTreeSet::from([*single_parallel_unit_id]),
                             },
                         );
                     }
@@ -1771,15 +1812,13 @@ where
 
                     let to_expand_parallel_units = target_parallel_unit_ids
                         .difference(&fragment_parallel_unit_ids)
-                        .sorted()
                         .cloned()
-                        .collect_vec();
+                        .collect();
 
                     let to_shrink_parallel_units = fragment_parallel_unit_ids
                         .difference(&target_parallel_unit_ids)
-                        .sorted()
                         .cloned()
-                        .collect_vec();
+                        .collect();
 
                     target_plan.insert(
                         fragment_id,

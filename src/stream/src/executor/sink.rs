@@ -98,7 +98,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             pk_indices,
             sink_type,
         };
-        let sink = build_sink(sink_param.clone())?;
+        let sink = build_sink(sink_param.clone()).await?;
         let input_schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -195,7 +195,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.checkpoint)
+                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                         .await?;
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id) {
                         log_writer.update_vnode_bitmap(vnode_bitmap);
@@ -268,7 +268,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let chunk = if visible_columns.len() != columns.len() {
                         // Do projection here because we may have columns that aren't visible to
                         // the downstream.
-                        chunk.reorder_columns(&visible_columns)
+                        chunk.project(&visible_columns)
                     } else {
                         chunk
                     };

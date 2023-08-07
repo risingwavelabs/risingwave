@@ -20,16 +20,16 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 fs-err = "2.9.0"
 glob = "0.3"
-google-cloud-pubsub = "0.14"
+google-cloud-pubsub = "0.17"
 indicatif = "0.17"
-itertools = "0.10"
+itertools = "0.11"
 rdkafka = { workspace = true }
-redis = "0.22"
+redis = "0.23"
 regex = "1"
 reqwest = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_with = "2"
+serde_with = "3"
 serde_yaml = "0.9"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = [

@@ -76,6 +76,17 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message Barrier {
+  enum BarrierKind {
+    BARRIER_KIND_UNSPECIFIED = 0;
+    // The first barrier after a fresh start or recovery.
+    // There will be no data associated with the previous epoch of the barrier.
+    BARRIER_KIND_INITIAL = 1;
+    // A normal barrier. Data should be flushed locally.
+    BARRIER_KIND_BARRIER = 2;
+    // A checkpoint barrier. Data should be synchorized to the shared storage.
+    BARRIER_KIND_CHECKPOINT = 3;
+  }
+
   data.Epoch epoch = 1;
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -94,8 +105,8 @@ message Barrier {
   }
   // Used for tracing.
   map<string, string> tracing_context = 2;
-  // Whether this barrier do checkpoint
-  bool checkpoint = 9;
+  // The kind of the barrier.
+  BarrierKind kind = 9;
 
   // Record the actors that the barrier has passed. Only used for debugging.
   repeated uint32 passed_actors = 255;
@@ -158,10 +169,18 @@ message SinkDesc {
   repeated plan_common.ColumnCatalog column_catalogs = 10;
 }
 
+enum SinkLogStoreType {
+  /// Default value is the normal in memory log store to be backward compatible with the previously unset value
+  SINK_LOG_STORE_TYPE_UNSPECIFIED = 0;
+  KV_LOG_STORE = 1;
+  IN_MEMORY_LOG_STORE = 2;
+}
+
 message SinkNode {
   SinkDesc sink_desc = 1;
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
+  SinkLogStoreType log_store_type = 3;
 }
 
 message ProjectNode {

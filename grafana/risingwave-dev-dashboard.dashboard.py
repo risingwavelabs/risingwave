@@ -60,12 +60,12 @@ def section_cluster_node(panels):
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
-                    "cpu - {{job}} @ {{instance}}",
+                    "cpu usage (total) - {{job}} @ {{instance}}",
                 ),
 
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance) / avg({metric('process_cpu_core_num')}) by (job,instance)",
-                    "cpu usage -{{job}} @ {{instance}}",
+                    "cpu usage (avg per core) - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -159,17 +159,6 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
                             "write - {{table_id}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_count(
-                    "Compactor Core Count To Scale",
-                    "The number of CPUs needed to meet the demand of compaction.",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_compactor_suggest_core_count')})",
-                            "suggest-core-count"
                         ),
                     ],
                 ),
@@ -1110,6 +1099,23 @@ def section_streaming_actors(outer_panels):
                                       "{{actor_id}} {{side}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Join Executor Matched Rows",
+                    "The number of matched rows on the opposite side",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, actor_id, table_id, job, instance))",
+                                f"p{legend} - actor_id {{{{actor_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                            ),
+                            [90, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, actor_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
+                            "avg - actor_id {{actor_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_actor_ops(
                     "Aggregation Executor Cache Statistics For Each Key/State",
                     "Lookup miss count counts the number of aggregation key's cache miss per second."
@@ -1134,7 +1140,7 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
                             "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
-           
+
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
@@ -1186,7 +1192,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_temporal_join_cached_entry_count')}",
                                       "Temporal Join cached count | table {{table_id}} actor {{actor_id}}"),
-                       
+
                     ],
                 ),
 
@@ -1196,7 +1202,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_lookup_cached_entry_count')}",
                                       "lookup cached count | table {{table_id}} actor {{actor_id}}"),
-                       
+
                     ],
                 ),
             ],
@@ -1620,12 +1626,8 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
-                    "file cache {{op}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
-                    "file cache miss @ {{instance}}",
+                    f"sum(rate({metric('foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                    "file cache {{op}} {{extra}} @ {{instance}}",
                 ),
             ],
         ),
@@ -1959,6 +1961,16 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_bytes(
+            "Mem Table Size (Max)",
+            "This metric shows the statistics of mem_table size on flush. By default only max (p100) is shown.",
+            [
+                panels.target(
+                    f"histogram_quantile(1.0, sum(rate({metric('state_store_write_batch_size_bucket')}[$__rate_interval])) by (le, table_id, job, instance))",
+                    "pmax - {{table_id}} @ {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_bytes(
             "Checkpoint Sync Size",
             "",
             [
@@ -2063,7 +2075,7 @@ def section_hummock(panels):
             "The times of move_state_table occurs",
             [
                 panels.target(
-                    f"sum({table_metric('storage_move_state_table_count')}[$__rate_interval]) by (group)",
+                    f"sum({table_metric('storage_move_state_table_count')}) by (group)",
                     "move table cg{{group}}",
                 ),
             ],
@@ -2095,6 +2107,8 @@ def section_hummock(panels):
 
 def section_hummock_tiered_cache(outer_panels):
     panels = outer_panels.sub_panel()
+    file_cache_hit_filter = 'op="lookup",extra="hit"'
+    file_cache_miss_filter = 'op="lookup",extra="miss"'
     return [
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
@@ -2104,16 +2118,12 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
-                            "file cache {{op}} @ {{instance}}",
+                            f"sum(rate({metric('data_foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                            "data file cache {{op}} {{extra}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
-                            "file cache miss @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('file_cache_disk_latency_count')}[$__rate_interval])) by (op, instance)",
-                            "file cache disk {{op}} @ {{instance}}",
+                            f"sum(rate({metric('meta_foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                            "meta cache {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2123,17 +2133,17 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_latency_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache" +
-                                " - {{op}} @ {{instance}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('data_foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
+                                f"p{legend} - data file cache" +
+                                " - {{op}} {{extra}} @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_disk_latency_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk" +
-                                " - {{op}} @ {{instance}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('meta_foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
+                                f"p{legend} - meta file cache" +
+                                " - {{op}} {{extra}} @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
                         ),
@@ -2144,30 +2154,48 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('file_cache_disk_bytes')}[$__rate_interval])) by (op, instance)",
-                            "disk {{op}} @ {{instance}}",
+                            f"sum(rate({metric('data_foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
+                            "data file cache - {{op}} {{extra}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
+                            "meta file cache - {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Disk IO Size",
+                    "Size",
                     "",
                     [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_disk_io_size_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk" +
-                                " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
+                        panels.target(
+                            f"{metric('data_foyer_storage_size')}", "size @ {{instance}}"
                         ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_disk_read_entry_size_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk read entry" +
-                                " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
+                            panels.target(
+                            f"{metric('meta_foyer_storage_size')}", "size @ {{instance}}"
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Cache Hit Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('data_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) / (sum(rate({metric('data_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) + sum(rate({metric('data_foyer_storage_latency_count', file_cache_miss_filter)}[$__rate_interval])) by (instance))",
+                            "data file cache hit ratio @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) / (sum(rate({metric('meta_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) + sum(rate({metric('meta_foyer_storage_latency_count', file_cache_miss_filter)}[$__rate_interval])) by (instance))",
+                            "meta file cache hit ratio @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Refill",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('compute_refill_data_file_cache_count')}[$__rate_interval])) by (extra, instance)",
+                            "refill data file cache - {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2268,7 +2296,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
 
-        
+
                 panels.timeseries_count(
                     "Table KV Count",
                     "",

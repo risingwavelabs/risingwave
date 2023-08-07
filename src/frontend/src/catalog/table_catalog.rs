@@ -21,6 +21,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
@@ -29,6 +30,7 @@ use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
 use crate::expr::ExprImpl;
+use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -94,6 +96,9 @@ pub struct TableCatalog {
     /// on this to derive an append-only stream plan.
     pub append_only: bool,
 
+    /// The cardinality of the table.
+    pub cardinality: Cardinality,
+
     /// Owner of the table.
     pub owner: UserId,
 
@@ -137,6 +142,10 @@ pub struct TableCatalog {
     /// Optional field specifies the distribution key indices in pk.
     /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
     pub dist_key_in_pk: Vec<usize>,
+
+    pub created_at_epoch: Option<Epoch>,
+
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -380,6 +389,9 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
+            cardinality: Some(self.cardinality.to_protobuf()),
+            initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
+            created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
         }
     }
 
@@ -479,6 +491,12 @@ impl From<PbTable> for TableCatalog {
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
             dist_key_in_pk: tb.dist_key_in_pk.iter().map(|x| *x as _).collect(),
+            cardinality: tb
+                .cardinality
+                .map(|c| Cardinality::from_protobuf(&c))
+                .unwrap_or_else(Cardinality::unknown),
+            created_at_epoch: tb.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
         }
     }
 }
@@ -553,6 +571,7 @@ mod tests {
             )]),
             fragment_id: 0,
             dml_fragment_id: None,
+            initialized_at_epoch: None,
             value_indices: vec![0],
             definition: "".into(),
             read_prefix_len_hint: 0,
@@ -565,6 +584,8 @@ mod tests {
             watermark_indices: vec![],
             handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
+            cardinality: None,
+            created_at_epoch: None,
         }
         .into();
 
@@ -615,6 +636,9 @@ mod tests {
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
                 dist_key_in_pk: vec![],
+                cardinality: Cardinality::unknown(),
+                created_at_epoch: None,
+                initialized_at_epoch: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

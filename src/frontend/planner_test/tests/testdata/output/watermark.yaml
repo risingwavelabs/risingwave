@@ -10,7 +10,7 @@
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
       └─StreamRowIdGen { row_id_index: 1 }
-        └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - '00:00:01':Interval) }] }
+        └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }] }
           └─StreamSource { source: t, columns: [v1, _row_id] }
   stream_dist_plan: |+
     Fragment 0
@@ -18,8 +18,16 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
         └── StreamRowIdGen { row_id_index: 1 }
-            └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - '00:00:01':Interval) }] }
+            └── StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }] } { state tables: [ 0 ] }
                 └── StreamSource { source: t, columns: [v1, _row_id] } { source state table: 1 }
+
+    Table 0
+    ├── columns: [ vnode, offset ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 1
     ├── columns: [ partition_id, offset_info ]
@@ -41,7 +49,7 @@
   explain_output: |
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamRowIdGen { row_id_index: 1 }
-      └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - '00:00:01':Interval) }] }
+      └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }] }
         └─StreamDml { columns: [v1, _row_id] }
           └─StreamSource { source: t, columns: [v1, _row_id] }
 - name: watermark on append only table without source
@@ -50,7 +58,7 @@
   explain_output: |
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamRowIdGen { row_id_index: 1 }
-      └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - '00:00:01':Interval) }] }
+      └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }] }
         └─StreamDml { columns: [v1, _row_id] }
           └─StreamSource
 - name: hash agg

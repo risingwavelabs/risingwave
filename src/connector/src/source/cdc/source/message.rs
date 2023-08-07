@@ -20,6 +20,7 @@ use crate::source::SourceMeta;
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
+            key: None,
             payload: Some(message.payload.as_bytes().to_vec()),
             offset: message.offset,
             split_id: message.partition.into(),

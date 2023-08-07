@@ -37,18 +37,17 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- install postgresql"
 sudo yum install -y postgresql
 
-rw_image_tag="latest"
-# Check if the variable is set and not empty
-if [[ -n "${RW_IMAGE_VERSION+x}" ]]; then
-  rw_image_tag=$RW_IMAGE_VERSION
-fi
-sed -i "s|risingwave:latest|risingwave:$rw_image_tag|g" docker/docker-compose.yml
-
-grep "risingwave:" docker/docker-compose.yml
-
 cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
+
+if [ -z "${RW_IMAGE_VERSION-}" ]; then
+  export RW_IMAGE_VERSION=latest
+fi
+if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+  export RW_IMAGE_VERSION="nightly-$(date '+%Y%m%d')"
+fi
+echo Docker image version: $RW_IMAGE_VERSION
 
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then
