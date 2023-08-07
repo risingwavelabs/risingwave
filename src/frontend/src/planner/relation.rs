@@ -53,6 +53,7 @@ impl Planner {
         Ok(LogicalScan::create(
             sys_table.sys_table_catalog.name().to_string(),
             true,
+            false,
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],
             self.ctx(),
@@ -64,6 +65,7 @@ impl Planner {
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
+            false,
             false,
             Rc::new(base_table.table_catalog.table_desc()),
             base_table

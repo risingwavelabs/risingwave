@@ -21,6 +21,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::ChainType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -31,6 +32,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::Convention::Stream;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -64,6 +66,7 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         is_sys_table: bool,
+        is_cdc_table: bool,
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
@@ -71,6 +74,7 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
+            is_cdc_table,
             is_sys_table,
             (0..table_desc.columns.len()).collect(),
             table_desc,
@@ -88,6 +92,10 @@ impl LogicalScan {
 
     pub fn is_sys_table(&self) -> bool {
         self.core.is_sys_table
+    }
+
+    pub fn is_cdc_table(&self) -> bool {
+        self.core.is_cdc_table
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -233,6 +241,7 @@ impl LogicalScan {
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
+            false,
             self.is_sys_table(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
@@ -252,6 +261,7 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::Scan::new(
             self.table_name().to_string(),
+            false,
             self.is_sys_table(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
@@ -266,6 +276,7 @@ impl LogicalScan {
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::Scan::new(
             self.table_name().to_string(),
+            false,
             self.is_sys_table(),
             output_col_idx,
             self.core.table_desc.clone(),
@@ -504,7 +515,13 @@ impl ToStream for LogicalScan {
             )));
         }
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new(self.core.clone()).into())
+            let chain_type = if self.is_cdc_table() {
+                ChainType::CdcBackfill
+            } else {
+                ChainType::Backfill
+            };
+
+            Ok(StreamTableScan::new_with_chain_type(self.core.clone(), chain_type).into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

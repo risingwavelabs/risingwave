@@ -513,6 +513,7 @@ pub(crate) mod tests {
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
             false,
+            false,
             Rc::new(TableDesc {
                 table_id,
                 stream_key: vec![],

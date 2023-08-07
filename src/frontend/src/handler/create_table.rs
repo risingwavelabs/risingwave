@@ -19,10 +19,12 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
+    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
     USER_COLUMN_ID_OFFSET,
 };
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -43,7 +45,7 @@ use crate::handler::create_source::{
     validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::LogicalSource;
+use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::{CheckRelationError, SessionImpl};
@@ -576,6 +578,16 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
 
+    let is_backfill_cdc = with_options
+        .get(UPSTREAM_SOURCE_KEY)
+        .map_or_else(false, |connector| {
+            if let Some((src, _)) = connector.split_once('-') {
+                src == "mysql" || src == "postgres"
+            } else {
+                false
+            }
+        });
+
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -608,6 +620,52 @@ fn gen_table_plan_inner(
         context.clone(),
     )?
     .into();
+
+    let pk_column_indices = {
+        let mut id_to_idx = HashMap::new();
+
+        columns.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id(), idx);
+        });
+        pk_column_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
+            .collect_vec()
+    };
+
+    let pk = pk_column_indices
+        .iter()
+        .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+        .collect();
+
+    let external_table_desc = Rc::new(TableDesc {
+        table_id: TableId::placeholder(),
+        pk,
+        columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+        distribution_key: pk_column_indices.clone(),
+        stream_key: pk_column_indices,
+        append_only,
+        retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+        value_indices: (0..columns.len()).collect_vec(),
+        read_prefix_len_hint: 0,
+        watermark_columns: Default::default(),
+        versioned: false,
+    });
+
+    // TODO(siyuan): add a logical scan for cdc table
+    if is_backfill_cdc {
+        let upstream_table_name = with_options.get("table.name").unwrap_or(&name);
+
+        LogicalScan::create(
+            upstream_table_name.clone(),
+            false,
+            true,
+            external_table_desc,
+            vec![],
+            context.clone(),
+            false,
+        );
+    }
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
     let mut plan_root = PlanRoot::new(
