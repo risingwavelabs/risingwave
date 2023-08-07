@@ -146,6 +146,9 @@ pub struct TableCatalog {
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
+
+    /// Indicate whether to use watermark cache for state table.
+    pub use_watermark_cache: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -230,6 +233,11 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
+        self
+    }
+
+    pub fn with_use_watermark_cache(mut self, use_watermark_cache: bool) -> Self {
+        self.use_watermark_cache = use_watermark_cache;
         self
     }
 
@@ -392,6 +400,7 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
+            use_watermark_cache: Some(self.use_watermark_cache),
         }
     }
 
@@ -497,6 +506,7 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
+            use_watermark_cache: matches!(tb.use_watermark_cache, Some(true)),
         }
     }
 }
@@ -586,6 +596,7 @@ mod tests {
             dist_key_in_pk: vec![],
             cardinality: None,
             created_at_epoch: None,
+            use_watermark_cache: Some(false),
         }
         .into();
 
@@ -639,6 +650,7 @@ mod tests {
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
+                use_watermark_cache: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
