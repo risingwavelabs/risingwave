@@ -15,7 +15,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
 use std::ops::Range;
 
 use risingwave_common::array::{Op, StreamChunk};
@@ -44,18 +43,20 @@ const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 /// Count the approximate number of unique non-null values.
 #[build_aggregate("approx_count_distinct(*) -> int64")]
-fn build(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
-    Ok(Box::new(ApproxCountDistinct::<UpdatableBucket> {
-        _mark: PhantomData,
-    }))
+fn build_updatable(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
+    Ok(Box::new(UpdatableApproxCountDistinct))
 }
 
-struct ApproxCountDistinct<B: Bucket> {
-    _mark: PhantomData<B>,
+/// Count the approximate number of unique non-null values.
+#[build_aggregate("approx_count_distinct(*) -> int64", append_only)]
+fn build_append_only(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
+    Ok(Box::new(AppendOnlyApproxCountDistinct))
 }
+
+struct UpdatableApproxCountDistinct;
 
 #[async_trait::async_trait]
-impl<B: Bucket> AggregateFunction for ApproxCountDistinct<B> {
+impl AggregateFunction for UpdatableApproxCountDistinct {
     fn return_type(&self) -> DataType {
         DataType::Int64
     }
@@ -110,6 +111,98 @@ impl<B: Bucket> AggregateFunction for ApproxCountDistinct<B> {
         Ok(AggregateState::Any(Box::new(UpdatableRegisters {
             initial_count,
             ..UpdatableRegisters::default()
+        })))
+    }
+}
+
+struct AppendOnlyApproxCountDistinct;
+
+#[async_trait::async_trait]
+impl AggregateFunction for AppendOnlyApproxCountDistinct {
+    fn return_type(&self) -> DataType {
+        DataType::Int64
+    }
+
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Any(Box::<AppendOnlyRegisters>::default())
+    }
+
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        let state = state.downcast_mut::<AppendOnlyRegisters>();
+        for (op, row) in input.rows() {
+            let retract = matches!(op, Op::Delete | Op::UpdateDelete);
+            if let Some(scalar) = row.datum_at(0) {
+                state.update(scalar, retract)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        let state = state.downcast_mut::<AppendOnlyRegisters>();
+        for (op, row) in input.rows_in(range) {
+            let retract = matches!(op, Op::Delete | Op::UpdateDelete);
+            if let Some(scalar) = row.datum_at(0) {
+                state.update(scalar, retract)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<AppendOnlyRegisters>();
+        Ok(Some(state.calculate_result().into()))
+    }
+
+    fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
+        let reg = state.downcast_ref::<AppendOnlyRegisters>();
+
+        let buckets = &reg.registers[..];
+        let result_len = (buckets.len() * LOG_COUNT_BITS as usize - 1) / (i64::BITS as usize) + 1;
+        let mut result = vec![0u64; result_len];
+        for (i, bucket_val) in buckets.iter().enumerate() {
+            let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
+            result[start_idx] |= (buckets[i].0 as u64) << begin_bit;
+            if post_end_bit > i64::BITS {
+                result[start_idx + 1] |= (bucket_val.0 as u64) >> (i64::BITS - begin_bit as u32);
+            }
+        }
+        Ok(Some(ScalarImpl::List(ListValue::new(
+            result
+                .into_iter()
+                .map(|x| Some(ScalarImpl::Int64(x as i64)))
+                .collect(),
+        ))))
+    }
+
+    fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
+        let scalar = datum.unwrap();
+        let list = scalar.as_list().values();
+        let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
+        let registers = (0..bucket_num)
+            .map(|i| {
+                let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
+                let val = *list[start_idx].as_ref().unwrap().as_int64();
+                let v = if post_end_bit <= i64::BITS {
+                    (val as u64) << (i64::BITS - post_end_bit)
+                        >> (i64::BITS - LOG_COUNT_BITS as u32)
+                } else {
+                    ((val as u64) >> begin_bit)
+                        + (((*list[start_idx + 1].as_ref().unwrap().as_int64() as u64)
+                            & ((1 << (post_end_bit - i64::BITS)) - 1))
+                            << (i64::BITS - begin_bit as u32))
+                };
+                AppendOnlyBucket(v as u8)
+            })
+            .collect();
+        Ok(AggregateState::Any(Box::new(AppendOnlyRegisters {
+            registers,
+            initial_count: 0,
         })))
     }
 }
@@ -232,56 +325,6 @@ impl<B: Bucket> EstimateSize for Registers<B> {
     }
 }
 
-/// Serialize the state into a scalar.
-impl From<AppendOnlyRegisters> for ScalarImpl {
-    fn from(reg: AppendOnlyRegisters) -> Self {
-        let buckets = &reg.registers[..];
-        let result_len = (buckets.len() * LOG_COUNT_BITS as usize - 1) / (i64::BITS as usize) + 1;
-        let mut result = vec![0u64; result_len];
-        for (i, bucket_val) in buckets.iter().enumerate() {
-            let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
-            result[start_idx] |= (buckets[i].0 as u64) << begin_bit;
-            if post_end_bit > i64::BITS {
-                result[start_idx + 1] |= (bucket_val.0 as u64) >> (i64::BITS - begin_bit as u32);
-            }
-        }
-        ScalarImpl::List(ListValue::new(
-            result
-                .into_iter()
-                .map(|x| Some(ScalarImpl::Int64(x as i64)))
-                .collect(),
-        ))
-    }
-}
-
-/// Deserialize the state from a scalar.
-impl From<ScalarImpl> for AppendOnlyRegisters {
-    fn from(state: ScalarImpl) -> Self {
-        let list = state.as_list().values();
-        let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
-        let registers = (0..bucket_num)
-            .map(|i| {
-                let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
-                let val = *list[start_idx].as_ref().unwrap().as_int64();
-                let v = if post_end_bit <= i64::BITS {
-                    (val as u64) << (i64::BITS - post_end_bit)
-                        >> (i64::BITS - LOG_COUNT_BITS as u32)
-                } else {
-                    ((val as u64) >> begin_bit)
-                        + (((*list[start_idx + 1].as_ref().unwrap().as_int64() as u64)
-                            & ((1 << (post_end_bit - i64::BITS)) - 1))
-                            << (i64::BITS - begin_bit as u32))
-                };
-                AppendOnlyBucket(v as u8)
-            })
-            .collect();
-        Self {
-            registers,
-            initial_count: 0,
-        }
-    }
-}
-
 fn pos_in_serialized(bucket_idx: usize) -> (usize, usize, u32) {
     // rust compiler will optimize for us
     let start_idx = bucket_idx * LOG_COUNT_BITS as usize / i64::BITS as usize;
@@ -299,7 +342,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let approx_count_distinct = crate::agg::build(&AggCall::from_pretty(
+        let approx_count_distinct = crate::agg::build_append_only(&AggCall::from_pretty(
             "(approx_count_distinct:int8 $0:int4)",
         ))
         .unwrap();

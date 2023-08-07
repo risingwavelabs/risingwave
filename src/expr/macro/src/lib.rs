@@ -408,6 +408,7 @@ struct FunctionAttr {
     args: Vec<String>,
     ret: String,
     is_table_function: bool,
+    append_only: bool,
     batch_fn: Option<String>,
     state: Option<String>,
     init_state: Option<String>,

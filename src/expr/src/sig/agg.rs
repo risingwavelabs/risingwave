@@ -38,6 +38,7 @@ pub struct AggFuncSig {
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
     pub build: fn(agg: &AggCall) -> Result<BoxedAggregateFunction>,
+    pub append_only: bool,
 }
 
 impl fmt::Debug for AggFuncSig {
@@ -48,6 +49,7 @@ impl fmt::Debug for AggFuncSig {
             ret_type: self.ret_type,
             set_returning: false,
             deprecated: false,
+            append_only: self.append_only,
         }
         .fmt(f)
     }
@@ -63,16 +65,18 @@ impl AggFuncSigMap {
         self.0.entry((sig.func, arity)).or_default().push(sig);
     }
 
-    /// Returns a function signature with the given type, argument types and return type.
+    /// Returns a function signature with the given type, argument types, return type,
+    /// and append-only flag.
     pub fn get(
         &self,
         ty: AggKind,
         args: &[DataTypeName],
         ret: DataTypeName,
+        append_only: bool,
     ) -> Option<&AggFuncSig> {
         let v = self.0.get(&(ty, args.len()))?;
         v.iter()
-            .find(|d| d.inputs_type == args && d.ret_type == ret)
+            .find(|d| d.inputs_type == args && d.ret_type == ret && d.append_only == append_only)
     }
 
     /// Returns the return type for the given function and arguments.

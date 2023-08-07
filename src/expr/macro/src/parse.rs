@@ -75,6 +75,8 @@ impl Parse for FunctionAttr {
                 parsed.type_infer = Some(get_value()?);
             } else if meta.path().is_ident("deprecated") {
                 parsed.deprecated = true;
+            } else if meta.path().is_ident("append_only") {
+                parsed.append_only = true;
             } else {
                 return Err(Error::new(
                     meta.span(),

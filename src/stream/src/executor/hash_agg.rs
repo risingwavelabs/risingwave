@@ -26,7 +26,7 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build, AggCall, BoxedAggregateFunction};
+use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
@@ -229,7 +229,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
-                agg_funcs: args.agg_calls.iter().map(build).try_collect()?,
+                agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,

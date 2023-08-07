@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build, AggCall, BoxedAggregateFunction};
+use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -143,7 +143,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                agg_funcs: args.agg_calls.iter().map(build).try_collect()?,
+                agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,

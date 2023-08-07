@@ -148,6 +148,7 @@ pub fn build(
                     ret_type: (&return_type).into(),
                     set_returning: true,
                     deprecated: false,
+                    append_only: false,
                 }
             ))
         })?;

@@ -294,11 +294,15 @@ impl FunctionAttr {
             args.push(data_type_name(ty));
         }
         let ret = data_type_name(&self.ret);
+        let append_only = match build_fn {
+            false => !user_fn.retract,
+            true => self.append_only,
+        };
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = match self.user_fn.retract {
-            true => format_ident!("{}", self.ident_name()),
-            false => format_ident!("{}_append_only", self.ident_name()),
+        let ctor_name = match append_only {
+            false => format_ident!("{}", self.ident_name()),
+            true => format_ident!("{}_append_only", self.ident_name()),
         };
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
@@ -316,6 +320,7 @@ impl FunctionAttr {
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
                     build: #build_fn,
+                    append_only: #append_only,
                 }) };
             }
         })

@@ -154,7 +154,7 @@ mod tests {
     use crate::agg::AggCall;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
-        let agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let agg = crate::agg::build_append_only(&AggCall::from_pretty(pretty)).unwrap();
         let mut state = agg.create_state();
         agg.update(&mut state, &input)
             .now_or_never()

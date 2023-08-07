@@ -133,19 +133,27 @@ impl AggregateState {
 
 pub type BoxedAggregateFunction = Box<dyn AggregateFunction>;
 
-/// Build an `AggregateFunction` from `AggCall`.
+/// Build an append-only `Aggregator` from `AggCall`.
+pub fn build_append_only(agg: &AggCall) -> Result<BoxedAggregateFunction> {
+    build(agg, true)
+}
+
+/// Build a retractable `Aggregator` from `AggCall`.
+pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
+    build(agg, false)
+}
+
+/// Build an `Aggregator` from `AggCall`.
 ///
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
-pub fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
-    // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
-
+pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction> {
     let args = (agg.args.arg_types().iter())
         .map(|t| t.into())
         .collect::<Vec<DataTypeName>>();
     let ret_type = (&agg.return_type).into();
     let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
-        .get(agg.kind, &args, ret_type)
+        .get(agg.kind, &args, ret_type, append_only)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
                 "{:?}",
@@ -155,6 +163,7 @@ pub fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
                     ret_type,
                     set_returning: false,
                     deprecated: false,
+                    append_only,
                 }
             ))
         })?;
