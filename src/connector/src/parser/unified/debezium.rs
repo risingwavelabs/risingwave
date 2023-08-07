@@ -58,6 +58,8 @@ where
     }
 
     /// Returns the transaction metadata if exists.
+    ///
+    /// See the [doc](https://debezium.io/documentation/reference/2.3/connectors/postgresql.html#postgresql-transaction-metadata) of Debezium for more details.
     pub(crate) fn transaction_control(&self) -> Result<TransactionControl, AccessError> {
         if let Some(accessor) = &self.value_accessor {
             if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (

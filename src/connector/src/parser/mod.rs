@@ -323,6 +323,7 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+/// Transaction control message. Currently only used by Debezium messages.
 pub enum TransactionControl {
     Begin { id: Box<str> },
     Commit { id: Box<str> },
