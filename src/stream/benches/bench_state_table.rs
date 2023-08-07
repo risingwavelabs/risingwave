@@ -28,17 +28,34 @@ use tokio::runtime::Runtime;
 
 type TestStateTable = StateTable<MemoryStateStore>;
 
+const TEST_DATA_TYPES: [DataType; 14] = [
+    DataType::Timestamp,
+    DataType::Int16,
+    DataType::Int32,
+    DataType::Int64,
+    DataType::Float32,
+    DataType::Float64,
+    DataType::Varchar,
+    DataType::Timestamp,
+    DataType::Int16,
+    DataType::Int32,
+    DataType::Int64,
+    DataType::Float32,
+    DataType::Float64,
+    DataType::Varchar,
+];
+
 async fn create_state_table() -> TestStateTable {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
-    let column_descs = vec![
-        // TODO: ColumnDesc::unnamed(ColumnId::from(0), DataType::Timestamptz),
-        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int64),
-        ColumnDesc::unnamed(ColumnId::from(3), DataType::Int64),
-    ];
-    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
-    let pk_indices = vec![0_usize, 1_usize];
+    let column_descs = TEST_DATA_TYPES
+        .iter()
+        .enumerate()
+        .map(|(i, data_type)| ColumnDesc::unnamed(ColumnId::new(i as i32), data_type.clone()))
+        .collect::<Vec<_>>();
+    let key_length = column_descs.len() / 2;
+    let order_types = vec![OrderType::ascending(); key_length];
+    let pk_indices = (0..key_length).collect();
 
     let store = MemoryStateStore::new();
     StateTable::new_without_distribution_inconsistent_op(
@@ -66,7 +83,7 @@ fn gen_stream_chunks(
         n,
         1024,
         data_types,
-        &VarcharProperty::Constant,
+        &VarcharProperty::RandomFixedLength(Some(20)),
         visibility_percent,
         inserts_percent,
     )
@@ -93,12 +110,7 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     group.bench_function("benchmark_inserts", |b| {
         b.to_async(&rt).iter_batched(
-            || {
-                (
-                    setup_bench_state_table(),
-                    gen_inserts(1, &[DataType::Int32, DataType::Int64, DataType::Int64]),
-                )
-            },
+            || (setup_bench_state_table(), gen_inserts(1, &TEST_DATA_TYPES)),
             |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
             BatchSize::SmallInput,
         )
@@ -144,7 +156,7 @@ fn bench_state_table_chunks(c: &mut Criterion, visibility_percent: f64, inserts_
                         setup_bench_state_table(),
                         gen_stream_chunks(
                             100,
-                            &[DataType::Int32, DataType::Int64, DataType::Int64],
+                            &TEST_DATA_TYPES,
                             visibility_percent,
                             inserts_percent,
                         ),

@@ -851,22 +851,33 @@ impl DataChunkTestExt for DataChunk {
             let mut array_builder = data_type.create_array_builder(chunk_size);
             for j in 0..chunk_size {
                 let offset = ((chunk_offset + 1) * (j + 1)) as u64;
-                if *data_type == DataType::Varchar {
-                    let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
-                        .generate_datum(offset);
-                    array_builder.append(&datum);
-                } else {
-                    let mut data_gen = FieldGeneratorImpl::with_number_random(
-                        data_type.clone(),
-                        None,
-                        None,
-                        Self::SEED,
-                    )
-                    .unwrap();
-                    let datum = data_gen.generate_datum(offset);
-                    array_builder.append(datum);
+                match data_type {
+                    DataType::Varchar => {
+                        let datum =
+                            FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
+                                .generate_datum(offset);
+                        array_builder.append(&datum);
+                    }
+                    DataType::Timestamp => {
+                        let datum =
+                            FieldGeneratorImpl::with_timestamp(None, None, None, Self::SEED)
+                                .expect("create timestamp generator should succeed")
+                                .generate_datum(offset);
+                        array_builder.append(datum);
+                    }
+                    _ if data_type.is_numeric() => {
+                        let mut data_gen = FieldGeneratorImpl::with_number_random(
+                            data_type.clone(),
+                            None,
+                            None,
+                            Self::SEED,
+                        )
+                        .unwrap();
+                        let datum = data_gen.generate_datum(offset);
+                        array_builder.append(datum);
+                    }
+                    _ => todo!("unsupported type: {data_type:?}"),
                 }
-                // FIXME(kwannoel): This misses the case where it is neither Varchar or numeric.
             }
             columns.push(array_builder.finish().into());
         }
