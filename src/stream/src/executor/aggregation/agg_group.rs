@@ -20,6 +20,7 @@ use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;

@@ -460,7 +460,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 agg_kinds::rewritten!() => {
                     unreachable!("should have been rewritten")
                 }
-                agg_kinds::unimplemented_in_stream!() | AggKind::ApproxCountDistinct => {
+                agg_kinds::unimplemented_in_stream!() => {
                     unreachable!("should have been banned")
                 }
             })

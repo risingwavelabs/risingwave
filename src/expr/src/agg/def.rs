@@ -418,7 +418,11 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! single_value_state {
         () => {
-            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
+            AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::BitXor
+                | AggKind::ApproxCountDistinct
         };
     }
     pub use single_value_state;
@@ -428,7 +432,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! single_value_state_iff_in_append_only {
         () => {
-            AggKind::Max | AggKind::Min | AggKind::ApproxCountDistinct
+            AggKind::Max | AggKind::Min
         };
     }
     pub use single_value_state_iff_in_append_only;

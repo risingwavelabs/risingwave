@@ -55,7 +55,6 @@ impl EstimateSize for AggState {
     fn estimated_heap_size(&self) -> usize {
         match self {
             Self::Value(state) => state.estimated_heap_size(),
-            Self::Table(state) => state.estimated_heap_size(),
             Self::MaterializedInput(state) => state.estimated_size(),
         }
     }
