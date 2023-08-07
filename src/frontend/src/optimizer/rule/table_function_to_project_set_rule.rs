@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
