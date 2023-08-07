@@ -361,6 +361,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 return Err(RwError::from(ProtocolError(
     "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
+            let key_message_name = get_key_message_name(&mut options);
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
             let name_strategy =
                 get_sr_name_strategy_check(&mut options, avro_schema.use_schema_registry)?;
@@ -370,6 +371,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
                 use_schema_registry: avro_schema.use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
+                key_message_name,
                 name_strategy: name_strategy
                     .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
                 ..Default::default()
@@ -463,7 +465,10 @@ pub(crate) async fn try_bind_columns_from_source(
             let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
                 &mut options,
                 NAME_STRATEGY_KEY,
-            ))?;
+            ))?
+            .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32);
+            let key_message_name = get_key_message_name(&mut options);
+            let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
             if !avro_schema.use_schema_registry && name_strategy.is_some() {
                 return Err(RwError::from(ProtocolError(
                     "schema registry name strategy only works with schema registry enabled"
@@ -480,14 +485,14 @@ pub(crate) async fn try_bind_columns_from_source(
                 let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
 
                 let stream_source_info = StreamSourceInfo {
+                    key_message_name,
                     format: FormatType::Upsert as i32,
                     row_encode: EncodeType::Avro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
+                    proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                     upsert_avro_primary_key,
-                    name_strategy: name_strategy.unwrap_or(
-                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
-                    ),
+                    name_strategy,
                     ..Default::default()
                 };
                 let columns =
@@ -500,9 +505,8 @@ pub(crate) async fn try_bind_columns_from_source(
                     row_encode: EncodeType::Avro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
-                    name_strategy: name_strategy.unwrap_or(
-                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
-                    ),
+                    proto_message_name: message_name.unwrap_or(AstString("".into())).0,
+                    name_strategy,
                     ..Default::default()
                 };
                 let (columns, pk_from_avro) =
