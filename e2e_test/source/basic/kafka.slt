@@ -385,8 +385,7 @@ CREATE TABLE upsert_students (
     age INT,
     height REAL,
     weight REAL
-) append only with
-WITH (
+) append only with (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_json')
