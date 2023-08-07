@@ -114,6 +114,7 @@ pub struct StorageOpts {
     pub object_store_recv_buffer_size: Option<usize>,
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
+    pub compactor_max_sst_size: u64,
 }
 
 impl Default for StorageOpts {
@@ -208,6 +209,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
+            compactor_max_sst_size: c.storage.compactor_max_sst_size,
         }
     }
 }
