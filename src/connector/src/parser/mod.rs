@@ -67,7 +67,6 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
-    current_transaction: Option<Box<str>>,
 }
 
 impl SourceStreamChunkBuilder {
@@ -81,7 +80,6 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
-            current_transaction: None,
         }
     }
 
@@ -93,6 +91,7 @@ impl SourceStreamChunkBuilder {
         }
     }
 
+    /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
         StreamChunk::new(
             self.op_builder,
@@ -104,37 +103,8 @@ impl SourceStreamChunkBuilder {
         )
     }
 
-    pub fn in_transaction(&self) -> bool {
-        self.current_transaction.is_some()
-    }
-
-    pub fn apply_transaction_control(&mut self, txn_ctl: TransactionControl) -> bool {
-        match txn_ctl {
-            TransactionControl::Begin { id } => {
-                if let Some(current_id) = &self.current_transaction {
-                    tracing::warn!(
-                        "already in transaction, current: {}, new: {}",
-                        current_id,
-                        id
-                    );
-                }
-                self.current_transaction = Some(id);
-            }
-            TransactionControl::Commit { id } => {
-                if self.current_transaction.as_ref() != Some(&id) {
-                    tracing::warn!(
-                        "transaction id mismatch, current: {:?}, actual: {}",
-                        self.current_transaction,
-                        id
-                    );
-                }
-                self.current_transaction = None;
-            }
-        }
-
-        self.in_transaction()
-    }
-
+    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
+    /// the builders of the next [`StreamChunk`].
     #[must_use]
     pub fn take(&mut self, next_cap: usize) -> StreamChunk {
         let descs = std::mem::take(&mut self.descs);
@@ -146,8 +116,8 @@ impl SourceStreamChunkBuilder {
         self.op_builder.len()
     }
 
-    pub fn is_clean(&self) -> bool {
-        self.op_builder.is_empty() && !self.in_transaction()
+    pub fn is_empty(&self) -> bool {
+        self.op_builder.is_empty()
     }
 }
 
@@ -377,13 +347,15 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
     /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
     /// as a transaction control message.
+    ///
+    /// The default implementation forwards to [`ByteStreamSourceParser::parse_one`] for
+    /// non-transactional sources.
     fn parse_one_with_txn<'a>(
         &'a mut self,
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<Either<WriteGuard, TransactionControl>>> + Send + 'a {
-        // The default implementation is for non-transactional source.
         self.parse_one(key, payload, writer).map_ok(Either::Left)
     }
 
@@ -409,18 +381,23 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
     let mut split_offset_mapping = HashMap::<SplitId, String>::new();
-    let mut yield_asap = false;
+
+    let mut current_transaction = None;
+    let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
 
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
         let batch_len = batch.len();
 
-        if builder.is_clean() {
+        if builder.is_empty() && current_transaction.is_none() {
+            // Clean state. Reserve capacity for the builder.
             assert!(!yield_asap);
             assert!(split_offset_mapping.is_empty());
             let _ = builder.take(batch_len);
         } else {
+            // Dirty state. The last batch is not yielded due to uncommitted transaction.
+            // After the transaction is committed, we should yield the last batch immediately.
             yield_asap = true;
         }
 
@@ -463,10 +440,34 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         }
                     }
                 }
-                Ok(Either::Right(txn_ctl)) => {
-                    let in_transaction = builder.apply_transaction_control(txn_ctl);
 
-                    if !in_transaction && yield_asap {
+                Ok(Either::Right(txn_ctl)) => {
+                    match txn_ctl {
+                        TransactionControl::Begin { id } => {
+                            if let Some(current_id) = &current_transaction {
+                                tracing::warn!(
+                                    "already in transaction, current: {}, new: {}",
+                                    current_id,
+                                    id
+                                );
+                            }
+                            current_transaction = Some(id);
+                        }
+                        TransactionControl::Commit { id } => {
+                            if current_transaction.as_ref() != Some(&id) {
+                                tracing::warn!(
+                                    "transaction id mismatch, current: {:?}, actual: {}",
+                                    current_transaction,
+                                    id
+                                );
+                            }
+                            current_transaction = None;
+                        }
+                    }
+
+                    // Not in a transaction anymore and `yield_asap` is set, so we should yield the
+                    // chunk now.
+                    if current_transaction.is_none() && yield_asap {
                         yield_asap = false;
                         yield StreamChunkWithState {
                             chunk: builder.take(batch_len - (i + 1)),
@@ -484,7 +485,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             }
         }
 
-        if !builder.in_transaction() {
+        // If we are not in a transaction, we should yield the chunk now.
+        if current_transaction.is_none() {
             yield_asap = false;
             yield StreamChunkWithState {
                 chunk: builder.take(0),

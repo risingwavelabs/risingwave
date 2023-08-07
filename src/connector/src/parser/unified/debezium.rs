@@ -57,6 +57,7 @@ where
         }
     }
 
+    /// Returns the transaction metadata if exists.
     pub(crate) fn transaction_control(&self) -> Result<TransactionControl, AccessError> {
         if let Some(accessor) = &self.value_accessor {
             if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (

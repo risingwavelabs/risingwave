@@ -103,10 +103,18 @@ impl DebeziumParser {
         };
         let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 
-        if let Ok(transaction_control) = row_op.transaction_control() {
-            return Ok(Either::Right(transaction_control));
+        match apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer) {
+            Ok(guard) => Ok(Either::Left(guard)),
+            Err(err) => {
+                // Only try to access transaction control message if the row operation access failed
+                // to make it a fast path.
+                if let Ok(transaction_control) = row_op.transaction_control() {
+                    Ok(Either::Right(transaction_control))
+                } else {
+                    Err(err)
+                }
+            }
         }
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map(Either::Left)
     }
 }
 
@@ -126,7 +134,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        unreachable!("should call `parse_one_new` instead")
+        unreachable!("should call `parse_one_with_txn` instead")
     }
 
     async fn parse_one_with_txn<'a>(
