@@ -16,7 +16,7 @@ extract_error_sql() {
    | grep -E "(\[EXECUTING|\[TEST)" \
    | sed 's/.*\[EXECUTING .*\]: //' \
    | sed 's/.*\[TEST.*\]: //' \
-   | sed 's/$/;/' > $LOGDIR/error.sql
+   | sed 's/$/;/' > $LOGDIR/error.sql.log
 }
 
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
