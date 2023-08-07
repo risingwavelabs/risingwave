@@ -420,11 +420,13 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
-    use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, test_key_of, test_user_key_of, DEFAULT_MAX_KEY_COUNT,
+        DEFAULT_MAX_SST_SIZE,
+    };
     use crate::hummock::{
         create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
-        SstableBuilderOptions, DEFAULT_MAX_KEY_COUNT, DEFAULT_MAX_SST_SIZE,
-        DEFAULT_RESTART_INTERVAL,
+        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
     };
 
     #[tokio::test]
