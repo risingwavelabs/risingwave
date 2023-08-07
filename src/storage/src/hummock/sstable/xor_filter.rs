@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+use std::ops::Bound;
+
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use xorf::{Filter, Xor16, Xor8};
-use risingwave_hummock_sdk::key::{FullKey, user_key, UserKeyRange};
 
 use super::{FilterBuilder, Sstable};
+use crate::hummock::BlockMeta;
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
-const FOOTER_BLOCKED_XOR16: u8 = 254;
+const FOOTER_BLOCKED_XOR16: u8 = 253;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -124,7 +128,7 @@ pub struct BlockedXor16FilterBuilder {
     block_count: usize,
 }
 
-const BLOCK_FILTER_CAPACITY: usize = 16 * 1024;    // 16KB means 2K key count.
+const BLOCK_FILTER_CAPACITY: usize = 16 * 1024; // 16KB means 2K key count.
 
 impl BlockedXor16FilterBuilder {
     pub fn new(capacity: usize) -> Self {
@@ -164,19 +168,76 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
     }
 }
 
-pub struct BlockedXorFilter {
+pub struct BlockBasedXorFilter {
     filters: Vec<(Vec<u8>, Xor16)>,
 }
 
-impl BlockedXorFilter {
-    pub fn may_exist(&self, user_key: &UserKeyRange, h: u64) -> bool {
-        true
+impl Clone for BlockBasedXorFilter {
+    fn clone(&self) -> Self {
+        let mut filters = Vec::with_capacity(self.filters.len());
+        for (key, filter) in &self.filters {
+            filters.push((
+                key.clone(),
+                Xor16 {
+                    seed: filter.seed,
+                    block_length: filter.block_length,
+                    fingerprints: filter.fingerrints.clone(),
+                },
+            ));
+        }
+        Self { filters }
+    }
+}
+
+impl BlockBasedXorFilter {
+    pub fn may_exist(
+        &self,
+        user_key_range: &(Bound<UserKey<&[u8]>>, Bound<UserKey<&[u8]>>),
+        h: u64,
+    ) -> bool {
+        let mut block_idx = match user_key_range.0 {
+            Bound::Unbounded => 0,
+            Bound::Included(left) | Bound::Excluded(left) => self
+                .filters
+                .partition_point(|(smallest_key, _)| {
+                    let ord = FullKey::decode(smallest_key).user_key.cmp(&left);
+                    ord == Ordering::Less || ord == Ordering::Equal
+                })
+                .saturating_sub(1),
+        };
+
+        while block_idx < self.filters.len() {
+            let read_bound = match user_key_range.1 {
+                Bound::Unbounded => false,
+                Bound::Included(right) => {
+                    let ord = FullKey::decode(&self.filters[block_idx].0)
+                        .user_key
+                        .cmp(&right);
+                    ord == Ordering::Greater
+                }
+                Bound::Excluded(right) => {
+                    let ord = FullKey::decode(&self.filters[block_idx].0)
+                        .user_key
+                        .cmp(&right);
+                    ord != Ordering::Less
+                }
+            };
+            if read_bound {
+                break;
+            }
+            if self.filters[block_idx].1.contains(&h) {
+                return true;
+            }
+            block_idx += 1;
+        }
+        false
     }
 }
 
 pub enum XorFilter {
     Xor8(Xor8),
     Xor16(Xor16),
+    BlockXor16(BlockBasedXorFilter),
 }
 
 pub struct XorFilterReader {
@@ -185,8 +246,8 @@ pub struct XorFilterReader {
 
 impl XorFilterReader {
     /// Creates an xor filter from a byte slice
-    pub fn new(buf: Vec<u8>) -> Self {
-        if buf.len() <= 1 {
+    pub fn new(mut data: &[u8], metas: &[BlockMeta]) -> Self {
+        if data.len() <= 1 {
             return Self {
                 filter: XorFilter::Xor16(Xor16 {
                     seed: 0,
@@ -196,29 +257,32 @@ impl XorFilterReader {
             };
         }
 
-        let kind = *buf.last().unwrap();
-        let filter = if kind == FOOTER_XOR16 {
-            let buf = &mut &buf[..];
-            let xor_filter_seed = buf.get_u64_le();
-            let xor_filter_block_length = buf.get_u32_le();
-            // is correct even when there is an extra 0xff byte in the end of buf
-            let len = buf.len() / 2;
-            let xor_filter_fingerprints = (0..len)
-                .map(|_| buf.get_u16_le())
-                .collect_vec()
-                .into_boxed_slice();
-            XorFilter::Xor16(Xor16 {
-                seed: xor_filter_seed,
-                block_length: xor_filter_block_length as usize,
-                fingerprints: xor_filter_fingerprints,
-            })
+        let kind = *data.last().unwrap();
+        let l = data.len();
+        let filter = if kind == FOOTER_BLOCKED_XOR16 {
+            assert!(l >= 5);
+            let reader = &mut &data[(l - 5)..];
+            let block_count = reader.get_u32_le() as usize;
+            assert_eq!(block_count, metas.len());
+            let reader = &mut data;
+            let mut filters = Vec::with_capacity(block_count);
+            for idx in 0..block_count {
+                let len = reader.get_u32_le() as usize;
+                let xor16 = Self::to_xor16(&reader[..len]);
+                reader.advance(len);
+                filters.push((metas[idx].smallest_key.clone(), xor16));
+            }
+            XorFilter::BlockXor16(BlockBasedXorFilter { filters })
+        } else if kind == FOOTER_XOR16 {
+            let xor16 = Self::to_xor16(data);
+            XorFilter::Xor16(xor16)
         } else {
-            let mbuf = &mut &buf[..];
+            let mbuf = &mut data;
             let xor_filter_seed = mbuf.get_u64_le();
             let xor_filter_block_length = mbuf.get_u32_le();
             // is correct even when there is an extra 0xff byte in the end of buf
-            let end_pos = buf.len() - 1;
-            let xor_filter_fingerprints = buf[(8 + 4)..end_pos].to_vec().into_boxed_slice();
+            let end_pos = mbuf.len() - 1;
+            let xor_filter_fingerprints = mbuf[..end_pos].to_vec().into_boxed_slice();
             XorFilter::Xor8(Xor8 {
                 seed: xor_filter_seed,
                 block_length: xor_filter_block_length as usize,
@@ -228,10 +292,34 @@ impl XorFilterReader {
         Self { filter }
     }
 
+    fn to_xor16(mut data: &[u8]) -> Xor16 {
+        let kind = *data.last().unwrap();
+        assert_eq!(kind, FOOTER_XOR16);
+        let buf = &mut data;
+        let xor_filter_seed = buf.get_u64_le();
+        let xor_filter_block_length = buf.get_u32_le();
+        // is correct even when there is an extra 0xff byte in the end of buf
+        let len = buf.len() / 2;
+        let xor_filter_fingerprints = (0..len)
+            .map(|_| buf.get_u16_le())
+            .collect_vec()
+            .into_boxed_slice();
+        Xor16 {
+            seed: xor_filter_seed,
+            block_length: xor_filter_block_length as usize,
+            fingerprints: xor_filter_fingerprints,
+        }
+    }
+
     pub fn estimate_size(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => filter.fingerprints.len(),
             XorFilter::Xor16(filter) => filter.fingerprints.len() * std::mem::size_of::<u16>(),
+            XorFilter::BlockXor16(reader) => reader
+                .filters
+                .iter()
+                .map(|filter| filter.1.fingerprints.len() * std::mem::size_of::<u16>())
+                .sum(),
         }
     }
 
@@ -239,6 +327,7 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => filter.block_length == 0,
             XorFilter::Xor16(filter) => filter.block_length == 0,
+            XorFilter::BlockXor16(reader) => reader.filters.is_empty(),
         }
     }
 
@@ -249,13 +338,18 @@ impl XorFilterReader {
     ///     the hash;
     ///   - if the return value is true, then the table may or may not have the user key that has
     ///     the hash actually, a.k.a. we don't know the answer.
-    pub fn may_match(&self, h: u64) -> bool {
+    pub fn may_match(
+        &self,
+        user_key_range: &(Bound<UserKey<&[u8]>>, Bound<UserKey<&[u8]>>),
+        h: u64,
+    ) -> bool {
         if self.is_empty() {
             true
         } else {
             match &self.filter {
                 XorFilter::Xor8(filter) => filter.contains(&h),
                 XorFilter::Xor16(filter) => filter.contains(&h),
+                XorFilter::BlockXor16(reader) => reader.may_exist(user_key_range, h),
             }
         }
     }
@@ -277,6 +371,9 @@ impl Clone for XorFilterReader {
                     block_length: filter.block_length,
                     fingerprints: filter.fingerprints.clone(),
                 }),
+            },
+            XorFilter::BlockXor16(reader) => Self {
+                filter: XorFilter::BlockXor16(reader.clone()),
             },
         }
     }

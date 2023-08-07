@@ -244,7 +244,7 @@ impl Debug for Sstable {
 impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
-        let filter_reader = XorFilterReader::new(filter_data);
+        let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
 
         Self {
             id,
@@ -283,8 +283,12 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn may_match_hash(&self, hash: u64) -> bool {
-        self.filter_reader.may_match(hash)
+    pub fn may_match_hash(
+        &self,
+        user_key_range: &(Bound<UserKey<&[u8]>>, Bound<UserKey<&[u8]>>),
+        hash: u64,
+    ) -> bool {
+        self.filter_reader.may_match(user_key_range, hash)
     }
 
     pub fn block_count(&self) -> usize {

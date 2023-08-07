@@ -563,12 +563,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use std::collections::Bound;
+
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::UserKey;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
@@ -678,7 +681,15 @@ pub(super) mod tests {
             let full_key = test_key_of(i);
             if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
-                assert!(table.may_match_hash(hash));
+                let key_ref = full_key.user_key.as_ref();
+                assert!(
+                    table.may_match_hash(
+                        &(Bound::Included(key_ref), Bound::Included(key_ref)),
+                        hash
+                    ),
+                    "failed at {}",
+                    i
+                );
             }
         }
     }
@@ -688,5 +699,6 @@ pub(super) mod tests {
         test_with_bloom_filter::<Xor16FilterBuilder>(false).await;
         test_with_bloom_filter::<Xor16FilterBuilder>(true).await;
         test_with_bloom_filter::<Xor8FilterBuilder>(true).await;
+        test_with_bloom_filter::<BlockedXor16FilterBuilder>(true).await;
     }
 }
