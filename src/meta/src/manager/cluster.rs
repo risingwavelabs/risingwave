@@ -510,9 +510,6 @@ pub struct ClusterManagerCore {
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
 
-    /// Record for parallel units.
-    parallel_units: Vec<ParallelUnit>,
-
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<u32>,
 }
@@ -526,8 +523,6 @@ impl ClusterManagerCore {
         S: MetaStore,
     {
         let mut workers = Worker::list(&*meta_store).await?;
-        let mut worker_map = HashMap::new();
-        let mut parallel_units = Vec::new();
 
         let used_transactional_ids: HashSet<_> = workers
             .iter()
@@ -579,14 +574,11 @@ impl ClusterManagerCore {
             var_txn.commit();
         }
 
-        workers.into_iter().for_each(|w| {
-            worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
-            parallel_units.extend(w.worker_node.parallel_units);
-        });
-
         Ok(Self {
-            workers: worker_map,
-            parallel_units,
+            workers: workers
+                .into_iter()
+                .map(|w| (WorkerKey(w.key().unwrap()), w))
+                .collect(),
             available_transactional_ids,
         })
     }
@@ -618,9 +610,6 @@ impl ClusterManagerCore {
                 .retain(|id| *id != transactional_id);
         }
 
-        self.parallel_units
-            .extend(worker.worker_node.parallel_units.clone());
-
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
@@ -631,13 +620,6 @@ impl ClusterManagerCore {
     }
 
     fn delete_worker_node(&mut self, worker: Worker) {
-        worker
-            .worker_node
-            .parallel_units
-            .iter()
-            .for_each(|parallel_unit| {
-                self.parallel_units.retain(|p| p.id != parallel_unit.id);
-            });
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
 
         if let Some(transactional_id) = worker.worker_node.transactional_id {
@@ -679,16 +661,9 @@ impl ClusterManagerCore {
     }
 
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
-        let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(State::Running))
+        self.list_streaming_worker_node(Some(State::Running))
             .into_iter()
-            .map(|w| w.id)
-            .collect();
-
-        self.parallel_units
-            .iter()
-            .filter(|p| active_workers.contains(&p.worker_node_id))
-            .cloned()
+            .flat_map(|w| w.parallel_units)
             .collect()
     }
 
@@ -710,11 +685,9 @@ impl ClusterManagerCore {
             .map(|w| (w.id, w))
             .collect();
 
-        let active_parallel_units = self
-            .parallel_units
-            .iter()
-            .filter(|p| active_workers.contains_key(&p.worker_node_id))
-            .map(|p| (p.id, p.clone()))
+        let active_parallel_units = active_workers
+            .values()
+            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
             .collect();
 
         let unschedulable_parallel_units = unschedulable_worker_node
@@ -810,6 +783,48 @@ mod tests {
 
         let parallel_count = fake_parallelism * worker_count;
         assert_cluster_manager(&cluster_manager, parallel_count).await;
+
+        // re-register existing worker node with larger parallelism.
+        let fake_host_address = HostAddress {
+            host: "localhost".to_string(),
+            port: 5000,
+        };
+        let worker_node = cluster_manager
+            .add_worker_node(
+                WorkerType::ComputeNode,
+                fake_host_address,
+                AddNodeProperty {
+                    worker_node_parallelism: (fake_parallelism + 4) as u64,
+                    is_streaming: true,
+                    is_serving: true,
+                    is_unschedulable: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+
+        // re-register existing worker node with smaller parallelism.
+        let fake_host_address = HostAddress {
+            host: "localhost".to_string(),
+            port: 5000,
+        };
+        let worker_node = cluster_manager
+            .add_worker_node(
+                WorkerType::ComputeNode,
+                fake_host_address,
+                AddNodeProperty {
+                    worker_node_parallelism: (fake_parallelism - 2) as u64,
+                    is_streaming: true,
+                    is_serving: true,
+                    is_unschedulable: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
 
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
