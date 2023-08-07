@@ -700,6 +700,7 @@ impl SpecificParserConfig {
                     } else {
                         Some(info.proto_message_name.clone())
                     },
+                    key_record_name: info.key_message_name.clone(),
                     name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
@@ -733,6 +734,7 @@ impl SpecificParserConfig {
                     row_schema_location: info.row_schema_location.clone(),
                     name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
                         .unwrap(),
+                    key_message_name: info.key_message_name.clone(),
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
@@ -757,6 +759,7 @@ impl SpecificParserConfig {
                     },
                     name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
                         .unwrap(),
+                    key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: SchemaRegistryAuth::from(props),
