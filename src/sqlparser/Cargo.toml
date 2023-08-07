@@ -25,7 +25,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-itertools = "0.10"
+itertools = "0.11"
 serde = { version = "1.0", features = ["derive"], optional = true }
 tracing = "0.1"
 

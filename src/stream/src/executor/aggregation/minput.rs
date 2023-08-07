@@ -12,28 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
-
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, RowExt};
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::agg::{AggCall, AggKind};
+use risingwave_expr::agg::{build, AggCall, AggKind, BoxedAggState};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInputBatch};
-use super::minput_agg_impl::array_agg::ArrayAgg;
-use super::minput_agg_impl::extreme::ExtremeAgg;
-use super::minput_agg_impl::string_agg::StringAgg;
+use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use super::GroupKey;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
@@ -46,7 +39,13 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// stored in the state table when applying chunks, and the aggregation result is calculated
 /// when need to get output.
 #[derive(EstimateSize)]
-pub struct MaterializedInputState<S: StateStore> {
+pub struct MaterializedInputState {
+    /// The aggregation state. It is always initial.
+    ///
+    /// This is `None` if the aggregate function is either `min`, `max`, `first_value` or
+    /// `last_value`.
+    aggregator: Option<BoxedAggState>,
+
     /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
 
@@ -65,11 +64,9 @@ pub struct MaterializedInputState<S: StateStore> {
     /// Serializer for cache key.
     #[estimate_size(ignore)]
     cache_key_serializer: OrderedRowSerde,
-
-    _phantom_data: PhantomData<S>,
 }
 
-impl<S: StateStore> MaterializedInputState<S> {
+impl MaterializedInputState {
     /// Create an instance from [`AggCall`].
     pub fn new(
         agg_call: &AggCall,
@@ -77,7 +74,7 @@ impl<S: StateStore> MaterializedInputState<S> {
         col_mapping: &StateTableColumnMapping,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         let arg_col_indices = agg_call.args.val_indices().to_vec();
         let (mut order_col_indices, mut order_types) =
             if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
@@ -136,17 +133,20 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
+        let aggregator = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => None,
+            _ => Some(build(agg_call)?),
+        };
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => Box::new(
-                GenericAggStateCache::new(TopNStateCache::new(extreme_cache_size), ExtremeAgg),
-            ),
-            AggKind::StringAgg => Box::new(GenericAggStateCache::new(
+            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => {
+                Box::new(GenericAggStateCache::new(
+                    TopNStateCache::new(extreme_cache_size),
+                    agg_call.args.arg_types(),
+                ))
+            }
+            AggKind::StringAgg | AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
-                StringAgg,
-            )),
-            AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
-                OrderedStateCache::new(),
-                ArrayAgg,
+                agg_call.args.arg_types(),
             )),
             _ => panic!(
                 "Agg kind `{}` is not expected to have materialized input state",
@@ -154,39 +154,32 @@ impl<S: StateStore> MaterializedInputState<S> {
             ),
         };
 
-        Self {
+        Ok(Self {
+            aggregator,
             arg_col_indices,
             state_table_arg_col_indices,
             order_col_indices,
             state_table_order_col_indices,
             cache,
             cache_key_serializer,
-            _phantom_data: PhantomData,
-        }
+        })
     }
 
     /// Apply a chunk of data to the state cache.
-    pub fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-    ) -> StreamExecutorResult<()> {
-        self.cache.apply_batch(StateCacheInputBatch::new(
-            ops,
-            visibility,
-            columns,
+    pub fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
+        self.cache.apply_batch(
+            chunk,
             &self.cache_key_serializer,
             &self.arg_col_indices,
             &self.order_col_indices,
-        ));
+        );
         Ok(())
     }
 
     /// Get the output of the state.
     pub async fn get_output(
         &mut self,
-        state_table: &StateTable<S>,
+        state_table: &StateTable<impl StateStore>,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
@@ -218,14 +211,26 @@ impl<S: StateStore> MaterializedInputState<S> {
                 let cache_value = self
                     .state_table_arg_col_indices
                     .iter()
-                    .map(|i| state_row[*i].as_ref().map(ScalarImpl::as_scalar_ref_impl))
+                    .map(|i| state_row[*i].clone())
                     .collect();
                 cache_filler.append(cache_key, cache_value);
             }
             cache_filler.finish();
         }
         assert!(self.cache.is_synced());
-        Ok(self.cache.get_output())
+
+        if let Some(aggregator) = &mut self.aggregator {
+            const CHUNK_SIZE: usize = 1024;
+            let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
+            for chunk in chunks {
+                aggregator.update(&chunk).await?;
+            }
+            Ok(aggregator.output()?)
+        } else {
+            // special case for `min`, `max`, `first_value` and `last_value`
+            // take the first value from the cache
+            Ok(self.cache.output_first())
+        }
     }
 }
 
@@ -242,7 +247,6 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
-    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::agg::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
@@ -260,15 +264,7 @@ mod tests {
         col_mapping: &StateTableColumnMapping,
     ) -> StreamChunk {
         let chunk = StreamChunk::from_pretty(pretty);
-        table.write_chunk(StreamChunk::new(
-            chunk.ops().to_vec(),
-            col_mapping
-                .upstream_columns()
-                .iter()
-                .map(|col_idx| chunk.columns()[*col_idx].clone())
-                .collect(),
-            chunk.visibility().cloned(),
-        ));
+        table.write_chunk(chunk.project(col_mapping.upstream_columns()));
         chunk
     }
 
@@ -329,7 +325,8 @@ mod tests {
             &mapping,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -345,20 +342,13 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 3);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(3i32.into()));
         }
 
         {
@@ -370,20 +360,13 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 2);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(2i32.into()));
         }
 
         {
@@ -394,14 +377,10 @@ mod tests {
                 &mapping,
                 usize::MAX,
                 &input_schema,
-            );
+            )
+            .unwrap();
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 2);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(2i32.into()));
         }
 
         Ok(())
@@ -438,7 +417,8 @@ mod tests {
             &mapping,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -454,20 +434,13 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 8);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(8i32.into()));
         }
 
         {
@@ -479,20 +452,13 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 9);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(9i32.into()));
         }
 
         {
@@ -503,14 +469,11 @@ mod tests {
                 &mapping,
                 usize::MAX,
                 &input_schema,
-            );
+            )
+            .unwrap();
+
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 9);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(9i32.into()));
         }
 
         Ok(())
@@ -529,7 +492,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call_1 = AggCall::from_pretty("(min:varchar $0:varchar)"); // min(a)
-        let agg_call_2 = AggCall::from_pretty("(max:varchar $1:varchar)"); // max(b)
+        let agg_call_2 = AggCall::from_pretty("(max:int4 $1:int4)"); // max(b)
         let group_key = None;
 
         let (mut table_1, mapping_1) = create_mem_state_table(
@@ -561,14 +524,17 @@ mod tests {
             &mapping_1,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
+
         let mut state_2 = MaterializedInputState::new(
             &agg_call_2,
             &input_pk_indices,
             &mapping_2,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         {
             let chunk_1 = create_chunk(
@@ -596,31 +562,18 @@ mod tests {
                 &mapping_2,
             );
 
-            [chunk_1, chunk_2]
-                .into_iter()
-                .zip_eq_fast([&mut state_1, &mut state_2])
-                .try_for_each(|(chunk, state)| {
-                    let (ops, columns, visibility) = chunk.into_inner();
-                    let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-                    state.apply_chunk(&ops, visibility.as_ref(), &columns)
-                })?;
+            state_1.apply_chunk(&chunk_1)?;
+            state_2.apply_chunk(&chunk_2)?;
 
             epoch.inc();
             table_1.commit(epoch).await.unwrap();
             table_2.commit(epoch).await.unwrap();
 
-            match state_1.get_output(&table_1, group_key.as_ref()).await? {
-                Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s.as_ref(), "a");
-                }
-                _ => panic!("unexpected output"),
-            }
-            match state_2.get_output(&table_2, group_key.as_ref()).await? {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 9);
-                }
-                _ => panic!("unexpected output"),
-            }
+            let out1 = state_1.get_output(&table_1, group_key.as_ref()).await?;
+            assert_eq!(out1, Some("a".into()));
+
+            let out2 = state_2.get_output(&table_2, group_key.as_ref()).await?;
+            assert_eq!(out2, Some(9i32.into()));
         }
 
         Ok(())
@@ -658,7 +611,8 @@ mod tests {
             &mapping,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -673,20 +627,13 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 5);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(5i32.into()));
         }
 
         {
@@ -698,20 +645,13 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 8);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(8i32.into()));
         }
 
         {
@@ -722,14 +662,11 @@ mod tests {
                 &mapping,
                 usize::MAX,
                 &input_schema,
-            );
+            )
+            .unwrap();
+
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 8);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(8i32.into()));
         }
 
         Ok(())
@@ -767,7 +704,8 @@ mod tests {
             &mapping,
             1024,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut rng = rand::thread_rng();
         let insert_values: Vec<i32> = (0..10000).map(|_| rng.gen()).collect_vec();
@@ -796,20 +734,13 @@ mod tests {
             }
 
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, min_value);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(min_value.into()));
         }
 
         {
@@ -830,20 +761,13 @@ mod tests {
             }
 
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, min_value);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(min_value.into()));
         }
 
         Ok(())
@@ -878,7 +802,8 @@ mod tests {
             &mapping,
             3, // cache capacity = 3 for easy testing
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -892,20 +817,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 4);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(4i32.into()));
         }
 
         {
@@ -919,20 +837,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 12);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(12i32.into()));
         }
 
         {
@@ -948,20 +859,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 12);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some(12i32.into()));
         }
 
         Ok(())
@@ -1004,7 +908,8 @@ mod tests {
             &mapping,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -1019,20 +924,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s.as_ref(), "c,a".to_string());
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some("c,a".into()));
         }
 
         {
@@ -1043,20 +941,13 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
-            match res {
-                Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s.as_ref(), "d_c,a+e".to_string());
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res, Some("d_c,a+e".into()));
         }
 
         Ok(())
@@ -1075,7 +966,7 @@ mod tests {
         let field4 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
-        let agg_call = AggCall::from_pretty("(array_agg:int4 $1:int4 orderby $2:asc $0:desc)");
+        let agg_call = AggCall::from_pretty("(array_agg:int4[] $1:int4 orderby $2:asc $0:desc)");
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -1095,7 +986,8 @@ mod tests {
             &mapping,
             usize::MAX,
             &input_schema,
-        );
+        )
+        .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -1109,9 +1001,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -1138,9 +1028,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();

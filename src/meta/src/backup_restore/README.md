@@ -16,6 +16,6 @@ backup-restore <options, see -h for detail>
 4. Config meta service cluster to use the new meta store.
 
 ### Caveat
-The meta service backup/recovery procedure **doesn't** replicate SSTs in object store. 
+The meta service backup/recovery procedure **doesn't** replicate SSTs in object store.
 So always make sure the underlying SST object store is writable to at most one running cluster at any time.
 Otherwise, the SST object store will face the risk of data corruption.

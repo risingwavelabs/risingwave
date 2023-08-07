@@ -14,13 +14,11 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::row::OwnedRow;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_keywords` stores keywords. `pg_get_keywords` returns the content of this table.
-/// Ref: [`https://www.postgresql.org/docs/15/functions-info.html`]
 pub const PG_KEYWORDS_TABLE_NAME: &str = "pg_keywords";
 pub const PG_GET_KEYWORDS_FUNC_NAME: &str = "pg_get_keywords";
 pub const PG_KEYWORDS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
@@ -29,5 +27,12 @@ pub const PG_KEYWORDS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "catdesc"),
 ];
 
-// TODO: set reserved keywords here
-pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
+/// The catalog `pg_keywords` stores keywords. `pg_get_keywords` returns the content of this table.
+/// Ref: [`https://www.postgresql.org/docs/15/functions-info.html`]
+// TODO: change to read reserved keywords here
+pub static PG_KEYWORDS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: PG_KEYWORDS_TABLE_NAME,
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_KEYWORDS_COLUMNS,
+    sql: infer_dummy_view_sql(PG_KEYWORDS_COLUMNS),
+});

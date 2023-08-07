@@ -16,14 +16,15 @@ use std::ops::Range;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk};
+use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, BoxedAggState};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -62,7 +63,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
+            .map(|agg| AggCall::from_protobuf(agg).and_then(|agg| build_agg(&agg)))
             .try_collect()?;
 
         let group_key: Vec<_> = sort_agg_node
@@ -118,7 +119,7 @@ impl SortAggExecutor {
 
         #[for_await]
         for child_chunk in self.child.execute() {
-            let child_chunk = child_chunk?.compact();
+            let child_chunk = StreamChunk::from(child_chunk?.compact());
             let mut group_columns = Vec::with_capacity(self.group_key.len());
             for expr in &mut self.group_key {
                 self.shutdown_rx.check()?;
@@ -136,11 +137,11 @@ impl SortAggExecutor {
                 EqGroups::intersect(&groups)
             };
 
-            for Range { start, end } in groups.ranges() {
+            for range in groups.ranges() {
                 self.shutdown_rx.check()?;
                 let group: Vec<_> = group_columns
                     .iter()
-                    .map(|col| col.datum_at(start))
+                    .map(|col| col.datum_at(range.start))
                     .collect();
 
                 if curr_group.as_ref() != Some(&group) {
@@ -172,7 +173,7 @@ impl SortAggExecutor {
                     }
                 }
 
-                Self::update_agg_states(&mut self.agg_states, &child_chunk, start, end).await?;
+                Self::update_agg_states(&mut self.agg_states, &child_chunk, range).await?;
             }
         }
 
@@ -200,14 +201,11 @@ impl SortAggExecutor {
 
     async fn update_agg_states(
         agg_states: &mut [BoxedAggState],
-        child_chunk: &DataChunk,
-        start_row_idx: usize,
-        end_row_idx: usize,
+        child_chunk: &StreamChunk,
+        range: Range<usize>,
     ) -> Result<()> {
         for state in agg_states.iter_mut() {
-            state
-                .update_multi(child_chunk, start_row_idx, end_row_idx)
-                .await?;
+            state.update_range(child_chunk, range.clone()).await?;
         }
         Ok(())
     }
@@ -216,11 +214,10 @@ impl SortAggExecutor {
         agg_states: &mut [BoxedAggState],
         agg_builders: &mut [ArrayBuilderImpl],
     ) -> Result<()> {
-        agg_states
-            .iter_mut()
-            .zip_eq_fast(agg_builders)
-            .try_for_each(|(state, builder)| state.output(builder))
-            .map_err(Into::into)
+        for (aggregator, builder) in agg_states.iter_mut().zip_eq_fast(agg_builders) {
+            builder.append(aggregator.output()?);
+        }
+        Ok(())
     }
 
     fn create_builders(
@@ -268,16 +265,7 @@ impl EqGroups {
 
     /// Detect the equality groups in the given array.
     fn detect(array: &ArrayImpl) -> Result<EqGroups> {
-        macro_rules! gen_match_detect_inner {
-            ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match array {
-                    $(
-                        ArrayImpl::$variant_name(array) => Ok(Self::detect_inner(array))
-                    ),*
-                }
-            };
-        }
-        for_all_variants! { gen_match_detect_inner }
+        dispatch_array_variants!(array, array, { Ok(Self::detect_inner(array)) })
     }
 
     fn detect_inner<T>(array: &T) -> EqGroups
@@ -404,7 +392,7 @@ mod tests {
              4 5 9",
         ));
 
-        let count_star = build_agg(AggCall::from_pretty("(count:int8)"))?;
+        let count_star = build_agg(&AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![count_star];
 
@@ -485,7 +473,7 @@ mod tests {
              5 8 9",
         ));
 
-        let count_star = build_agg(AggCall::from_pretty("(count:int8)"))?;
+        let count_star = build_agg(&AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -582,7 +570,7 @@ mod tests {
              10",
         ));
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -648,7 +636,7 @@ mod tests {
              4 5 9",
         ));
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -740,7 +728,7 @@ mod tests {
               2  7 12",
         ));
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -833,7 +821,7 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int32)]),
         );
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();

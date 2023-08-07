@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -124,11 +124,7 @@ where
     S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
-        let table_fragments = try_match_expand!(
-            TableFragments::list(env.meta_store()).await,
-            Ok,
-            "TableFragments::list fail"
-        )?;
+        let table_fragments = TableFragments::list(env.meta_store()).await?;
 
         let table_fragments = table_fragments
             .into_iter()
@@ -150,6 +146,21 @@ where
         self.core.read().await
     }
 
+    pub async fn list_dirty_table_fragments(
+        &self,
+        check_dirty: impl Fn(&TableFragments) -> bool,
+    ) -> Vec<TableFragments> {
+        self.core
+            .read()
+            .await
+            .table_fragments
+            .values()
+            .filter(|tf| check_dirty(tf))
+            .cloned()
+            .collect_vec()
+    }
+
+    // FIXME: `list_table_fragments` would be too heavy for large cluster.
     pub async fn list_table_fragments(&self) -> Vec<TableFragments> {
         let map = &self.core.read().await.table_fragments;
         map.values().cloned().collect()
@@ -546,37 +557,63 @@ where
         }
     }
 
+    async fn migrate_fragment_actors_inner(
+        &self,
+        migration_plan: &MigrationPlan,
+        table_id: TableId,
+    ) -> MetaResult<()> {
+        let core = &mut *self.core.write().await;
+        let current_revision = &mut core.table_revision;
+        let map = &mut core.table_fragments;
+        let mut table_trx = BTreeMapTransaction::new(map);
+        let mut table_fragment = table_trx
+            .get_mut(table_id)
+            .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+        for status in table_fragment.actor_status.values_mut() {
+            if let Some(pu) = &status.parallel_unit && migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+                status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
+            }
+        }
+        table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
+        let table_fragment = table_fragment.clone();
+        let next_revision = current_revision.next();
+
+        let mut trx = Transaction::default();
+        next_revision.store(&mut trx);
+        commit_meta_with_trx!(self, trx, table_trx)?;
+        *current_revision = next_revision;
+
+        self.notify_fragment_mapping(&table_fragment, Operation::Update)
+            .await;
+
+        Ok(())
+    }
+
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     /// migrate actors and update fragments one by one according to the migration plan.
     pub async fn migrate_fragment_actors(&self, migration_plan: &MigrationPlan) -> MetaResult<()> {
-        let table_fragments = self.list_table_fragments().await;
-        for mut table_fragment in table_fragments {
-            let mut updated = false;
-            for status in table_fragment.actor_status.values_mut() {
-                if let Some(pu) = &status.parallel_unit && migration_plan.parallel_unit_plan.contains_key(&pu.id) {
-                    updated = true;
-                    status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
+        let to_migrate_table_fragments = self
+            .core
+            .read()
+            .await
+            .table_fragments
+            .values()
+            .filter(|tf| {
+                for status in tf.actor_status.values() {
+                    if let Some(pu) = &status.parallel_unit &&
+                    migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+                        return true;
+                    }
                 }
-            }
-            if updated {
-                table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
-                let mut guard = self.core.write().await;
-                let current_revision = guard.table_revision;
-                let map = &mut guard.table_fragments;
-                if map.contains_key(&table_fragment.table_id()) {
-                    let mut table_trx = BTreeMapTransaction::new(map);
-                    table_trx.insert(table_fragment.table_id(), table_fragment.clone());
+                false
+            })
+            .map(|tf| tf.table_id())
+            .collect_vec();
 
-                    let next_revision = current_revision.next();
-                    let mut trx = Transaction::default();
-                    next_revision.store(&mut trx);
-                    commit_meta_with_trx!(self, trx, table_trx)?;
-                    guard.table_revision = next_revision;
-
-                    self.notify_fragment_mapping(&table_fragment, Operation::Update)
-                        .await;
-                }
-            }
+        for table_id in to_migrate_table_fragments {
+            self.migrate_fragment_actors_inner(migration_plan, table_id)
+                .await?;
         }
 
         Ok(())

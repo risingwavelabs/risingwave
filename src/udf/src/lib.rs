@@ -12,5 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod error;
 mod external;
-pub use external::{ArrowFlightUdfClient, Error};
+
+pub use error::{Error, Result};
+pub use external::ArrowFlightUdfClient;

@@ -52,7 +52,7 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
-        options.capacity = estimate_task_memory_capacity(context.clone(), &task);
+        options.capacity = estimate_task_memory_capacity(context.clone(), &task).0;
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
@@ -111,7 +111,6 @@ impl CompactorRunner {
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
-        gc_delete_keys: bool,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<CompactionDeleteRanges>> {
@@ -132,7 +131,7 @@ impl CompactorRunner {
             builder.add_delete_events(range_tombstone_list);
         }
 
-        let aggregator = builder.build_for_compaction(gc_delete_keys);
+        let aggregator = builder.build_for_compaction();
         Ok(aggregator)
     }
 
@@ -142,6 +141,11 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
+        let compact_io_retry_time = self
+            .compactor
+            .context
+            .storage_opts
+            .compact_iter_recreate_timeout_ms;
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -171,6 +175,7 @@ impl CompactorRunner {
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                     task_progress.clone(),
+                    compact_io_retry_time,
                 ));
             } else {
                 for table_info in &level.table_infos {
@@ -189,6 +194,7 @@ impl CompactorRunner {
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
+                        compact_io_retry_time,
                     ));
                 }
             }
@@ -280,7 +286,6 @@ mod tests {
 
         let collector = CompactorRunner::build_delete_range_iter(
             &sstable_infos,
-            compact_task.gc_delete_keys,
             &sstable_store,
             &mut state_clean_up_filter,
         )

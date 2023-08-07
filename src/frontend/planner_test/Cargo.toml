@@ -16,12 +16,12 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 expect-test = "1"
-itertools = "0.10"
+itertools = "0.11"
 paste = "1"
-risingwave_frontend = { path = ".." }
-risingwave_sqlparser = { path = "../../sqlparser" }
+risingwave_frontend = { workspace = true }
+risingwave_sqlparser = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-serde_with = "2"
+serde_with = "3"
 serde_yaml = "0.9"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

@@ -210,7 +210,7 @@ pub async fn handle_alter_table_column(
     };
 
     // Calculate the mapping from the original columns to the new columns.
-    let col_index_mapping = ColIndexMapping::new(
+    let col_index_mapping = ColIndexMapping::with_target_size(
         original_catalog
             .columns()
             .iter()
@@ -220,6 +220,7 @@ pub async fn handle_alter_table_column(
                 })
             })
             .collect(),
+        table.columns.len(),
     );
 
     let catalog_writer = session.catalog_writer()?;

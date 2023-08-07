@@ -16,7 +16,7 @@ use bytes::{Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
 
 use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 // Used to convert ScalarRef to text format
 pub trait ToBinary {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>>;
@@ -73,8 +73,14 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) => todo!(),
-            ScalarRefImpl::List(_) => todo!(),
+            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => Err(ErrorCode::NotImplemented(
+                format!(
+                    "the pgwire extended-mode encoding for {} is unsupported",
+                    ty
+                ),
+                Some(7949).into(),
+            )
+            .into()),
         }
     }
 }

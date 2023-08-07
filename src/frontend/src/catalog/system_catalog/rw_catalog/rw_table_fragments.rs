@@ -12,11 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_TABLE_FRAGMENTS_TABLE_NAME: &str = "rw_table_fragments";
+pub const RW_TABLE_FRAGMENTS: BuiltinTable = BuiltinTable {
+    name: "rw_table_fragments",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[(DataType::Int32, "table_id"), (DataType::Varchar, "status")],
+    pk: &[0],
+};
 
-pub const RW_TABLE_FRAGMENTS_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
-    &[(DataType::Int32, "table_id"), (DataType::Varchar, "status")];
+impl SysCatalogReaderImpl {
+    pub async fn read_rw_table_fragments_info(&self) -> Result<Vec<OwnedRow>> {
+        let states = self.meta_client.list_table_fragment_states().await?;
+
+        Ok(states
+            .into_iter()
+            .map(|state| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(state.table_id as i32)),
+                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
+                ])
+            })
+            .collect_vec())
+    }
+}

@@ -40,11 +40,16 @@ pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
+use crate::{
+    dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants,
+    for_all_scalar_variants, for_all_type_pairs,
+};
 
 mod datetime;
 mod decimal;
 mod interval;
 mod jsonb;
+mod macros;
 mod native_type;
 mod num256;
 mod ops;
@@ -81,37 +86,6 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
-
-/// `for_all_type_pairs` is a macro that records all logical type (`DataType`) variants and their
-/// corresponding physical type (`ScalarImpl`, `ArrayImpl`, or `ArrayBuilderImpl`) variants.
-///
-/// This is useful for checking whether a physical type is compatible with a logical type.
-#[macro_export]
-macro_rules! for_all_type_pairs {
-    ($macro:ident) => {
-        $macro! {
-            { Boolean,     Bool },
-            { Int16,       Int16 },
-            { Int32,       Int32 },
-            { Int64,       Int64 },
-            { Int256,      Int256 },
-            { Float32,     Float32 },
-            { Float64,     Float64 },
-            { Varchar,     Utf8 },
-            { Bytea,       Bytea },
-            { Date,        Date },
-            { Time,        Time },
-            { Timestamp,   Timestamp },
-            { Timestamptz, Timestamptz },
-            { Interval,    Interval },
-            { Decimal,     Decimal },
-            { Jsonb,       Jsonb },
-            { Serial,      Serial },
-            { List,        List },
-            { Struct,      Struct }
-        }
-    };
-}
 
 /// The set of datatypes that are supported in RisingWave.
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
@@ -312,19 +286,9 @@ impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
 
-        macro_rules! new_builder {
-            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
-                match self {
-                    $(
-                        DataType::$DataType { .. } => {
-                            let builder = ArrayBuilder::with_type(capacity, self.clone());
-                            ArrayBuilderImpl::$PhysicalType(builder)
-                        }
-                    )*
-                }
-            }
-        }
-        for_all_type_pairs! { new_builder }
+        dispatch_data_types!(self, [B = ArrayBuilder], {
+            B::with_type(capacity, self.clone()).into()
+        })
     }
 
     pub fn prost_type_name(&self) -> PbTypeName {
@@ -531,42 +495,6 @@ pub trait ScalarRef<'a>: ScalarBounds<ScalarRefImpl<'a>> + 'a + Copy {
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H);
 }
 
-/// `for_all_scalar_variants` includes all variants of our scalar types. If you added a new scalar
-/// type inside the project, be sure to add a variant here.
-///
-/// It is used to simplify the boilerplate code of repeating all scalar types, while each type
-/// has exactly the same code.
-///
-/// To use it, you need to provide a macro, whose input is `{ enum variant name, function suffix
-/// name, scalar type, scalar ref type }` tuples. Refer to the following implementations as
-/// examples.
-#[macro_export]
-macro_rules! for_all_scalar_variants {
-    ($macro:ident) => {
-        $macro! {
-            { Int16, int16, i16, i16 },
-            { Int32, int32, i32, i32 },
-            { Int64, int64, i64, i64 },
-            { Int256, int256, Int256, Int256Ref<'scalar> },
-            { Serial, serial, Serial, Serial },
-            { Float32, float32, F32, F32 },
-            { Float64, float64, F64, F64 },
-            { Utf8, utf8, Box<str>, &'scalar str },
-            { Bool, bool, bool, bool },
-            { Decimal, decimal, Decimal, Decimal  },
-            { Interval, interval, Interval, Interval },
-            { Date, date, Date, Date },
-            { Time, time, Time, Time },
-            { Timestamp, timestamp, Timestamp, Timestamp },
-            { Timestamptz, timestamptz, Timestamptz, Timestamptz },
-            { Jsonb, jsonb, JsonbVal, JsonbRef<'scalar> },
-            { Struct, struct, StructValue, StructRef<'scalar> },
-            { List, list, ListValue, ListRef<'scalar> },
-            { Bytea, bytea, Box<[u8]>, &'scalar [u8] }
-        }
-    };
-}
-
 /// Define `ScalarImpl` and `ScalarRefImpl` with macro.
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
@@ -586,6 +514,12 @@ macro_rules! scalar_impl_enum {
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
+
+// We MUST NOT implement `Ord` for `ScalarImpl` because that will make `Datum` derive an incorrect
+// default `Ord`. To get a default-ordered `ScalarImpl`/`ScalarRefImpl`/`Datum`/`DatumRef`, you can
+// use `DefaultOrdered<T>`. If non-default order is needed, please refer to `sort_util`.
+impl !PartialOrd for ScalarImpl {}
+impl !PartialOrd for ScalarRefImpl<'_> {}
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
@@ -768,6 +702,19 @@ impl From<&str> for ScalarImpl {
 impl From<&String> for ScalarImpl {
     fn from(s: &String) -> Self {
         Self::Utf8(s.as_str().into())
+    }
+}
+impl TryFrom<ScalarImpl> for String {
+    type Error = ArrayError;
+
+    fn try_from(val: ScalarImpl) -> ArrayResult<Self> {
+        match val {
+            ScalarImpl::Utf8(s) => Ok(s.into()),
+            other_scalar => bail!(
+                "cannot convert ScalarImpl::{} to concrete type",
+                other_scalar.get_ident()
+            ),
+        }
     }
 }
 
@@ -977,58 +924,31 @@ impl ScalarImpl {
     }
 }
 
-macro_rules! impl_scalar_impl_ref_conversion {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl ScalarImpl {
-            /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
-            pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
-                match self {
-                    $(
-                        Self::$variant_name(inner) => ScalarRefImpl::<'_>::$variant_name(inner.as_scalar_ref())
-                    ), *
-                }
-            }
-        }
-
-        impl<'a> ScalarRefImpl<'a> {
-            /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
-            pub fn into_scalar_impl(self) -> ScalarImpl {
-                match self {
-                    $(
-                        Self::$variant_name(inner) => ScalarImpl::$variant_name(inner.to_owned_scalar())
-                    ), *
-                }
-            }
-        }
-    };
+impl ScalarImpl {
+    /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
+    pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
+        dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().into() })
+    }
 }
 
-for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
-
-/// Implement [`Hash`] for [`ScalarImpl`] and [`ScalarRefImpl`] with `hash_scalar`.
-///
-/// Should behave the same as [`crate::array::Array::hash_at`].
-macro_rules! scalar_impl_hash {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl Hash for ScalarRefImpl<'_> {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.hash_scalar(state), )*
-                }
-            }
-        }
-
-        impl Hash for ScalarImpl {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.as_scalar_ref().hash_scalar(state), )*
-                }
-            }
-        }
-    };
+impl<'a> ScalarRefImpl<'a> {
+    /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
+    pub fn into_scalar_impl(self) -> ScalarImpl {
+        dispatch_scalar_ref_variants!(self, inner, { inner.to_owned_scalar().into() })
+    }
 }
 
-for_all_scalar_variants! { scalar_impl_hash }
+impl Hash for ScalarImpl {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().hash_scalar(state) })
+    }
+}
+
+impl Hash for ScalarRefImpl<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        dispatch_scalar_ref_variants!(self, inner, { inner.hash_scalar(state) })
+    }
+}
 
 /// Feeds the raw scalar reference of `datum` to the given `state`, which should behave the same
 /// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
