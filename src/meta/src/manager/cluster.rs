@@ -117,55 +117,57 @@ where
                     .unwrap_or_default();
             }
 
-            worker.update_ttl(self.max_heartbeat_interval);
             let current_parallelism = worker.worker_node.parallel_units.len();
             if current_parallelism == worker_node_parallelism
                 && worker.worker_node.property == property
             {
+                worker.update_ttl(self.max_heartbeat_interval);
                 return Ok(worker.to_protobuf());
             }
+
+            let mut new_worker = worker.clone();
             match current_parallelism.cmp(&worker_node_parallelism) {
                 Ordering::Less => {
                     tracing::info!(
                         "worker {} parallelism updated from {} to {}",
-                        worker.worker_node.id,
+                        new_worker.worker_node.id,
                         current_parallelism,
                         worker_node_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
                             worker_node_parallelism - current_parallelism,
-                            worker.worker_id(),
+                            new_worker.worker_id(),
                         )
                         .await?;
-                    worker.worker_node.parallel_units.extend(parallel_units);
+                    new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
                 Ordering::Greater => {
-                    // Simply reject the request if the worker registered with a smaller
-                    // parallelism.
-                    return Err(MetaError::invalid_worker(
-                        worker.worker_id(),
-                        format!(
-                            "parallelism is less than current, current is {}, but received {}",
-                            current_parallelism, worker_node_parallelism
-                        ),
-                    ));
+                    // Warn and keep the original parallelism if the worker registered with a
+                    // smaller parallelism.
+                    tracing::warn!(
+                        "worker {} parallelism is less than current, current is {}, but received {}",
+                        new_worker.worker_id(),
+                        current_parallelism,
+                        worker_node_parallelism
+                    );
                 }
                 Ordering::Equal => {}
             }
-            if property != worker.worker_node.property {
+            if property != new_worker.worker_node.property {
                 tracing::info!(
                     "worker {} property updated from {:?} to {:?}",
-                    worker.worker_node.id,
-                    worker.worker_node.property,
+                    new_worker.worker_node.id,
+                    new_worker.worker_node.property,
                     property
                 );
 
-                worker.worker_node.property = property;
+                new_worker.worker_node.property = property;
             }
 
-            worker.insert(self.env.meta_store()).await?;
-            // FIXME: should update cache after txn success.
+            new_worker.update_ttl(self.max_heartbeat_interval);
+            new_worker.insert(self.env.meta_store()).await?;
+            *worker = new_worker;
             return Ok(worker.to_protobuf());
         }
 
