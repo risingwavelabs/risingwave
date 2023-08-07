@@ -182,6 +182,10 @@ pub trait RowExt: Row {
         }
         D(self)
     }
+
+    fn is_null_at(&self, index: usize) -> bool {
+        self.datum_at(index).is_none()
+    }
 }
 
 impl<R: Row> RowExt for R {}

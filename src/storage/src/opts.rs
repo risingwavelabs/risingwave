@@ -54,6 +54,8 @@ pub struct StorageOpts {
     pub share_buffer_upload_concurrency: usize,
     /// Capacity of sstable meta cache.
     pub compactor_memory_limit_mb: usize,
+    /// compactor streaming iterator recreate timeout.
+    pub compact_iter_recreate_timeout_ms: u64,
     /// Number of SST ids fetched from meta per RPC
     pub sstable_id_remote_fetch_number: u32,
     /// Whether to enable streaming upload for sstable.
@@ -112,6 +114,7 @@ pub struct StorageOpts {
     pub object_store_recv_buffer_size: Option<usize>,
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
+    pub compactor_max_sst_size: u64,
 }
 
 impl Default for StorageOpts {
@@ -195,6 +198,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             object_store_streaming_read_timeout_ms: c
                 .storage
                 .object_store_streaming_read_timeout_ms,
+            compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
             object_store_streaming_upload_timeout_ms: c
                 .storage
                 .object_store_streaming_upload_timeout_ms,
@@ -205,6 +209,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
+            compactor_max_sst_size: c.storage.compactor_max_sst_size,
         }
     }
 }
