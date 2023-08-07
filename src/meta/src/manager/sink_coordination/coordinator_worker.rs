@@ -23,13 +23,12 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
-use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::{
+use risingwave_pb::connector_service::coordinate_request::CommitRequest;
+use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
-use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::CommitRequest;
 use risingwave_pb::connector_service::{
-    sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
-    SinkMetadata, SinkWriterToCoordinatorMsg,
+    coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, SinkMetadata,
 };
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -123,7 +122,7 @@ impl CoordinatorWorker {
 
     async fn send_to_all_sink_writers(
         &mut self,
-        new_msg: impl Fn() -> Result<SinkCoordinatorToWriterMsg, Status>,
+        new_msg: impl Fn() -> Result<CoordinateResponse, Status>,
     ) {
         for sender in &self.response_senders {
             send_await_with_err_check!(sender, new_msg());
@@ -199,8 +198,8 @@ impl CoordinatorWorker {
         }
 
         self.send_to_all_sink_writers(|| {
-            Ok(SinkCoordinatorToWriterMsg {
-                msg: Some(sink_coordinator_to_writer_msg::Msg::StartResponse(
+            Ok(CoordinateResponse {
+                msg: Some(coordinate_response::Msg::StartResponse(
                     StartCoordinationResponse {},
                 )),
             })
@@ -241,9 +240,9 @@ impl CoordinatorWorker {
                     ));
                 }
                 Either::Right((Some(next_result), _)) => match next_result {
-                    Ok(Some(SinkWriterToCoordinatorMsg {
+                    Ok(Some(CoordinateRequest {
                         msg:
-                            Some(sink_writer_to_coordinator_msg::Msg::CommitRequest(CommitRequest {
+                            Some(coordinate_request::Msg::CommitRequest(CommitRequest {
                                 epoch: request_epoch,
                                 metadata: Some(metadata),
                             })),
@@ -305,10 +304,10 @@ impl CoordinatorWorker {
                     .map_err(|e| error!("failed to commit metadata of epoch {}: {:?}", epoch, e))?;
 
                 self.send_to_all_sink_writers(|| {
-                    Ok(SinkCoordinatorToWriterMsg {
-                        msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(
-                            CommitResponse { epoch },
-                        )),
+                    Ok(CoordinateResponse {
+                        msg: Some(coordinate_response::Msg::CommitResponse(CommitResponse {
+                            epoch,
+                        })),
                     })
                 })
                 .await;

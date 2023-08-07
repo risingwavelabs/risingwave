@@ -17,20 +17,19 @@ use std::future::Future;
 use anyhow::anyhow;
 use futures::Stream;
 use risingwave_common::buffer::Bitmap;
-use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{
+use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest,
 };
 use risingwave_pb::connector_service::{
-    sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, PbSinkParam,
-    SinkCoordinatorToWriterMsg, SinkMetadata, SinkWriterToCoordinatorMsg,
+    coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
+    SinkMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::{BidiStreamHandle, SinkCoordinationRpcClient};
 
-pub type CoordinatorStreamHandle =
-    BidiStreamHandle<SinkWriterToCoordinatorMsg, SinkCoordinatorToWriterMsg>;
+pub type CoordinatorStreamHandle = BidiStreamHandle<CoordinateRequest, CoordinateResponse>;
 
 impl CoordinatorStreamHandle {
     pub async fn new(
@@ -50,13 +49,13 @@ impl CoordinatorStreamHandle {
         init_stream: F,
     ) -> anyhow::Result<Self>
     where
-        F: FnOnce(Request<ReceiverStream<SinkWriterToCoordinatorMsg>>) -> Fut,
-        St: Stream<Item = Result<SinkCoordinatorToWriterMsg, Status>> + Send + Unpin + 'static,
+        F: FnOnce(Request<ReceiverStream<CoordinateRequest>>) -> Fut,
+        St: Stream<Item = Result<CoordinateResponse, Status>> + Send + Unpin + 'static,
         Fut: Future<Output = Result<Response<St>, Status>> + Send,
     {
         let (stream_handle, first_response) = BidiStreamHandle::initialize(
-            SinkWriterToCoordinatorMsg {
-                msg: Some(sink_writer_to_coordinator_msg::Msg::StartRequest(
+            CoordinateRequest {
+                msg: Some(coordinate_request::Msg::StartRequest(
                     StartCoordinationRequest {
                         vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
                         param: Some(param),
@@ -67,26 +66,24 @@ impl CoordinatorStreamHandle {
         )
         .await?;
         match first_response {
-            SinkCoordinatorToWriterMsg {
-                msg: Some(sink_coordinator_to_writer_msg::Msg::StartResponse(_)),
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::StartResponse(_)),
             } => Ok(stream_handle),
             msg => Err(anyhow!("should get start response but get {:?}", msg)),
         }
     }
 
     pub async fn commit(&mut self, epoch: u64, metadata: SinkMetadata) -> anyhow::Result<()> {
-        self.send_request(SinkWriterToCoordinatorMsg {
-            msg: Some(sink_writer_to_coordinator_msg::Msg::CommitRequest(
-                CommitRequest {
-                    epoch,
-                    metadata: Some(metadata),
-                },
-            )),
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
+                epoch,
+                metadata: Some(metadata),
+            })),
         })
         .await?;
         match self.next_response().await? {
-            SinkCoordinatorToWriterMsg {
-                msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(_)),
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::CommitResponse(_)),
             } => Ok(()),
             msg => Err(anyhow!("should get commit response but get {:?}", msg)),
         }

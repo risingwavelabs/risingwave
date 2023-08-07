@@ -14,7 +14,7 @@
 
 use futures::{Stream, StreamExt};
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationService;
-use risingwave_pb::connector_service::{SinkCoordinatorToWriterMsg, SinkWriterToCoordinatorMsg};
+use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse};
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -32,11 +32,11 @@ impl SinkCoordinationServiceImpl {
 
 #[async_trait::async_trait]
 impl SinkCoordinationService for SinkCoordinationServiceImpl {
-    type CoordinateStream = impl Stream<Item = Result<SinkCoordinatorToWriterMsg, Status>>;
+    type CoordinateStream = impl Stream<Item = Result<CoordinateResponse, Status>>;
 
     async fn coordinate(
         &self,
-        request: Request<Streaming<SinkWriterToCoordinatorMsg>>,
+        request: Request<Streaming<CoordinateRequest>>,
     ) -> Result<Response<Self::CoordinateStream>, Status> {
         let stream = request.into_inner();
         Ok(Response::new(

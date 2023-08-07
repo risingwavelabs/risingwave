@@ -23,10 +23,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::pending_on_none;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::SinkParam;
-use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::Msg;
-use risingwave_pb::connector_service::{
-    sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg, SinkWriterToCoordinatorMsg,
-};
+use risingwave_pb::connector_service::coordinate_request::Msg;
+use risingwave_pb::connector_service::{coordinate_request, CoordinateRequest, CoordinateResponse};
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -104,18 +102,18 @@ impl SinkCoordinatorManager {
     pub(crate) async fn handle_new_request(
         &self,
         mut request_stream: SinkWriterRequestStream,
-    ) -> Result<impl Stream<Item = Result<SinkCoordinatorToWriterMsg, Status>>, Status> {
+    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>>, Status> {
         let (param, vnode_bitmap) = match request_stream.try_next().await? {
-            Some(SinkWriterToCoordinatorMsg {
+            Some(CoordinateRequest {
                 msg:
-                    Some(Msg::StartRequest(sink_writer_to_coordinator_msg::StartCoordinationRequest {
+                    Some(Msg::StartRequest(coordinate_request::StartCoordinationRequest {
                         param: Some(param),
                         vnode_bitmap: Some(vnode_bitmap),
                     })),
             }) => (SinkParam::from_proto(param), Bitmap::from(&vnode_bitmap)),
             msg => {
                 return Err(Status::invalid_argument(format!(
-                    "expected SinkWriterToCoordinatorMsg::StartRequest in the first request, get {:?}",
+                    "expected CoordinateRequest::StartRequest in the first request, get {:?}",
                     msg
                 )));
             }

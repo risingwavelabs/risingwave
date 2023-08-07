@@ -185,7 +185,7 @@ service ConnectorService {
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
 }
 
-message SinkWriterToCoordinatorMsg {
+message CoordinateRequest {
   message StartCoordinationRequest {
     common.Buffer vnode_bitmap = 1;
     SinkParam param = 2;
@@ -202,7 +202,7 @@ message SinkWriterToCoordinatorMsg {
   }
 }
 
-message SinkCoordinatorToWriterMsg {
+message CoordinateResponse {
   message StartCoordinationResponse {}
 
   message CommitResponse {
@@ -216,5 +216,5 @@ message SinkCoordinatorToWriterMsg {
 }
 
 service SinkCoordinationService {
-  rpc Coordinate(stream SinkWriterToCoordinatorMsg) returns (stream SinkCoordinatorToWriterMsg);
+  rpc Coordinate(stream CoordinateRequest) returns (stream CoordinateResponse);
 }
