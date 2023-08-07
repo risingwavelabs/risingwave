@@ -302,9 +302,8 @@ where
                                         // mark.
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_snapshot_processed_rows +=
+                                            cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            total_snapshot_processed_rows += chunk_cardinality;
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
