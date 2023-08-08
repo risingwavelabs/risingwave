@@ -108,11 +108,10 @@ where
     ///
     /// Returns the new epoch after recovery.
     pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
-        // pause discovery of all connector split changes and trigger config change.
-        let _source_pause_guard = self.source_manager.paused.lock().await;
-
-        // Abort buffered schedules, they might be dirty already.
-        self.scheduled_barriers.abort().await;
+        // Mark blocked and abort buffered schedules, they might be dirty already.
+        self.scheduled_barriers
+            .abort_and_mark_blocked("cluster is under recovering".into())
+            .await;
 
         tracing::info!("recovery start!");
         self.clean_dirty_fragments()
@@ -221,6 +220,7 @@ where
         .await
         .expect("Retry until recovery success.");
         recovery_timer.observe_duration();
+        self.scheduled_barriers.mark_ready().await;
         tracing::info!("recovery success");
 
         new_epoch
