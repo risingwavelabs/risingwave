@@ -52,12 +52,6 @@ profile:
       # - use: kafka
       #   persist-data: true
 
-  debug:
-    steps:
-      - use: prometheus  # metrics
-      - use: tempo       # tracing
-      - use: grafana     # visualization
-
   default-v6:
     steps:
       - use: meta-node
