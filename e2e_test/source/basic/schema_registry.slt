@@ -1,5 +1,5 @@
 # wrong strategy name
-statement err
+statement error
 create source s1 () with (
   connector = 'kafka',
   topic = 'upsert_avro_json-record',
@@ -11,7 +11,7 @@ create source s1 () with (
 );
 
 # redundant field key.message
-statement err
+statement error
 create source s1 () with (
   connector = 'kafka',
   topic = 'upsert_avro_json-record',
@@ -35,7 +35,7 @@ create source s1 () with (
 );
 
 # lack field key.message
-statement err
+statement error
 create table t1 () with (
     connector = 'kafka',
     topic = 'upsert_avro_json-topic-record',
