@@ -121,7 +121,7 @@ impl Rule for ApplyJoinTransposeRule {
         }
 
         assert!(
-            join.is_full_out(),
+            join.output_indices_is_trivial(),
             "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
         );
 

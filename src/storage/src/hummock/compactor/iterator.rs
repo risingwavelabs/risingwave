@@ -20,6 +20,7 @@ use std::sync::{atomic, Arc};
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
+use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -30,19 +31,20 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{Block, BlockHolder, BlockIterator, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
-struct SstableStreamIterator {
+pub struct SstableStreamIterator {
+    sstable_store: SstableStoreRef,
+    block_metas: Vec<BlockMeta>,
     /// The downloading stream.
-    block_stream: BlockStream,
+    block_stream: Option<BlockStream>,
 
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
 
-    /// The maximum number of remaining blocks that iterator will download and read.
-    remaining_blocks: usize,
+    seek_block_idx: usize,
 
     /// Counts the time used for IO.
     stats_ptr: Arc<AtomicU64>,
@@ -51,6 +53,8 @@ struct SstableStreamIterator {
     sstable_info: SstableInfo,
     existing_table_ids: HashSet<StateTableId>,
     task_progress: Arc<TaskProgress>,
+    io_retry_timeout_ms: u64,
+    create_time: Instant,
 }
 
 impl SstableStreamIterator {
@@ -69,22 +73,42 @@ impl SstableStreamIterator {
     /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
-        sstable_info: &SstableInfo,
+        block_metas: Vec<BlockMeta>,
+        sstable_info: SstableInfo,
         existing_table_ids: HashSet<StateTableId>,
-        block_stream: BlockStream,
-        max_block_count: usize,
+        start_block_idx: usize,
         stats: &StoreLocalStatistic,
         task_progress: Arc<TaskProgress>,
+        sstable_store: SstableStoreRef,
+        io_retry_timeout_ms: u64,
     ) -> Self {
         Self {
-            block_stream,
+            block_stream: None,
             block_iter: None,
-            remaining_blocks: max_block_count,
+            block_metas,
+            seek_block_idx: start_block_idx,
             stats_ptr: stats.remote_io_time.clone(),
             existing_table_ids,
-            sstable_info: sstable_info.clone(),
+            sstable_info,
+            create_time: Instant::now(),
+            sstable_store,
             task_progress,
+            io_retry_timeout_ms,
         }
+    }
+
+    async fn create_stream(&mut self) -> HummockResult<()> {
+        let block_stream = self
+            .sstable_store
+            .get_stream_by_position(
+                self.sstable_info.object_id,
+                self.seek_block_idx,
+                &self.block_metas,
+            )
+            .verbose_instrument_await("stream_iter_get_stream")
+            .await?;
+        self.block_stream = Some(block_stream);
+        Ok(())
     }
 
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
@@ -132,29 +156,46 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
-        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().verbose_instrument_await("stream_iter_next_block").await? {
-            let mut block_iter = BlockIterator::new(BlockHolder::from_owned_block(block));
-            block_iter.seek_to_first();
-
-            self.remaining_blocks -= 1;
-            self.block_iter = Some(block_iter);
-        } else {
-            self.remaining_blocks = 0;
-            self.block_iter = None;
+        if self.seek_block_idx < self.block_metas.len() {
+            loop {
+                let now = Instant::now();
+                let ret = match &mut self.block_stream {
+                    Some(block_stream) => block_stream.next().await,
+                    None => {
+                        self.create_stream().await?;
+                        continue;
+                    }
+                };
+                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                match ret {
+                    Ok(Some(block)) => {
+                        let mut block_iter =
+                            BlockIterator::new(BlockHolder::from_owned_block(block));
+                        block_iter.seek_to_first();
+                        self.seek_block_idx += 1;
+                        self.block_iter = Some(block_iter);
+                        return Ok(());
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        if !e.is_object_error()
+                            || self.create_time.elapsed().as_millis() as u64
+                                > self.io_retry_timeout_ms
+                        {
+                            return Err(e);
+                        }
+                        self.block_stream.take();
+                        fail_point!("create_stream_err");
+                    }
+                }
+                self.stats_ptr
+                    .fetch_add(add as u64, atomic::Ordering::Relaxed);
+            }
         }
+        self.seek_block_idx = self.block_metas.len();
+        self.block_iter = None;
 
         Ok(())
-    }
-
-    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
-    async fn download_next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
-        let now = Instant::now();
-        let result = self.block_stream.next().await;
-        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-        self.stats_ptr
-            .fetch_add(add as u64, atomic::Ordering::Relaxed);
-
-        result
     }
 
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
@@ -178,14 +219,14 @@ impl SstableStreamIterator {
         Ok(())
     }
 
-    fn key(&self) -> FullKey<&[u8]> {
+    pub fn key(&self) -> FullKey<&[u8]> {
         self.block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
             .key()
     }
 
-    fn value(&self) -> HummockValue<&[u8]> {
+    pub fn value(&self) -> HummockValue<&[u8]> {
         let raw_value = self
             .block_iter
             .as_ref()
@@ -195,7 +236,7 @@ impl SstableStreamIterator {
             .unwrap_or_else(|_| panic!("decode error sstinfo={}", self.sst_debug_info()))
     }
 
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
@@ -241,6 +282,7 @@ pub struct ConcatSstableIterator {
 
     stats: StoreLocalStatistic,
     task_progress: Arc<TaskProgress>,
+    io_retry_timeout_ms: u64,
 }
 
 impl ConcatSstableIterator {
@@ -253,6 +295,7 @@ impl ConcatSstableIterator {
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
+        io_retry_timeout_ms: u64,
     ) -> Self {
         Self {
             key_range,
@@ -263,6 +306,7 @@ impl ConcatSstableIterator {
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
+            io_retry_timeout_ms,
         }
     }
 
@@ -279,6 +323,7 @@ impl ConcatSstableIterator {
             key_range,
             sstable_store,
             Arc::new(TaskProgress::default()),
+            0,
         )
     }
 
@@ -316,8 +361,6 @@ impl ConcatSstableIterator {
                 .sstable(table_info, &mut self.stats)
                 .verbose_instrument_await("stream_iter_sstable")
                 .await?;
-            let stats_ptr = self.stats.remote_io_time.clone();
-            let now = Instant::now();
             let block_metas = &sstable.value().meta.block_metas;
             let mut start_index = match seek_key {
                 None => 0,
@@ -358,23 +401,15 @@ impl ConcatSstableIterator {
                 self.task_progress
                     .num_pending_read_io
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let block_stream = self
-                    .sstable_store
-                    .get_stream(sstable.value(), Some(start_index))
-                    .verbose_instrument_await("stream_iter_get_stream")
-                    .await?;
-
-                // Determine time needed to open stream.
-                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-                stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
-
                 let mut sstable_iter = SstableStreamIterator::new(
-                    table_info,
+                    sstable.value().meta.block_metas.clone(),
+                    table_info.clone(),
                     self.existing_table_ids.clone(),
-                    block_stream,
-                    end_index - start_index,
+                    start_index,
                     &self.stats,
                     self.task_progress.clone(),
+                    self.sstable_store.clone(),
+                    self.io_retry_timeout_ms,
                 );
                 sstable_iter.seek(seek_key).await?;
 

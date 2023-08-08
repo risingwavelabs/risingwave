@@ -48,9 +48,7 @@ use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceR
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -194,7 +192,6 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        TieredCacheMetricsBuilder::new(registry.clone()),
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -231,8 +228,7 @@ pub async fn compute_node_serve(
                 running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
-            let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+            let (handle, shutdown_sender) = Compactor::start_compactor(compactor_context);
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -481,7 +477,8 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.file_cache_total_buffer_capacity_mb
+        + storage_memory_config.data_file_cache_buffer_pool_capacity_mb
+        + storage_memory_config.meta_file_cache_buffer_pool_capacity_mb
         + storage_memory_config.compactor_memory_limit_mb;
     total_storage_memory_mb << 20
 }
@@ -512,7 +509,8 @@ fn print_memory_config(
         >         block_cache_capacity: {}\n\
         >         meta_cache_capacity: {}\n\
         >         shared_buffer_capacity: {}\n\
-        >         file_cache_total_buffer_capacity: {}\n\
+        >         data_file_cache_buffer_pool_capacity: {}\n\
+        >         meta_file_cache_buffer_pool_capacity: {}\n\
         >         compactor_memory_limit: {}\n\
         >     compute_memory: {}\n\
         >     reserved_memory: {}",
@@ -521,7 +519,8 @@ fn print_memory_config(
         convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _),
+        convert((storage_memory_config.data_file_cache_buffer_pool_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_file_cache_buffer_pool_capacity_mb << 20) as _),
         if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
         } else {
