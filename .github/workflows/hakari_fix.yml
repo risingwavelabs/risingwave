@@ -6,7 +6,7 @@ on:
     paths: ["Cargo.lock", "**/Cargo.toml"]
 
 jobs:
-  format-code:
+  hakari-fix:
     runs-on: ubuntu-latest
 
     permissions:
