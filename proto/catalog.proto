@@ -26,6 +26,12 @@ message WatermarkDesc {
   expr.ExprNode expr = 2;
 }
 
+enum SchemaRegistryNameStrategy {
+  TOPIC_NAME_STRATEGY_UNSPECIFIED = 0;
+  RECORD_NAME_STRATEGY = 1;
+  TOPIC_RECORD_NAME_STRATEGY = 2;
+}
+
 message StreamSourceInfo {
   // deprecated
   plan_common.RowFormatType row_format = 1;
@@ -37,6 +43,8 @@ message StreamSourceInfo {
   string upsert_avro_primary_key = 7;
   plan_common.FormatType format = 8;
   plan_common.EncodeType row_encode = 9;
+  SchemaRegistryNameStrategy name_strategy = 10;
+  optional string key_message_name = 11;
 }
 
 message Source {
