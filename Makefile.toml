@@ -527,9 +527,7 @@ script = '''
 #!/usr/bin/env bash
 
 tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
-tmux kill-session -t risedev &
-kill_session_pid=$!
-wait $kill_session_pid
+tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
