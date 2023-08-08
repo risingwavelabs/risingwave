@@ -25,7 +25,6 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
-
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
@@ -40,9 +39,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
-use crate::common::table::state_table::{
-    StateTable, WatermarkCacheParameterizedStateTable,
-};
+use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
