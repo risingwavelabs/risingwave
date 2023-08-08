@@ -412,6 +412,7 @@ pub(super) enum EitherFragment {
 ///   containing the `Chain` nodes will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
+    /// TODO(siyuan): 这个是准备接入的streaming job
     building_graph: StreamFragmentGraph,
 
     /// The required information of existing fragments.
@@ -439,6 +440,7 @@ impl CompleteStreamFragmentGraph {
 
     /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV, with the upstream existing
     /// `Materialize` fragments.
+    /// todo(siyuan): 这个函数是把输入的graph接入meta中已有的Fragment
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
@@ -450,6 +452,7 @@ impl CompleteStreamFragmentGraph {
         // the new materialized view.
         for (&id, fragment) in &graph.fragments {
             for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
+                // todo: 这里是通过table id查找到上游的mview fragment
                 let mview_fragment = upstream_mview_fragments
                     .get(&upstream_table_id)
                     .context("upstream materialized view fragment not found")?;
