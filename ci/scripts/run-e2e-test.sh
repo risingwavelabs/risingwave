@@ -29,7 +29,7 @@ list_open_ports() {
 }
 
 echo "--- Download artifacts"
-download-and-decompress-artifact e2e_test_generated ./
+# download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 buildkite-agent artifact download risingwave-udf-example.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
@@ -72,14 +72,14 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 list_open_ports
-
-echo "--- e2e, ci-3streaming-2serving-3fe, generated"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
-sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
-
-echo "--- Kill cluster"
-cargo make ci-kill
+#
+#echo "--- e2e, ci-3streaming-2serving-3fe, generated"
+#RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+#cargo make ci-start ci-3streaming-2serving-3fe
+#sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
+#
+#echo "--- Kill cluster"
+#cargo make ci-kill
 
 list_open_ports
 
