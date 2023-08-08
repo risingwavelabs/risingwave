@@ -60,49 +60,44 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
         let left_table = node.get_left_table()?;
-        if let Ok(use_watermark_cache) = left_table.get_use_watermark_cache() && *use_watermark_cache {
+        if left_table.get_use_watermark_cache() {
             let state_table_l = WatermarkCacheStateTable::from_table_catalog(
-                        node.get_left_table()?,
-                        store,
-                        Some(vnodes),
-                    )
-                    .await;
+                node.get_left_table()?,
+                store,
+                Some(vnodes),
+            )
+            .await;
 
-        Ok(Box::new(DynamicFilterExecutor::new(
-            params.actor_context,
-            source_l,
-            source_r,
-            key_l,
-            params.pk_indices,
-            params.executor_id,
-            comparator,
-            state_table_l,
-            state_table_r,
-            params.executor_stats,
-            params.env.config().developer.chunk_size,
-        )))
+            Ok(Box::new(DynamicFilterExecutor::new(
+                params.actor_context,
+                source_l,
+                source_r,
+                key_l,
+                params.pk_indices,
+                params.executor_id,
+                comparator,
+                state_table_l,
+                state_table_r,
+                params.executor_stats,
+                params.env.config().developer.chunk_size,
+            )))
         } else {
             let state_table_l =
-         StateTable::from_table_catalog(
-            node.get_left_table()?,
-            store,
-            Some(vnodes),
-        )
-        .await;
+                StateTable::from_table_catalog(node.get_left_table()?, store, Some(vnodes)).await;
 
-        Ok(Box::new(DynamicFilterExecutor::new(
-            params.actor_context,
-            source_l,
-            source_r,
-            key_l,
-            params.pk_indices,
-            params.executor_id,
-            comparator,
-            state_table_l,
-            state_table_r,
-            params.executor_stats,
-            params.env.config().developer.chunk_size,
-        )))
+            Ok(Box::new(DynamicFilterExecutor::new(
+                params.actor_context,
+                source_l,
+                source_r,
+                key_l,
+                params.pk_indices,
+                params.executor_id,
+                comparator,
+                state_table_l,
+                state_table_r,
+                params.executor_stats,
+                params.env.config().developer.chunk_size,
+            )))
         }
     }
 }

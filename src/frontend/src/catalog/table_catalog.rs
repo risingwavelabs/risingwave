@@ -400,7 +400,7 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
-            use_watermark_cache: Some(self.use_watermark_cache),
+            use_watermark_cache: self.use_watermark_cache,
         }
     }
 
@@ -506,7 +506,7 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            use_watermark_cache: matches!(tb.use_watermark_cache, Some(true)),
+            use_watermark_cache: matches!(tb.use_watermark_cache, true),
         }
     }
 }
@@ -596,7 +596,7 @@ mod tests {
             dist_key_in_pk: vec![],
             cardinality: None,
             created_at_epoch: None,
-            use_watermark_cache: Some(false),
+            use_watermark_cache: false,
         }
         .into();
 
