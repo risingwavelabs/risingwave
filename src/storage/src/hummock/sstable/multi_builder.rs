@@ -411,11 +411,10 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{
         create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
-        SstableBuilderOptions, DEFAULT_MAX_KEY_COUNT, DEFAULT_RESTART_INTERVAL,
+        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
     };
 
     #[tokio::test]
@@ -427,8 +426,7 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
+            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::for_test(builder_factory);
@@ -445,8 +443,7 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
+            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
@@ -638,8 +635,7 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
+            ..Default::default()
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
@@ -683,8 +679,7 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
+            ..Default::default()
         };
         let table_id = TableId::new(1);
         let mut builder = CapacitySplitTableBuilder::new(

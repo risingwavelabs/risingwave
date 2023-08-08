@@ -49,8 +49,6 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
-    /// Limit the number of keys inside a single sst to avoid excessive memory usage.
-    pub max_key_count: u64,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -62,7 +60,6 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: options.compactor_max_sst_key_count,
         }
     }
 }
@@ -75,7 +72,6 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
         }
     }
 }
@@ -116,7 +112,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     last_full_key: Vec<u8>,
-    last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
@@ -178,7 +173,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
-            last_extract_key: vec![],
             monotonic_deletes: vec![],
             sstable_id,
             filter_key_extractor,
@@ -275,7 +269,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
-                self.last_extract_key.clear();
                 if !self.block_builder.is_empty() {
                     self.build_block().await?;
                 }
@@ -592,8 +585,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: 0.001,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
+            ..Default::default()
         };
 
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -608,8 +600,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
+            ..Default::default()
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -671,7 +662,6 @@ pub(super) mod tests {
             restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
         };
 
         // build remote table
