@@ -363,7 +363,7 @@ profile:
 
       - use: tempo
         listen-address: "0.0.0.0"
-        otlp-address: ${id}
+        address: ${id}
         id: tempo-0
 
       - use: etcd
@@ -1071,12 +1071,14 @@ template:
     # Id of this instance
     id: tempo
 
+    # Listen address of HTTP server and OTLP gRPC collector
     listen-address: "127.0.0.1"
 
-    port: 3200
+    # Advertise address of Tempo
+    address: "127.0.0.1"
 
-    # gRPC listen address of the OTLP collector
-    otlp-address: "127.0.0.1"
+    # HTTP server listen port
+    port: 3200
 
     # gRPC listen port of the OTLP collector
     otlp-port: 4317

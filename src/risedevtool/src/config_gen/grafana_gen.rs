@@ -87,7 +87,7 @@ datasources:
             ));
         }
         let tempo = &provide_tempo[0];
-        let tempo_host = &tempo.listen_address;
+        let tempo_host = &tempo.address;
         let tempo_port = &tempo.port;
 
         let yml = format!(
