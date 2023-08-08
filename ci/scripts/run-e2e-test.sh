@@ -21,8 +21,10 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" common
 
-list_open_ports_and_process() {
-  lsof -i | grep -E "(5691|1250)"
+list_open_ports() {
+  echo "PORTS"
+  lsof -i P | grep -E "(5691|1250)"
+  echo "PROCESSES"
   ps aux
 }
 
