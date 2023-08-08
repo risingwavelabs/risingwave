@@ -21,6 +21,10 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" common
 
+list_open_ports() {
+  lsof -i | grep -E "(5691|1250)"
+}
+
 echo "--- Download artifacts"
 download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
@@ -38,6 +42,8 @@ sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-$
 
 echo "--- Kill cluster"
 cargo make ci-kill
+
+list_open_ports
 
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -62,6 +68,8 @@ pkill java
 echo "--- Kill cluster"
 cargo make ci-kill
 
+list_open_ports
+
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3streaming-2serving-3fe
@@ -69,6 +77,8 @@ sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-$
 
 echo "--- Kill cluster"
 cargo make ci-kill
+
+list_open_ports
 
 echo "--- e2e, ci-3streaming-2serving-3fe, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
