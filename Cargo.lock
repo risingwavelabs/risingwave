@@ -6145,9 +6145,9 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow-array 44.0.0",
- "arrow-buffer 44.0.0",
- "arrow-schema 44.0.0",
+ "arrow-array 45.0.0",
+ "arrow-buffer 45.0.0",
+ "arrow-schema 45.0.0",
  "async-trait",
  "auto_enums",
  "bitflags 2.3.3",
@@ -6466,8 +6466,8 @@ version = "1.0.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "arrow-array 44.0.0",
- "arrow-schema 44.0.0",
+ "arrow-array 45.0.0",
+ "arrow-schema 45.0.0",
  "async-trait",
  "auto_enums",
  "await-tree",
@@ -6522,7 +6522,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow-schema 44.0.0",
+ "arrow-schema 45.0.0",
  "assert_matches",
  "async-recursion",
  "async-trait",
@@ -7147,10 +7147,10 @@ dependencies = [
 name = "risingwave_udf"
 version = "0.1.0"
 dependencies = [
- "arrow-array 44.0.0",
+ "arrow-array 45.0.0",
  "arrow-flight",
- "arrow-schema 44.0.0",
- "arrow-select 44.0.0",
+ "arrow-schema 45.0.0",
+ "arrow-select 45.0.0",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
