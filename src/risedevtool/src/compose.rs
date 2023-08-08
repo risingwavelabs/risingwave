@@ -509,7 +509,7 @@ impl Compose for TempoConfig {
 
         let config_root = Path::new(&config.config_directory);
         let config_file_path = config_root.join("tempo.yaml");
-        fs_err::write(&config_file_path, TempoGen.gen_tempo_yml(self))?;
+        fs_err::write(config_file_path, TempoGen.gen_tempo_yml(self))?;
 
         let service = ComposeService {
             image: config.image.tempo.clone(),
