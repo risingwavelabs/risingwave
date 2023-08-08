@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::ProjectSetNode;
 use super::stream::StreamPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, ExprRewriter};
+use crate::expr::{try_derive_watermark, ExprRewriter, WatermarkDerivation};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -39,12 +39,13 @@ impl StreamProjectSet {
 
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         for (expr_idx, expr) in logical.select_list.iter().enumerate() {
-            if let Some(input_idx) = try_derive_watermark(expr) {
+            if let WatermarkDerivation::Watermark(input_idx) = try_derive_watermark(expr) {
                 if input.watermark_columns().contains(input_idx) {
                     // The first column of ProjectSet is `projected_row_id`.
                     watermark_columns.insert(expr_idx + 1);
                 }
             }
+            // XXX(rc): do we need to handle `WatermarkDerivation::Nondecreasing` here?
         }
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
