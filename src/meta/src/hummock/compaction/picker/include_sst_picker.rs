@@ -22,19 +22,13 @@ use crate::hummock::level_handler::LevelHandler;
 pub const MAX_LEVEL_COUNT: usize = 32;
 
 pub struct L0IncludeSstPicker {
-    overlap_info: Box<dyn OverlapInfo>,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     max_compact_size: u64,
 }
 
 impl L0IncludeSstPicker {
-    pub fn new(
-        overlap_info: Box<dyn OverlapInfo>,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-        max_compact_size: u64,
-    ) -> Self {
+    pub fn new(overlap_strategy: Arc<dyn OverlapStrategy>, max_compact_size: u64) -> Self {
         Self {
-            overlap_info,
             overlap_strategy,
             max_compact_size,
         }
@@ -42,6 +36,7 @@ impl L0IncludeSstPicker {
 
     pub fn pick_tables(
         &self,
+        overlap_info: &Box<dyn OverlapInfo>,
         sub_levels: &[Level],
         level_handler: &LevelHandler,
     ) -> SubLevelSstables {
@@ -53,7 +48,7 @@ impl L0IncludeSstPicker {
             {
                 break;
             }
-            let mut range = self.overlap_info.check_multiple_include(&level.table_infos);
+            let mut range = overlap_info.check_multiple_include(&level.table_infos);
             for overlap in &overlaps {
                 let old_range = overlap.check_multiple_include(&level.table_infos);
                 range.start = std::cmp::max(range.start, old_range.start);

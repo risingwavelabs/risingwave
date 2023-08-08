@@ -176,7 +176,7 @@ where
         if let Some(builder) = self.current_builder.as_mut() {
             if is_new_user_key {
                 need_seal_current =
-                    switch_builder || builder.reach_capacity() || builder.reach_key_count();
+                    switch_builder || builder.reach_capacity() || builder.reach_max_key_count();
             }
             if need_seal_current && let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
                 last_range_tombstone_epoch = event.new_epoch;
