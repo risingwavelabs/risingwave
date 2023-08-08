@@ -1059,24 +1059,28 @@ description = "Clean data and start a full RisingWave dev cluster using risedev-
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs", "wait-sessions-exit"]
+dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
 description = "Kill cluster, dump logs and check logs"
 
-[tasks.wait-sessions-exit]
+[tasks.wait-processes-exit]
 private = true
 category = "Misc"
-description = "Wait for tmux sessions to exit"
+description = "Wait for RisingWave processes to exit"
 script = """
-while true; do
-    OUTPUT=$(tmux list-windows || true)
-    if [ -z "$OUTPUT" ]; then
-        break
-    else
-        echo "Waiting for tmux windows to be empty..."
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
         sleep 1
-    fi
-done
-echo "Tmux windows are now empty."
+    done
+}
+
+wait_for_process meta-node
+wait_for_process compute-node
+wait_for_process frontend
+wait_for_process compactor
+echo "All processes has exited."
 """
 
 [tasks.slt]
