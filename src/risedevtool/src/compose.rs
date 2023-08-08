@@ -118,8 +118,12 @@ fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
     Ok(result)
 }
 
-fn get_cmd_envs(cmd: &Command) -> Result<BTreeMap<String, String>> {
+fn get_cmd_envs(cmd: &Command, rust_backtrace: bool) -> Result<BTreeMap<String, String>> {
     let mut result = BTreeMap::new();
+    if rust_backtrace {
+        result.insert("RUST_BACKTRACE".to_string(), "1".to_string());
+    }
+
     for (k, v) in cmd.get_envs() {
         let k = k
             .to_str()
@@ -199,6 +203,7 @@ impl Compose for ComputeNodeConfig {
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
@@ -206,9 +211,7 @@ impl Compose for ComputeNodeConfig {
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [
                 ("./risingwave.toml:/risingwave.toml".to_string()),
                 format!("{}:/filecache", self.id),
@@ -243,12 +246,12 @@ impl Compose for MetaNodeConfig {
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
+
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
@@ -276,12 +279,12 @@ impl Compose for FrontendConfig {
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
+
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
@@ -309,12 +312,12 @@ impl Compose for CompactorConfig {
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
+
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
@@ -337,7 +340,7 @@ impl Compose for MinioConfig {
         MinioService::apply_command_args(&mut command, self)?;
         command.arg("/data");
 
-        let env = get_cmd_envs(&command)?;
+        let env = get_cmd_envs(&command, false)?;
         let command = get_cmd_args(&command, false)?;
         let bucket_name = &self.hummock_bucket;
 
