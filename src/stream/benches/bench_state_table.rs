@@ -29,13 +29,16 @@ use tokio::runtime::Runtime;
 type TestStateTable = StateTable<MemoryStateStore>;
 
 const FEW_DATA_TYPES: [DataType; 4] = [
+    // Keys
     DataType::Int32,
     DataType::Int64,
+    // Values
     DataType::Int32,
     DataType::Int64,
 ];
 
 const MANY_DATA_TYPES: [DataType; 14] = [
+    // Keys
     DataType::Timestamp,
     DataType::Int16,
     DataType::Int32,
@@ -43,6 +46,7 @@ const MANY_DATA_TYPES: [DataType; 14] = [
     DataType::Float32,
     DataType::Float64,
     DataType::Varchar,
+    // Values
     DataType::Timestamp,
     DataType::Int16,
     DataType::Int32,
