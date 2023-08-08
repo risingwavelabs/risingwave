@@ -28,7 +28,7 @@ pub static RW_COLUMNS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
     columns: &[
         (DataType::Int32, "relation_id"), // belonged relation id
         (DataType::Varchar, "name"),      // column name
-        (DataType::Int16, "position"),    // 1-indexed position
+        (DataType::Int32, "position"),    // 1-indexed position
         (DataType::Varchar, "data_type"),
         (DataType::Int32, "type_oid"),
         (DataType::Int16, "type_len"),
@@ -49,7 +49,7 @@ impl SysCatalogReaderImpl {
                         OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(view.id as i32)),
                             Some(ScalarImpl::Utf8(column.name.clone().into())),
-                            Some(ScalarImpl::Int16(index as i16 + 1)),
+                            Some(ScalarImpl::Int32(index as i32 + 1)),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                             Some(ScalarImpl::Int32(column.data_type().to_oid())),
                             Some(ScalarImpl::Int16(column.data_type().type_len())),
@@ -75,7 +75,7 @@ impl SysCatalogReaderImpl {
                                 OwnedRow::new(vec![
                                     Some(ScalarImpl::Int32(id as i32)),
                                     Some(ScalarImpl::Utf8(column.name().into())),
-                                    Some(ScalarImpl::Int16(index as i16 + 1)),
+                                    Some(ScalarImpl::Int32(index as i32 + 1)),
                                     Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                                     Some(ScalarImpl::Int32(column.data_type().to_oid())),
                                     Some(ScalarImpl::Int16(column.data_type().type_len())),

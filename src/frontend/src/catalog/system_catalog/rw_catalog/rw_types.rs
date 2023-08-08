@@ -25,6 +25,7 @@ use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
 pub const RW_TYPE_DATA: &[(i32, &str)] = &[
     (16, "bool"),
+    (17, "bytea"),
     (20, "int8"),
     (21, "int2"),
     (23, "int4"),
@@ -39,7 +40,9 @@ pub const RW_TYPE_DATA: &[(i32, &str)] = &[
     (1114, "timestamp"),
     (1184, "timestamptz"),
     (1186, "interval"),
+    (1301, "rw_int256"),
     (1700, "numeric"),
+    (3802, "jsonb"),
 ];
 
 /// `rw_types` stores all supported types in the database.

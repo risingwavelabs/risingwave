@@ -52,12 +52,24 @@ async fn create_state_table() -> TestStateTable {
 }
 
 fn gen_inserts(n: usize, data_types: &[DataType]) -> Vec<OwnedRow> {
-    let chunk = DataChunk::gen_data_chunk(0, n, data_types, &VarcharProperty::Constant);
+    let chunk = DataChunk::gen_data_chunk(0, n, data_types, &VarcharProperty::Constant, 1.0);
     chunk.rows().map(|r| r.into_owned_row()).collect()
 }
 
-fn gen_stream_chunks(n: usize, data_types: &[DataType]) -> Vec<StreamChunk> {
-    StreamChunk::gen_stream_chunks(n, 1024, data_types, &VarcharProperty::Constant)
+fn gen_stream_chunks(
+    n: usize,
+    data_types: &[DataType],
+    visibility_percent: f64,
+    inserts_percent: f64,
+) -> Vec<StreamChunk> {
+    StreamChunk::gen_stream_chunks_inner(
+        n,
+        1024,
+        data_types,
+        &VarcharProperty::Constant,
+        visibility_percent,
+        inserts_percent,
+    )
 }
 
 fn setup_bench_state_table() -> TestStateTable {
@@ -103,28 +115,51 @@ async fn run_bench_state_table_chunks(mut state_table: TestStateTable, chunks: V
     state_table.commit(epoch).await.unwrap();
 }
 
-fn bench_state_table_insert_chunks(c: &mut Criterion) {
+fn bench_state_table_write_chunk(c: &mut Criterion) {
+    let visibilities = [0.5, 0.90, 0.99, 1.0];
+    let inserts = [0.5, 0.90, 0.99, 1.0];
+    for visibility in visibilities {
+        for insert in inserts {
+            bench_state_table_chunks(c, visibility, insert);
+        }
+    }
+}
+
+fn bench_state_table_chunks(c: &mut Criterion, visibility_percent: f64, inserts_percent: f64) {
     let mut group = c.benchmark_group("state_table");
     group.sample_size(10);
 
+    let deletes_percent = 1.0 - inserts_percent;
+
     let rt = Runtime::new().unwrap();
-    group.bench_function("benchmark_insert_chunks", |b| {
-        b.to_async(&rt).iter_batched(
-            || {
-                (
-                    setup_bench_state_table(),
-                    gen_stream_chunks(100, &[DataType::Int32, DataType::Int64, DataType::Int64]),
-                )
-            },
-            |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
-            BatchSize::SmallInput,
-        )
-    });
+    group.bench_function(
+        format!(
+            "benchmark_chunks_visibility_{:.2}_inserts_{:.2}_deletes_{:.2}",
+            visibility_percent, inserts_percent, deletes_percent
+        ),
+        |b| {
+            b.to_async(&rt).iter_batched(
+                || {
+                    (
+                        setup_bench_state_table(),
+                        gen_stream_chunks(
+                            100,
+                            &[DataType::Int32, DataType::Int64, DataType::Int64],
+                            visibility_percent,
+                            inserts_percent,
+                        ),
+                    )
+                },
+                |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
+                BatchSize::SmallInput,
+            )
+        },
+    );
 }
 
 criterion_group!(
     benches,
     bench_state_table_inserts,
-    bench_state_table_insert_chunks
+    bench_state_table_write_chunk
 );
 criterion_main!(benches);

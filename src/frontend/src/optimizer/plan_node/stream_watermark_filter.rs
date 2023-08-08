@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
@@ -74,7 +74,12 @@ impl Distill for StreamWatermarkFilter {
                     input_schema,
                 };
                 let fields = vec![
-                    ("idx", Pretty::debug(&desc.watermark_idx)),
+                    (
+                        "column",
+                        Pretty::display(&FieldDisplay(
+                            &self.input.schema()[desc.watermark_idx as usize],
+                        )),
+                    ),
                     ("expr", Pretty::display(&expr)),
                 ];
                 Pretty::childless_record("Desc", fields)
