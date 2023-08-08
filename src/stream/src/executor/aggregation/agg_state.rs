@@ -28,7 +28,7 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
-    /// The state is stored as a value in the result table.
+    /// The state is stored as a value in the intermediate state table.
     Value,
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
@@ -63,12 +63,11 @@ impl EstimateSize for AggState {
 impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
-    pub async fn create(
+    pub fn create(
         agg_call: &AggCall,
         storage: &AggStateStorage<impl StateStore>,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
-        _group_key: Option<&GroupKey>,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
