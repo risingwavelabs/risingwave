@@ -123,8 +123,6 @@ mod project_join_separate_rule;
 pub use project_join_separate_rule::*;
 mod grouping_sets_to_expand_rule;
 pub use grouping_sets_to_expand_rule::*;
-pub use apply_project_set_transpose_rule::*;
-pub use cross_join_eliminate_rule::*;
 mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
 
