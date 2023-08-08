@@ -56,13 +56,6 @@ pub fn get_subject_by_strategy(
         };
     match (name_strategy, require_key) {
         (PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified, _) => {
-            if record.is_some() || key_record_name.is_some() {
-                return Err(build_error_redundant_field(
-                    name_strategy,
-                    &["message", "key.message"],
-                    &[record, key_record_name],
-                ));
-            }
             // default behavior
             Ok((format!("{}-key", topic), format!("{}-value", topic)))
         }
