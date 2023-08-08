@@ -21,8 +21,9 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" common
 
-list_open_ports() {
+list_open_ports_and_process() {
   lsof -i | grep -E "(5691|1250)"
+  ps aux
 }
 
 echo "--- Download artifacts"
