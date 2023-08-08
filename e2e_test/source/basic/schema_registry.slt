@@ -43,7 +43,7 @@ create table t1 () with (
 ) format upsert encode avro (
     schema.registry = 'http://message_queue:8081',
     schema.registry.name.strategy = 'topic_record_name_strategy',
-    message = 'upsert_avro_json-topic-record-CPLM.OBJ_ATTRIBUTE_VALUE'
+    message = 'CPLM.OBJ_ATTRIBUTE_VALUE'
 );
 
 statement ok
@@ -54,8 +54,8 @@ create table t1 () with (
 ) format upsert encode avro (
     schema.registry = 'http://message_queue:8081',
     schema.registry.name.strategy = 'topic_record_name_strategy',
-    message = 'upsert_avro_json-topic-record-CPLM.OBJ_ATTRIBUTE_VALUE',
-    key.message = 'upsert_avro_json-topic-record-string'
+    message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+    key.message = 'string'
 );
 
 statement ok
