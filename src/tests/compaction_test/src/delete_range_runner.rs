@@ -565,7 +565,7 @@ fn run_compactor_thread(
 ) {
     let compactor_context = Arc::new(CompactorContext {
         storage_opts,
-        hummock_meta_client: meta_client.clone(),
+        hummock_meta_client: meta_client,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
@@ -577,10 +577,7 @@ fn run_compactor_thread(
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     });
-    risingwave_storage::hummock::compactor::Compactor::start_compactor(
-        compactor_context,
-        meta_client,
-    )
+    risingwave_storage::hummock::compactor::Compactor::start_compactor(compactor_context)
 }
 
 #[cfg(test)]

@@ -231,8 +231,7 @@ pub async fn compute_node_serve(
                 running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
-            let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+            let (handle, shutdown_sender) = Compactor::start_compactor(compactor_context);
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
