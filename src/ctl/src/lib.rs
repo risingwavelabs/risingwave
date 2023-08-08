@@ -264,7 +264,7 @@ enum TableCommands {
 }
 
 #[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
 pub struct ScaleResizeCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
@@ -280,9 +280,15 @@ pub struct ScaleResizeCommands {
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host, ..."
     )]
     include_workers: Option<Vec<String>>,
+
+    /// The target parallelism, currently, it is used to limit the target parallelism and only
+    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
+    /// with exclude/include_workers.
+    #[clap(long)]
+    target_parallelism: Option<u32>,
 
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.

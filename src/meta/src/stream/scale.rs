@@ -1680,6 +1680,7 @@ where
         struct WorkerChanges {
             include_worker_ids: BTreeSet<WorkerId>,
             exclude_worker_ids: BTreeSet<WorkerId>,
+            target_parallelism: Option<usize>,
         }
 
         let mut fragment_worker_changes: HashMap<_, _> = fragment_worker_changes
@@ -1690,6 +1691,7 @@ where
                     WorkerChanges {
                         include_worker_ids: changes.include_worker_ids.into_iter().collect(),
                         exclude_worker_ids: changes.exclude_worker_ids.into_iter().collect(),
+                        target_parallelism: changes.target_parallelism.map(|p| p as usize),
                     },
                 )
             })
@@ -1707,6 +1709,7 @@ where
             WorkerChanges {
                 include_worker_ids,
                 exclude_worker_ids,
+                target_parallelism,
             },
         ) in fragment_worker_changes
         {
@@ -1808,6 +1811,10 @@ where
                             "No schedulable ParallelUnits available for fragment {}",
                             fragment_id
                         );
+                    }
+
+                    if let Some(target_parallelism) = target_parallelism && target_parallel_unit_ids.len() > target_parallelism {
+                        target_parallel_unit_ids = target_parallel_unit_ids.into_iter().take(target_parallelism).collect();
                     }
 
                     let to_expand_parallel_units = target_parallel_unit_ids
