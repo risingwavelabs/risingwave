@@ -646,7 +646,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
- "fastrand",
+ "fastrand 1.9.0",
  "http",
  "hyper",
  "time 0.3.23",
@@ -663,7 +663,7 @@ checksum = "1fcdb2f7acbc076ff5ad05e7864bdb191ca70a6fd07668dc3a1a8bcd051de5ae"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-types",
- "fastrand",
+ "fastrand 1.9.0",
  "tokio",
  "tracing",
  "zeroize",
@@ -722,7 +722,7 @@ dependencies = [
  "aws-smithy-xml",
  "aws-types",
  "bytes",
- "fastrand",
+ "fastrand 1.9.0",
  "http",
  "regex",
  "tokio-stream",
@@ -894,7 +894,7 @@ dependencies = [
  "aws-smithy-http-tower",
  "aws-smithy-types",
  "bytes",
- "fastrand",
+ "fastrand 1.9.0",
  "http",
  "http-body",
  "hyper",
@@ -2568,6 +2568,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6999dc1837253364c2ebb0704ba97994bd874e8f195d665c50b7548f6ea92764"
+
+[[package]]
 name = "fiemap"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2903,7 +2909,7 @@ version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49a9d51ce47660b1e808d3c990b4709f2f415d928835a17dfd16991515c46bce"
 dependencies = [
- "fastrand",
+ "fastrand 1.9.0",
  "futures-core",
  "futures-io",
  "memchr",
@@ -3825,6 +3831,12 @@ name = "linux-raw-sys"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ece97ea872ece730aed82664c424eb4c8291e1ff2480247ccf7409044bc6479f"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57bcfdad1b858c2db7c38303a6d2ad4dfaf5eb53dfeb0910128b2c26d6158503"
 
 [[package]]
 name = "local_stats_alloc"
@@ -7365,6 +7377,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix"
+version = "0.38.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "172891ebdceb05aa0005f533a6cbfca599ddd7d966f6f5d4d9b2e70478e70399"
+dependencies = [
+ "bitflags 2.3.3",
+ "errno",
+ "libc",
+ "linux-raw-sys 0.4.5",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "rustls"
 version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8287,15 +8312,14 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.6.0"
+version = "3.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31c0432476357e58790aaa47a8efb0c5138f137343f3b5f23bd36a27e3b0a6d6"
+checksum = "dc02fddf48964c42031a0b3fe0428320ecf3a73c401040fc0096f97794310651"
 dependencies = [
- "autocfg",
  "cfg-if",
- "fastrand",
+ "fastrand 2.0.0",
  "redox_syscall 0.3.5",
- "rustix 0.37.19",
+ "rustix 0.38.7",
  "windows-sys 0.48.0",
 ]
 
