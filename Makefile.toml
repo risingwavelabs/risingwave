@@ -527,9 +527,7 @@ script = '''
 #!/usr/bin/env bash
 
 tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
-tmux kill-session -t risedev &
-kill_session_pid=$!
-wait $kill_session_pid
+tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
@@ -1061,8 +1059,25 @@ description = "Clean data and start a full RisingWave dev cluster using risedev-
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs"]
+dependencies = ["k", "l", "check-logs", "wait-sessions-exit"]
 description = "Kill cluster, dump logs and check logs"
+
+[tasks.wait-sessions-exit]
+private = true
+category = "Misc"
+description = "Wait for tmux sessions to exit"
+script = """
+while true; do
+    OUTPUT=$(tmux list-windows || true)
+    if [ -z "$OUTPUT" ]; then
+        break
+    else
+        echo "Waiting for tmux windows to be empty..."
+        sleep 1
+    fi
+done
+echo "Tmux windows are now empty."
+"""
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"

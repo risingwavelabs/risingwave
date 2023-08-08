@@ -401,7 +401,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     });
 
     #[cfg(not(madsim))]
-    if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+    let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
             prometheus_endpoint: prometheus_endpoint.clone(),
@@ -414,9 +414,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
         };
-        // TODO: join dashboard service back to local thread.
-        tokio::spawn(dashboard_service.serve(address_info.ui_path));
-    }
+        let task = tokio::spawn(dashboard_service.serve(address_info.ui_path));
+        Some(task)
+    } else {
+        None
+    };
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
@@ -717,6 +719,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         })
         .await
         .unwrap();
+
+    #[cfg(not(madsim))]
+    if let Some(dashboard_task) = dashboard_task {
+        dashboard_task.await.unwrap().unwrap();
+    }
     Ok(())
 }
 
