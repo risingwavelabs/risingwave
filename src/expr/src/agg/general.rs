@@ -15,7 +15,7 @@
 use std::convert::From;
 use std::ops::{BitAnd, BitOr, BitXor};
 
-use num_traits::CheckedAdd;
+use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_expr_macro::aggregate;
 
 use crate::{ExprError, Result};
@@ -28,23 +28,34 @@ use crate::{ExprError, Result};
 #[aggregate("sum(float64) -> float64")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
-#[aggregate("sum(int256) -> int256", state = "Int256")]
-#[aggregate("sum0(int64) -> int64", init_state = "Some(0)")]
-fn sum<S, T>(state: S, input: T) -> Result<S>
+#[aggregate("sum(int256) -> int256")]
+#[aggregate("sum0(int64) -> int64", init_state = "0")]
+fn sum<S, T>(state: Option<S>, input: Option<T>, retract: bool) -> Result<Option<S>>
 where
-    S: From<T> + CheckedAdd<Output = S>,
+    S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
 {
-    state
-        .checked_add(&S::from(input))
-        .ok_or(ExprError::NumericOutOfRange)
+    let Some(input) = input else {
+        return Ok(state);
+    };
+    let state = state.unwrap_or_default();
+    let result = if retract {
+        state
+            .checked_sub(&S::from(input))
+            .ok_or_else(|| ExprError::NumericOutOfRange)?
+    } else {
+        state
+            .checked_add(&S::from(input))
+            .ok_or_else(|| ExprError::NumericOutOfRange)?
+    };
+    Ok(Some(result))
 }
 
-#[aggregate("min(*) -> auto")]
+#[aggregate("min(*) -> auto", state = "ref")]
 fn min<T: Ord>(state: T, input: T) -> T {
     state.min(input)
 }
 
-#[aggregate("max(*) -> auto")]
+#[aggregate("max(*) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
@@ -66,19 +77,19 @@ where
 }
 
 #[aggregate("bit_xor(*int) -> auto")]
-fn bit_xor<T>(state: T, input: T) -> T
+fn bit_xor<T>(state: T, input: T, _retract: bool) -> T
 where
     T: BitXor<Output = T>,
 {
     state.bitxor(input)
 }
 
-#[aggregate("first_value(*) -> auto")]
+#[aggregate("first_value(*) -> auto", state = "ref")]
 fn first_value<T>(state: T, _: T) -> T {
     state
 }
 
-#[aggregate("last_value(*) -> auto")]
+#[aggregate("last_value(*) -> auto", state = "ref")]
 fn last_value<T>(_: T, input: T) -> T {
     input
 }
@@ -110,9 +121,22 @@ fn last_value<T>(_: T, input: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64", init_state = "Some(0)")]
-fn count<T>(state: i64, _: T) -> i64 {
-    state + 1
+#[aggregate("count(*) -> int64", init_state = "0")]
+fn count<T>(state: i64, _: T, retract: bool) -> i64 {
+    if retract {
+        state - 1
+    } else {
+        state + 1
+    }
+}
+
+#[aggregate("count() -> int64", init_state = "0")]
+fn count_star(state: i64, retract: bool) -> i64 {
+    if retract {
+        state - 1
+    } else {
+        state + 1
+    }
 }
 
 /// Returns true if all non-null input values are true, otherwise false.
@@ -195,258 +219,401 @@ fn bool_or(state: bool, input: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    extern crate test;
+
     use std::sync::Arc;
 
+    use futures_util::FutureExt;
     use risingwave_common::array::*;
-    use risingwave_common::types::{DataType, Decimal};
+    use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
+    use risingwave_common::types::{Datum, Decimal};
+    use test::Bencher;
 
     use crate::agg::AggCall;
-    use crate::Result;
 
-    async fn eval_agg(
-        pretty: &str,
-        input: ArrayRef,
-        mut builder: ArrayBuilderImpl,
-    ) -> Result<ArrayImpl> {
-        let len = input.len();
-        let input_chunk = DataChunk::new(vec![input], len);
-        let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty))?;
-        agg_state
-            .update_multi(&input_chunk, 0, input_chunk.cardinality())
-            .await?;
-        agg_state.output(&mut builder)?;
-        Ok(builder.finish())
+    fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
+        let mut agg_state = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        agg_state.update(&input).now_or_never().unwrap().unwrap();
+        let actual = agg_state.output().unwrap();
+        assert_eq!(actual, expected);
     }
 
-    #[tokio::test]
-    async fn vec_sum_int32() -> Result<()> {
-        let input = I32Array::from_iter([1, 2, 3]);
-        let actual = eval_agg(
-            "(sum:int8 $0:int4)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_int64();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(6)]);
-        Ok(())
+    #[test]
+    fn sum_int32() {
+        let input = StreamChunk::from_pretty(
+            " i
+            + 3
+            - 1
+            - 3 D
+            + 1 D",
+        );
+        test_agg("(sum:int8 $0:int4)", input, Some(2i64.into()));
     }
 
-    #[tokio::test]
-    async fn vec_sum_int64() -> Result<()> {
-        let input = I64Array::from_iter([1, 2, 3]);
-        let actual = eval_agg(
+    #[test]
+    fn sum_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 3
+            - 1
+            - 3 D
+            + 1 D",
+        );
+        test_agg(
             "(sum:decimal $0:int8)",
-            Arc::new(input.into()),
-            DecimalArrayBuilder::new(0).into(),
-        )
-        .await?;
-        let actual: DecimalArray = actual.into();
-        let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
-        assert_eq!(actual, vec![Some(Decimal::from(6))]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn vec_min_float32() -> Result<()> {
-        let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg(
-            "(min:float4 $0:float4)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_float32();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(1.0.into())]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn vec_min_char() -> Result<()> {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(min:varchar $0:varchar)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("aa")]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn vec_min_list() -> Result<()> {
-        let input = ListArray::from_iter(
-            [
-                Some(I32Array::from_iter([Some(0)]).into()),
-                Some(I32Array::from_iter([Some(1)]).into()),
-                Some(I32Array::from_iter([Some(2)]).into()),
-            ],
-            DataType::Int32,
+            input,
+            Some(Decimal::from(2).into()),
         );
-        let actual = eval_agg(
+    }
+
+    #[test]
+    fn sum_float64() {
+        let input = StreamChunk::from_pretty(
+            " F
+            + 1.0
+            + 2.0
+            + 3.0
+            - 4.0",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(2.0f64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " F
+            + 1.0
+            + inf
+            + 3.0
+            - 3.0",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(f64::INFINITY.into()));
+
+        let input = StreamChunk::from_pretty(
+            " F
+            + 0.0
+            - -inf",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(f64::INFINITY.into()));
+
+        let input = StreamChunk::from_pretty(
+            " F
+            + 1.0
+            + nan
+            + 1926.0",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(f64::NAN.into()));
+    }
+
+    /// Even if there is no element after some insertions and equal number of deletion operations,
+    /// sum aggregator should output `0` instead of `None`.
+    #[test]
+    fn sum_no_none() {
+        test_agg("(sum:int8 $0:int8)", StreamChunk::from_pretty("I"), None);
+
+        let input = StreamChunk::from_pretty(
+            " I
+            + 2
+            - 1
+            + 1
+            - 2",
+        );
+        test_agg("(sum:int8 $0:int8)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " I
+            - 3 D
+            + 1
+            - 3 D
+            - 1",
+        );
+        test_agg("(sum:int8 $0:int8)", input, Some(0i64.into()));
+    }
+
+    #[test]
+    fn min_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1  D
+            + 10
+            + .
+            + 5",
+        );
+        test_agg("(min:int8 $0:int8)", input, Some(5i64.into()));
+    }
+
+    #[test]
+    fn min_float32() {
+        let input = StreamChunk::from_pretty(
+            " f
+            + 1.0  D
+            + 10.0
+            + .
+            + 5.0",
+        );
+        test_agg("(min:float4 $0:float4)", input, Some(5.0f32.into()));
+    }
+
+    #[test]
+    fn min_char() {
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg("(min:varchar $0:varchar)", input, Some("aa".into()));
+    }
+
+    #[test]
+    fn min_list() {
+        let input = StreamChunk::from_pretty(
+            " i[]
+            + {0}
+            + {1}
+            + {2}",
+        );
+        test_agg(
             "(min:int4[] $0:int4[])",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::List(ListArrayBuilder::with_type(
-                0,
-                DataType::List(Box::new(DataType::Int32)),
-            )),
-        )
-        .await?;
-        let actual = actual.as_list();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(
-            actual,
-            vec![Some(ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(0i32.into())])
-            })]
+            input,
+            Some(ListValue::new(vec![Some(0i32.into())]).into()),
         );
-        Ok(())
     }
 
-    #[tokio::test]
-    async fn vec_max_char() -> Result<()> {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(max:varchar $0:varchar)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("b")]);
-        Ok(())
+    #[test]
+    fn max_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1
+            + 10 D
+            + .
+            + 5",
+        );
+        test_agg("(max:int8 $0:int8)", input, Some(5i64.into()));
     }
 
-    #[tokio::test]
-    async fn vec_count_int32() -> Result<()> {
-        async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let actual = eval_agg(
-                "(count:int8 $0:int4)",
-                Arc::new(input),
-                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-            )
-            .await?;
-            let actual = actual.as_int64();
-            let actual = actual.iter().collect::<Vec<_>>();
-            assert_eq!(actual, expected);
-            Ok(())
-        }
-        let input = I32Array::from_iter([1, 2, 3]);
-        let expected = &[Some(3)];
-        test_case(input.into(), expected).await?;
-        #[allow(clippy::needless_borrow)]
-        let input = I32Array::from_iter(&[]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await?;
-        let input = I32Array::from_iter([None]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await
+    #[test]
+    fn max_char() {
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg("(max:varchar $0:varchar)", input, Some("b".into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_sum_int32() -> Result<()> {
-        let input = I32Array::from_iter([1, 1, 3]);
-        let actual = eval_agg(
-            "(sum:int8 $0:int4 distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_int64();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(4)]);
-        Ok(())
+    #[test]
+    fn count_int32() {
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + 2
+            + 3",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(3i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + .
+            + 3
+            - 1",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(1i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            - 1 D
+            - .
+            - 3 D
+            - 1 D",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty("i");
+        test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            + .",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_sum_int64() -> Result<()> {
-        let input = I64Array::from_iter([1, 1, 3]);
-        let actual = eval_agg(
-            "(sum:decimal $0:int8 distinct)",
-            Arc::new(input.into()),
-            DecimalArrayBuilder::new(0).into(),
-        )
-        .await?;
-        let actual: &DecimalArray = (&actual).into();
-        let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
-        assert_eq!(actual, vec![Some(Decimal::from(4))]);
-        Ok(())
+    #[test]
+    fn count_star() {
+        // when there is no element, output should be `0`.
+        let input = StreamChunk::from_pretty("i");
+        test_agg("(count:int8)", input, Some(0i64.into()));
+
+        // insert one element to state
+        let input = StreamChunk::from_pretty(
+            " i
+            + 0",
+        );
+        test_agg("(count:int8)", input, Some(1i64.into()));
+
+        // delete one element from state
+        let input = StreamChunk::from_pretty(
+            " i
+            + 0
+            - 0",
+        );
+        test_agg("(count:int8)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            - 0
+            - 0 D
+            + 1
+            - 1",
+        );
+        test_agg("(count:int8)", input, Some((-1i64).into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_min_float32() -> Result<()> {
-        let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg(
-            "(min:float4 $0:float4 distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_float32();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(1.0.into())]);
-        Ok(())
+    #[test]
+    fn bitxor_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1
+            - 10 D
+            + .
+            - 5",
+        );
+        test_agg("(bit_xor:int8 $0:int8)", input, Some(4i64.into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_min_char() -> Result<()> {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(min:varchar $0:varchar distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("aa")]);
-        Ok(())
+    fn bench_i64(
+        b: &mut Bencher,
+        agg_desc: &str,
+        chunk_size: usize,
+        vis_rate: f64,
+        append_only: bool,
+    ) {
+        println!(
+            "benching {} agg, chunk_size={}, vis_rate={}",
+            agg_desc, chunk_size, vis_rate
+        );
+        let bitmap = if vis_rate < 1.0 {
+            Some(rand_bitmap::gen_rand_bitmap(
+                chunk_size,
+                (chunk_size as f64 * vis_rate) as usize,
+                666,
+            ))
+        } else {
+            None
+        };
+        let (ops, data) = rand_stream_chunk::gen_legal_stream_chunk(
+            bitmap.as_ref(),
+            chunk_size,
+            append_only,
+            666,
+        );
+        let vis = match bitmap {
+            Some(bitmap) => Vis::Bitmap(bitmap),
+            None => Vis::Compact(chunk_size),
+        };
+        let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
+        let pretty = format!("({agg_desc}:int8 $0:int8)");
+        let mut agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        b.iter(|| {
+            agg.update(&chunk).now_or_never().unwrap().unwrap();
+        });
     }
 
-    #[tokio::test]
-    async fn vec_distinct_max_char() -> Result<()> {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(max:varchar $0:varchar distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("b")]);
-        Ok(())
+    #[bench]
+    fn sum_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 1.0, false);
     }
 
-    #[tokio::test]
-    async fn vec_distinct_count_int32() -> Result<()> {
-        async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let actual = eval_agg(
-                "(count:int8 $0:int4 distinct)",
-                Arc::new(input),
-                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-            )
-            .await?;
-            let actual = actual.as_int64();
-            let actual = actual.iter().collect::<Vec<_>>();
-            assert_eq!(actual, expected);
-            Ok(())
-        }
-        let input = I32Array::from_iter([1, 1, 3]);
-        let expected = &[Some(2)];
-        test_case(input.into(), expected).await?;
-        #[allow(clippy::needless_borrow)]
-        let input = I32Array::from_iter(&[]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await?;
-        let input = I32Array::from_iter([None]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await
+    #[bench]
+    fn sum_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.75, false);
+    }
+
+    #[bench]
+    fn sum_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.5, false);
+    }
+
+    #[bench]
+    fn sum_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.25, false);
+    }
+
+    #[bench]
+    fn sum_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.05, false);
+    }
+
+    #[bench]
+    fn count_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 1.0, false);
+    }
+
+    #[bench]
+    fn count_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.75, false);
+    }
+
+    #[bench]
+    fn count_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.5, false);
+    }
+
+    #[bench]
+    fn count_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.25, false);
+    }
+
+    #[bench]
+    fn count_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.05, false);
+    }
+
+    #[bench]
+    fn min_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 1.0, true);
+    }
+
+    #[bench]
+    fn min_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.75, true);
+    }
+
+    #[bench]
+    fn min_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.5, true);
+    }
+
+    #[bench]
+    fn min_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.25, true);
+    }
+
+    #[bench]
+    fn min_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.05, true);
+    }
+
+    #[bench]
+    fn max_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 1.0, true);
+    }
+
+    #[bench]
+    fn max_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.75, true);
+    }
+
+    #[bench]
+    fn max_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.5, true);
+    }
+
+    #[bench]
+    fn max_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.25, true);
+    }
+
+    #[bench]
+    fn max_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.05, true);
     }
 }

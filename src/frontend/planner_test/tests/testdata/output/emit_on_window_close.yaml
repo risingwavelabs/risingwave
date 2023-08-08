@@ -20,7 +20,7 @@
       └─StreamHashAgg [append_only] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
         └─StreamExchange { dist: HashShard(v1) }
           └─StreamRowIdGen { row_id_index: 3 }
-            └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - 10:Int32) }] }
+            └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - 10:Int32) }], output_watermarks: [v1] }
               └─StreamSource { source: t, columns: [v1, v2, v3, _row_id] }
   eowc_stream_plan: |-
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck, watermark_columns: [v1] }
@@ -28,7 +28,7 @@
       └─StreamHashAgg [append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
         └─StreamExchange { dist: HashShard(v1) }
           └─StreamRowIdGen { row_id_index: 3 }
-            └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - 10:Int32) }] }
+            └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - 10:Int32) }], output_watermarks: [v1] }
               └─StreamSource { source: t, columns: [v1, v2, v3, _row_id] }
   eowc_stream_dist_plan: |+
     Fragment 0
@@ -43,7 +43,8 @@
 
     Fragment 1
     StreamRowIdGen { row_id_index: 3 }
-    └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - 10:Int32) }] } { state tables: [ 2 ] }
+    └── StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - 10:Int32) }], output_watermarks: [v1] }
+        ├── state tables: [ 2 ]
         └── StreamSource { source: t, columns: [v1, v2, v3, _row_id] } { source state table: 3 }
 
     Table 0
@@ -142,7 +143,7 @@
           └─StreamExchange { dist: HashShard(b) }
             └─StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
               └─StreamRowIdGen { row_id_index: 3 }
-                └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 2, expr: (tm - '00:05:00':Interval) }] }
+                └─StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [tm] }
                   └─StreamSource { source: t, columns: [a, b, tm, _row_id] }
   eowc_stream_dist_plan: |+
     Fragment 0
@@ -157,7 +158,8 @@
     Fragment 1
     StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
     └── StreamRowIdGen { row_id_index: 3 }
-        └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 2, expr: (tm - '00:05:00':Interval) }] } { state tables: [ 2 ] }
+        └── StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [tm] }
+            ├── state tables: [ 2 ]
             └── StreamSource { source: t, columns: [a, b, tm, _row_id] } { source state table: 3 }
 
     Table 0

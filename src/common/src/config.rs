@@ -180,9 +180,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    /// Interval of invoking a vacuum job, to remove stale metadata from meta store and objects
+    /// from object store.
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
+
+    /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
+    /// meta node.
+    #[serde(default = "default::meta::vacuum_spin_interval_ms")]
+    pub vacuum_spin_interval_ms: u64,
 
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
@@ -482,7 +488,10 @@ pub struct StorageConfig {
     pub sstable_id_remote_fetch_number: u32,
 
     #[serde(default)]
-    pub file_cache: FileCacheConfig,
+    pub data_file_cache: FileCacheConfig,
+
+    #[serde(default)]
+    pub meta_file_cache: FileCacheConfig,
 
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
@@ -524,6 +533,11 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
+    #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
+    pub compact_iter_recreate_timeout_ms: u64,
+
+    #[serde(default = "default::storage::compactor_max_sst_size")]
+    pub compactor_max_sst_size: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -540,17 +554,44 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
 
+    #[serde(default = "default::file_cache::file_capacity_mb")]
+    pub file_capacity_mb: usize,
+
     #[serde(default)]
-    pub total_buffer_capacity_mb: Option<usize>,
+    pub buffer_pool_size_mb: Option<usize>,
 
-    #[serde(default = "default::file_cache::cache_file_fallocate_unit_mb")]
-    pub cache_file_fallocate_unit_mb: usize,
+    #[serde(default = "default::file_cache::device_align")]
+    pub device_align: usize,
 
-    #[serde(default = "default::file_cache::cache_meta_fallocate_unit_mb")]
-    pub cache_meta_fallocate_unit_mb: usize,
+    #[serde(default = "default::file_cache::device_io_size")]
+    pub device_io_size: usize,
 
-    #[serde(default = "default::file_cache::cache_file_max_write_size_mb")]
-    pub cache_file_max_write_size_mb: usize,
+    #[serde(default = "default::file_cache::flushers")]
+    pub flushers: usize,
+
+    #[serde(default = "default::file_cache::reclaimers")]
+    pub reclaimers: usize,
+
+    #[serde(default = "default::file_cache::recover_concurrency")]
+    pub recover_concurrency: usize,
+
+    #[serde(default = "default::file_cache::lfu_window_to_cache_size_ratio")]
+    pub lfu_window_to_cache_size_ratio: usize,
+
+    #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
+    pub lfu_tiny_lru_capacity_ratio: f64,
+
+    #[serde(default = "default::file_cache::rated_random_rate_mb")]
+    pub rated_random_rate_mb: usize,
+
+    #[serde(default = "default::file_cache::flush_rate_limit_mb")]
+    pub flush_rate_limit_mb: usize,
+
+    #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
+    pub reclaim_rate_limit_mb: usize,
+
+    #[serde(default = "default::file_cache::refill_levels")]
+    pub refill_levels: Vec<u32>,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -741,6 +782,10 @@ pub mod default {
             30
         }
 
+        pub fn vacuum_spin_interval_ms() -> u64 {
+            10
+        }
+
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
         }
@@ -928,6 +973,14 @@ pub mod default {
         pub fn compactor_max_sst_key_count() -> u64 {
             2 * 1024 * 1024 // 200w
         }
+
+        pub fn compact_iter_recreate_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn compactor_max_sst_size() -> u64 {
+            512 * 1024 * 1024 // 512m
+        }
     }
 
     pub mod streaming {
@@ -958,20 +1011,56 @@ pub mod default {
             1024
         }
 
-        pub fn total_buffer_capacity_mb() -> usize {
-            128
+        pub fn file_capacity_mb() -> usize {
+            64
         }
 
-        pub fn cache_file_fallocate_unit_mb() -> usize {
-            512
+        pub fn buffer_pool_size_mb() -> usize {
+            1024
         }
 
-        pub fn cache_meta_fallocate_unit_mb() -> usize {
-            16
+        pub fn device_align() -> usize {
+            4096
         }
 
-        pub fn cache_file_max_write_size_mb() -> usize {
+        pub fn device_io_size() -> usize {
+            16 * 1024
+        }
+
+        pub fn flushers() -> usize {
             4
+        }
+
+        pub fn reclaimers() -> usize {
+            4
+        }
+
+        pub fn recover_concurrency() -> usize {
+            8
+        }
+
+        pub fn lfu_window_to_cache_size_ratio() -> usize {
+            1
+        }
+
+        pub fn lfu_tiny_lru_capacity_ratio() -> f64 {
+            0.01
+        }
+
+        pub fn rated_random_rate_mb() -> usize {
+            0
+        }
+
+        pub fn flush_rate_limit_mb() -> usize {
+            0
+        }
+
+        pub fn reclaim_rate_limit_mb() -> usize {
+            0
+        }
+
+        pub fn refill_levels() -> Vec<u32> {
+            vec![]
         }
     }
 
@@ -1179,7 +1268,8 @@ pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub meta_cache_capacity_mb: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub file_cache_total_buffer_capacity_mb: usize,
+    pub data_file_cache_buffer_pool_capacity_mb: usize,
+    pub meta_file_cache_buffer_pool_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
@@ -1197,11 +1287,16 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
-    let file_cache_total_buffer_capacity_mb = s
+    let data_file_cache_buffer_pool_size_mb = s
         .storage
-        .file_cache
-        .total_buffer_capacity_mb
-        .unwrap_or(default::file_cache::total_buffer_capacity_mb());
+        .data_file_cache
+        .buffer_pool_size_mb
+        .unwrap_or(default::file_cache::buffer_pool_size_mb());
+    let meta_file_cache_buffer_pool_size_mb = s
+        .storage
+        .meta_file_cache
+        .buffer_pool_size_mb
+        .unwrap_or(default::file_cache::buffer_pool_size_mb());
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
@@ -1215,7 +1310,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        file_cache_total_buffer_capacity_mb,
+        data_file_cache_buffer_pool_capacity_mb: data_file_cache_buffer_pool_size_mb,
+        meta_file_cache_buffer_pool_capacity_mb: meta_file_cache_buffer_pool_size_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }

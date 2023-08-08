@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
@@ -21,6 +22,7 @@
 #![feature(lazy_cell)]
 #![feature(round_ties_even)]
 #![feature(generators)]
+#![feature(test)]
 
 pub mod agg;
 mod error;

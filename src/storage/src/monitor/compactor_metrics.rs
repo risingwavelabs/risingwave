@@ -14,10 +14,10 @@
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
-    IntGauge, Registry,
+    exponential_buckets, histogram_opts, register_counter_vec_with_registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
 };
 
 #[derive(Debug)]
@@ -45,6 +45,7 @@ pub struct CompactorMetrics {
     pub sstable_distinct_epoch_count: Histogram,
     pub preload_io_count: GenericCounter<AtomicU64>,
     pub refill_cache_duration: Histogram,
+    pub refill_data_file_cache_count: CounterVec,
 }
 
 impl CompactorMetrics {
@@ -91,6 +92,13 @@ impl CompactorMetrics {
             exponential_buckets(0.001, 1.6, 20).unwrap()
         );
         let refill_cache_duration = register_histogram_with_registry!(opts, registry).unwrap();
+        let refill_data_file_cache_count = register_counter_vec_with_registry!(
+            "compute_refill_data_file_cache_count",
+            "compute refill data file cache count",
+            &["extra"],
+            registry
+        )
+        .unwrap();
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
@@ -246,6 +254,7 @@ impl CompactorMetrics {
             sstable_distinct_epoch_count,
             preload_io_count,
             refill_cache_duration,
+            refill_data_file_cache_count,
         }
     }
 

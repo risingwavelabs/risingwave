@@ -84,8 +84,12 @@ pub struct MetaOpts {
     /// Default parallelism of units for all streaming jobs.
     pub default_parallelism: DefaultParallelism,
 
-    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    /// Interval of invoking a vacuum job, to remove stale metadata from meta store and objects
+    /// from object store.
     pub vacuum_interval_sec: u64,
+    /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
+    /// meta node.
+    pub vacuum_spin_interval_ms: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
@@ -162,6 +166,7 @@ impl MetaOpts {
             compaction_deterministic_test: false,
             default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
+            vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
