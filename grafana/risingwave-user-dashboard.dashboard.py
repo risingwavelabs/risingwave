@@ -297,7 +297,7 @@ def section_memory(outer_panels):
                             "storage write buffer - {{job}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum(stream_memory_usage * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
                             "materialized_view {{materialized_view_id}}",
                         ),
                     ],
