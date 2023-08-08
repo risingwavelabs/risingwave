@@ -56,12 +56,8 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        let state_table_r = StateTable::from_table_catalog_inconsistent_op(
-            node.get_right_table()?,
-            store.clone(),
-            None,
-        )
-        .await;
+        let state_table_r =
+            StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
         let left_table = node.get_left_table()?;
         if let Ok(use_watermark_cache) = left_table.get_use_watermark_cache() && *use_watermark_cache {
