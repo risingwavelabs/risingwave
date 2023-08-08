@@ -281,7 +281,7 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
-    }  else {
+    } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;
         compaction_config.target_file_size_base << step
