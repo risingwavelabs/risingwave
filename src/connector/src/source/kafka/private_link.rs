@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -90,21 +91,25 @@ impl BrokerAddrRewriter {
 
 pub struct PrivateLinkConsumerContext {
     inner: BrokerAddrRewriter,
+    metrics: Arc<RdKafkaStats>,
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        broker_rewrite_map: Option<HashMap<String, String>>,
+        metrics: Arc<RdKafkaStats>,
+    ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self { inner })
+        Ok(Self { inner, metrics })
     }
 }
 
 impl ClientContext for PrivateLinkConsumerContext {
+    fn stats(&self, statistics: Statistics) {}
+
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         self.inner.rewrite_broker_addr(addr)
     }
-
-    fn stats(&self, statistics: Statistics) {}
 }
 
 // required by the trait bound of BaseConsumer
@@ -112,16 +117,24 @@ impl ConsumerContext for PrivateLinkConsumerContext {}
 
 pub struct PrivateLinkProducerContext {
     inner: BrokerAddrRewriter,
+    metrics: Arc<RdKafkaStats>,
 }
 
 impl PrivateLinkProducerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        broker_rewrite_map: Option<HashMap<String, String>>,
+        metrics: Arc<RdKafkaStats>,
+    ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
-        Ok(Self { inner })
+        Ok(Self { inner, metrics })
     }
 }
 
 impl ClientContext for PrivateLinkProducerContext {
+    fn stats(&self, statistics: Statistics) {
+        todo!()
+    }
+
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         self.inner.rewrite_broker_addr(addr)
     }
