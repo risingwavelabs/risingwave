@@ -110,7 +110,7 @@ where
     pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering".into())
+            .abort_and_mark_blocked("cluster is under recovering")
             .await;
 
         tracing::info!("recovery start!");
