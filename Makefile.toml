@@ -1077,6 +1077,9 @@ while true; do
     fi
 done
 echo "Tmux windows are now empty."
+
+# FIXME: a dirty workaround for #11519.
+sleep 5
 """
 
 [tasks.slt]
