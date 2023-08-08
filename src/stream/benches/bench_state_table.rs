@@ -28,7 +28,14 @@ use tokio::runtime::Runtime;
 
 type TestStateTable = StateTable<MemoryStateStore>;
 
-const TEST_DATA_TYPES: [DataType; 14] = [
+const FEW_DATA_TYPES: [DataType; 4] = [
+    DataType::Int32,
+    DataType::Int64,
+    DataType::Int32,
+    DataType::Int64,
+];
+
+const MANY_DATA_TYPES: [DataType; 14] = [
     DataType::Timestamp,
     DataType::Int16,
     DataType::Int32,
@@ -45,10 +52,10 @@ const TEST_DATA_TYPES: [DataType; 14] = [
     DataType::Varchar,
 ];
 
-async fn create_state_table() -> TestStateTable {
+async fn create_state_table(data_types: &[DataType]) -> TestStateTable {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
-    let column_descs = TEST_DATA_TYPES
+    let column_descs = data_types
         .iter()
         .enumerate()
         .map(|(i, data_type)| ColumnDesc::unnamed(ColumnId::new(i as i32), data_type.clone()))
@@ -89,8 +96,8 @@ fn gen_stream_chunks(
     )
 }
 
-fn setup_bench_state_table() -> TestStateTable {
-    block_on(create_state_table())
+fn setup_bench_state_table(data_types: &[DataType]) -> TestStateTable {
+    block_on(create_state_table(data_types))
 }
 
 async fn run_bench_state_table_inserts(mut state_table: TestStateTable, rows: Vec<OwnedRow>) {
@@ -108,9 +115,28 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     group.sample_size(10);
 
     let rt = Runtime::new().unwrap();
-    group.bench_function("benchmark_inserts", |b| {
+    group.bench_function("benchmark_inserts_few_data_types", |b| {
         b.to_async(&rt).iter_batched(
-            || (setup_bench_state_table(), gen_inserts(1, &TEST_DATA_TYPES)),
+            || {
+                (
+                    setup_bench_state_table(&FEW_DATA_TYPES),
+                    gen_inserts(1, &FEW_DATA_TYPES),
+                )
+            },
+            |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
+            BatchSize::SmallInput,
+        )
+    });
+
+    let rt = Runtime::new().unwrap();
+    group.bench_function("benchmark_inserts_many_data_types", |b| {
+        b.to_async(&rt).iter_batched(
+            || {
+                (
+                    setup_bench_state_table(&MANY_DATA_TYPES),
+                    gen_inserts(1, &MANY_DATA_TYPES),
+                )
+            },
             |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
             BatchSize::SmallInput,
         )
@@ -130,14 +156,22 @@ async fn run_bench_state_table_chunks(mut state_table: TestStateTable, chunks: V
 fn bench_state_table_write_chunk(c: &mut Criterion) {
     let visibilities = [0.5, 0.90, 0.99, 1.0];
     let inserts = [0.5, 0.90, 0.99, 1.0];
-    for visibility in visibilities {
-        for insert in inserts {
-            bench_state_table_chunks(c, visibility, insert);
+    let schemas = [&MANY_DATA_TYPES[..], &FEW_DATA_TYPES[..]];
+    for schema in schemas {
+        for visibility in visibilities {
+            for insert in inserts {
+                bench_state_table_chunks(c, schema, visibility, insert);
+            }
         }
     }
 }
 
-fn bench_state_table_chunks(c: &mut Criterion, visibility_percent: f64, inserts_percent: f64) {
+fn bench_state_table_chunks(
+    c: &mut Criterion,
+    data_types: &[DataType],
+    visibility_percent: f64,
+    inserts_percent: f64,
+) {
     let mut group = c.benchmark_group("state_table");
     group.sample_size(10);
 
@@ -153,13 +187,8 @@ fn bench_state_table_chunks(c: &mut Criterion, visibility_percent: f64, inserts_
             b.to_async(&rt).iter_batched(
                 || {
                     (
-                        setup_bench_state_table(),
-                        gen_stream_chunks(
-                            100,
-                            &TEST_DATA_TYPES,
-                            visibility_percent,
-                            inserts_percent,
-                        ),
+                        setup_bench_state_table(data_types),
+                        gen_stream_chunks(100, data_types, visibility_percent, inserts_percent),
                     )
                 },
                 |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
