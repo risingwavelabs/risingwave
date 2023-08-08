@@ -57,7 +57,6 @@ use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse,
 };
-use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -473,8 +472,8 @@ impl Compactor {
     #[cfg_attr(coverage, no_coverage)]
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> (JoinHandle<()>, Sender<()>) {
+        let hummock_meta_client = compactor_context.hummock_meta_client.clone();
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(30);
