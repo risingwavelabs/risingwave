@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::types::DataType;
@@ -22,7 +21,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::utils::{childless_record, Distill, TableCatalogBuilder};
+use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -37,7 +36,7 @@ pub struct StreamWatermarkFilter {
 
 impl StreamWatermarkFilter {
     pub fn new(input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
+        let mut watermark_columns = input.watermark_columns().clone();
         for i in &watermark_descs {
             watermark_columns.insert(i.get_watermark_idx() as usize)
         }
@@ -85,7 +84,12 @@ impl Distill for StreamWatermarkFilter {
                 Pretty::childless_record("Desc", fields)
             })
             .collect();
-        let fields = vec![("watermark_descs", Pretty::Array(display_watermark_descs))];
+        let display_output_watermarks =
+            watermark_pretty(&self.base.watermark_columns, input_schema).unwrap();
+        let fields = vec![
+            ("watermark_descs", Pretty::Array(display_watermark_descs)),
+            ("output_watermarks", display_output_watermarks),
+        ];
         childless_record("StreamWatermarkFilter", fields)
     }
 }
