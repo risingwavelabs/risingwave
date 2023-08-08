@@ -124,10 +124,10 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
 
 fn bench_state_table_inserts(c: &mut Criterion) {
     let mut group = c.benchmark_group("state_table");
-    group.sample_size(10);
+    group.sample_size(100);
 
     let rt = Runtime::new().unwrap();
-    group.bench_function("benchmark_inserts_few_data_types", |b| {
+    group.bench_function("inserts:col=2,watermark_cache=false", |b| {
         b.to_async(&rt).iter_batched(
             || {
                 (
@@ -141,38 +141,32 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     });
 
     let rt = Runtime::new().unwrap();
-    group.bench_function(
-        "benchmark_inserts_many_data_types_with_watermark_cache",
-        |b| {
-            b.to_async(&rt).iter_batched(
-                || {
-                    (
-                        setup_bench_state_table::<true>(&MANY_DATA_TYPES),
-                        gen_inserts(1, &MANY_DATA_TYPES),
-                    )
-                },
-                |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
-                BatchSize::SmallInput,
-            )
-        },
-    );
+    group.bench_function("inserts:col=7,watermark_cache=true", |b| {
+        b.to_async(&rt).iter_batched(
+            || {
+                (
+                    setup_bench_state_table::<true>(&MANY_DATA_TYPES),
+                    gen_inserts(1, &MANY_DATA_TYPES),
+                )
+            },
+            |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
+            BatchSize::SmallInput,
+        )
+    });
 
     let rt = Runtime::new().unwrap();
-    group.bench_function(
-        "benchmark_inserts_many_data_types_without_watermark_cache",
-        |b| {
-            b.to_async(&rt).iter_batched(
-                || {
-                    (
-                        setup_bench_state_table::<false>(&MANY_DATA_TYPES),
-                        gen_inserts(1, &MANY_DATA_TYPES),
-                    )
-                },
-                |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
-                BatchSize::SmallInput,
-            )
-        },
-    );
+    group.bench_function("inserts:col=7,watermark_cache=false", |b| {
+        b.to_async(&rt).iter_batched(
+            || {
+                (
+                    setup_bench_state_table::<false>(&MANY_DATA_TYPES),
+                    gen_inserts(1, &MANY_DATA_TYPES),
+                )
+            },
+            |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
+            BatchSize::SmallInput,
+        )
+    });
 }
 
 async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
@@ -212,15 +206,16 @@ fn bench_state_table_chunks(
     inserts_percent: f64,
 ) {
     let mut group = c.benchmark_group("state_table");
-    group.sample_size(10);
+    group.sample_size(100);
 
+    let data_types_len = data_types.len();
     let deletes_percent = 1.0 - inserts_percent;
 
     let rt = Runtime::new().unwrap();
     if use_watermark_cache && matches!(data_types[0], DataType::Timestamp) {
         group.bench_function(
             format!(
-                "benchmark_chunks_visibility_{:.2}_inserts_{:.2}_deletes_{:.2}",
+                "write_chunk:vis={:.2},insert={:.2},delete={:.2},watermark_cache={use_watermark_cache},cols={data_types_len}",
                 visibility_percent, inserts_percent, deletes_percent
             ),
             |b| {
@@ -239,7 +234,7 @@ fn bench_state_table_chunks(
     } else {
         group.bench_function(
             format!(
-                "benchmark_chunks_visibility_{:.2}_inserts_{:.2}_deletes_{:.2}",
+                "write_chunk:vis={:.2},insert={:.2},delete={:.2},watermark_cache={use_watermark_cache},cols={data_types_len}",
                 visibility_percent, inserts_percent, deletes_percent
             ),
             |b| {
