@@ -1033,7 +1033,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
         services
             .drop_materialized_views(vec![table_id])
             .await
