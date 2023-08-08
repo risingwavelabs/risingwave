@@ -32,6 +32,188 @@ pub struct BrokerStats {
     pub outbuf_msg_cnt: IntGaugeVec,
 }
 
+pub struct StatsWindow {
+    pub registry: Registry,
+
+    pub min: IntGaugeVec,
+    pub max: IntGaugeVec,
+    pub avg: IntGaugeVec,
+    pub sum: IntGaugeVec,
+    pub cnt: IntGaugeVec,
+    pub stddev: IntGaugeVec,
+    pub hdr_size: IntGaugeVec,
+    pub p50: IntGaugeVec,
+    pub p75: IntGaugeVec,
+    pub p90: IntGaugeVec,
+    pub p95: IntGaugeVec,
+    pub p99: IntGaugeVec,
+    pub p99_99: IntGaugeVec,
+    pub out_of_range: IntGaugeVec,
+}
+
+impl StatsWindow {
+    pub fn new(registry: Registry, path: &str) -> Self {
+        let get_metric_name = |name: &str| format!("rdkafka.{}.{}", path, name);
+        let min = register_int_gauge_vec_with_registry!(
+            get_metric_name("min"),
+            "Minimum value",
+            &["id", "client_id", "broker", "topic"],
+            registry.clone()
+        )
+        .unwrap();
+        let max = register_int_gauge_vec_with_registry!(
+            get_metric_name("max"),
+            "Maximum value",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let avg = register_int_gauge_vec_with_registry!(
+            get_metric_name("avg"),
+            "Average value",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let sum = register_int_gauge_vec_with_registry!(
+            get_metric_name("sum"),
+            "Sum of values",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let cnt = register_int_gauge_vec_with_registry!(
+            get_metric_name("cnt"),
+            "Count of values",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let stddev = register_int_gauge_vec_with_registry!(
+            get_metric_name("stddev"),
+            "Standard deviation",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let hdr_size = register_int_gauge_vec_with_registry!(
+            get_metric_name("hdr.size"),
+            "Size of the histogram header",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let p50 = register_int_gauge_vec_with_registry!(
+            get_metric_name("p50"),
+            "50th percentile",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let p75 = register_int_gauge_vec_with_registry!(
+            get_metric_name("p75"),
+            "75th percentile",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let p90 = register_int_gauge_vec_with_registry!(
+            get_metric_name("p90"),
+            "90th percentile",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let p95 = register_int_gauge_vec_with_registry!(
+            get_metric_name("p95"),
+            "95th percentile",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let p99 = register_int_gauge_vec_with_registry!(
+            get_metric_name("p99"),
+            "99th percentile",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let p99_99 = register_int_gauge_vec_with_registry!(
+            get_metric_name("p99.99"),
+            "99.99th percentile",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+        let out_of_range = register_int_gauge_vec_with_registry!(
+            get_metric_name("out.of.range"),
+            "Out of range values",
+            &["id"],
+            registry.clone()
+        )
+        .unwrap();
+
+        Self {
+            registry,
+            min,
+            max,
+            avg,
+            sum,
+            cnt,
+            stddev,
+            hdr_size,
+            p50,
+            p75,
+            p90,
+            p95,
+            p99,
+            p99_99,
+            out_of_range,
+        }
+    }
+}
+
+pub struct TopicStats {
+    pub registry: Registry,
+
+    pub metadata_age: IntGaugeVec,
+    pub batch_size: StatsWindow,
+    pub batch_cnt: StatsWindow,
+    pub partitions: PartitionStats,
+}
+
+impl TopicStats {
+    pub fn new(registry: Registry) -> Self {
+        let metadata_age = register_int_gauge_vec_with_registry!(
+            "rdkafka.topic.metadata.age",
+            "Age of the topic metadata in milliseconds",
+            &["id", "client_id", "broker", "topic"],
+            registry.clone()
+        )
+        .unwrap();
+        let batch_size = StatsWindow::new(registry.clone(), "topic.batchsize");
+        let batch_cnt = StatsWindow::new(registry.clone(), "topic.batchcnt");
+        let partitions = PartitionStats::new(registry.clone());
+        Self {
+            registry,
+            metadata_age,
+            batch_cnt,
+            batch_size,
+            partitions,
+        }
+    }
+}
+
+pub struct PartitionStats {
+    pub registry: Registry,
+}
+
+impl PartitionStats {
+    pub fn new(registry: Registry) -> Self {
+        Self { registry }
+    }
+}
+
 impl RdKafkaStats {
     pub fn new(registry: Registry) -> Self {
         let top_ts = register_int_gauge_vec_with_registry!(
