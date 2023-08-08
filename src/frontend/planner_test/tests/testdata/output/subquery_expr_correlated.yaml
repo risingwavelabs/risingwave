@@ -918,3 +918,28 @@
               └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [$expr1] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: test ApplyLimitTransposeRule case 1
+  sql: |
+    create table t1 (v1 int, k1 int);
+    create table t2 (v2 int, k2 int);
+    select * from t1 where v1 in ( select v2 from t2 where k2 = k1 limit 1);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t1.k1) }
+      │ └─BatchScan { table: t1, columns: [t1.v1, t1.k1], distribution: SomeShard }
+      └─BatchGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+        └─BatchExchange { order: [], dist: HashShard(t2.k2) }
+          └─BatchProject { exprs: [t2.k2, t2.v2] }
+            └─BatchFilter { predicate: IsNotNull(t2.k2) }
+              └─BatchScan { table: t2, columns: [t2.v2, t2.k2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, k1, t1._row_id(hidden)], stream_key: [t1._row_id, v1, k1], pk_columns: [t1._row_id, v1, k1], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
+      ├─StreamExchange { dist: HashShard(t1.k1) }
+      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+        └─StreamExchange { dist: HashShard(t2.k2) }
+          └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+            └─StreamFilter { predicate: IsNotNull(t2.k2) }
+              └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
