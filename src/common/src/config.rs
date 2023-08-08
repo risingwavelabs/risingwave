@@ -519,6 +519,8 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
+    #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
+    pub compact_iter_recreate_timeout_ms: u64,
 
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
@@ -910,6 +912,10 @@ pub mod default {
 
         pub fn compactor_max_sst_key_count() -> u64 {
             2 * 1024 * 1024 // 200w
+        }
+
+        pub fn compact_iter_recreate_timeout_ms() -> u64 {
+            10 * 60 * 1000
         }
 
         pub fn compactor_max_sst_size() -> u64 {
