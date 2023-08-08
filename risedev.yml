@@ -52,6 +52,12 @@ profile:
       # - use: kafka
       #   persist-data: true
 
+  debug:
+    steps:
+      - use: prometheus  # metrics
+      - use: tempo       # tracing
+      - use: grafana     # visualization
+
   default-v6:
     steps:
       - use: meta-node
@@ -354,6 +360,11 @@ profile:
         listen-address: "0.0.0.0"
         address: ${id}
         id: grafana-0
+
+      - use: tempo
+        listen-address: "0.0.0.0"
+        otlp-address: ${id}
+        id: tempo-0
 
       - use: etcd
         listen-address: "0.0.0.0"
@@ -758,6 +769,7 @@ compose:
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
   etcd: "quay.io/coreos/etcd:latest"
+  tempo: "grafana/tempo:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
