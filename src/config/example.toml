@@ -103,34 +103,9 @@ compactor_max_sst_size = 536870912
 [storage.file_cache]
 dir = ""
 capacity_mb = 1024
-file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
-flushers = 4
-reclaimers = 4
-recover_concurrency = 8
-lfu_window_to_cache_size_ratio = 1
-lfu_tiny_lru_capacity_ratio = 0.01
-rated_random_rate_mb = 0
-flush_rate_limit_mb = 0
-reclaim_rate_limit_mb = 0
-refill_levels = []
-
-[storage.meta_file_cache]
-dir = ""
-capacity_mb = 1024
-file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
-flushers = 4
-reclaimers = 4
-recover_concurrency = 8
-lfu_window_to_cache_size_ratio = 1
-lfu_tiny_lru_capacity_ratio = 0.01
-rated_random_rate_mb = 0
-flush_rate_limit_mb = 0
-reclaim_rate_limit_mb = 0
-refill_levels = []
+cache_file_fallocate_unit_mb = 512
+cache_meta_fallocate_unit_mb = 16
+cache_file_max_write_size_mb = 4
 
 [system]
 barrier_interval_ms = 1000
