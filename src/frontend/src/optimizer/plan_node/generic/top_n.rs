@@ -86,7 +86,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         )
     }
 
-    /// decompose -> (input, limit, offset, with_ties, order, group_key)
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
     pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
         let (limit, with_ties) = match self.limit_attr {
             TopNLimit::Simple(limit) => (limit, false),

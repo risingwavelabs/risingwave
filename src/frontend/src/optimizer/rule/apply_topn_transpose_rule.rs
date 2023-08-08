@@ -63,7 +63,7 @@ impl Rule for ApplyTopNTransposeRule {
             JoinType::Inner,
             Condition::true_cond(),
             correlated_id,
-            correlated_indices.clone(),
+            correlated_indices,
             false,
         )
         .into();

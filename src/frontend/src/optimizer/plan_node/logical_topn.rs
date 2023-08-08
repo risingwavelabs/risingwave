@@ -101,7 +101,7 @@ impl LogicalTopN {
         &self.core.group_key
     }
 
-    /// decompose -> (input, limit, offset, with_ties, order, group_key)
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
     pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
         self.core.decompose()
     }
