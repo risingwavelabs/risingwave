@@ -30,7 +30,6 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -58,6 +57,7 @@ log = { version = "0.4", default-features = false, features = ["std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
@@ -119,7 +119,6 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -147,6 +146,7 @@ log = { version = "0.4", default-features = false, features = ["std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
