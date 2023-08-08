@@ -25,8 +25,8 @@ console-subscriber = "0.1.8"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
-opentelemetry-otlp = { version = "0.12" }
-opentelemetry-semantic-conventions = "0.11"
+opentelemetry-otlp = { version = "0.13" }
+opentelemetry-semantic-conventions = "0.12"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
@@ -43,7 +43,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs"
 ] }
 tracing = "0.1"
-tracing-opentelemetry = "0.19"
+tracing-opentelemetry = "0.20"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
 
 [target.'cfg(not(madsim))'.dependencies]
