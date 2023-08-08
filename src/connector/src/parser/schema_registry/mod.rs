@@ -36,7 +36,7 @@ pub fn get_subject_by_strategy(
     record: Option<&str>,
     require_key: bool,
 ) -> Result<(String, String), RwError> {
-    let build_error =
+    let build_error_lack_field =
         |ns: &PbSchemaRegistryNameStrategy, expect: &[&str], got: &[Option<&str>]| -> RwError {
             RwError::from(ProtocolError(format!(
                 "{:?} expect num-empty field {:?} but got {:?}",
@@ -45,8 +45,24 @@ pub fn get_subject_by_strategy(
                 got
             )))
         };
+    let build_error_redundant_field =
+        |ns: &PbSchemaRegistryNameStrategy, expect: &[&str], got: &[Option<&str>]| -> RwError {
+            RwError::from(ProtocolError(format!(
+                "{:?} expect empty field {:?} but got {:?}",
+                ns.as_str_name(),
+                expect,
+                got
+            )))
+        };
     match (name_strategy, require_key) {
         (PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified, _) => {
+            if record.is_some() || key_record_name.is_some() {
+                return Err(build_error_redundant_field(
+                    name_strategy,
+                    &["message", "key.message"],
+                    &[record, key_record_name],
+                ));
+            }
             // default behavior
             Ok((format!("{}-key", topic), format!("{}-value", topic)))
         }
@@ -54,14 +70,17 @@ pub fn get_subject_by_strategy(
             if let Some(record_name) = record && let Some(key_rec_name) = key_record_name {
                 Ok((key_rec_name.to_string(), record_name.to_string()))
             } else {
-                Err(build_error(ns, &["key.message","message"], &[key_record_name, record]))
+                Err(build_error_lack_field(ns, &["key.message","message"], &[key_record_name, record]))
             }
         }
         (ns @ PbSchemaRegistryNameStrategy::RecordNameStrategy, false) => {
+            if key_record_name.is_some() {
+                return Err(build_error_redundant_field(ns, &["key.message"], &[key_record_name]));
+            }
             if let Some(record_name) = record {
                 Ok(("".to_string(), record_name.to_string()))
             } else {
-                Err(build_error(ns, &["message"], &[record]))
+                Err(build_error_lack_field(ns, &["message"], &[record]))
             }
         }
         (ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy, true) => {
@@ -71,7 +90,7 @@ pub fn get_subject_by_strategy(
                     format!("{}-{}", topic, record_name),
                 ))
             } else {
-                Err(build_error(
+                Err(build_error_lack_field(
                     ns,
                     &["topic", "key.message","message"],
                     &[Some(topic), key_record_name, record],
@@ -79,10 +98,13 @@ pub fn get_subject_by_strategy(
             }
         }
         (ns @ PbSchemaRegistryNameStrategy::TopicRecordNameStrategy, false) => {
+            if key_record_name.is_some() {
+                return Err(build_error_redundant_field(ns, &["key.message"], &[key_record_name]));
+            }
             if let Some(record_name) = record {
                 Ok(("".to_string(), format!("{}-{}", topic, record_name)))
             } else {
-                Err(build_error(
+                Err(build_error_lack_field(
                     ns,
                     &["topic","message"],
                     &[Some(topic), record],
