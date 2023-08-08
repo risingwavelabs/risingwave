@@ -24,19 +24,25 @@ pub const MAX_LEVEL_COUNT: usize = 32;
 pub struct L0IncludeSstPicker {
     overlap_strategy: Arc<dyn OverlapStrategy>,
     max_compact_size: u64,
+    max_file_count: u64,
 }
 
 impl L0IncludeSstPicker {
-    pub fn new(overlap_strategy: Arc<dyn OverlapStrategy>, max_compact_size: u64) -> Self {
+    pub fn new(
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+        max_compact_size: u64,
+        max_file_count: u64,
+    ) -> Self {
         Self {
             overlap_strategy,
             max_compact_size,
+            max_file_count,
         }
     }
 
     pub fn pick_tables(
         &self,
-        overlap_info: &Box<dyn OverlapInfo>,
+        overlap_info: &dyn OverlapInfo,
         sub_levels: &[Level],
         level_handler: &LevelHandler,
     ) -> SubLevelSstables {
@@ -45,6 +51,7 @@ impl L0IncludeSstPicker {
         for level in sub_levels {
             if ret.total_file_size > self.max_compact_size
                 || ret.sstable_infos.len() >= MAX_LEVEL_COUNT
+                || ret.total_file_count as u64 > self.max_file_count
             {
                 break;
             }
