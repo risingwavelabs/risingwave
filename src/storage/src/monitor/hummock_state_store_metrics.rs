@@ -65,6 +65,8 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
+
+    registry: Registry,
 }
 
 impl HummockStateStoreMetrics {
@@ -161,7 +163,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
                 "state_store_write_batch_duration",
                 "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+                exponential_buckets(0.0001, 2.0, 21).unwrap() // min 1ms ~ max 104s
             );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -169,7 +171,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_write_batch_size",
             "Total size of batched write that have been issued to state store",
-            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
+            exponential_buckets(256.0, 2.0, 25).unwrap() // min 256B ~ max 4GB
         );
         let write_batch_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -263,12 +265,17 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
+            registry,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 }
 
@@ -278,7 +285,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
-    fn get_uploading_memory_usage_ratio(&self) -> f64;
+    fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 struct StateStoreCollector {
@@ -369,7 +376,7 @@ impl Collector for StateStoreCollector {
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
         self.uploading_memory_usage_ratio
-            .set(self.memory_collector.get_uploading_memory_usage_ratio());
+            .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());

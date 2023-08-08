@@ -15,7 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::config::DefaultParallelism;
+use risingwave_common::config::{CompactionConfig, DefaultParallelism};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 
@@ -84,8 +84,12 @@ pub struct MetaOpts {
     /// Default parallelism of units for all streaming jobs.
     pub default_parallelism: DefaultParallelism,
 
-    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    /// Interval of invoking a vacuum job, to remove stale metadata from meta store and objects
+    /// from object store.
     pub vacuum_interval_sec: u64,
+    /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
+    /// meta node.
+    pub vacuum_spin_interval_ms: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
@@ -93,8 +97,11 @@ pub struct MetaOpts {
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
     /// restarted.
     pub min_delta_log_num_for_hummock_version_checkpoint: u64,
-    /// Threshold used by worker node to filter out new SSTs when scanning object store.
+    /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
+    /// are dangling.
     pub min_sst_retention_time_sec: u64,
+    /// Interval of automatic hummock full GC.
+    pub full_gc_interval_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
     pub collect_gc_watermark_spin_interval_sec: u64,
     /// Enable sanity check when SSTs are committed
@@ -130,9 +137,6 @@ pub struct MetaOpts {
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
-    pub max_compactor_task_multiplier: u32,
-
     /// Schedule split_compaction_group for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -149,6 +153,7 @@ pub struct MetaOpts {
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
+    pub compaction_config: Option<CompactionConfig>,
 }
 
 impl MetaOpts {
@@ -161,9 +166,11 @@ impl MetaOpts {
             compaction_deterministic_test: false,
             default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
+            vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
+            full_gc_interval_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
@@ -177,7 +184,6 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_split_compact_group_interval_sec: 60,
-            max_compactor_task_multiplier: 2,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
@@ -185,6 +191,7 @@ impl MetaOpts {
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
+            compaction_config: None,
         }
     }
 }

@@ -33,13 +33,13 @@ pub struct BatchInsert {
 
 impl BatchInsert {
     pub fn new(logical: generic::Insert<PlanRef>) -> Self {
-        // TODO: derive from input
-        let base = PlanBase::new_batch(
-            logical.ctx(),
-            logical.schema().clone(),
-            Distribution::Single,
+        assert_eq!(logical.input.distribution(), &Distribution::Single);
+        let base: PlanBase = PlanBase::new_batch_from_logical(
+            &logical,
+            logical.input.distribution().clone(),
             Order::any(),
         );
+
         BatchInsert { base, logical }
     }
 }

@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use anyhow::anyhow;
+
+pub mod aggregation;
 mod delete;
 mod expand;
 mod filter;
@@ -29,6 +30,7 @@ mod project;
 mod project_set;
 mod row_seq_scan;
 mod sort_agg;
+mod sort_over_window;
 mod source;
 mod sys_row_seq_scan;
 mod table_function;
@@ -39,6 +41,7 @@ mod update;
 mod utils;
 mod values;
 
+use anyhow::anyhow;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;
@@ -64,6 +67,7 @@ use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use sort_over_window::SortOverWindowExecutor;
 pub use source::*;
 pub use table_function::*;
 pub use top_n::TopNExecutor;
@@ -223,6 +227,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
+            NodeBody::SortOverWindow => SortOverWindowExecutor,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuidler,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,

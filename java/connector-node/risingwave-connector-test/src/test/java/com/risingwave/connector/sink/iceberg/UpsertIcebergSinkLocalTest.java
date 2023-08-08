@@ -106,8 +106,8 @@ public class UpsertIcebergSinkLocalTest {
         Configuration hadoopConf = new Configuration();
         HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
-        UpsertIcebergSink sink =
-                new UpsertIcebergSink(
+        UpsertIcebergSinkWriter sink =
+                new UpsertIcebergSinkWriter(
                         TestUtils.getMockTableSchema(),
                         hadoopCatalog,
                         hadoopCatalog.loadTable(tableIdentifier),
@@ -115,7 +115,7 @@ public class UpsertIcebergSinkLocalTest {
 
         try {
             sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
-            sink.sync();
+            sink.barrier(true);
 
             Record record1 = GenericRecord.create(icebergTableSchema);
             record1.setField("id", 1);
@@ -128,7 +128,7 @@ public class UpsertIcebergSinkLocalTest {
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
-            sink.sync();
+            sink.barrier(true);
 
             Record record2 = GenericRecord.create(icebergTableSchema);
             record2.setField("id", 2);
@@ -149,8 +149,8 @@ public class UpsertIcebergSinkLocalTest {
         Configuration hadoopConf = new Configuration();
         HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
-        UpsertIcebergSink sink =
-                new UpsertIcebergSink(
+        UpsertIcebergSinkWriter sink =
+                new UpsertIcebergSinkWriter(
                         TestUtils.getMockTableSchema(),
                         hadoopCatalog,
                         hadoopCatalog.loadTable(tableIdentifier),
@@ -164,7 +164,7 @@ public class UpsertIcebergSinkLocalTest {
                             new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice"),
                             new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare"),
                             new ArraySinkRow(Op.DELETE, 2, "Bob")));
-            sink.sync();
+            sink.barrier(true);
 
             Record record1 = GenericRecord.create(icebergTableSchema);
             record1.setField("id", 1);
@@ -178,7 +178,7 @@ public class UpsertIcebergSinkLocalTest {
                             new ArraySinkRow(Op.UPDATE_DELETE, 1, "Clare"),
                             new ArraySinkRow(Op.UPDATE_INSERT, 1, "Alice"),
                             new ArraySinkRow(Op.DELETE, 1, "Alice")));
-            sink.sync();
+            sink.barrier(true);
 
             validateTableWithIceberg(Sets.newHashSet());
             validateTableWithSpark(Sets.newHashSet());
@@ -195,8 +195,8 @@ public class UpsertIcebergSinkLocalTest {
         Configuration hadoopConf = new Configuration();
         HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
-        UpsertIcebergSink sink =
-                new UpsertIcebergSink(
+        UpsertIcebergSinkWriter sink =
+                new UpsertIcebergSinkWriter(
                         TestUtils.getMockTableSchema(),
                         hadoopCatalog,
                         hadoopCatalog.loadTable(tableIdentifier),

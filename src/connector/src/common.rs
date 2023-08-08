@@ -15,16 +15,21 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use anyhow::Ok;
 use aws_sdk_kinesis::Client as KinesisClient;
+use clickhouse::Client;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 
 use crate::aws_auth::AwsAuthProps;
 
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
+
+pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsPrivateLinkItem {
@@ -102,6 +107,40 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+
+    #[serde(flatten)]
+    pub rdkafka_properties: RdKafkaPropertiesCommon,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RdKafkaPropertiesCommon {
+    /// Maximum Kafka protocol request message size. Due to differing framing overhead between
+    /// protocol versions the producer is unable to reliably enforce a strict max message limit at
+    /// produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+    /// the broker will enforce the the topic's max.message.bytes limit
+    #[serde(rename = "properties.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub message_max_bytes: Option<usize>,
+
+    /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
+    /// memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes
+    /// + 512 to allow for protocol overhead; the value is adjusted automatically unless the
+    /// configuration property is explicitly set.
+    #[serde(rename = "properties.receive.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub receive_message_max_bytes: Option<usize>,
+}
+
+impl RdKafkaPropertiesCommon {
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.message_max_bytes {
+            c.set("message.max.bytes", v.to_string());
+        }
+        if let Some(v) = self.message_max_bytes {
+            c.set("receive.message.max.bytes", v.to_string());
+        }
+    }
 }
 
 impl KafkaCommon {
@@ -167,6 +206,10 @@ impl KafkaCommon {
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
+
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        self.rdkafka_properties.set_client(c);
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -219,6 +262,30 @@ impl KinesisCommon {
             builder = builder.endpoint_url(endpoint);
         }
         Ok(KinesisClient::from_conf(builder.build()))
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ClickHouseCommon {
+    #[serde(rename = "clickhouse.url")]
+    pub url: String,
+    #[serde(rename = "clickhouse.user")]
+    pub user: String,
+    #[serde(rename = "clickhouse.password")]
+    pub password: String,
+    #[serde(rename = "clickhouse.database")]
+    pub database: String,
+    #[serde(rename = "clickhouse.table")]
+    pub table: String,
+}
+
+impl ClickHouseCommon {
+    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
+        let client = Client::default()
+            .with_url(&self.url)
+            .with_user(&self.user)
+            .with_password(&self.password);
+        Ok(client)
     }
 }
 

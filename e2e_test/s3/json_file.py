@@ -20,7 +20,7 @@ def do_test(client, config, N,  prefix):
     cur = conn.cursor()
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE TABLE s3_test_jsonfile( 
+    cur.execute(f'''CREATE TABLE s3_test_jsonfile(
         id int,
         name TEXT,
         sex int,

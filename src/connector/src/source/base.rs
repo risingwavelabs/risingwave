@@ -27,8 +27,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::connector_service::TableSchema;
+use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::ConnectorSplit;
+use risingwave_rpc_client::ConnectorClient;
 use serde::{Deserialize, Serialize};
 
 use super::datagen::DatagenMeta;
@@ -108,6 +109,7 @@ impl Default for SourceCtrlOpts {
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
+    pub connector_client: Option<ConnectorClient>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -117,6 +119,7 @@ pub struct SourceEnumeratorInfo {
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
+    pub connector_client: Option<ConnectorClient>,
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
@@ -129,21 +132,40 @@ impl SourceContext {
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
+        connector_client: Option<ConnectorClient>,
     ) -> Self {
         Self {
+            connector_client,
             source_info: SourceInfo {
                 actor_id,
                 source_id: table_id,
                 fragment_id,
             },
             metrics,
-            error_suppressor: None,
             source_ctrl_opts,
+            error_suppressor: None,
         }
     }
 
-    pub fn add_suppressor(&mut self, error_suppressor: Arc<Mutex<ErrorSuppressor>>) {
-        self.error_suppressor = Some(error_suppressor)
+    pub fn new_with_suppressor(
+        actor_id: u32,
+        table_id: TableId,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_client: Option<ConnectorClient>,
+        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+    ) -> Self {
+        let mut ctx = Self::new(
+            actor_id,
+            table_id,
+            fragment_id,
+            metrics,
+            source_ctrl_opts,
+            connector_client,
+        );
+        ctx.error_suppressor = Some(error_suppressor);
+        ctx
     }
 
     pub(crate) fn report_user_source_error(&self, e: RwError) -> RwResult<()> {
@@ -184,22 +206,41 @@ pub struct SourceInfo {
     pub fragment_id: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SourceFormat {
+    #[default]
     Invalid,
-    Json,
-    UpsertJson,
-    Protobuf,
-    DebeziumJson,
-    Avro,
-    UpsertAvro,
-    Maxwell,
-    CanalJson,
-    Csv,
     Native,
-    DebeziumAvro,
-    DebeziumMongoJson,
+    Debezium,
+    DebeziumMongo,
+    Maxwell,
+    Canal,
+    Upsert,
+    Plain,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SourceEncode {
+    #[default]
+    Invalid,
+    Native,
+    Avro,
+    Csv,
+    Protobuf,
+    Json,
     Bytes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SourceStruct {
+    pub format: SourceFormat,
+    pub encode: SourceEncode,
+}
+
+impl SourceStruct {
+    pub fn new(format: SourceFormat, encode: SourceEncode) -> Self {
+        Self { format, encode }
+    }
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
@@ -286,22 +327,28 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn init_properties_for_cdc(
-        &mut self,
-        source_id: u32,
-        rpc_addr: String,
-        table_schema: Option<TableSchema>,
-    ) {
+    pub fn init_cdc_properties(&mut self, table_schema: Option<PbTableSchema>) {
         match self {
             ConnectorProperties::MySqlCdc(c)
             | ConnectorProperties::PostgresCdc(c)
             | ConnectorProperties::CitusCdc(c) => {
-                c.source_id = source_id;
-                c.connector_node_addr = rpc_addr;
                 c.table_schema = table_schema;
             }
             _ => {}
         }
+    }
+
+    pub fn is_cdc_connector(&self) -> bool {
+        matches!(
+            self,
+            ConnectorProperties::MySqlCdc(_)
+                | ConnectorProperties::PostgresCdc(_)
+                | ConnectorProperties::CitusCdc(_)
+        )
+    }
+
+    pub fn support_multiple_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Kafka(_))
     }
 }
 
@@ -433,6 +480,7 @@ pub type SplitId = Arc<str>;
 /// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone)]
 pub struct SourceMessage {
+    pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
@@ -597,7 +645,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
         if let ConnectorProperties::MySqlCdc(c) = conn_props {
-            assert_eq!(c.source_id, 0);
             assert_eq!(c.source_type, "mysql");
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
@@ -612,7 +659,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(c.source_id, 0);
             assert_eq!(c.source_type, "postgres");
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");

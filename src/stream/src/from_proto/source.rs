@@ -134,6 +134,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     system_params,
                     params.executor_id,
                     source_ctrl_opts,
+                    params.env.connector_params(),
                 )))
             }
         } else {
@@ -150,6 +151,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 params.executor_id,
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
+                params.env.connector_params(),
             )))
         }
     }

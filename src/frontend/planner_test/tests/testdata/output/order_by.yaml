@@ -88,7 +88,7 @@
     └─StreamProject { exprs: [t.v1, t.v2, t._row_id] }
       └─StreamTopN { order: [t.v1 DESC], limit: 5, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t.v1 DESC], limit: 5, offset: 0, group_key: [3] }
+          └─StreamGroupTopN { order: [t.v1 DESC], limit: 5, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -120,7 +120,7 @@
     └─StreamProject { exprs: [t.v1, t.v2, t._row_id] }
       └─StreamTopN { order: [t.v1 DESC], limit: 5, offset: 7 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t.v1 DESC], limit: 12, offset: 0, group_key: [3] }
+          └─StreamGroupTopN { order: [t.v1 DESC], limit: 12, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by expression that would be valid in select list
@@ -249,7 +249,7 @@
   batch_plan: |-
     BatchExchange { order: [t.x ASC, t.y ASC], dist: Single }
     └─BatchSort { order: [t.x ASC, t.y ASC] }
-      └─BatchGroupTopN { order: [t.x ASC, t.y ASC], limit: 1, offset: 0, group_key: [0] }
+      └─BatchGroupTopN { order: [t.x ASC, t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
         └─BatchExchange { order: [], dist: HashShard(t.x) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
 - name: distinct on order by in cte
@@ -258,6 +258,6 @@
     with cte as (select distinct on(x) x,y from t order by x,y) select * from cte;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [t.x ASC, t.y ASC], limit: 1, offset: 0, group_key: [0] }
+    └─BatchGroupTopN { order: [t.x ASC, t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
       └─BatchExchange { order: [], dist: HashShard(t.x) }
         └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
