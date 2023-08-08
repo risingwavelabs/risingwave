@@ -1,0 +1,32 @@
+syntax = "proto3";
+package server;
+
+service Server {
+    rpc GetFeature(GetFeatureRequest) returns (GetFeatureResponse) {}
+    rpc ReportAction(ReportActionRequest) returns (ReportActionResponse) {}
+}
+
+message ReportActionRequest {
+    string userid = 1;
+    ActionType eventtype = 2;
+    int64 changenum = 3;
+}
+
+message ReportActionResponse {
+    uint64 timestamp = 1;
+}
+
+message GetFeatureRequest {
+    string userid = 1;
+}
+
+message GetFeatureResponse {
+    uint64 count = 1;
+    int64 sum = 2;
+}
+
+enum ActionType {
+    OTHER = 0;
+    MFACHANGEADD = 1;
+    MFACHANGEREDUCE = 2;
+}
