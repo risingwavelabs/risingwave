@@ -90,16 +90,12 @@ impl BrokerAddrRewriter {
 
 pub struct PrivateLinkConsumerContext {
     inner: BrokerAddrRewriter,
-    stats: Option<RdKafkaStats>,
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(
-        broker_rewrite_map: Option<HashMap<String, String>>,
-        stats: Option<RdKafkaStats>,
-    ) -> anyhow::Result<Self> {
+    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self { inner, stats })
+        Ok(Self { inner })
     }
 }
 
