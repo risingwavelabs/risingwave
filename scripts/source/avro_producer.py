@@ -42,12 +42,14 @@ if __name__ == '__main__':
     print("name strategy: {}".format(sys.argv[4] if sys.argv[4] is not None else 'topic'))
 
     schema_registry_conf = {'url': schema_registry_url}
-    if sys.argv[4] == 'record':
-        schema_registry_conf['subject.name.strategy'] = record_subject_name_strategy
-    elif sys.argv[4] == 'topic-record':
-        schema_registry_conf['subject.name.strategy'] = topic_record_subject_name_strategy
     kafka_conf = {'bootstrap.servers': broker_list}
     schema_registry_client = SchemaRegistryClient(schema_registry_conf)
+
+    avro_ser_conf = dict()
+    if sys.argv[4] == 'record':
+        avro_ser_conf['subject.name.strategy'] = record_subject_name_strategy
+    elif sys.argv[4] == 'topic-record':
+        avro_ser_conf['subject.name.strategy'] = topic_record_subject_name_strategy
 
     create_topic(kafka_conf=kafka_conf, topic_name=topic)
     producer = Producer(kafka_conf)
@@ -58,9 +60,12 @@ if __name__ == '__main__':
             if i == 0:
                 parts = line.split("^")
                 if len(parts) > 1:
-                    key_serializer = AvroSerializer(schema_registry_client=schema_registry_client, schema_str=parts[0])
+                    key_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
+                                                    schema_str=parts[0],
+                                                    conf=avro_ser_conf)
                     value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
-                                                      schema_str=parts[1])
+                                                      schema_str=parts[1],
+                                                      conf=avro_ser_conf)
                 else:
                     value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
                                                       schema_str=parts[0])
