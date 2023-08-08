@@ -86,6 +86,10 @@ where
     // Used for ssl connection.
     // If None, not expected to build ssl connection (panic).
     tls_context: Option<SslContext>,
+
+    // Used in extended query protocol. When encounter error in extended query, we need to ignore
+    // the following message util sync message.
+    ignore_util_sync: bool,
 }
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
@@ -169,6 +173,7 @@ where
             unnamed_portal: Default::default(),
             portal_store: Default::default(),
             statement_portal_dependency: Default::default(),
+            ignore_util_sync: false,
         }
     }
 
@@ -249,6 +254,15 @@ where
     }
 
     async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
+        // Ignore util sync message.
+        if self.ignore_util_sync {
+            if let FeMessage::Sync = msg {
+            } else {
+                tracing::trace!("ignore message {:?} until sync.", msg);
+                return Ok(());
+            }
+        }
+
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
@@ -256,13 +270,46 @@ where
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
-            FeMessage::Parse(m) => self.process_parse_msg(m)?,
-            FeMessage::Bind(m) => self.process_bind_msg(m)?,
-            FeMessage::Execute(m) => self.process_execute_msg(m).await?,
-            FeMessage::Describe(m) => self.process_describe_msg(m)?,
-            FeMessage::Sync => self.ready_for_query()?,
-            FeMessage::Close(m) => self.process_close_msg(m)?,
-            FeMessage::Flush => self.stream.flush().await?,
+            FeMessage::Parse(m) => {
+                if let Err(err) = self.process_parse_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Bind(m) => {
+                if let Err(err) = self.process_bind_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Execute(m) => {
+                if let Err(err) = self.process_execute_msg(m).await {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Describe(m) => {
+                if let Err(err) = self.process_describe_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Sync => {
+                self.ignore_util_sync = false;
+                self.ready_for_query()?
+            }
+            FeMessage::Close(m) => {
+                if let Err(err) = self.process_close_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Flush => {
+                if let Err(err) = self.stream.flush().await {
+                    self.ignore_util_sync = true;
+                    return Err(err.into());
+                }
+            }
         }
         self.stream.flush().await?;
         Ok(())
