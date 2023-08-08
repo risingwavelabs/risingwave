@@ -102,6 +102,7 @@ object_store_req_retry_max_delay_ms = 10000
 object_store_req_retry_max_attempts = 8
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
+compactor_max_sst_size = 536870912
 
 [storage.data_file_cache]
 dir = ""
