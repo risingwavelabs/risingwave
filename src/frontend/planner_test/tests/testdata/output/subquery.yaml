@@ -253,7 +253,7 @@
       │   │       │ │ │ │ │ └─LogicalProject { exprs: [rw_system_tables.id, rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
       │   │       │ │ │ │ │   └─LogicalScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
       │   │       │ │ │ │ └─LogicalProject { exprs: [rw_sources.id, rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner, rw_sources.definition, rw_sources.acl] }
-      │   │       │ │ │ │   └─LogicalScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.row_format, rw_sources.append_only, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at] }
+      │   │       │ │ │ │   └─LogicalScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.format, rw_sources.row_encode, rw_sources.append_only, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at] }
       │   │       │ │ │ └─LogicalProject { exprs: [rw_indexes.id, rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl] }
       │   │       │ │ │   └─LogicalScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.primary_table_id, rw_indexes.original_column_ids, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl, rw_indexes.initialized_at, rw_indexes.created_at] }
       │   │       │ │ └─LogicalProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.definition, rw_sinks.acl] }
@@ -522,7 +522,39 @@
   sql: |
     create table t(x int[], y int[], k int primary key);
     select *, (select sum(i) from unnest(x) i) as sum_x from t;
-  batch_error: 'internal error: Subquery can not be unnested.'
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.y, t.k, sum(Unnest($0))] }
+      ├─BatchExchange { order: [], dist: HashShard(t.x) }
+      │ └─BatchScan { table: t, columns: [t.x, t.y, t.k], distribution: UpstreamHashShard(t.k) }
+      └─BatchHashAgg { group_key: [t.x], aggs: [sum(Unnest($0))] }
+        └─BatchHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0)] }
+          ├─BatchHashAgg { group_key: [t.x], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(t.x) }
+          │   └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+          └─BatchProject { exprs: [t.x, Unnest($0)] }
+            └─BatchProjectSet { select_list: [$0, Unnest($0)] }
+              └─BatchHashAgg { group_key: [t.x], aggs: [] }
+                └─BatchExchange { order: [], dist: HashShard(t.x) }
+                  └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, k, sum_x, t.x(hidden)], stream_key: [k, t.x, x], pk_columns: [k, t.x, x], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.y, t.k, sum(Unnest($0)), t.x] }
+      ├─StreamExchange { dist: HashShard(t.x) }
+      │ └─StreamTableScan { table: t, columns: [t.x, t.y, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
+      └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
+        └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
+          └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
+            ├─StreamProject { exprs: [t.x] }
+            │ └─StreamHashAgg { group_key: [t.x], aggs: [count] }
+            │   └─StreamExchange { dist: HashShard(t.x) }
+            │     └─StreamTableScan { table: t, columns: [t.x, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
+            └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
+              └─StreamProjectSet { select_list: [$0, Unnest($0)] }
+                └─StreamProject { exprs: [t.x] }
+                  └─StreamHashAgg { group_key: [t.x], aggs: [count] }
+                    └─StreamExchange { dist: HashShard(t.x) }
+                      └─StreamTableScan { table: t, columns: [t.x, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
 - name: CorrelatedInputRef in ProjectSet and apply on condition is true.
   sql: |
     create table t(x int[], y int[], k int primary key);
