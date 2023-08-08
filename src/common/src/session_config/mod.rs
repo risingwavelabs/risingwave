@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 28] = [
+const CONFIG_KEYS: [&str; 33] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -63,6 +63,11 @@ const CONFIG_KEYS: [&str; 28] = [
     "RW_FORCE_SPLIT_DISTINCT_AGG",
     "CLIENT_MIN_MESSAGES",
     "CLIENT_ENCODING",
+    "SINK_DECOUPLE",
+    "SYNCHRONIZE_SEQSCANS",
+    "STATEMENT_TIMEOUT",
+    "LOCK_TIMEOUT",
+    "ROW_SECURITY",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -95,6 +100,11 @@ const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
 const CLIENT_MIN_MESSAGES: usize = 26;
 const CLIENT_ENCODING: usize = 27;
+const SINK_DECOUPLE: usize = 28;
+const SYNCHRONIZE_SEQSCANS: usize = 29;
+const STATEMENT_TIMEOUT: usize = 30;
+const LOCK_TIMEOUT: usize = 31;
+const ROW_SECURITY: usize = 32;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -127,9 +137,17 @@ impl<const NAME: usize, const DEFAULT: bool> TryFrom<&[&str]> for ConfigBool<NAM
         }
 
         let s = value[0];
-        if s.eq_ignore_ascii_case("true") {
+        if s.eq_ignore_ascii_case("true")
+            || s.eq_ignore_ascii_case("on")
+            || s.eq_ignore_ascii_case("yes")
+            || s.eq_ignore_ascii_case("1")
+        {
             Ok(ConfigBool(true))
-        } else if s.eq_ignore_ascii_case("false") {
+        } else if s.eq_ignore_ascii_case("false")
+            || s.eq_ignore_ascii_case("off")
+            || s.eq_ignore_ascii_case("no")
+            || s.eq_ignore_ascii_case("0")
+        {
             Ok(ConfigBool(false))
         } else {
             Err(ErrorCode::InvalidConfigValue {
@@ -303,6 +321,11 @@ type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 90_500>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
 type ClientEncoding = ConfigString<CLIENT_ENCODING>;
+type SinkDecouple = ConfigBool<SINK_DECOUPLE, false>;
+type SynchronizeSeqscans = ConfigBool<SYNCHRONIZE_SEQSCANS, false>;
+type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
+type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
+type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -415,6 +438,27 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
     #[educe(Default(expression = "ConfigString::<CLIENT_ENCODING>(String::from(\"UTF8\"))"))]
     client_encoding: ClientEncoding,
+
+    /// Enable decoupling sink and internal streaming graph or not
+    sink_decouple: SinkDecouple,
+
+    /// See <https://www.postgresql.org/docs/current/runtime-config-compatible.html#RUNTIME-CONFIG-COMPATIBLE-VERSION>
+    /// Unused in RisingWave, support for compatibility.
+    synchronize_seqscans: SynchronizeSeqscans,
+
+    /// Abort any statement that takes more than the specified amount of time. If
+    /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
+    /// logged. If this value is specified without units, it is taken as milliseconds. A value of
+    /// zero (the default) disables the timeout.
+    statement_timeout: StatementTimeout,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
+    /// Unused in RisingWave, support for compatibility.
+    lock_timeout: LockTimeout,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
+    /// Unused in RisingWave, support for compatibility.
+    row_security: RowSecurity,
 }
 
 impl ConfigMap {
@@ -514,6 +558,16 @@ impl ConfigMap {
                 }
                 .into());
             }
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            self.sink_decouple = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(SynchronizeSeqscans::entry_name()) {
+            self.synchronize_seqscans = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StatementTimeout::entry_name()) {
+            self.statement_timeout = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(LockTimeout::entry_name()) {
+            self.lock_timeout = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(RowSecurity::entry_name()) {
+            self.row_security = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -583,6 +637,16 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case("bytea_output") {
             // TODO: We only support hex now.
             Ok("hex".to_string())
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            Ok(self.sink_decouple.to_string())
+        } else if key.eq_ignore_ascii_case(SynchronizeSeqscans::entry_name()) {
+            Ok(self.synchronize_seqscans.to_string())
+        } else if key.eq_ignore_ascii_case(StatementTimeout::entry_name()) {
+            Ok(self.statement_timeout.to_string())
+        } else if key.eq_ignore_ascii_case(LockTimeout::entry_name()) {
+            Ok(self.lock_timeout.to_string())
+        } else if key.eq_ignore_ascii_case(RowSecurity::entry_name()) {
+            Ok(self.row_security.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -729,7 +793,32 @@ impl ConfigMap {
                 name: "bytea_output".to_string(),
                 setting: "hex".to_string(),
                 description: "Sets the output format for bytea.".to_string(),
-            }
+            },
+            VariableInfo{
+                name: SinkDecouple::entry_name().to_lowercase(),
+                setting: self.sink_decouple.to_string(),
+                description: String::from("Enable decoupling sink and internal streaming graph or not")
+            },
+            VariableInfo{
+                name: SynchronizeSeqscans::entry_name().to_lowercase(),
+                setting: self.synchronize_seqscans.to_string(),
+                description: String::from("Unused in RisingWave")
+            },
+            VariableInfo{
+                name: StatementTimeout::entry_name().to_lowercase(),
+                setting: self.statement_timeout.to_string(),
+                description: String::from("Sets the maximum allowed duration of any statement, currently just a mock variable and not adopted in RW"),
+            },
+            VariableInfo{
+                name: LockTimeout::entry_name().to_lowercase(),
+                setting: self.lock_timeout.to_string(),
+                description: String::from("Unused in RisingWave"),
+            },
+            VariableInfo{
+                name: RowSecurity::entry_name().to_lowercase(),
+                setting: self.row_security.to_string(),
+                description: String::from("Unused in RisingWave"),
+            },
         ]
     }
 
@@ -844,5 +933,9 @@ impl ConfigMap {
 
     pub fn get_client_encoding(&self) -> &str {
         &self.client_encoding
+    }
+
+    pub fn get_sink_decouple(&self) -> bool {
+        self.sink_decouple.0
     }
 }

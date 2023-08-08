@@ -26,10 +26,6 @@ app.get("/actors", (req, res, next) => {
   res.json(require("./mock/actors.json"))
 })
 
-app.get("/fragments", (req, res, next) => {
-  res.json(require("./mock/fragments.json"))
-})
-
 app.get("/fragments2", (req, res, next) => {
   res.json(require("./mock/fragments2.json"))
 })
