@@ -91,13 +91,13 @@ impl BrokerAddrRewriter {
 
 pub struct PrivateLinkConsumerContext {
     inner: BrokerAddrRewriter,
-    metrics: Arc<RdKafkaStats>,
+    metrics: Option<Arc<RdKafkaStats>>,
 }
 
 impl PrivateLinkConsumerContext {
     pub fn new(
         broker_rewrite_map: Option<HashMap<String, String>>,
-        metrics: Arc<RdKafkaStats>,
+        metrics: Option<Arc<RdKafkaStats>>,
     ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
         Ok(Self { inner, metrics })
@@ -105,7 +105,12 @@ impl PrivateLinkConsumerContext {
 }
 
 impl ClientContext for PrivateLinkConsumerContext {
-    fn stats(&self, statistics: Statistics) {}
+    fn stats(&self, statistics: Statistics) {
+        if let Some(metrics) = &self.metrics {
+            let id: String = "".to_string(); // todo: use source id or sink id
+            metrics.report(id.as_str(), &statistics);
+        }
+    }
 
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         self.inner.rewrite_broker_addr(addr)
@@ -117,13 +122,13 @@ impl ConsumerContext for PrivateLinkConsumerContext {}
 
 pub struct PrivateLinkProducerContext {
     inner: BrokerAddrRewriter,
-    metrics: Arc<RdKafkaStats>,
+    metrics: Option<Arc<RdKafkaStats>>,
 }
 
 impl PrivateLinkProducerContext {
     pub fn new(
         broker_rewrite_map: Option<HashMap<String, String>>,
-        metrics: Arc<RdKafkaStats>,
+        metrics: Option<Arc<RdKafkaStats>>,
     ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
         Ok(Self { inner, metrics })
@@ -132,7 +137,10 @@ impl PrivateLinkProducerContext {
 
 impl ClientContext for PrivateLinkProducerContext {
     fn stats(&self, statistics: Statistics) {
-        todo!()
+        if let Some(metrics) = &self.metrics {
+            let id: String = "".to_string(); // todo: use source id or sink id
+            metrics.report(id.as_str(), &statistics);
+        }
     }
 
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
