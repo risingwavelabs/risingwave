@@ -886,6 +886,17 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+                    "Materialized View Memory Usage",
+                    "Materialzed View Memory Usage",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            "materialized_view {{materialized_view_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_percentage(
                     "Actor Input Blocking Time Ratio",
                     "",
