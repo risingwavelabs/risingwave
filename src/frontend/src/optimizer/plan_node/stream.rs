@@ -566,7 +566,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::SimpleAgg(me) => {
-            let result_table = me.core.infer_result_table(base, None, None);
+            let intermediate_state_table = me.core.infer_intermediate_state_table(base, None, None);
             let agg_states = me.core.infer_stream_agg_state(base, None, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None, None);
 
@@ -589,8 +589,8 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|s| s.into_prost(state))
                     .collect(),
-                result_table: Some(
-                    result_table
+                intermediate_state_table: Some(
+                    intermediate_state_table
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -623,9 +623,9 @@ pub fn to_stream_prost_body(
             PbNodeBody::GroupTopN(group_topn_node)
         }
         Node::HashAgg(me) => {
-            let result_table =
+            let intermediate_state_table =
                 me.core
-                    .infer_result_table(base, me.vnode_col_idx, me.window_col_idx);
+                    .infer_intermediate_state_table(base, me.vnode_col_idx, me.window_col_idx);
             let agg_states =
                 me.core
                     .infer_stream_agg_state(base, me.vnode_col_idx, me.window_col_idx);
@@ -647,8 +647,8 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|s| s.into_prost(state))
                     .collect(),
-                result_table: Some(
-                    result_table
+                intermediate_state_table: Some(
+                    intermediate_state_table
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -697,7 +697,7 @@ pub fn to_stream_prost_body(
                     .map(|&idx| idx as u32)
                     .collect(),
                 agg_call_states: vec![],
-                result_table: None,
+                intermediate_state_table: None,
                 is_append_only: me.input.0.append_only,
                 distinct_dedup_tables: Default::default(),
             })

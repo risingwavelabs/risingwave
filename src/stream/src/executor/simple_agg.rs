@@ -73,10 +73,10 @@ struct ExecutorInner<S: StateStore> {
     /// State storage for each agg calls.
     storages: Vec<AggStateStorage<S>>,
 
-    /// State table for the previous result of all agg calls.
-    /// The outputs of all managed agg states are collected and stored in this
+    /// Intermediate state table for value-state agg calls.
+    /// The state of all value-state aggregates are collected and stored in this
     /// table when `flush_data` is called.
-    result_table: StateTable<S>,
+    intermediate_state_table: StateTable<S>,
 
     /// State tables for deduplicating rows on distinct key for distinct agg calls.
     /// One table per distinct column (may be shared by multiple agg calls).
@@ -95,10 +95,12 @@ impl<S: StateStore> ExecutorInner<S> {
     fn all_state_tables_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
         iter_table_storage(&mut self.storages)
             .chain(self.distinct_dedup_tables.values_mut())
-            .chain(std::iter::once(&mut self.result_table))
+            .chain(std::iter::once(&mut self.intermediate_state_table))
     }
 
-    fn all_state_tables_except_result_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
+    fn all_state_tables_except_intermediate_state_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut StateTable<S>> {
         iter_table_storage(&mut self.storages).chain(self.distinct_dedup_tables.values_mut())
     }
 }
@@ -151,7 +153,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
-                result_table: args.result_table,
+                intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
@@ -220,9 +222,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             vars.distinct_dedup
                 .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
-            // Commit all state tables except for result table.
+            // Commit all state tables except for intermediate state table.
             futures::future::try_join_all(
-                this.all_state_tables_except_result_mut()
+                this.all_state_tables_except_intermediate_state_mut()
                     .map(|table| table.commit(epoch)),
             )
             .await?;
@@ -234,13 +236,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 .await?
             {
                 Some(change) => {
-                    this.result_table.write_record(change.as_ref());
-                    this.result_table.commit(epoch).await?;
+                    this.intermediate_state_table.write_record(change.as_ref());
+                    this.intermediate_state_table.commit(epoch).await?;
                     Some(change.to_stream_chunk(&this.info.schema.data_types()))
                 }
                 None => {
                     // Agg result is not changed.
-                    this.result_table.commit_no_data_expected(epoch);
+                    this.intermediate_state_table.commit_no_data_expected(epoch);
                     None
                 }
             }
@@ -271,13 +273,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         });
 
         let mut vars = ExecutionVars {
-            // Create `AggGroup`. This will fetch previous agg result from the result table.
+            // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
                 None,
                 &this.agg_calls,
                 &this.agg_funcs,
                 &this.storages,
-                &this.result_table,
+                &this.intermediate_state_table,
                 &this.input_pk_indices,
                 this.row_count_index,
                 this.extreme_cache_size,

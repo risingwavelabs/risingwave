@@ -161,7 +161,7 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState>,
 
-    /// Previous outputs of managed states. Initializing with `None`.
+    /// Previous outputs of aggregate functions. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
 
     /// Index of row count agg call (`count(*)`) in the call list.
@@ -197,17 +197,17 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
-        result_table: &StateTable<S>,
+        intermediate_state_table: &StateTable<S>,
         pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        let prev_outputs: Option<OwnedRow> = result_table
+        let intermediate_states: Option<OwnedRow> = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
-        if let Some(prev_outputs) = &prev_outputs {
-            assert_eq!(prev_outputs.len(), agg_calls.len());
+        if let Some(states) = &intermediate_states {
+            assert_eq!(states.len(), agg_calls.len());
         }
 
         let mut states = Vec::with_capacity(agg_calls.len());
@@ -216,13 +216,28 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_call,
                 agg_func,
                 &storages[idx],
-                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                intermediate_states.as_ref().map(|outputs| &outputs[idx]),
                 pk_indices,
                 extreme_cache_size,
                 input_schema,
             )?;
             states.push(state);
         }
+
+        let prev_outputs = match intermediate_states {
+            Some(row) => Some(
+                row.into_iter()
+                    .zip(states.iter())
+                    .map(|(v, state)| match state {
+                        AggState::Value(state) => state.get_output(),
+                        // for minput state, the value in the intermediate state table is the
+                        // previous output.
+                        AggState::MaterializedInput(_) => Ok(v),
+                    })
+                    .try_collect()?,
+            ),
+            None => None,
+        };
 
         Ok(Self {
             group_key,

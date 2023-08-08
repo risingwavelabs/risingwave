@@ -100,11 +100,11 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// `None` means the agg call need not to maintain a state table by itself.
     storages: Vec<AggStateStorage<S>>,
 
-    /// State table for the previous result of all agg calls.
-    /// The outputs of all managed agg states are collected and stored in this
+    /// Intermediate state table for value-state agg calls.
+    /// The state of all value-state aggregates are collected and stored in this
     /// table when `flush_data` is called.
     /// Also serves as EOWC sort buffer table.
-    result_table: StateTable<S>,
+    intermediate_state_table: StateTable<S>,
 
     /// State tables for deduplicating rows on distinct key for distinct agg calls.
     /// One table per distinct column (may be shared by multiple agg calls).
@@ -129,7 +129,7 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
     fn all_state_tables_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
         iter_table_storage(&mut self.storages)
             .chain(self.distinct_dedup_tables.values_mut())
-            .chain(std::iter::once(&mut self.result_table))
+            .chain(std::iter::once(&mut self.intermediate_state_table))
     }
 }
 
@@ -208,7 +208,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let group_key_len = args.extra.group_key_indices.len();
         // NOTE: we assume the prefix of table pk is exactly the group key
-        let group_key_table_pk_projection = &args.result_table.pk_indices()[..group_key_len];
+        let group_key_table_pk_projection =
+            &args.intermediate_state_table.pk_indices()[..group_key_len];
         assert!(group_key_table_pk_projection
             .iter()
             .sorted()
@@ -233,7 +234,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
-                result_table: args.result_table,
+                intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
@@ -286,7 +287,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     stats.lookup_miss_count += 1;
                     Some(async {
                         // Create `AggGroup` for the current group if not exists. This will
-                        // fetch previous agg result from the result table.
+                        // restore agg states from the intermediate state table.
                         let agg_group = AggGroup::create(
                             Some(GroupKey::new(
                                 key.deserialize(group_key_types)?,
@@ -295,7 +296,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             &this.agg_calls,
                             &this.agg_funcs,
                             &this.storages,
-                            &this.result_table,
+                            &this.intermediate_state_table,
                             &this.input_pk_indices,
                             this.row_count_index,
                             this.extreme_cache_size,
@@ -404,7 +405,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     ) {
         // Update metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
-        let table_id_str = this.result_table.table_id().to_string();
+        let table_id_str = this.intermediate_state_table.table_id().to_string();
         this.metrics
             .agg_lookup_miss_count
             .with_label_values(&[&table_id_str, &actor_id_str])
@@ -468,12 +469,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             if this.emit_on_window_close {
                 for change in changes.into_iter().flatten() {
                     // For EOWC, write change to the sort buffer.
-                    vars.buffer.apply_change(change, &mut this.result_table);
+                    vars.buffer
+                        .apply_change(change, &mut this.intermediate_state_table);
                 }
             } else {
                 for change in changes.into_iter().flatten() {
                     // For EOU, write change to result table and directly yield the change.
-                    this.result_table.write_record(change.as_ref());
+                    this.intermediate_state_table.write_record(change.as_ref());
                     if let Some(chunk) = vars.chunk_builder.append_record(change) {
                         yield chunk;
                     }
@@ -487,7 +489,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 #[for_await]
                 for row in vars
                     .buffer
-                    .consume(watermark.clone(), &mut this.result_table)
+                    .consume(watermark.clone(), &mut this.intermediate_state_table)
                 {
                     let row = row?;
                     if let Some(chunk) = vars.chunk_builder.append_row(Op::Insert, row) {
@@ -536,14 +538,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             inner: mut this,
         } = self;
 
-        let window_col_idx_in_group_key = this.result_table.pk_indices()[0];
+        let window_col_idx_in_group_key = this.intermediate_state_table.pk_indices()[0];
         let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
 
         let agg_group_cache_metrics_info = MetricsInfo::new(
             this.metrics.clone(),
-            this.result_table.table_id(),
+            this.intermediate_state_table.table_id(),
             this.actor_ctx.id,
-            "agg result table",
+            "agg intermediate state table",
         );
 
         let mut vars = ExecutionVars {
@@ -564,7 +566,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            buffer: SortBuffer::new(window_col_idx_in_group_key, &this.result_table),
+            buffer: SortBuffer::new(window_col_idx_in_group_key, &this.intermediate_state_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
@@ -630,7 +632,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let previous_vnode_bitmap = this.result_table.vnodes().clone();
+                        let previous_vnode_bitmap = this.intermediate_state_table.vnodes().clone();
                         this.all_state_tables_mut().for_each(|table| {
                             let _ = table.update_vnode_bitmap(vnode_bitmap.clone());
                         });

@@ -270,7 +270,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_result_table(me, vnode_col_idx, window_col_idx),
+            self.infer_intermediate_state_table(me, vnode_col_idx, window_col_idx),
             self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
             self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
         )
@@ -467,7 +467,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn infer_result_table(
+    pub fn infer_intermediate_state_table(
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
@@ -490,8 +490,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             table_builder.set_vnode_col_idx(tb_vnode_idx);
         }
 
-        // the result_table is composed of group_key and all agg_call's values, so the value_indices
-        // of this table should skip group_key.len().
+        // the intermediate state table is composed of group_key and all agg_call's states, so the
+        // value_indices of this table should skip group_key.len().
         table_builder.set_value_indices((n_group_key_cols..out_fields.len()).collect());
         table_builder.build(tb_dist, read_prefix_len_hint)
     }
