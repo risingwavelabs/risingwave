@@ -148,7 +148,7 @@ pub struct TableCatalog {
     pub initialized_at_epoch: Option<Epoch>,
 
     /// Indicate whether to use watermark cache for state table.
-    pub use_watermark_cache: bool,
+    pub cleaned_by_watermark: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -236,8 +236,8 @@ impl TableCatalog {
         self
     }
 
-    pub fn with_use_watermark_cache(mut self, use_watermark_cache: bool) -> Self {
-        self.use_watermark_cache = use_watermark_cache;
+    pub fn with_cleaned_by_watermark(mut self, cleaned_by_watermark: bool) -> Self {
+        self.cleaned_by_watermark = cleaned_by_watermark;
         self
     }
 
@@ -400,7 +400,7 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
-            use_watermark_cache: self.use_watermark_cache,
+            cleaned_by_watermark: self.cleaned_by_watermark,
         }
     }
 
@@ -506,7 +506,7 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            use_watermark_cache: matches!(tb.use_watermark_cache, true),
+            cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
         }
     }
 }
@@ -596,7 +596,7 @@ mod tests {
             dist_key_in_pk: vec![],
             cardinality: None,
             created_at_epoch: None,
-            use_watermark_cache: false,
+            cleaned_by_watermark: false,
         }
         .into();
 
@@ -650,7 +650,7 @@ mod tests {
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
-                use_watermark_cache: false,
+                cleaned_by_watermark: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

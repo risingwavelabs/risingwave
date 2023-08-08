@@ -60,7 +60,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
         let left_table = node.get_left_table()?;
-        if left_table.get_use_watermark_cache() {
+        if left_table.get_cleaned_by_watermark() {
             let state_table_l = WatermarkCacheStateTable::from_table_catalog(
                 node.get_left_table()?,
                 store,

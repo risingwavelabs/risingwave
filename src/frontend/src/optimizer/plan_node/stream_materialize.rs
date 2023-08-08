@@ -221,7 +221,7 @@ impl StreamMaterialize {
             cardinality,
             created_at_epoch: None,
             initialized_at_epoch: None,
-            use_watermark_cache: false,
+            cleaned_by_watermark: false,
         })
     }
 

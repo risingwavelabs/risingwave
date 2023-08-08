@@ -85,7 +85,7 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
-        let use_watermark_cache = if let Some(condition) = self.core.predicate().as_expr_unless_true()
+        let cleaned_by_watermark = if let Some(condition) = self.core.predicate().as_expr_unless_true()
             && let Some((_input_expr, cmp, _now_expr)) = condition.as_now_comparison_cond() {
             // Only GT / GTE will undergo state cleaning.
             // As such, we only need cache for these cases.
@@ -103,7 +103,7 @@ impl StreamNode for StreamDynamicFilter {
         let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
             .with_id(state.gen_table_id_wrapped())
-            .with_use_watermark_cache(use_watermark_cache);
+            .with_cleaned_by_watermark(cleaned_by_watermark);
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
