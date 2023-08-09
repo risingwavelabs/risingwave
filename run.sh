@@ -6,8 +6,10 @@ f() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
 }
 
+set +e
 ./risedev k
 ./risedev clean-data
+set -e
 RUST_LOG="risingwave_stream=trace" ./risedev d full
 
 f queries.sql </dev/null
