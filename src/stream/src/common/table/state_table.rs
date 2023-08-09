@@ -59,7 +59,7 @@ use crate::common::table::state_table_cache::StateTableWatermarkCache;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
-const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
+const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 /// Mostly watermark operators will have inserts (append-only).
 /// So this number should not need to be very large.
 /// But we may want to improve this choice in the future.
