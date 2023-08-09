@@ -369,7 +369,7 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Common Sub Expression Extract",
         vec![CommonSubExprExtractRule::create()],
-        ApplyOrder::BottomUp,
+        ApplyOrder::TopDown,
     )
 });
 

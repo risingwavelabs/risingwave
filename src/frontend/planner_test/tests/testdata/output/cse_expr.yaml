@@ -51,27 +51,32 @@
     FROM (VALUES (0), (45), (90), (135), (180),
     (225), (270), (315), (360)) AS t(x)
   batch_plan: |-
-    BatchProject { exprs: [*VALUES*_0.column_0, $expr1, In($expr1, -Infinity:Float64, -1:Float64, 0:Float64, 1:Float64, Infinity:Float64) as $expr3, $expr2, In($expr2, -Infinity:Float64, -1:Float64, 0:Float64, 1:Float64, Infinity:Float64) as $expr4] }
-    └─BatchProject { exprs: [*VALUES*_0.column_0, Tand(*VALUES*_0.column_0::Float64) as $expr1, Cotd(*VALUES*_0.column_0::Float64) as $expr2] }
-      └─BatchValues { rows: [[0:Int32], [45:Int32], [90:Int32], [135:Int32], [180:Int32], [225:Int32], [270:Int32], [315:Int32], [360:Int32]] }
+    BatchProject { exprs: [*VALUES*_0.column_0, $expr2, In($expr2, -Infinity:Float64, -1:Float64, 0:Float64, 1:Float64, Infinity:Float64) as $expr4, $expr3, In($expr3, -Infinity:Float64, -1:Float64, 0:Float64, 1:Float64, Infinity:Float64) as $expr5] }
+    └─BatchProject { exprs: [*VALUES*_0.column_0, Tand($expr1) as $expr2, Cotd($expr1) as $expr3] }
+      └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_0::Float64 as $expr1] }
+        └─BatchValues { rows: [[0:Int32], [45:Int32], [90:Int32], [135:Int32], [180:Int32], [225:Int32], [270:Int32], [315:Int32], [360:Int32]] }
 - name: Common sub expression shouldn't extract expression having short cut evaluation semantics and we use stddev_samp and var_samp here because they can rewrite into a case then and have some common sub expressions.
   sql: |
     create table t(v int);
     select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t;
   batch_plan: |-
-    BatchProject { exprs: [Sqrt($expr2) as $expr4, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, Sqrt(($expr3 / (sum0(count(t.v)) - 1:Int64)::Decimal))) as $expr5, $expr2, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, ($expr3 / (sum0(count(t.v)) - 1:Int64)::Decimal)) as $expr6] }
-    └─BatchProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), ((sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)) / sum0(count(t.v))::Decimal) as $expr2, (sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)) as $expr3] }
-      └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v))] }
-        └─BatchExchange { order: [], dist: Single }
-          └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
-            └─BatchProject { exprs: [t.v, (t.v * t.v) as $expr1] }
-              └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    BatchProject { exprs: [Sqrt($expr5) as $expr6, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, Sqrt(($expr4 / (sum0(count(t.v)) - 1:Int64)::Decimal))) as $expr7, $expr5, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, ($expr4 / (sum0(count(t.v)) - 1:Int64)::Decimal)) as $expr8] }
+    └─BatchProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), ($expr4 / $expr3) as $expr5, $expr4] }
+      └─BatchProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), (sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) as $expr4, $expr3] }
+        └─BatchProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), sum(sum(t.v))::Decimal as $expr2, sum0(count(t.v))::Decimal as $expr3] }
+          └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v))] }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
+                └─BatchProject { exprs: [t.v, (t.v * t.v) as $expr1] }
+                  └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [stddev_pop, stddev_samp, var_pop, var_samp], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Sqrt($expr2) as $expr4, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, Sqrt(($expr3 / (sum0(count(t.v)) - 1:Int64)::Decimal))) as $expr5, $expr2, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, ($expr3 / (sum0(count(t.v)) - 1:Int64)::Decimal)) as $expr6] }
-      └─StreamProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), ((sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)) / sum0(count(t.v))::Decimal) as $expr2, (sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)) as $expr3] }
-        └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), count] }
-          └─StreamExchange { dist: Single }
-            └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
-              └─StreamProject { exprs: [t.v, (t.v * t.v) as $expr1, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [Sqrt($expr5) as $expr6, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, Sqrt(($expr4 / (sum0(count(t.v)) - 1:Int64)::Decimal))) as $expr7, $expr5, Case((sum0(count(t.v)) <= 1:Int64), null:Decimal, ($expr4 / (sum0(count(t.v)) - 1:Int64)::Decimal)) as $expr8] }
+      └─StreamProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), ($expr4 / $expr3) as $expr5, $expr4] }
+        └─StreamProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), (sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) as $expr4, $expr3] }
+          └─StreamProject { exprs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), sum(sum(t.v))::Decimal as $expr2, sum0(count(t.v))::Decimal as $expr3] }
+            └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), count] }
+              └─StreamExchange { dist: Single }
+                └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
+                  └─StreamProject { exprs: [t.v, (t.v * t.v) as $expr1, t._row_id] }
+                    └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
