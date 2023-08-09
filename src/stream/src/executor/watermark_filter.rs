@@ -238,15 +238,16 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         if idle_input {
                             // Align watermark
                             let global_max_watermark =
-                                Self::get_global_max_watermark(&table, watermark_type.clone()).await?;
+                                Self::get_global_max_watermark(&table, watermark_type.clone())
+                                    .await?;
                             current_watermark = cmp::max_by(
-                                    current_watermark,
-                                    global_max_watermark,
-                                    DefaultOrd::default_cmp,
-                                );
+                                current_watermark,
+                                global_max_watermark,
+                                DefaultOrd::default_cmp,
+                            );
                         } else {
                             idle_input = true;
-                        } 
+                        }
                     } else {
                         table.commit_no_data_expected(barrier.epoch);
                     }
