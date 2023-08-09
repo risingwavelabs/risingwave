@@ -65,15 +65,7 @@ impl StreamDynamicFilter {
             match function_call.func_type() {
                 ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
                     let rhs_input = core.right();
-                    if let Some(stream_exchange) = rhs_input.as_stream_exchange() {
-                        if let Some(node) = stream_exchange.input().as_stream_project() {
-                            node.input().as_stream_now().is_some()
-                        } else {
-                            stream_exchange.input().as_stream_now().is_some()
-                        }
-                    } else {
-                        false
-                    }
+                    rhs_input.watermark_columns().contains(0)
                 }
                 _ => false,
             }
