@@ -2323,6 +2323,8 @@ Objects are classified into 3 groups:
 - not referenced by versions: these object are being deleted from object store.
 - referenced by non-current versions: these objects are stale (not in the latest version), but those old versions may still be in use (e.g. long-running pinning). Thus those objects cannot be deleted at the moment.
 - referenced by current version: these objects are in the latest version.
+
+Additionally, a metric on all objects (including dangling ones) is updated with low-frequency. The metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.
                     """,
                     [
                         panels.target(f"{metric('storage_stale_object_count')}",
@@ -2331,6 +2333,8 @@ Objects are classified into 3 groups:
                                       "referenced by non-current versions"),
                         panels.target(f"{metric('storage_current_version_object_count')}",
                                       "referenced by current version"),
+                        panels.target(f"{metric('storage_total_object_count')}",
+                                      "all objects (including dangling ones)"),
                     ],
                 ),
                 panels.timeseries_bytes(
@@ -2343,6 +2347,8 @@ Objects are classified into 3 groups:
                                       "referenced by non-current versions"),
                         panels.target(f"{metric('storage_current_version_object_size')}",
                                       "referenced by current version"),
+                        panels.target(f"{metric('storage_total_object_size')}",
+                                      "all objects, including dangling ones"),
                     ],
                 ),
                 panels.timeseries_count(

@@ -117,6 +117,10 @@ pub struct MetaMetrics {
     pub current_version_object_count: IntGauge,
     /// Total size of objects that is referenced by current version.
     pub current_version_object_size: IntGauge,
+    /// Total number of objects that includes dangling objects.
+    pub total_object_count: IntGauge,
+    /// Total size of objects that includes dangling objects.
+    pub total_object_size: IntGauge,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -394,6 +398,18 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let total_object_count = register_int_gauge_with_registry!(
+            "storage_total_object_count",
+            "Total number of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
+            registry
+        ).unwrap();
+
+        let total_object_size = register_int_gauge_with_registry!(
+            "storage_total_object_size",
+            "Total size of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
+            registry
+        ).unwrap();
+
         let delta_log_count = register_int_gauge_with_registry!(
             "storage_delta_log_count",
             "total number of hummock version delta log",
@@ -595,6 +611,8 @@ impl MetaMetrics {
             old_version_object_size,
             current_version_object_count,
             current_version_object_size,
+            total_object_count,
+            total_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,

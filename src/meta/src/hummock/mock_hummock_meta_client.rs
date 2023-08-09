@@ -186,7 +186,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_full_scan_task(&self, _object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
+    async fn report_full_scan_task(
+        &self,
+        _filtered_object_ids: Vec<HummockSstableObjectId>,
+        _total_object_count: u64,
+        _total_object_size: u64,
+    ) -> Result<()> {
         unimplemented!()
     }
 
