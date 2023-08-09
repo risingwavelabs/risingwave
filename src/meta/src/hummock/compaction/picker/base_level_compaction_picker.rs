@@ -198,26 +198,26 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        let mut last_ssts = vec![];
         let mut exist_small_task = false;
         let max_target_level_size = std::cmp::min(
             self.config.max_compaction_bytes / 8,
             self.config.sub_level_max_compaction_bytes,
         );
-        for (idx, sst) in target_level.table_infos.iter().enumerate() {
+        for idx in 0..target_level.table_infos.len() {
             let mut last_overlap_info = overlap_strategy.create_overlap_info();
             let mut total_file_size = 0;
+            let mut target_level_files = vec![];
             for end in idx..target_level.table_infos.len() {
-                if end > idx && total_file_size + sst.file_size > max_target_level_size {
+                let next_sst = &target_level.table_infos[end];
+                if end > idx && total_file_size + next_sst.file_size > max_target_level_size {
                     break;
                 }
-                if level_handlers[self.target_level]
-                    .is_pending_compact(&target_level.table_infos[end].sst_id)
-                {
+                if level_handlers[self.target_level].is_pending_compact(&next_sst.sst_id) {
                     break;
                 }
-                total_file_size += sst.file_size;
-                let key_range = target_level.table_infos[end].key_range.as_ref().unwrap();
+                total_file_size += next_sst.file_size;
+                target_level_files.push(next_sst.clone());
+                let key_range = next_sst.key_range.as_ref().unwrap();
                 if end > 0 && end + 1 < target_level.table_infos.len() {
                     last_overlap_info.update_key_range(key_range);
                 } else if end == 0 {
@@ -240,10 +240,36 @@ impl LevelCompactionPicker {
                     &l0.sub_levels,
                     &level_handlers[0],
                 );
+
+                if !input.sstable_infos.is_empty() {
+                    let mut overlap_info = overlap_strategy.create_overlap_info();
+                    for (i, ssts) in input.sstable_infos.iter().enumerate().rev() {
+                        if i + 1 != input.sstable_infos.len() {
+                            let r =
+                                overlap_info.check_multiple_overlap(&l0.sub_levels[i].table_infos);
+                            for j in r {
+                                assert!(ssts.iter().any(
+                                    |sst| sst.sst_id == l0.sub_levels[i].table_infos[j].sst_id
+                                ));
+                            }
+                        }
+                        for sst in ssts {
+                            overlap_info.update(sst);
+                        }
+                    }
+                    let r = overlap_info.check_multiple_overlap(&target_level.table_infos);
+                    assert!(
+                        idx <= r.start && r.end <= end + 1,
+                        "[{},{}] found: {:?}",
+                        idx,
+                        end,
+                        r
+                    );
+                }
                 if input.total_file_size > total_file_size && input.sstable_infos.len() > 1 {
                     min_write_amp_meet = true;
                     exist_small_task = true;
-                    input_levels.push((input, total_file_size, std::mem::take(&mut last_ssts)));
+                    input_levels.push((input, total_file_size, target_level_files.clone()));
                 }
             }
         }
@@ -605,6 +631,9 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .compaction_mode(CompactionMode::Range as i32)
                 .level0_sub_level_compact_level_count(1)
+                .max_bytes_for_level_base(500)
+                .sub_level_max_compaction_bytes(100)
+                .max_compaction_bytes(1000)
                 .build(),
         );
         let mut picker = LevelCompactionPicker::new(1, config);

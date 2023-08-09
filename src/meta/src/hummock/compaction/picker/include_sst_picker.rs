@@ -64,10 +64,10 @@ impl L0IncludeSstPicker {
             if range.start >= range.end {
                 break;
             }
-            let pending_compact = range
-                .any(|index| level_handler.is_pending_compact(&level.table_infos[index].sst_id));
-            if pending_compact {
-                break;
+            for index in range.clone() {
+                if level_handler.is_pending_compact(&level.table_infos[index].sst_id) {
+                    return ret;
+                }
             }
             let mut overlap = self.overlap_strategy.create_overlap_info();
             ret.sstable_infos
