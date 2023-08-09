@@ -6844,6 +6844,7 @@ name = "risingwave_pb"
 version = "1.1.0-alpha"
 dependencies = [
  "enum-as-inner",
+ "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
@@ -6851,6 +6852,7 @@ dependencies = [
  "prost",
  "prost-helpers",
  "serde",
+ "walkdir",
  "workspace-hack",
 ]
 
