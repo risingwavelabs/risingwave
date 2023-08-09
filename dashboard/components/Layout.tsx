@@ -140,6 +140,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Debug</NavTitle>
             <NavButton href="/await_tree/">Await Tree Dump</NavButton>
+            <NavButton href="/heap_profiling/">Heap Profiling</NavButton>
           </VStack>
           <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>

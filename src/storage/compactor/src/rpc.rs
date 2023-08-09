@@ -20,7 +20,7 @@ use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{EchoRequest, EchoResponse};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
+    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse, HeapProfilingResponse, HeapProfilingRequest,
 };
 use tonic::{Request, Response, Status};
 
@@ -71,6 +71,15 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<ProfilingResponse>, Status> {
         Err(Status::unimplemented(
             "profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn heap_profiling(
+        &self,
+        _request: Request<HeapProfilingRequest>,
+    ) -> Result<Response<HeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
         ))
     }
 }
