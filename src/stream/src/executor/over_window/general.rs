@@ -23,7 +23,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{RowRef, StreamChunk};
 use risingwave_common::catalog::Field;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DefaultOrdered;
+use risingwave_common::types::{DataType, DefaultOrdered};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
@@ -60,10 +60,18 @@ mod private {
     use std::marker::PhantomData;
     use std::ops::{Bound, RangeInclusive};
 
+    use futures::StreamExt;
+    use futures_async_stream::for_await;
+    use itertools::Itertools;
     use risingwave_common::array::stream_record::Record;
-    use risingwave_common::row::OwnedRow;
+    use risingwave_common::hash::VnodeBitmapExt;
+    use risingwave_common::row::{OwnedRow, Row, RowExt};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::memcmp_encoding;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::window_function::StateKey;
+    use risingwave_storage::store::PrefetchOptions;
+    use risingwave_storage::table::merge_sort::merge_sort;
     use risingwave_storage::StateStore;
 
     use super::{CacheKey, PartitionCache};
@@ -83,19 +91,24 @@ mod private {
     pub(super) struct OverPartition<'a, S: StateStore> {
         this_partition_key: &'a OwnedRow,
         range_cache: &'a mut PartitionCache,
+        order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
         _phantom: PhantomData<S>,
     }
+
+    const MAGIC_BATCH_SIZE: usize = 1024;
 
     impl<'a, S: StateStore> OverPartition<'a, S> {
         pub fn new(
             this_partition_key: &'a OwnedRow,
             cache: &'a mut PartitionCache,
+            order_key_data_types: &'a [DataType],
             order_key_order_types: &'a [OrderType],
         ) -> Self {
             Self {
                 this_partition_key,
                 range_cache: cache,
+                order_key_data_types,
                 order_key_order_types,
                 _phantom: PhantomData,
             }
@@ -103,6 +116,23 @@ mod private {
 
         pub fn cache_snapshot(&self) -> &BTreeMap<CacheKey, OwnedRow> {
             &self.range_cache.inner()
+        }
+
+        pub fn first_non_sentinel_key(&self) -> Option<&StateKey> {
+            self.range_cache
+                .inner()
+                .iter()
+                .find_or_first(|(k, _)| !k.is_sentinel())
+                .map(|(k, _)| k.as_normal_expect())
+        }
+
+        pub fn last_non_sentinel_key(&self) -> Option<&StateKey> {
+            self.range_cache
+                .inner()
+                .iter()
+                .rev()
+                .find_or_first(|(k, _)| !k.is_sentinel())
+                .map(|(k, _)| k.as_normal_expect())
         }
 
         /// Write a change record to state table and cache.
@@ -135,54 +165,184 @@ mod private {
             table: &StateTable<S>,
             range: RangeInclusive<&StateKey>,
         ) -> StreamExecutorResult<()> {
-            // TODO(): prefetch something after range.end
-            todo!()
+            // TODO(): load the range of entries and one more into the cache
+
+            // TODO(): assert must have at least one entry, or, no entry at all
+
+            // TODO(rc): prefetch something before the start of the range;
+            // self.extend_cache_from_table_leftward(table).await
+
+            // prefetch something after the end of the range
+            self.extend_cache_from_table_rightward(table).await
         }
 
         pub async fn extend_cache_from_table_leftward(
             &mut self,
             table: &StateTable<S>,
         ) -> StreamExecutorResult<()> {
-            todo!()
+            if self.range_cache.inner().len() <= 1 {
+                // empty or only one entry in the table (no sentinel)
+                return Ok(());
+            }
+
+            let (left_first, left_second) = {
+                let mut iter = self.range_cache.inner().iter();
+                let first = iter.next().unwrap().0;
+                let second = iter.next().unwrap().0;
+                (first, second)
+            };
+
+            match (left_first, left_second) {
+                (CacheKey::Normal(_), _) => {
+                    // no sentinel here, meaning we've already cached all of the 2 entries
+                    Ok(())
+                }
+                (CacheKey::Smallest, CacheKey::Normal(key)) => {
+                    // For leftward extension, we now must iterate the table in order from the
+                    // beginning of this partition and fill only the last n rows
+                    // to the cache. This is called `rotate`. TODO(rc): WE NEED
+                    // STATE TABLE REVERSE ITERATOR!!
+                    let rotate = true;
+
+                    let key = key.clone();
+                    self.extend_cache_take_n(
+                        table,
+                        Bound::Unbounded,
+                        Bound::Excluded(&key),
+                        MAGIC_BATCH_SIZE,
+                        rotate,
+                    )
+                    .await
+                }
+                (CacheKey::Smallest, CacheKey::Largest) => {
+                    panic!("must call `extend_cache_from_table_with_range` before");
+                }
+                _ => {
+                    unreachable!();
+                }
+            }
         }
 
         pub async fn extend_cache_from_table_rightward(
             &mut self,
             table: &StateTable<S>,
         ) -> StreamExecutorResult<()> {
-            todo!()
+            if self.range_cache.inner().len() <= 1 {
+                // empty or only one entry in the table (no sentinel)
+                return Ok(());
+            }
+
+            // note the order of keys here
+            let (right_second, right_first) = {
+                let mut iter = self.range_cache.inner().iter();
+                let first = iter.next_back().unwrap().0;
+                let second = iter.next_back().unwrap().0;
+                (second, first)
+            };
+
+            match (right_second, right_first) {
+                (_, CacheKey::Normal(_)) => {
+                    // no sentinel here, meaning we've already cached all of the 2 entries
+                    Ok(())
+                }
+                (CacheKey::Normal(key), CacheKey::Largest) => {
+                    let key = key.clone();
+                    self.extend_cache_take_n(
+                        table,
+                        Bound::Excluded(&key),
+                        Bound::Unbounded,
+                        MAGIC_BATCH_SIZE,
+                        false,
+                    )
+                    .await
+                }
+                (CacheKey::Smallest, CacheKey::Largest) => {
+                    panic!("must call `extend_cache_from_table_with_range` before");
+                }
+                _ => {
+                    unreachable!();
+                }
+            }
         }
 
-        async fn extend_cache_take_first_n(
+        async fn extend_cache_take_n(
             &mut self,
             table: &StateTable<S>,
             start: Bound<&StateKey>,
             end: Bound<&StateKey>,
             n: usize,
+            rotate: bool,
         ) -> StreamExecutorResult<()> {
-            // let mut cache_for_partition = BTreeMap::new();
-            // let table_iter = this
-            //     .state_table
-            //     .iter_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
-            //     .await?;
+            debug_assert!(
+                table.value_indices().is_none(),
+                "we must have full row as value here"
+            );
 
-            // #[for_await]
-            // for row in table_iter {
-            //     let row: OwnedRow = row?;
-            //     cache_for_partition.insert(this.row_to_state_key(&row)?, row);
-            // }
+            let mut to_extend = Vec::with_capacity(n.min(MAGIC_BATCH_SIZE));
 
-            todo!()
+            {
+                let range = (self.convert_bound(start)?, self.convert_bound(end)?);
+                let streams: Vec<_> = futures::future::try_join_all(
+                    table.vnode_bitmap().iter_vnodes().map(|vnode| {
+                        table.iter_key_and_val_with_pk_range(
+                            &range,
+                            vnode,
+                            PrefetchOptions {
+                                exhaust_iter: n == usize::MAX || rotate,
+                            },
+                        )
+                    }),
+                )
+                .await?
+                .into_iter()
+                .map(Box::pin)
+                .collect();
+
+                #[for_await]
+                for kv in merge_sort(streams).take(n) {
+                    let (_, row): (_, OwnedRow) = kv?;
+                    // TODO(): fill the cache
+                }
+            }
+
+            for (key, row) in to_extend {
+                self.range_cache.insert(key, row);
+            }
+
+            // TODO(): handle the sentinel
+
+            Ok(())
         }
 
-        async fn extend_cache_take_last_n(
-            &mut self,
-            table: &StateTable<S>,
-            start: Bound<&StateKey>,
-            end: Bound<&StateKey>,
-            n: usize,
-        ) -> StreamExecutorResult<()> {
-            todo!()
+        fn convert_bound<'s, 'k>(
+            &'s self,
+            bound: Bound<&'k StateKey>,
+        ) -> StreamExecutorResult<Bound<impl Row + 'k>>
+        where
+            's: 'k,
+        {
+            Ok(match bound {
+                Bound::Included(key) => Bound::Included(self.state_key_to_table_pk(key)?),
+                Bound::Excluded(key) => Bound::Excluded(self.state_key_to_table_pk(key)?),
+                Bound::Unbounded => Bound::Unbounded,
+            })
+        }
+
+        fn state_key_to_table_pk<'s, 'k>(
+            &'s self,
+            key: &'k StateKey,
+        ) -> StreamExecutorResult<impl Row + 'k>
+        where
+            's: 'k,
+        {
+            Ok(self
+                .this_partition_key
+                .chain(memcmp_encoding::decode_row(
+                    &key.order_key,
+                    self.order_key_data_types,
+                    self.order_key_order_types,
+                )?)
+                .chain(key.pk.as_inner()))
         }
 
         pub fn shrink_cache_to_range(&mut self, range: RangeInclusive<&StateKey>) {
@@ -208,6 +368,7 @@ struct ExecutorInner<S: StateStore> {
     calls: Vec<WindowFuncCall>,
     partition_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
+    order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
     input_pk_indices: Vec<usize>,
     input_schema_len: usize,
@@ -300,6 +461,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
             schema
         };
 
+        let order_key_data_types = args
+            .order_key_indices
+            .iter()
+            .map(|i| schema.fields()[*i].data_type.clone())
+            .collect();
+
         Self {
             input: args.input,
             inner: ExecutorInner {
@@ -312,6 +479,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 calls: args.calls,
                 partition_key_indices: args.partition_key_indices,
                 order_key_indices: args.order_key_indices,
+                order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
                 input_pk_indices: input_info.pk_indices,
                 input_schema_len: input_info.schema.len(),
@@ -472,8 +640,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     .put(part_key.0.clone(), new_empty_partition_cache());
             }
             let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
-            let mut partition =
-                OverPartition::new(&part_key, &mut cache, &this.order_key_order_types);
+            let mut partition = OverPartition::new(
+                &part_key,
+                &mut cache,
+                &this.order_key_data_types,
+                &this.order_key_order_types,
+            );
 
             // Build changes for current partition.
             let part_changes =
