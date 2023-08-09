@@ -1247,9 +1247,11 @@ impl GrpcMetaClientCore {
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
-        let stream_client = StreamManagerServiceClient::new(channel.clone());
+        let stream_client =
+            StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel.clone());
+        let scale_client =
+            ScaleServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
