@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -47,13 +48,15 @@ pub struct CompactorContext {
 
     pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
-    pub output_memory_limiter: Arc<MemoryLimiter>,
+    pub memory_limiter: Arc<MemoryLimiter>,
 
     pub sstable_object_id_manager: SstableObjectIdManagerRef,
 
     pub task_progress_manager: TaskProgressManagerRef,
 
     pub await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+
+    pub running_task_count: Arc<AtomicU32>,
 }
 
 impl CompactorContext {
@@ -73,8 +76,8 @@ impl CompactorContext {
                 storage_opts.share_buffer_compaction_worker_threads_number as usize,
             )))
         };
+
         // not limit memory for local compact
-        let memory_limiter = MemoryLimiter::unlimit();
         Self {
             storage_opts,
             hummock_meta_client,
@@ -83,10 +86,11 @@ impl CompactorContext {
             is_share_buffer_compact: true,
             compaction_executor,
             filter_key_extractor_manager,
-            output_memory_limiter: memory_limiter,
+            memory_limiter: MemoryLimiter::unlimit(),
             sstable_object_id_manager,
             task_progress_manager: Default::default(),
             await_tree_reg: None,
+            running_task_count: Arc::new(AtomicU32::new(0)),
         }
     }
 }

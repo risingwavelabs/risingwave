@@ -37,7 +37,7 @@ pub struct AggFuncSig {
     pub func: AggKind,
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
-    pub build: fn(agg: AggCall) -> Result<BoxedAggState>,
+    pub build: fn(agg: &AggCall) -> Result<BoxedAggState>,
 }
 
 impl fmt::Debug for AggFuncSig {
@@ -47,6 +47,7 @@ impl fmt::Debug for AggFuncSig {
             inputs_type: self.inputs_type,
             ret_type: self.ret_type,
             set_returning: false,
+            deprecated: false,
         }
         .fmt(f)
     }

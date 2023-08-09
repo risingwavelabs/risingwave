@@ -47,6 +47,7 @@ macro_rules! for_all_undeprecated_params {
             { barrier_interval_ms, u32, Some(1000_u32), true },
             { checkpoint_frequency, u64, Some(1_u64), true },
             { sstable_size_mb, u32, Some(256_u32), false },
+            { parallel_compact_size_mb, u32, Some(512_u32), false },
             { block_size_kb, u32, Some(64_u32), false },
             { bloom_false_positive, f64, Some(0.001_f64), false },
             { state_store, String, None, false },
@@ -178,7 +179,13 @@ macro_rules! impl_system_params_from_kv {
             });
             derive_missing_fields(&mut ret);
             if !kvs.is_empty() {
-                Err(format!("unrecognized system params {:?}", kvs))
+                let unrecognized_params = kvs.into_iter().map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                    )
+                }).collect::<Vec<_>>();
+                Err(format!("unrecognized system params {:?}", unrecognized_params))
             } else {
                 Ok(ret)
             }
@@ -353,6 +360,7 @@ mod tests {
             (BARRIER_INTERVAL_MS_KEY, "1"),
             (CHECKPOINT_FREQUENCY_KEY, "1"),
             (SSTABLE_SIZE_MB_KEY, "1"),
+            (PARALLEL_COMPACT_SIZE_MB_KEY, "2"),
             (BLOCK_SIZE_KB_KEY, "1"),
             (BLOOM_FALSE_POSITIVE_KEY, "1"),
             (STATE_STORE_KEY, "a"),

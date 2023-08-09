@@ -39,6 +39,7 @@ RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+  chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
 RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \

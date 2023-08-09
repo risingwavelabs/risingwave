@@ -14,15 +14,11 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::row::OwnedRow;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]
-/// This is introduced only for pg compatibility and is not used in our system.
-pub const PG_CONSTRAINT_TABLE_NAME: &str = "pg_constraint";
 pub static PG_CONSTRAINT_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
     LazyLock::new(|| {
         vec![
@@ -53,4 +49,12 @@ pub static PG_CONSTRAINT_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
         ]
     });
 
-pub static PG_CONSTRAINT_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
+/// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]
+/// This is introduced only for pg compatibility and is not used in our system.
+pub static PG_CONSTRAINT: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_constraint",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &PG_CONSTRAINT_COLUMNS,
+    sql: infer_dummy_view_sql(&PG_CONSTRAINT_COLUMNS),
+});

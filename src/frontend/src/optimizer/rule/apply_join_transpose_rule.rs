@@ -121,7 +121,7 @@ impl Rule for ApplyJoinTransposeRule {
         }
 
         assert!(
-            join.is_full_out(),
+            join.output_indices_is_trivial(),
             "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
         );
 
@@ -211,7 +211,7 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: apply_left_len as isize,
             join_right_offset: apply_left_len as isize,
-            index_mapping: ColIndexMapping::new(
+            index_mapping: ColIndexMapping::without_target_size(
                 correlated_indices
                     .clone()
                     .into_iter()
@@ -297,7 +297,7 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: 0,
             join_right_offset: apply_left_len as isize,
-            index_mapping: ColIndexMapping::new(
+            index_mapping: ColIndexMapping::without_target_size(
                 correlated_indices
                     .clone()
                     .into_iter()
@@ -385,7 +385,7 @@ impl ApplyJoinTransposeRule {
             }
         };
         let mut output_indices_mapping =
-            ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
+            ColIndexMapping::without_target_size(output_indices.iter().map(|x| Some(*x)).collect());
         let new_join = LogicalJoin::new(
             join.left(),
             new_join_right,
@@ -419,7 +419,7 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: apply_left_len as isize,
             join_right_offset: 2 * apply_left_len as isize,
-            index_mapping: ColIndexMapping::new(
+            index_mapping: ColIndexMapping::without_target_size(
                 correlated_indices
                     .clone()
                     .into_iter()
@@ -564,8 +564,9 @@ impl ApplyJoinTransposeRule {
                 new_join.into()
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                let mut output_indices_mapping =
-                    ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
+                let mut output_indices_mapping = ColIndexMapping::without_target_size(
+                    output_indices.iter().map(|x| Some(*x)).collect(),
+                );
                 // Leave other condition for predicate push down to deal with
                 LogicalFilter::create(
                     new_join.into(),

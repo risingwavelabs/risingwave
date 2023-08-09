@@ -41,6 +41,7 @@ services:
   #=================== TiDB & TiCDC components ==================
   ticdc-controller:
     image: pingcap/ticdc:v6.6.0
+    container_name: ticdc-controller
     entrypoint: "/cdc cli"
     command:
       - changefeed
@@ -195,7 +196,7 @@ services:
   #===================== Others ===================
   datagen:
     build: ../datagen
-    depends_on: 
+    depends_on:
       - tidb
     command:
       - /bin/sh
@@ -206,14 +207,17 @@ services:
 
   init_tidb:
     image: mysql:8.0
-    depends_on: 
+    depends_on:
       - tidb
     command:
       - /bin/sh
       - -c
-      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql"
+      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql &&
+         sleep 10 &&
+         mysql --password= -h tidb --port 4000 -u root test < tidb_prepare.sql"
     volumes:
-      - "./tidb_create_tables.sql:/tidb_create_tables.sql"      
+      - "./tidb_create_tables.sql:/tidb_create_tables.sql"
+      - "./tidb_prepare.sql:/tidb_prepare.sql"
     container_name: init_tidb
     restart: on-failure
 

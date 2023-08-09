@@ -15,6 +15,7 @@
 #![expect(clippy::all)]
 #![expect(rustdoc::bare_urls)]
 #![expect(clippy::doc_markdown)]
+#![allow(non_snake_case)] // for derived code of `Message`
 #![feature(lint_reasons)]
 
 use std::str::FromStr;
@@ -28,6 +29,9 @@ pub mod common;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/compute.rs")]
 pub mod compute;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/cloud_service.rs")]
+pub mod cloud_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
@@ -94,6 +98,9 @@ pub mod common_serde;
 #[rustfmt::skip]
 #[path = "compute.serde.rs"]
 pub mod compute_serde;
+#[rustfmt::skip]
+#[path = "cloud_service.serde.rs"]
+pub mod cloud_service_serde;
 #[rustfmt::skip]
 #[path = "data.serde.rs"]
 pub mod data_serde;

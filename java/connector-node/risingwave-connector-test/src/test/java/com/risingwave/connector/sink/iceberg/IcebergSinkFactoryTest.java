@@ -17,7 +17,7 @@ package com.risingwave.connector.sink.iceberg;
 import static org.junit.Assert.*;
 
 import com.google.common.collect.Lists;
-import com.risingwave.connector.IcebergSink;
+import com.risingwave.connector.AppendOnlyIcebergSinkWriter;
 import com.risingwave.connector.IcebergSinkFactory;
 import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.TableSchema;
@@ -65,9 +65,9 @@ public class IcebergSinkFactoryTest {
     public void testCreate() throws IOException {
         createMockTable();
         IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
-        IcebergSink sink =
-                (IcebergSink)
-                        sinkFactory.create(
+        AppendOnlyIcebergSinkWriter sink =
+                (AppendOnlyIcebergSinkWriter)
+                        sinkFactory.createWriter(
                                 TestUtils.getMockTableSchema(),
                                 Map.of(
                                         "type",

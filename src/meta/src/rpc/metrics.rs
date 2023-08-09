@@ -25,14 +25,13 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::manager::{ClusterManagerRef, FragmentManagerRef};
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
 
@@ -685,6 +684,7 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
 
 pub async fn start_fragment_info_monitor<S: MetaStore>(
     cluster_manager: ClusterManagerRef<S>,
+    catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -710,7 +710,6 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
                 .await
@@ -720,13 +719,16 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                     None => (worker_node.id, "".to_owned()),
                 })
                 .collect();
-            for table_fragments in fragments {
+            let table_name_mapping = catalog_manager.get_table_name_mapping().await;
+            let table_type_mapping = catalog_manager.get_table_type_mapping().await;
+            let core = fragment_manager.get_fragment_read_guard().await;
+            for table_fragments in core.table_fragments().values() {
                 let mv_id_str = table_fragments.table_id().to_string();
-                for (fragment_id, fragment) in table_fragments.fragments {
+                for (fragment_id, fragment) in &table_fragments.fragments {
                     let fragment_id_str = fragment_id.to_string();
-                    for actor in fragment.actors {
+                    for actor in &fragment.actors {
                         let actor_id_str = actor.actor_id.to_string();
-                        // Report a dummay gauge metrics with (fragment id, actor id, node
+                        // Report a dummy gauge metrics with (fragment id, actor id, node
                         // address) as its label
                         if let Some(actor_status) =
                             table_fragments.actor_status.get(&actor.actor_id)
@@ -745,22 +747,29 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                             }
                         }
 
-                        // Report a dummay gauge metrics with (table id, actor id, table
+                        // Report a dummy gauge metrics with (table id, actor id, table
                         // name) as its label
-                        if let Some(mut node) = actor.nodes {
-                            visit_stream_node_tables(&mut node, |table, _| {
-                                let table_id_str = table.id.to_string();
-                                meta_metrics
-                                    .table_info
-                                    .with_label_values(&[
-                                        &mv_id_str,
-                                        &table_id_str,
-                                        &actor_id_str,
-                                        &table.name,
-                                        table.table_type().as_str_name(),
-                                    ])
-                                    .set(1);
-                            });
+
+                        for table_id in &fragment.state_table_ids {
+                            let table_id_str = table_id.to_string();
+                            let table_name = table_name_mapping
+                                .get(table_id)
+                                .cloned()
+                                .unwrap_or_else(|| "unknown".to_string());
+                            let table_type = table_type_mapping
+                                .get(table_id)
+                                .cloned()
+                                .unwrap_or_else(|| "unknown".to_string());
+                            meta_metrics
+                                .table_info
+                                .with_label_values(&[
+                                    &mv_id_str,
+                                    &table_id_str,
+                                    &actor_id_str,
+                                    &table_name,
+                                    &table_type,
+                                ])
+                                .set(1);
                         }
                     }
                 }

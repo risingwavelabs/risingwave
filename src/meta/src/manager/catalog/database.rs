@@ -157,6 +157,20 @@ impl DatabaseManager {
         )
     }
 
+    pub fn get_table_name_mapping(&self) -> HashMap<TableId, String> {
+        self.tables
+            .values()
+            .map(|table| (table.id, table.name.clone()))
+            .collect()
+    }
+
+    pub fn get_table_type_mapping(&self) -> HashMap<TableId, String> {
+        self.tables
+            .values()
+            .map(|table| (table.id, table.table_type().as_str_name().to_string()))
+            .collect()
+    }
+
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
         if self.tables.values().any(|x| {
             x.database_id == relation_key.0

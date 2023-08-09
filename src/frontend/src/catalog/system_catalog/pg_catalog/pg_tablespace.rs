@@ -14,15 +14,11 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::row::OwnedRow;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_tablespace` stores information about the available tablespaces.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-tablespace.html`]
-/// This is introduced only for pg compatibility and is not used in our system.
-pub const PG_TABLESPACE_TABLE_NAME: &str = "pg_tablespace";
 pub const PG_TABLESPACE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "spcname"),
@@ -31,4 +27,12 @@ pub const PG_TABLESPACE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "spcoptions"),
 ];
 
-pub static PG_TABLESPACE_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
+/// The catalog `pg_tablespace` stores information about the available tablespaces.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-tablespace.html`]
+/// This is introduced only for pg compatibility and is not used in our system.
+pub static PG_TABLESPACE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_tablespace",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_TABLESPACE_COLUMNS,
+    sql: infer_dummy_view_sql(PG_TABLESPACE_COLUMNS),
+});

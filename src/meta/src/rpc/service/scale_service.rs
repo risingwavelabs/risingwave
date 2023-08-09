@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -27,7 +26,9 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::stream::{GlobalStreamManagerRef, ParallelUnitReschedule, SourceManagerRef};
+use crate::stream::{
+    GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
+};
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_scheduler: BarrierScheduler<S>,
@@ -89,9 +90,10 @@ where
 
         let table_fragments = self
             .fragment_manager
-            .list_table_fragments()
+            .get_fragment_read_guard()
             .await
-            .iter()
+            .table_fragments()
+            .values()
             .map(|tf| tf.to_protobuf())
             .collect();
 
@@ -135,13 +137,17 @@ where
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        let req = request.into_inner();
+        let RescheduleRequest {
+            reschedules,
+            revision,
+            resolve_no_shuffle_upstream,
+        } = request.into_inner();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
 
         let current_revision = self.fragment_manager.get_revision().await;
 
-        if req.revision != current_revision.inner() {
+        if revision != current_revision.inner() {
             return Ok(Response::new(RescheduleResponse {
                 success: false,
                 revision: current_revision.inner(),
@@ -150,7 +156,7 @@ where
 
         self.stream_manager
             .reschedule_actors(
-                req.reschedules
+                reschedules
                     .into_iter()
                     .map(|(fragment_id, reschedule)| {
                         let Reschedule {
@@ -158,23 +164,21 @@ where
                             removed_parallel_units,
                         } = reschedule;
 
+                        let added_parallel_units = added_parallel_units.into_iter().collect();
+                        let removed_parallel_units = removed_parallel_units.into_iter().collect();
+
                         (
                             fragment_id,
                             ParallelUnitReschedule {
-                                added_parallel_units: added_parallel_units
-                                    .into_iter()
-                                    .sorted()
-                                    .dedup()
-                                    .collect(),
-                                removed_parallel_units: removed_parallel_units
-                                    .into_iter()
-                                    .sorted()
-                                    .dedup()
-                                    .collect(),
+                                added_parallel_units,
+                                removed_parallel_units,
                             },
                         )
                     })
                     .collect(),
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream,
+                },
             )
             .await?;
 

@@ -83,7 +83,7 @@ impl SstableObjectIdManager {
                 return Ok(new_id);
             }
             // 2. Otherwise either fetch new ids, or wait for previous fetch if any.
-            let waiter = {
+            let waiter: Option<oneshot::Receiver<bool>> = {
                 let mut guard = self.wait_queue.lock();
                 if let Some(new_id) = f(self.available_sst_object_ids.lock().deref_mut()) {
                     return Ok(new_id);

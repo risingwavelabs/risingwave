@@ -1,5 +1,5 @@
 statement ok
-create table t_kafka ( 
+create table t_kafka (
     id integer primary key,
     v_varchar varchar,
     v_smallint smallint,
@@ -8,6 +8,24 @@ create table t_kafka (
     v_float real,
     v_double double precision,
     v_timestamp timestamp
+);
+
+statement error failed to fetch metadata from kafka
+create sink sink_non_exist_broker from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'make no sense',
+    topic = 'test-rw-sink-append-only',
+    force_append_only = 'true',
+    type = 'append-only',
+);
+
+statement error topic invalid_topic not found
+create sink sink_non_exist_topic from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'invalid_topic',
+    force_append_only = 'true',
+    type = 'append-only',
 );
 
 # Test create sink with connection

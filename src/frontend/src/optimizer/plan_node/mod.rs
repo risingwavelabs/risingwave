@@ -37,7 +37,6 @@ use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
@@ -219,8 +218,8 @@ impl RewriteExprsRecursive for PlanRef {
     }
 }
 
-impl ColPrunable for PlanRef {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+impl PlanRef {
+    fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
             // column pruning.
@@ -306,10 +305,8 @@ impl ColPrunable for PlanRef {
             dyn_t.prune_col(required_cols, ctx)
         }
     }
-}
 
-impl PredicatePushdown for PlanRef {
-    fn predicate_pushdown(
+    fn predicate_pushdown_inner(
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
@@ -331,6 +328,12 @@ impl PredicatePushdown for PlanRef {
                     .take_predicate(self.id())
                     .expect("must have predicate")
                     .into_iter()
+                    .map(|mut c| Condition {
+                        conjunctions: c
+                            .conjunctions
+                            .drain_filter(|e| e.count_nows() == 0 && e.is_pure())
+                            .collect(),
+                    })
                     .reduce(|a, b| a.or(b))
                     .unwrap();
                 let input: PlanRef = logical_share.input();
@@ -343,6 +346,42 @@ impl PredicatePushdown for PlanRef {
             let dyn_t = self.deref();
             dyn_t.predicate_pushdown(predicate, ctx)
         }
+    }
+}
+
+impl ColPrunable for PlanRef {
+    #[allow(clippy::let_and_return)]
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let res = self.prune_col_inner(required_cols, ctx);
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+            "column pruning",
+            &LogicalProject::with_out_col_idx(self.clone(), required_cols.iter().cloned()).into(),
+            &res,
+        );
+        res
+    }
+}
+
+impl PredicatePushdown for PlanRef {
+    #[allow(clippy::let_and_return)]
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        #[cfg(debug_assertions)]
+        let predicate_clone = predicate.clone();
+
+        let res = self.predicate_pushdown_inner(predicate, ctx);
+
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+            "predicate push down",
+            &LogicalFilter::new(self.clone(), predicate_clone).into(),
+            &res,
+        );
+        res
     }
 }
 
@@ -748,7 +787,7 @@ pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
-pub use stream_sort::StreamSort;
+pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_table_scan::StreamTableScan;
@@ -858,7 +897,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
         }
     };
@@ -965,7 +1004,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
         }
     };

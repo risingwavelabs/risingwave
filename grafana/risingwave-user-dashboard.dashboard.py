@@ -296,6 +296,10 @@ def section_memory(outer_panels):
                             f"sum({metric('uploading_memory_size')}) by (job,instance)",
                             "storage write buffer - {{job}} @ {{instance}}",
                         ),
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            "materialized_view {{materialized_view_id}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_ops(
@@ -387,7 +391,7 @@ def section_memory(outer_panels):
                             f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-                        
+
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{instance}}",

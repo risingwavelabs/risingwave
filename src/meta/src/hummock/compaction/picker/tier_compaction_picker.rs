@@ -20,6 +20,7 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::picker::min_overlap_compaction_picker::MAX_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -83,11 +84,16 @@ impl TierCompactionPicker {
 
             let mut compaction_bytes = level.total_file_size;
             let mut compact_file_count = level.table_infos.len() as u64;
+            // Limit sstable file count to avoid using too much memory.
+            let overlapping_max_compact_file_numer = std::cmp::min(
+                self.config.level0_max_compact_file_number,
+                MAX_LEVEL_COUNT as u64,
+            );
             let mut waiting_enough_files = {
                 if compaction_bytes > max_compaction_bytes {
                     false
                 } else {
-                    compact_file_count <= self.config.level0_max_compact_file_number
+                    compact_file_count <= overlapping_max_compact_file_numer
                 }
             };
 
@@ -97,7 +103,7 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if compact_file_count > self.config.level0_max_compact_file_number {
+                if compact_file_count > overlapping_max_compact_file_numer {
                     waiting_enough_files = false;
                     break;
                 }

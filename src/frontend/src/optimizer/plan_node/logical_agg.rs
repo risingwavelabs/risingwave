@@ -283,18 +283,8 @@ impl LogicalAggBuilder {
     fn new(group_by: GroupBy, input_schema_len: usize) -> Result<Self> {
         let mut input_proj_builder = ProjectBuilder::default();
 
-        let (group_key, grouping_sets) = match group_by {
-            GroupBy::GroupKey(group_key) => {
-                let group_key = group_key
-                    .into_iter()
-                    .map(|expr| input_proj_builder.add_expr(&expr))
-                    .try_collect()
-                    .map_err(|err| {
-                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                    })?;
-                (group_key, vec![])
-            }
-            GroupBy::GroupingSets(grouping_sets) => {
+        let mut gen_group_key_and_grouping_sets =
+            |grouping_sets: Vec<Vec<ExprImpl>>| -> Result<(IndexSet, Vec<IndexSet>)> {
                 let grouping_sets: Vec<IndexSet> = grouping_sets
                     .into_iter()
                     .map(|set| {
@@ -317,7 +307,42 @@ impl LogicalAggBuilder {
                         acc.union(&x.to_bitset()).collect()
                     });
 
-                (IndexSet::from_iter(group_key.ones()), grouping_sets)
+                Ok((IndexSet::from_iter(group_key.ones()), grouping_sets))
+            };
+
+        let (group_key, grouping_sets) = match group_by {
+            GroupBy::GroupKey(group_key) => {
+                let group_key = group_key
+                    .into_iter()
+                    .map(|expr| input_proj_builder.add_expr(&expr))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+                    })?;
+                (group_key, vec![])
+            }
+            GroupBy::GroupingSets(grouping_sets) => gen_group_key_and_grouping_sets(grouping_sets)?,
+            GroupBy::Rollup(rollup) => {
+                // Convert rollup to grouping sets.
+                let grouping_sets = (0..=rollup.len())
+                    .map(|n| {
+                        rollup
+                            .iter()
+                            .take(n)
+                            .flat_map(|x| x.iter().cloned())
+                            .collect_vec()
+                    })
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
+            }
+            GroupBy::Cube(cube) => {
+                // Convert cube to grouping sets.
+                let grouping_sets = cube
+                    .into_iter()
+                    .powerset()
+                    .map(|x| x.into_iter().flatten().collect_vec())
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
             }
         };
 
@@ -422,6 +447,26 @@ impl LogicalAggBuilder {
         // subquery/agg/table are rejected in `bind_agg`.
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
+
+        if matches!(agg_kind, AggKind::Grouping) {
+            if self.grouping_sets.is_empty() {
+                return Err(ErrorCode::NotSupported(
+                    "GROUPING must be used in a query with grouping sets".into(),
+                    "try to use grouping sets instead".into(),
+                ));
+            }
+            if inputs.len() >= 32 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUPING must have fewer than 32 arguments".into(),
+                ));
+            }
+            if inputs.iter().any(|x| self.try_as_group_expr(x).is_none()) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "arguments to GROUPING must be grouping expressions of the associated query level"
+                        .into(),
+                ));
+            }
+        }
 
         let inputs: Vec<_> = inputs
             .iter()
@@ -647,7 +692,6 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-
             _ => Ok(self
                 .push_agg_call(PlanAggCall {
                     agg_kind,
@@ -1431,7 +1475,7 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let values = LogicalValues::new(
+        let values: LogicalValues = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields.clone(),
@@ -1457,12 +1501,10 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0].into());
-        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

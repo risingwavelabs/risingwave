@@ -186,6 +186,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
                 .iter()
                 .all(|t| *t != DataTypeName::Timestamptz)
                 && !FUNC_BAN_LIST.contains(&func.func)
+                && !func.deprecated // deprecated functions are not accepted by frontend
         })
         .filter_map(|func| func.try_into().ok())
         .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));
@@ -206,15 +207,17 @@ pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::ne
 
 /// Table which maps aggregate functions' return types to possible function signatures.
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
-pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
-    LazyLock::new(|| {
+pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> = LazyLock::new(
+    || {
         let mut funcs = HashMap::<DataType, Vec<AggFuncSig>>::new();
         agg_func_sigs()
             .filter(|func| {
                 func.inputs_type
                     .iter()
                     .all(|t| *t != DataTypeName::Timestamptz)
+                    // Ignored functions
                     && ![
+                        AggKind::Sum0, // Used internally
                         AggKind::BitAnd,
                         AggKind::BitOr,
                         AggKind::BoolAnd,
@@ -224,13 +227,24 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
                         AggKind::Mode,
                     ]
                     .contains(&func.func)
+                    // Exclude 2 phase agg global sum.
+                    // Sum(Int64) -> Int64.
+                    // Otherwise it conflicts with normal aggregation:
+                    // Sum(Int64) -> Decimal.
+                    // And sqlsmith will generate expressions with wrong types.
+                    && if func.func == AggKind::Sum {
+                       !(func.inputs_type[0] == DataTypeName::Int64 && func.ret_type == DataTypeName::Int64)
+                    } else {
+                       true
+                    }
             })
             .filter_map(|func| func.try_into().ok())
             .for_each(|func: AggFuncSig| {
                 funcs.entry(func.ret_type.clone()).or_default().push(func)
             });
         funcs
-    });
+    },
+);
 
 /// Build a cast map from return types to viable cast-signatures.
 /// NOTE: We avoid cast from varchar to other datatypes apart from itself.
