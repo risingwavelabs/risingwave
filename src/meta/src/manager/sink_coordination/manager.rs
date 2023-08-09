@@ -148,6 +148,7 @@ impl SinkCoordinatorManager {
         if rx.await.is_err() {
             error!("fail to wait for resetting sink manager worker");
         }
+        info!("successfully stop coordinator: {:?}", sink_id);
     }
 
     pub(crate) async fn reset(&self) {
