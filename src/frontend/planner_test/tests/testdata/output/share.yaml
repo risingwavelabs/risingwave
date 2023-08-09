@@ -346,7 +346,7 @@
     └─StreamHashJoin { type: Inner, predicate: id = id, output: [id, id, date_time, date_time, _row_id, _row_id] }
       ├─StreamExchange { dist: HashShard(id) }
       │ └─StreamProject { exprs: [id, date_time, _row_id] }
-      │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [id, date_time, $expr1, _row_id] }
+      │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [id, date_time, $expr1, _row_id], cleaned_by_watermark: true }
       │     ├─StreamProject { exprs: [id, date_time, AtTimeZone(date_time, 'UTC':Varchar) as $expr1, _row_id] }
       │     │ └─StreamFilter { predicate: (initial_bid = 1:Int32) }
       │     │   └─StreamShare { id: 4 }

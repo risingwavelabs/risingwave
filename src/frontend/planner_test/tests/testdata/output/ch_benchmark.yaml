@@ -2026,7 +2026,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [s_i_id, ordercount], stream_key: [s_i_id], pk_columns: [ordercount, s_i_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt)] }
-      └─StreamDynamicFilter { predicate: ($expr2 > $expr3), output: [stock.s_i_id, sum(stock.s_order_cnt), $expr2] }
+      └─StreamDynamicFilter { predicate: ($expr2 > $expr3), output: [stock.s_i_id, sum(stock.s_order_cnt), $expr2], cleaned_by_watermark: false }
         ├─StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt), sum(stock.s_order_cnt)::Decimal as $expr2] }
         │ └─StreamHashAgg { group_key: [stock.s_i_id], aggs: [sum(stock.s_order_cnt), count] }
         │   └─StreamExchange { dist: HashShard(stock.s_i_id) }
@@ -2066,7 +2066,7 @@
     StreamMaterialize { columns: [s_i_id, ordercount], stream_key: [s_i_id], pk_columns: [ordercount, s_i_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt)] }
-        └── StreamDynamicFilter { predicate: ($expr2 > $expr3), output: [stock.s_i_id, sum(stock.s_order_cnt), $expr2] }
+        └── StreamDynamicFilter { predicate: ($expr2 > $expr3), output: [stock.s_i_id, sum(stock.s_order_cnt), $expr2], cleaned_by_watermark: false }
             ├── left table: 0
             ├── right table: 1
             ├── StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt), sum(stock.s_order_cnt)::Decimal as $expr2] }
@@ -3585,7 +3585,7 @@
       └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
         └─StreamExchange { dist: HashShard($expr2) }
           └─StreamProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
-            └─StreamDynamicFilter { predicate: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
+            └─StreamDynamicFilter { predicate: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id], cleaned_by_watermark: false }
               ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
               │ ├─StreamExchange { dist: HashShard(customer.c_id, customer.c_w_id, customer.c_d_id) }
               │ │ └─StreamProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance] }
