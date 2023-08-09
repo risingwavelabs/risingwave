@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 f() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
 }
