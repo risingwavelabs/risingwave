@@ -50,7 +50,7 @@
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
         ├─StreamFilter { predicate: (event_type = 2:Int32) }
         │ └─StreamRowIdGen { row_id_index: 5 }
-        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -71,7 +71,7 @@
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
         ├─StreamFilter { predicate: (event_type = 2:Int32) }
         │ └─StreamRowIdGen { row_id_index: 5 }
-        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -83,7 +83,7 @@
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 0, right table: 1 }
             ├── StreamFilter { predicate: (event_type = 2:Int32) }
             │   └── StreamRowIdGen { row_id_index: 5 }
-            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
             └── StreamExchange Broadcast from 1
 
@@ -116,7 +116,7 @@
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
         ├─StreamFilter { predicate: (((((Field(bid, 0:Int32) = 1007:Int32) OR (Field(bid, 0:Int32) = 1020:Int32)) OR (Field(bid, 0:Int32) = 2001:Int32)) OR (Field(bid, 0:Int32) = 2019:Int32)) OR (Field(bid, 0:Int32) = 2087:Int32)) AND (event_type = 2:Int32) }
         │ └─StreamRowIdGen { row_id_index: 5 }
-        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -128,7 +128,7 @@
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 0, right table: 1 }
             ├── StreamFilter { predicate: (((((Field(bid, 0:Int32) = 1007:Int32) OR (Field(bid, 0:Int32) = 1020:Int32)) OR (Field(bid, 0:Int32) = 2001:Int32)) OR (Field(bid, 0:Int32) = 2019:Int32)) OR (Field(bid, 0:Int32) = 2087:Int32)) AND (event_type = 2:Int32) }
             │   └── StreamRowIdGen { row_id_index: 5 }
-            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
             └── StreamExchange Broadcast from 1
 
@@ -174,20 +174,20 @@
                     │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 5:Int32) as $expr3, Field(auction, 6:Int32) as $expr4, Field(auction, 8:Int32) as $expr5, _row_id] }
                     │   └─StreamFilter { predicate: (event_type = 1:Int32) }
                     │     └─StreamShare { id: 5 }
-                    │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                    │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                     │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                     │           └─StreamRowIdGen { row_id_index: 5 }
-                    │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                    │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                     │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                     └─StreamExchange { dist: HashShard($expr7) }
                       └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
                         └─StreamDynamicFilter { predicate: ($expr1 > $expr6), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                           ├─StreamFilter { predicate: (event_type = 2:Int32) }
                           │ └─StreamShare { id: 5 }
-                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                           │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                           │       └─StreamRowIdGen { row_id_index: 5 }
-                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                           │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
                             └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
@@ -225,10 +225,10 @@
         └── StreamExchange NoShuffle from 3
 
     Fragment 3
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 7 }
 
     Fragment 4
@@ -332,7 +332,7 @@
           │           └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
           │             ├─StreamFilter { predicate: IsNotNull(Field(bid, 5:Int32)) AND (event_type = 2:Int32) }
           │             │ └─StreamRowIdGen { row_id_index: 5 }
-          │             │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+          │             │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           │             └─StreamExchange { dist: Broadcast }
           │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -348,7 +348,7 @@
                           └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
                             ├─StreamFilter { predicate: IsNotNull(Field(bid, 5:Int32)) AND (event_type = 2:Int32) }
                             │ └─StreamRowIdGen { row_id_index: 5 }
-                            │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                            │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
                               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -379,7 +379,7 @@
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 5, right table: 6 }
             ├── StreamFilter { predicate: IsNotNull(Field(bid, 5:Int32)) AND (event_type = 2:Int32) }
             │   └── StreamRowIdGen { row_id_index: 5 }
-            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 7 }
             └── StreamExchange Broadcast from 4
 
@@ -461,20 +461,20 @@
                       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 5:Int32) as $expr3, Field(auction, 6:Int32) as $expr4, Field(auction, 7:Int32) as $expr5, _row_id] }
                       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
                       │     └─StreamShare { id: 5 }
-                      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                       │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                       │           └─StreamRowIdGen { row_id_index: 5 }
-                      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                       └─StreamExchange { dist: HashShard($expr7) }
                         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
                           └─StreamDynamicFilter { predicate: ($expr1 > $expr6), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                             ├─StreamFilter { predicate: (event_type = 2:Int32) }
                             │ └─StreamShare { id: 5 }
-                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                             │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                             │       └─StreamRowIdGen { row_id_index: 5 }
-                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
                               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
@@ -505,10 +505,10 @@
         └── StreamExchange NoShuffle from 4
 
     Fragment 4
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 6 }
 
     Fragment 5
@@ -578,7 +578,7 @@
           │     └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
           │       ├─StreamFilter { predicate: (event_type = 2:Int32) }
           │       │ └─StreamRowIdGen { row_id_index: 5 }
-          │       │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+          │       │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
           │       │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
           │       └─StreamExchange { dist: Broadcast }
           │         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -593,7 +593,7 @@
                         └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
                           ├─StreamFilter { predicate: (event_type = 2:Int32) }
                           │ └─StreamRowIdGen { row_id_index: 5 }
-                          │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                          │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                           │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
                             └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -617,7 +617,7 @@
     └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 4, right table: 5 }
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
         │   └── StreamRowIdGen { row_id_index: 5 }
-        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 6 }
         └── StreamExchange Broadcast from 3
 
@@ -709,7 +709,7 @@
       │           └─StreamProject { exprs: [event_type, person, auction, _row_id] }
       │             └─StreamFilter { predicate: ((event_type = 0:Int32) OR (event_type = 1:Int32)) }
       │               └─StreamRowIdGen { row_id_index: 5 }
-      │                 └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │                 └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │                   └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamAppendOnlyDedup { dedup_cols: [$expr6, $expr7, $expr8] }
         └─StreamExchange { dist: HashShard($expr6, $expr7, $expr8) }
@@ -719,7 +719,7 @@
                 └─StreamProject { exprs: [event_type, person, auction, _row_id] }
                   └─StreamFilter { predicate: ((event_type = 0:Int32) OR (event_type = 1:Int32)) }
                     └─StreamRowIdGen { row_id_index: 5 }
-                      └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                      └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                         └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
@@ -743,7 +743,7 @@
     StreamProject { exprs: [event_type, person, auction, _row_id] }
     └── StreamFilter { predicate: ((event_type = 0:Int32) OR (event_type = 1:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 5 }
 
     Fragment 4
@@ -791,20 +791,20 @@
             │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, Field(auction, 5:Int32) as $expr7, Field(auction, 6:Int32) as $expr8, Field(auction, 7:Int32) as $expr9, Field(auction, 8:Int32) as $expr10, _row_id] }
             │   └─StreamFilter { predicate: (event_type = 1:Int32) }
             │     └─StreamShare { id: 5 }
-            │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+            │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
             │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
             │           └─StreamRowIdGen { row_id_index: 5 }
-            │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
             └─StreamExchange { dist: HashShard($expr12) }
               └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr12, Field(bid, 1:Int32) as $expr13, Field(bid, 2:Int32) as $expr14, Field(bid, 5:Int32) as $expr15, _row_id] }
                 └─StreamDynamicFilter { predicate: ($expr1 > $expr11), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                   ├─StreamFilter { predicate: (event_type = 2:Int32) }
                   │ └─StreamShare { id: 5 }
-                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                   │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                   │       └─StreamRowIdGen { row_id_index: 5 }
-                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
                     └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr11], output_watermarks: [$expr11] }
@@ -826,10 +826,10 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 5 }
 
     Fragment 3
@@ -943,7 +943,7 @@
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
         ├─StreamFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
         │ └─StreamRowIdGen { row_id_index: 5 }
-        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -955,7 +955,7 @@
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 0, right table: 1 }
             ├── StreamFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
             │   └── StreamRowIdGen { row_id_index: 5 }
-            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
             └── StreamExchange Broadcast from 1
 
@@ -989,7 +989,7 @@
           └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
             ├─StreamFilter { predicate: (event_type = 2:Int32) }
             │ └─StreamRowIdGen { row_id_index: 5 }
-            │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
             └─StreamExchange { dist: Broadcast }
               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -1006,7 +1006,7 @@
     └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 1, right table: 2 }
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
         │   └── StreamRowIdGen { row_id_index: 5 }
-        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 3 }
         └── StreamExchange Broadcast from 2
 
@@ -1043,7 +1043,7 @@
             └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
               ├─StreamFilter { predicate: (event_type = 2:Int32) }
               │ └─StreamRowIdGen { row_id_index: 5 }
-              │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+              │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
               │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
               └─StreamExchange { dist: Broadcast }
                 └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -1063,7 +1063,7 @@
     └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 1, right table: 2 }
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
         │   └── StreamRowIdGen { row_id_index: 5 }
-        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 3 }
         └── StreamExchange Broadcast from 3
 
@@ -1099,7 +1099,7 @@
             └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
               ├─StreamFilter { predicate: (event_type = 2:Int32) }
               │ └─StreamRowIdGen { row_id_index: 5 }
-              │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+              │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
               │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
               └─StreamExchange { dist: Broadcast }
                 └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -1117,7 +1117,7 @@
     └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 2, right table: 3 }
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
         │   └── StreamRowIdGen { row_id_index: 5 }
-        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 4 }
         └── StreamExchange Broadcast from 2
 
@@ -1157,10 +1157,10 @@
       │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
       │     ├─StreamFilter { predicate: (event_type = 2:Int32) }
       │     │ └─StreamShare { id: 5 }
-      │     │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+      │     │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
       │     │     └─StreamFilter { predicate: ((event_type = 2:Int32) OR ((Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32))) }
       │     │       └─StreamRowIdGen { row_id_index: 5 }
-      │     │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │     │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │     │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -1169,10 +1169,10 @@
         └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr9, Field(auction, 1:Int32) as $expr10, Field(auction, 2:Int32) as $expr11, Field(auction, 3:Int32) as $expr12, Field(auction, 4:Int32) as $expr13, Field(auction, 5:Int32) as $expr14, Field(auction, 6:Int32) as $expr15, Field(auction, 7:Int32) as $expr16, Field(auction, 8:Int32) as $expr17, _row_id] }
           └─StreamFilter { predicate: (Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32) }
             └─StreamShare { id: 5 }
-              └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+              └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                 └─StreamFilter { predicate: ((event_type = 2:Int32) OR ((Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32))) }
                   └─StreamRowIdGen { row_id_index: 5 }
-                    └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                    └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                       └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
@@ -1190,10 +1190,10 @@
         └── StreamExchange Broadcast from 3
 
     Fragment 2
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 2:Int32) OR ((Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32))) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 6 }
 
     Fragment 3
@@ -1245,7 +1245,7 @@
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
         ├─StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(Field(bid, 3:Int32)), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) AND (event_type = 2:Int32) }
         │ └─StreamRowIdGen { row_id_index: 5 }
-        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -1257,7 +1257,7 @@
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 0, right table: 1 }
             ├── StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(Field(bid, 3:Int32)), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) AND (event_type = 2:Int32) }
             │   └── StreamRowIdGen { row_id_index: 5 }
-            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
             └── StreamExchange Broadcast from 1
 
@@ -1290,7 +1290,7 @@
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] }
         ├─StreamFilter { predicate: (event_type = 2:Int32) }
         │ └─StreamRowIdGen { row_id_index: 5 }
-        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+        │   └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
@@ -1302,7 +1302,7 @@
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, person, auction, bid, $expr1, _row_id] } { left table: 0, right table: 1 }
             ├── StreamFilter { predicate: (event_type = 2:Int32) }
             │   └── StreamRowIdGen { row_id_index: 5 }
-            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            │       └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │           └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
             └── StreamExchange Broadcast from 1
 
@@ -1347,10 +1347,10 @@
       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
       │     └─StreamShare { id: 5 }
-      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
       │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
       │           └─StreamRowIdGen { row_id_index: 5 }
-      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamProject { exprs: [$expr5, max($expr6)] }
         └─StreamHashAgg { group_key: [$expr5], aggs: [max($expr6), count] }
@@ -1359,10 +1359,10 @@
               └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                 ├─StreamFilter { predicate: (event_type = 2:Int32) }
                 │ └─StreamShare { id: 5 }
-                │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                 │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                 │       └─StreamRowIdGen { row_id_index: 5 }
-                │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                 └─StreamExchange { dist: Broadcast }
                   └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
@@ -1383,10 +1383,10 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 4 }
 
     Fragment 3
@@ -1455,10 +1455,10 @@
       │     │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
       │     │   └─StreamFilter { predicate: (event_type = 1:Int32) }
       │     │     └─StreamShare { id: 5 }
-      │     │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+      │     │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
       │     │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
       │     │           └─StreamRowIdGen { row_id_index: 5 }
-      │     │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │     │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │     │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       │     └─StreamExchange { dist: HashShard($expr5) }
       │       └─StreamShare { id: 14 }
@@ -1466,10 +1466,10 @@
       │           └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
       │             ├─StreamFilter { predicate: (event_type = 2:Int32) }
       │             │ └─StreamShare { id: 5 }
-      │             │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+      │             │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
       │             │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
       │             │       └─StreamRowIdGen { row_id_index: 5 }
-      │             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       │             └─StreamExchange { dist: Broadcast }
       │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
@@ -1486,10 +1486,10 @@
                         └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                           ├─StreamFilter { predicate: (event_type = 2:Int32) }
                           │ └─StreamShare { id: 5 }
-                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                           │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                           │       └─StreamRowIdGen { row_id_index: 5 }
-                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                           │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
                             └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
@@ -1516,10 +1516,10 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 7 }
 
     Fragment 3
@@ -1612,10 +1612,10 @@
       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
       │     └─StreamShare { id: 5 }
-      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
       │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
       │           └─StreamRowIdGen { row_id_index: 5 }
-      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamProject { exprs: [$expr5] }
         └─StreamFilter { predicate: (count >= 20:Int32) }
@@ -1625,10 +1625,10 @@
                 └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                   ├─StreamFilter { predicate: (event_type = 2:Int32) }
                   │ └─StreamShare { id: 5 }
-                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                   │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                   │       └─StreamRowIdGen { row_id_index: 5 }
-                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
                     └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
@@ -1650,10 +1650,10 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 4 }
 
     Fragment 3
@@ -1722,10 +1722,10 @@
       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
       │     └─StreamShare { id: 5 }
-      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
       │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
       │           └─StreamRowIdGen { row_id_index: 5 }
-      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamProject { exprs: [$expr5] }
         └─StreamFilter { predicate: (count < 20:Int32) }
@@ -1735,10 +1735,10 @@
                 └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                   ├─StreamFilter { predicate: (event_type = 2:Int32) }
                   │ └─StreamShare { id: 5 }
-                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                   │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                   │       └─StreamRowIdGen { row_id_index: 5 }
-                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
                     └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
@@ -1760,10 +1760,10 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 4 }
 
     Fragment 3
@@ -1838,20 +1838,20 @@
                   │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
                   │   └─StreamFilter { predicate: (event_type = 1:Int32) }
                   │     └─StreamShare { id: 5 }
-                  │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                  │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                   │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                   │           └─StreamRowIdGen { row_id_index: 5 }
-                  │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                  │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: HashShard($expr5) }
                     └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
                       └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                         ├─StreamFilter { predicate: (event_type = 2:Int32) }
                         │ └─StreamShare { id: 5 }
-                        │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                        │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                         │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                         │       └─StreamRowIdGen { row_id_index: 5 }
-                        │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                        │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                         │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                         └─StreamExchange { dist: Broadcast }
                           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
@@ -1882,10 +1882,10 @@
         └── StreamExchange NoShuffle from 3
 
     Fragment 3
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 7 }
 
     Fragment 4
@@ -1967,20 +1967,20 @@
                       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 5:Int32) as $expr3, Field(auction, 6:Int32) as $expr4, _row_id] }
                       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
                       │     └─StreamShare { id: 5 }
-                      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                      │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                       │         └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                       │           └─StreamRowIdGen { row_id_index: 5 }
-                      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                      │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                       └─StreamExchange { dist: HashShard($expr6) }
                         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, Field(bid, 2:Int32) as $expr7, Field(bid, 5:Int32) as $expr8, _row_id] }
                           └─StreamDynamicFilter { predicate: ($expr1 > $expr5), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id] }
                             ├─StreamFilter { predicate: (event_type = 2:Int32) }
                             │ └─StreamShare { id: 5 }
-                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
                             │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                             │       └─StreamRowIdGen { row_id_index: 5 }
-                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
                               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
@@ -2022,10 +2022,10 @@
         └── StreamExchange NoShuffle from 3
 
     Fragment 3
-    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id] }
+    StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id] }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 10 }
 
     Fragment 4

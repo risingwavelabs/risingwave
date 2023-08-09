@@ -28,6 +28,7 @@ pub use opendal_engine::*;
 
 pub mod s3;
 use await_tree::InstrumentAwait;
+use futures::stream::BoxStream;
 pub use s3::*;
 
 pub mod error;
@@ -135,7 +136,7 @@ pub trait ObjectStore: Send + Sync {
         MonitoredObjectStore::new(self, metrics)
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
 }
@@ -248,7 +249,7 @@ impl ObjectStoreImpl {
         object_store_impl_method_body_slice!(self, delete_objects, dispatch_async, paths)
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         object_store_impl_method_body!(self, list, dispatch_async, prefix)
     }
 
@@ -635,12 +636,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .read(path, block_loc)
                 .verbose_instrument_await("object_store_read")
                 .await
-                .map_err(|err| {
-                    ObjectError::internal(format!(
-                        "read {:?} in block {:?} failed, error: {:?}",
-                        path, block_loc, err
-                    ))
-                })
         };
         let res = match self.read_timeout.as_ref() {
             None => future.await,
@@ -811,7 +806,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = "list";
         let _timer = self
             .object_store_metrics
@@ -991,3 +986,5 @@ pub async fn parse_remote_object_store(
 ) -> ObjectStoreImpl {
     parse_remote_object_store_with_config(url, metrics, ident, None).await
 }
+
+pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
