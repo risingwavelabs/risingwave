@@ -126,7 +126,12 @@ pub use grouping_sets_to_expand_rule::*;
 mod apply_project_set_transpose_rule;
 pub use apply_project_set_transpose_rule::*;
 mod cross_join_eliminate_rule;
-pub use cross_join_eliminate_rule::CrossJoinEliminateRule;
+pub use cross_join_eliminate_rule::*;
+mod table_function_to_project_set_rule;
+pub use cross_join_eliminate_rule::*;
+pub use table_function_to_project_set_rule::*;
+mod apply_topn_transpose_rule;
+pub use apply_topn_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -181,6 +186,8 @@ macro_rules! for_all_rules {
             , { ProjectJoinSeparateRule }
             , { GroupingSetsToExpandRule }
             , { CrossJoinEliminateRule }
+            , { ApplyTopNTransposeRule }
+            , { TableFunctionToProjectSetRule }
         }
     };
 }

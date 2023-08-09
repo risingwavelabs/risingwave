@@ -18,6 +18,8 @@ use std::{fmt, usize};
 
 use bytes::Bytes;
 use itertools::Itertools;
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
 use risingwave_pb::data::PbDataChunk;
 
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray, Vis};
@@ -692,6 +694,7 @@ pub trait DataChunkTestExt {
         chunk_size: usize,
         data_types: &[DataType],
         string_properties: &VarcharProperty,
+        visibility_ratio: f64,
     ) -> Self;
 
     /// Generate data chunks when supplied with `chunk_size` and column data types.
@@ -700,6 +703,7 @@ pub trait DataChunkTestExt {
         chunk_size: usize,
         data_types: &[DataType],
         string_properties: &VarcharProperty,
+        visibility_ratio: f64,
     ) -> Vec<Self>
     where
         Self: Sized;
@@ -826,33 +830,58 @@ impl DataChunkTestExt for DataChunk {
         chunk_size: usize,
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
+        visibility_percent: f64,
     ) -> Self {
+        let vis = if visibility_percent == 0.0 {
+            Bitmap::zeros(chunk_size)
+        } else if visibility_percent == 1.0 {
+            Bitmap::ones(chunk_size)
+        } else {
+            let mut rng = SmallRng::from_seed([0; 32]);
+            let mut vis_builder = BitmapBuilder::with_capacity(chunk_size);
+            for _i in 0..chunk_size {
+                vis_builder.append(rng.gen_bool(visibility_percent));
+            }
+            vis_builder.finish()
+        };
+
         let mut columns = Vec::new();
         // Generate columns of this chunk.
         for data_type in data_types {
             let mut array_builder = data_type.create_array_builder(chunk_size);
             for j in 0..chunk_size {
                 let offset = ((chunk_offset + 1) * (j + 1)) as u64;
-                if *data_type == DataType::Varchar {
-                    let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
-                        .generate_datum(offset);
-                    array_builder.append(&datum);
-                } else {
-                    let mut data_gen = FieldGeneratorImpl::with_number_random(
-                        data_type.clone(),
-                        None,
-                        None,
-                        Self::SEED,
-                    )
-                    .unwrap();
-                    let datum = data_gen.generate_datum(offset);
-                    array_builder.append(datum);
+                match data_type {
+                    DataType::Varchar => {
+                        let datum =
+                            FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
+                                .generate_datum(offset);
+                        array_builder.append(&datum);
+                    }
+                    DataType::Timestamp => {
+                        let datum =
+                            FieldGeneratorImpl::with_timestamp(None, None, None, Self::SEED)
+                                .expect("create timestamp generator should succeed")
+                                .generate_datum(offset);
+                        array_builder.append(datum);
+                    }
+                    _ if data_type.is_numeric() => {
+                        let mut data_gen = FieldGeneratorImpl::with_number_random(
+                            data_type.clone(),
+                            None,
+                            None,
+                            Self::SEED,
+                        )
+                        .unwrap();
+                        let datum = data_gen.generate_datum(offset);
+                        array_builder.append(datum);
+                    }
+                    _ => todo!("unsupported type: {data_type:?}"),
                 }
-                // FIXME(kwannoel): This misses the case where it is neither Varchar or numeric.
             }
             columns.push(array_builder.finish().into());
         }
-        DataChunk::new(columns, Bitmap::ones(chunk_size))
+        DataChunk::new(columns, vis)
     }
 
     fn gen_data_chunks(
@@ -860,9 +889,18 @@ impl DataChunkTestExt for DataChunk {
         chunk_size: usize,
         data_types: &[DataType],
         varchar_properties: &VarcharProperty,
+        visibility_percent: f64,
     ) -> Vec<Self> {
         (0..num_of_chunks)
-            .map(|i| Self::gen_data_chunk(i, chunk_size, data_types, varchar_properties))
+            .map(|i| {
+                Self::gen_data_chunk(
+                    i,
+                    chunk_size,
+                    data_types,
+                    varchar_properties,
+                    visibility_percent,
+                )
+            })
             .collect()
     }
 }
