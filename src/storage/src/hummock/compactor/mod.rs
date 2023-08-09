@@ -104,7 +104,7 @@ impl Compactor {
         let context = compactor_context.clone();
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
-        let tracker_id: crate::hummock::TrackerId = match context
+        let tracker_id = match context
             .sstable_object_id_manager
             .add_watermark_object_id(None)
             .await
