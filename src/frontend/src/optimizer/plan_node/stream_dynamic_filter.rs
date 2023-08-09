@@ -21,7 +21,7 @@ use super::generic::DynamicFilter;
 use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -58,7 +58,8 @@ impl StreamDynamicFilter {
     }
 
     /// 1. Check the comparator.
-    /// 2. RHS input has to be temporal filter.
+    /// 2. RHS input should only have 1 columns, which is the watermark column.
+    ///    We check that the watermark should be set.
     pub fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
         let expr = core.predicate();
         if let Some(ExprImpl::FunctionCall(function_call)) = expr.as_expr_unless_true() {
