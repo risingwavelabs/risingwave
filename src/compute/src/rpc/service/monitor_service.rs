@@ -105,11 +105,7 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-<<<<<<< HEAD
     // #[cfg(target_os = "linux")]
-=======
-    #[cfg(target_os = "linux")]
->>>>>>> ce2a0c872793c1baadc813728fc93813f48f4b9f
     #[cfg_attr(coverage, no_coverage)]
     async fn heap_profiling(
         &self,
@@ -152,7 +148,6 @@ impl MonitorService for MonitorServiceImpl {
         response
     }
 
-<<<<<<< HEAD
     // #[cfg(not(target_os = "linux"))]
     // #[cfg_attr(coverage, no_coverage)]
     // async fn heap_profiling(
@@ -163,18 +158,6 @@ impl MonitorService for MonitorServiceImpl {
     //         "heap profiling is only implemented on Linux",
     //     ))
     // }
-=======
-    #[cfg(not(target_os = "linux"))]
-    #[cfg_attr(coverage, no_coverage)]
-    async fn heap_profiling(
-        &self,
-        _request: Request<HeapProfilingRequest>,
-    ) -> Result<Response<HeapProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "heap profiling is only implemented on Linux",
-        ))
-    }
->>>>>>> ce2a0c872793c1baadc813728fc93813f48f4b9f
 }
 
 pub use grpc_middleware::*;

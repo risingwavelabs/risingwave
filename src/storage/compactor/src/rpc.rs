@@ -82,13 +82,4 @@ impl MonitorService for MonitorServiceImpl {
             "Heap profiling unimplemented in compactor",
         ))
     }
-
-    async fn heap_profiling(
-        &self,
-        _request: Request<HeapProfilingRequest>,
-    ) -> Result<Response<HeapProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "Heap profiling unimplemented in compactor",
-        ))
-    }
 }
