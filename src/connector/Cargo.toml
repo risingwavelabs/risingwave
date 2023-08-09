@@ -21,6 +21,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0de
     "bzip",
     "xz",
 ] }
+arrow-array = "44.0.0"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 aws-config = { workspace = true }
@@ -45,7 +46,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 glob = "0.3"
 google-cloud-pubsub = "0.17"
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "671c001d2c61fa3edb59bbfb6a73919328c1777a" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "26b7a0c99c690b1e8ed57a5fc5a29c8ef0caacb3" }
 itertools = "0.11"
 maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }

@@ -71,10 +71,8 @@ enum Commands {
     Trace,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
-    Profile {
-        #[clap(short, long = "sleep")]
-        sleep: u64,
-    },
+    #[clap(subcommand)]
+    Profile(ProfileCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -416,6 +414,22 @@ enum MetaCommands {
     },
 }
 
+#[derive(Subcommand, Clone, Debug)]
+pub enum ProfileCommands {
+    /// CPU profile
+    Cpu {
+        /// The time to active profiling for (in seconds)
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
+    /// Heap profile
+    Heap {
+        /// The output directory of the dumped file
+        #[clap(long = "dir")]
+        dir: String,
+    },
+}
+
 pub async fn start(opts: CliOpts) -> Result<()> {
     let context = CtlContext::default();
     let result = start_impl(opts, &context).await;
@@ -579,7 +593,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::validate_source(context, props).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
-        Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
+        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
+            cmd_impl::profile::cpu_profile(context, sleep).await?
+        }
+        Commands::Profile(ProfileCommands::Heap { dir }) => {
+            cmd_impl::profile::heap_profile(context, dir).await?
+        }
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
         }

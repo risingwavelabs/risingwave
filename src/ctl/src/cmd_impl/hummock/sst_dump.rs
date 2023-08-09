@@ -15,10 +15,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::{Buf, Bytes};
 use chrono::offset::Utc;
 use chrono::DateTime;
 use clap::Args;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::types::ToText;
 use risingwave_common::util::epoch::Epoch;
@@ -112,10 +114,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);
-            let obj = &obj_store.list(&obj_path).await?[0];
-            print_object(obj);
-            let meta_offset = get_meta_offset_from_object(obj, obj_store.as_ref()).await?;
-            let obj_id = sstable_store.get_object_id_from_path(&obj.key);
+            let mut obj_metadata_iter = obj_store.list(&obj_path).await?;
+            let obj = obj_metadata_iter
+                .try_next()
+                .await?
+                .ok_or_else(|| anyhow!(format!("object {obj_path} doesn't exist")))?;
+            print_object(&obj);
+            let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
+            let obj_id = SstableStore::get_object_id_from_path(&obj.key);
             sst_dump_via_sstable_store(
                 &sstable_store,
                 obj_id,
@@ -126,12 +132,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             )
             .await?;
         } else {
-            let objects = sstable_store.list_ssts_from_object_store().await?;
-            for obj in objects {
+            let mut metadata_iter = sstable_store
+                .list_object_metadata_from_object_store()
+                .await?;
+            while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
                 let meta_offset =
                     get_meta_offset_from_object(&obj, sstable_store.store().as_ref()).await?;
-                let obj_id = sstable_store.get_object_id_from_path(&obj.key);
+                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
                 sst_dump_via_sstable_store(
                     &sstable_store,
                     obj_id,

@@ -97,6 +97,21 @@ Afterwards, the memory dump should be outputted to the specified folder. Use `ku
 
 </details>
 
+<details>
+<summary>1.4. Dump memory profile with risectl</summary>
+
+You can manually dump a heap profiling with risectl for a compute node with Jemalloc profiling enabled (`MALLOC_CONF=prof:true`).
+
+```shell
+./risedev ctl profile heap --dir [dumped_file_dir]
+```
+
+The dumped files will be saved in the directory you specified.
+
+Note: To profile compute nodes remotely, please make sure all remote nodes have a public IP address accessible from your local machine (where you are running `risedev`).
+
+</details>
+
 
 
 ## Step 2 - Analyze with `jeprof`
