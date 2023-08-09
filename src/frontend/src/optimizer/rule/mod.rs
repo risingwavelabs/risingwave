@@ -132,6 +132,8 @@ pub use cross_join_eliminate_rule::*;
 pub use table_function_to_project_set_rule::*;
 mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
+mod apply_limit_transpose_rule;
+pub use apply_limit_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -188,6 +190,7 @@ macro_rules! for_all_rules {
             , { CrossJoinEliminateRule }
             , { ApplyTopNTransposeRule }
             , { TableFunctionToProjectSetRule }
+            , { ApplyLimitTransposeRule }
         }
     };
 }
