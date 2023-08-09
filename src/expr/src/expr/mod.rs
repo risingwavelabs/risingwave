@@ -74,7 +74,7 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
-use super::{ExprError, Result};
+pub use super::{ExprError, Result};
 
 /// Interface of an expression.
 ///

@@ -37,7 +37,6 @@ fixedbitset = { version = "0.4" }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
-futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
@@ -64,6 +63,8 @@ nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -97,7 +98,6 @@ tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time", "parking_lot"] }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
@@ -126,7 +126,6 @@ fixedbitset = { version = "0.4" }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
-futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
@@ -153,6 +152,8 @@ nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -189,7 +190,6 @@ tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time", "parking_lot"] }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }

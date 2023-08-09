@@ -656,6 +656,7 @@ impl FunctionAttr {
                 #(let #const_child = #const_child.eval_const()?;)*
 
                 #[derive(Debug)]
+                #[allow(non_camel_case_types)]
                 struct #struct_name {
                     return_type: DataType,
                     chunk_size: usize,

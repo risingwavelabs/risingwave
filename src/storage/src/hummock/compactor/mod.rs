@@ -37,11 +37,11 @@ pub use compaction_filter::{
 pub use context::CompactorContext;
 use futures::future::try_join_all;
 use futures::{pin_mut, stream, FutureExt, StreamExt};
-pub use iterator::ConcatSstableIterator;
+pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use itertools::Itertools;
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{
-    compact_task_to_string, estimate_memory_for_compact_task, estimate_state_for_compaction,
+    compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::table_stats::{
@@ -57,7 +57,6 @@ use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse,
 };
-use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -70,7 +69,7 @@ use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_memory_capacity, generate_splits,
+    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -256,7 +255,7 @@ impl Compactor {
             }
         }
 
-        let (_, total_file_count, total_key_count) = estimate_state_for_compaction(&compact_task);
+        let compact_task_statistics = statistics_compact_task(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -280,8 +279,7 @@ impl Compactor {
             }
         };
 
-        let (capacity, total_file_size, total_file_size_uncompressed) =
-            estimate_task_memory_capacity(context.clone(), &compact_task);
+        let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
 
         let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
             &compact_task,
@@ -295,16 +293,13 @@ impl Compactor {
         ) * compact_task.splits.len() as u64;
 
         tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {}",
+            "Ready to handle compaction task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
                 compact_task.task_id,
-                task_memory_capacity_with_parallelism,
-                total_file_count,
-                total_file_size,
-                total_file_size_uncompressed,
-                total_key_count,
+                compact_task_statistics,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
                 parallelism,
+                task_memory_capacity_with_parallelism
             );
 
         // If the task does not have enough memory, it should cancel the task and let the meta
@@ -473,8 +468,8 @@ impl Compactor {
     #[cfg_attr(coverage, no_coverage)]
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> (JoinHandle<()>, Sender<()>) {
+        let hummock_meta_client = compactor_context.hummock_meta_client.clone();
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(30);

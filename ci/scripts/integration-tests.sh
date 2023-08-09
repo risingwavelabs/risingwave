@@ -35,7 +35,7 @@ echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
 echo "--- install postgresql"
-sudo yum install -y postgresql
+sudo yum install -y postgresql15
 
 cd integration_tests/scripts
 
@@ -65,7 +65,8 @@ echo "--- check if the ingestion is successful"
 upstream=$(echo ${case} | cut -d'-' -f 1)
 if [ "${upstream}" == "mysql" ]; then
   echo "install mysql"
-  sudo yum install -y mysql
+  sudo rpm -Uvh https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
+  sudo dnf -y install mysql-community-server
 fi
 
 export PGPASSWORD=123456
