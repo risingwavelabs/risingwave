@@ -726,15 +726,16 @@ pub mod tests {
         // When picking L0->L0, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
         let mut picker = create_compaction_picker_for_test();
+        let sst = generate_table(3, 1, 200, 300, 2);
 
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
-                table_infos: vec![generate_table(3, 1, 200, 300, 2)],
-                total_file_size: 0,
+                total_file_size: sst.file_size,
+                uncompressed_file_size: sst.uncompressed_file_size,
+                table_infos: vec![sst],
                 sub_level_id: 0,
-                uncompressed_file_size: 0,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
@@ -998,14 +999,11 @@ pub mod tests {
     #[test]
     fn test_l0_to_base_when_all_base_pending() {
         let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
-            vec![
-                generate_table(4, 1, 10, 90, 1),
-                generate_table(5, 1, 1000, 2000, 1),
-            ],
+            vec![generate_table(4, 1, 10, 90, 1)],
             vec![generate_table(6, 1, 10, 90, 1)],
         ]);
 
-        let levels = Levels {
+        let mut levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 10, 90, 1)])],
             member_table_ids: vec![1],
@@ -1031,6 +1029,11 @@ pub mod tests {
 
         // trivial move do not be limited by level0_sub_level_compact_level_count
         ret.add_pending_task(0, &mut levels_handler);
+        let sst = generate_table(5, 1, 1000, 2000, 1);
+        levels.l0.as_mut().unwrap().sub_levels[0].total_file_size += sst.file_size;
+        levels.l0.as_mut().unwrap().sub_levels[0]
+            .table_infos
+            .push(sst);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
