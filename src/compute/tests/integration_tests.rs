@@ -210,6 +210,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table_id,
         vec![ColumnOrder::new(0, OrderType::ascending())],
         all_column_ids.clone(),
+        4,
         Arc::new(AtomicU64::new(0)),
         ConflictBehavior::NoCheck,
     )

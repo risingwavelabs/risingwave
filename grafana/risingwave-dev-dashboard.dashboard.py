@@ -608,13 +608,11 @@ def section_object_storage(outer_panels):
     ]
 
 
-def section_streaming(panels):
+def section_streaming(panels): 
     mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
     sink_filter = "executor_identity=~\".*SinkExecutor.*\""
-    executor_identity = '.*MaterializeExecutor.*'
-    job = '$job'
-    instance = '$node'
-    mv_throughput_query = f'sum(rate(stream_executor_row_count{{executor_identity=~"{executor_identity}", job=~"{job}", instance=~"{instance}"}}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group(table_info{{table_type="MATERIALIZED_VIEW"}}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
+    table_type_filter = "table_type=~\".*MATERIALIZED_VIEW.*\""
+    mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
