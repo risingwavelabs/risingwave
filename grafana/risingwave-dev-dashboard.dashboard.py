@@ -28,7 +28,7 @@ def section_actor_info(panels):
                           [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
         panels.table_info("Materialized View Info",
                           "Mapping from materialized view table id to it's internal table ids",
-                           [panels.table_target(f"group({metric('table_info')}) by (materialized_view_id, table_id, table_name, table_type)")], excluded_cols),
+                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
     ]
 
 
