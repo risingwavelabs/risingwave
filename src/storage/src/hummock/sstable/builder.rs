@@ -30,8 +30,12 @@ use super::{
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::sstable::FilterBuilder;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder};
+use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder, DEFAULT_BLOCK_SIZE};
 use crate::opts::StorageOpts;
+
+pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
+pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
+pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
@@ -70,7 +74,7 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
-            max_sst_size: DEFAULT_SSTABLE_SIZE * 2,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         }
     }
 }
@@ -534,7 +538,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
-        self.filter_builder.switch_block(self.memory_limiter.clone());
+        self.filter_builder
+            .switch_block(self.memory_limiter.clone());
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())
@@ -552,7 +557,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
     }
-
 
     pub fn reach_max_sst_size(&self) -> bool {
         self.approximate_len() as u64 >= self.options.max_sst_size
@@ -582,7 +586,7 @@ pub(super) mod tests {
     use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
-        test_value_of, DEFAULT_MAX_KEY_COUNT, DEFAULT_MAX_SST_SIZE, TEST_KEYS_COUNT,
+        test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::{CachePolicy, Sstable, Xor16FilterBuilder, Xor8FilterBuilder};
 

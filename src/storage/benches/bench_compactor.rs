@@ -36,10 +36,9 @@ use risingwave_storage::hummock::multi_builder::{
 };
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-use risingwave_storage::hummock::test_utils::{DEFAULT_MAX_KEY_COUNT, DEFAULT_MAX_SST_SIZE};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, FileCache, SstableBuilder, SstableBuilderOptions,
+    CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
     SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};

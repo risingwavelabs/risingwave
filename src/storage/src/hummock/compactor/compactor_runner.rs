@@ -61,9 +61,7 @@ impl CompactorRunner {
             .map(|sst| sst.total_key_count)
             .sum::<u64>() as usize;
         let use_block_based_filter =
-            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count)
-                || task.target_level > 0;
-
+            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
