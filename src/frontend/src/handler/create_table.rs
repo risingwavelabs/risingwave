@@ -425,7 +425,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) =
+    let (columns_from_resolve_source, pk_names, mut source_info) =
         try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
@@ -458,6 +458,51 @@ pub(crate) async fn gen_create_table_plan_with_source(
             "Generated columns are only allowed in an append only source.".to_string(),
         )
         .into());
+    }
+
+    let can_backfill = properties.get(UPSTREAM_SOURCE_KEY).map_or_else(
+        || false,
+        |connector| {
+            if let Some((src, _)) = connector.split_once('-') {
+                src == "mysql"
+            } else {
+                false
+            }
+        },
+    );
+
+    if can_backfill && context.session_ctx().config().get_cdc_backfill() {
+        let pk_column_indices = {
+            let mut id_to_idx = HashMap::new();
+
+            columns.iter().enumerate().for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+            pk_column_ids
+                .iter()
+                .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
+                .collect_vec()
+        };
+
+        let pk = pk_column_indices
+            .iter()
+            .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+            .collect();
+
+        let upstream_table_desc = TableDesc {
+            table_id: TableId::placeholder(),
+            pk,
+            columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+            distribution_key: pk_column_indices.clone(),
+            stream_key: pk_column_indices,
+            append_only,
+            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+            value_indices: (0..columns.len()).collect_vec(),
+            read_prefix_len_hint: 0,
+            watermark_columns: Default::default(),
+            versioned: false,
+        };
+        source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
     }
 
     gen_table_plan_inner(
@@ -578,16 +623,6 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
 
-    let is_backfill_cdc = with_options
-        .get(UPSTREAM_SOURCE_KEY)
-        .map_or_else(false, |connector| {
-            if let Some((src, _)) = connector.split_once('-') {
-                src == "mysql" || src == "postgres"
-            } else {
-                false
-            }
-        });
-
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -620,52 +655,6 @@ fn gen_table_plan_inner(
         context.clone(),
     )?
     .into();
-
-    let pk_column_indices = {
-        let mut id_to_idx = HashMap::new();
-
-        columns.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id(), idx);
-        });
-        pk_column_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
-            .collect_vec()
-    };
-
-    let pk = pk_column_indices
-        .iter()
-        .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
-        .collect();
-
-    let external_table_desc = Rc::new(TableDesc {
-        table_id: TableId::placeholder(),
-        pk,
-        columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-        distribution_key: pk_column_indices.clone(),
-        stream_key: pk_column_indices,
-        append_only,
-        retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-        value_indices: (0..columns.len()).collect_vec(),
-        read_prefix_len_hint: 0,
-        watermark_columns: Default::default(),
-        versioned: false,
-    });
-
-    // TODO(siyuan): add a logical scan for cdc table
-    if is_backfill_cdc {
-        let upstream_table_name = with_options.get("table.name").unwrap_or(&name);
-
-        LogicalScan::create(
-            upstream_table_name.clone(),
-            false,
-            true,
-            external_table_desc,
-            vec![],
-            context.clone(),
-            false,
-        );
-    }
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
     let mut plan_root = PlanRoot::new(

@@ -69,10 +69,7 @@ impl ExternalStorageTable {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         output_indices: Vec<usize>,
-        Distribution {
-            dist_key_in_pk_indices,
-            vnodes,
-        }: Distribution,
+        distribution: Distribution,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -89,8 +86,8 @@ impl ExternalStorageTable {
             pk_serializer,
             pk_indices,
             output_indices,
-            dist_key_in_pk_indices,
-            vnodes,
+            dist_key_in_pk_indices: distribution.dist_key_in_pk_indices,
+            vnodes: distribution.vnodes,
         }
     }
 

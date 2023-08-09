@@ -91,6 +91,7 @@ const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
+const CDC_BACKFILL: usize = 33;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -297,6 +298,7 @@ type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
 type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
+type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -394,6 +396,8 @@ pub struct ConfigMap {
     #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
     server_version: ServerVersion,
     server_version_num: ServerVersionNum,
+
+    cdc_backfill: CdcBackfill,
 }
 
 impl ConfigMap {
@@ -767,5 +771,9 @@ impl ConfigMap {
             return Some(NonZeroU64::new(self.batch_parallelism.0).unwrap());
         }
         None
+    }
+
+    pub fn get_cdc_backfill(&self) -> bool {
+        self.cdc_backfill.0
     }
 }

@@ -34,6 +34,7 @@ message StreamSourceInfo {
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
   string upsert_avro_primary_key = 7;
+  plan_common.StorageTableDesc upstream_table = 8;
 }
 
 message Source {

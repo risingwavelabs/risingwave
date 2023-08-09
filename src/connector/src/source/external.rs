@@ -40,6 +40,25 @@ pub struct SchemaTableName {
     pub table_name: String,
 }
 
+impl SchemaTableName {
+    pub fn from_properties(properties: &HashMap<String, String>) -> Self {
+        let table_name = properties
+            .get("table.name")
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        let schema_name = properties
+            .get("table.name")
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        Self {
+            schema_name,
+            table_name,
+        }
+    }
+}
+
 // TODO(siyuan): replace string offset with BinlogOffset
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
 pub struct MySqlOffset {

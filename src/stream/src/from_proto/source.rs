@@ -14,17 +14,25 @@
 
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::source::cdc::CdcProperties;
+use risingwave_connector::source::external::{
+    ExternalTableReaderImpl, MySqlExternalTableReader, SchemaTableName,
+};
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
+use risingwave_storage::table::Distribution;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
+use crate::executor::external::ExternalStorageTable;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::FsSourceExecutor;
+use crate::executor::{CdcBackfillExecutor, FsSourceExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -49,13 +57,14 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         if let Some(source) = &node.source_inner {
             let source_id = TableId::new(source.source_id);
             let source_name = source.source_name.clone();
+            let source_info = source.get_info()?;
 
             let source_desc_builder = SourceDescBuilder::new(
                 source.columns.clone(),
                 params.env.source_metrics(),
                 source.row_id_index.map(|x| x as _),
                 source.properties.clone(),
-                source.get_info()?.clone(),
+                source_info.clone(),
                 params.env.connector_params(),
                 params.env.config().developer.connector_message_buffer_size,
                 // `pk_indices` is used to ensure that a message will be skipped instead of parsed
@@ -124,18 +133,78 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source_ctrl_opts,
                 )?))
             } else {
-                Ok(Box::new(SourceExecutor::new(
+                let source_exec = SourceExecutor::new(
                     params.actor_context,
-                    schema,
-                    params.pk_indices,
+                    schema.clone(),
+                    params.pk_indices.clone(),
                     Some(stream_source_core),
-                    params.executor_stats,
+                    params.executor_stats.clone(),
                     barrier_receiver,
                     system_params,
                     params.executor_id,
-                    source_ctrl_opts,
+                    source_ctrl_opts.clone(),
                     params.env.connector_params(),
-                )))
+                );
+
+                let can_backfill = {
+                    if let Some((src, _)) = connector.split_once('-') {
+                        src == "mysql"
+                    } else {
+                        false
+                    }
+                };
+
+                if can_backfill && let Some(table_desc) = source_info.upstream_table.clone() {
+                    let upstream_table_name = SchemaTableName::from_properties(&source.properties);
+                    let pk_indices = table_desc
+                        .pk
+                        .iter()
+                        .map(|k| k.column_index as usize)
+                        .collect_vec();
+
+                    let order_types = table_desc
+                        .pk
+                        .iter()
+                        .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                        .collect_vec();
+
+
+                    let external_table = ExternalStorageTable::new(
+                         TableId::new(table_desc.table_id),
+                        upstream_table_name.table_name,
+                        upstream_table_name.schema_name,
+                        ExternalTableReaderImpl::MYSQL(MySqlExternalTableReader::new(CdcProperties::default()).await?),
+                        schema.clone(),
+                        order_types.clone(),
+                        pk_indices.clone(),
+                         (0..table_desc.columns.len()).collect_vec(),
+                        Distribution::fallback(),
+                    );
+
+                    let dumb_state = StateTable::new_without_distribution(
+                        store.clone(),
+                        source_id,
+                        vec![],
+                        vec![],
+                        vec![],
+                    ).await;
+
+                    let cdc_backfill = CdcBackfillExecutor::new(
+                        external_table,
+                        Box::new(source_exec),
+                        Some(dumb_state),
+                        (0..source.columns.len()).collect_vec(),
+                        None,
+                        schema.clone(),
+                        pk_indices,
+                        params.executor_stats,
+                        source_ctrl_opts.chunk_size,
+                    );
+                    Ok(Box::new(cdc_backfill))
+
+                } else {
+                    Ok(Box::new(source_exec))
+                }
             }
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a

@@ -147,12 +147,11 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
 
-        // TODO(siyuan): init logic
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        // TODO: restore backfill offset from persistent state
+        // TODO(siyuan): restore backfill offset from persistent state
         let (backfill_offset, is_finished) = if let Some(state_table) = self.state_table.as_mut() {
             restore_backfill_progress(state_table, state_len).await?
         } else {

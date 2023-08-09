@@ -515,13 +515,7 @@ impl ToStream for LogicalScan {
             )));
         }
         if self.predicate().always_true() {
-            let chain_type = if self.is_cdc_table() {
-                ChainType::CdcBackfill
-            } else {
-                ChainType::Backfill
-            };
-
-            Ok(StreamTableScan::new_with_chain_type(self.core.clone(), chain_type).into())
+            Ok(StreamTableScan::new(self.core.clone()).into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

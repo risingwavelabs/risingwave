@@ -411,9 +411,6 @@ enum ChainType {
 
   // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
   UPSTREAM_ONLY = 4;
-
-  // CDC_BACKFILL is corresponding to the CDC-specific backfill executor.
-  CDC_BACKFILL = 5;
 }
 
 // ChainNode is used for mv on mv.
