@@ -846,7 +846,7 @@ impl S3ObjectIter {
             bucket,
             prefix,
             next_continuation_token: None,
-            is_truncated: false,
+            is_truncated: true,
             send_future: None,
         }
     }
@@ -874,7 +874,7 @@ impl Stream for S3ObjectIter {
                 }
             };
         }
-        if self.is_truncated {
+        if !self.is_truncated {
             return Poll::Ready(None);
         }
         let mut request = self
