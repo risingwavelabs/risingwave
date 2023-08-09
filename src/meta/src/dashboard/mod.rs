@@ -252,14 +252,12 @@ where
         let app = if let Some(ui_path) = ui_path {
             let static_file_router = Router::new().nest_service(
                 "/",
-                get_service(ServeDir::new(ui_path)).handle_error(
-                    |error: std::io::Error| async move {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", error),
-                        )
-                    },
-                ),
+                get_service(ServeDir::new(ui_path)).handle_error(|e| async move {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Unhandled internal error: {e}",),
+                    )
+                }),
             );
             Router::new()
                 .fallback_service(static_file_router)
