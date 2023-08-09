@@ -719,8 +719,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                     None => (worker_node.id, "".to_owned()),
                 })
                 .collect();
-            let table_name_mapping = catalog_manager.get_table_name_mapping().await;
-            let table_type_mapping = catalog_manager.get_table_type_mapping().await;
+            let table_name_and_type_mapping =
+                catalog_manager.get_table_name_and_type_mapping().await;
+
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {
                 let mv_id_str = table_fragments.table_id().to_string();
@@ -752,14 +753,11 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
 
                         for table_id in &fragment.state_table_ids {
                             let table_id_str = table_id.to_string();
-                            let table_name = table_name_mapping
+                            let (table_name, table_type) = table_name_and_type_mapping
                                 .get(table_id)
                                 .cloned()
-                                .unwrap_or_else(|| "unknown".to_string());
-                            let table_type = table_type_mapping
-                                .get(table_id)
-                                .cloned()
-                                .unwrap_or_else(|| "unknown".to_string());
+                                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+
                             meta_metrics
                                 .table_info
                                 .with_label_values(&[
