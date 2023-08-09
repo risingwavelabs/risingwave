@@ -1,3 +1,6 @@
+[workspace]
+members = []
+
 [package]
 name = "simulator"
 version = "0.1.0"

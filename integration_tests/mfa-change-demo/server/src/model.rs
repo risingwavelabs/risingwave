@@ -1,13 +1,13 @@
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RecallRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub userid: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RecallResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub userid: ::prost::alloc::string::String,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub count: u64,
 }
 /// Generated client implementations.
@@ -40,6 +40,7 @@ pub mod model_client {
             let inner = tonic::client::Grpc::new(inner);
             Self { inner }
         }
+
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
@@ -53,12 +54,12 @@ pub mod model_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + Send + Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + Send + Sync,
         {
             ModelClient::new(InterceptedService::new(inner, interceptor))
         }
+
         /// Compress requests with `gzip`.
         ///
         /// This requires the server to support it otherwise it might respond with an
@@ -68,25 +69,24 @@ pub mod model_client {
             self.inner = self.inner.send_gzip();
             self
         }
+
         /// Enable decompressing responses with `gzip`.
         #[must_use]
         pub fn accept_gzip(mut self) -> Self {
             self.inner = self.inner.accept_gzip();
             self
         }
+
         pub async fn recall(
             &mut self,
             request: impl tonic::IntoRequest<super::RecallRequest>,
         ) -> Result<tonic::Response<super::RecallResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/model.Model/Recall");
             self.inner.unary(request.into_request(), path, codec).await
@@ -97,7 +97,7 @@ pub mod model_client {
 pub mod model_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    ///Generated trait containing gRPC methods that should be implemented for use with ModelServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with ModelServer.
     #[async_trait]
     pub trait Model: Send + Sync + 'static {
         async fn recall(
@@ -116,6 +116,7 @@ pub mod model_server {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
+
         pub fn from_arc(inner: Arc<T>) -> Self {
             let inner = _Inner(inner);
             Self {
@@ -124,10 +125,8 @@ pub mod model_server {
                 send_compression_encodings: Default::default(),
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -140,28 +139,24 @@ pub mod model_server {
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
-        type Response = http::Response<tonic::body::BoxBody>;
         type Error = std::convert::Infallible;
         type Future = BoxFuture<Self::Response, Self::Error>;
-        fn poll_ready(
-            &mut self,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Self::Error>> {
+        type Response = http::Response<tonic::body::BoxBody>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
+
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/model.Model/Recall" => {
                     #[allow(non_camel_case_types)]
                     struct RecallSvc<T: Model>(pub Arc<T>);
-                    impl<T: Model> tonic::server::UnaryService<super::RecallRequest>
-                    for RecallSvc<T> {
+                    impl<T: Model> tonic::server::UnaryService<super::RecallRequest> for RecallSvc<T> {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         type Response = super::RecallResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RecallRequest>,
@@ -178,28 +173,23 @@ pub mod model_server {
                         let inner = inner.0;
                         let method = RecallSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            );
+                        let mut grpc = tonic::server::Grpc::new(codec).apply_compression_config(
+                            accept_compression_encodings,
+                            send_compression_encodings,
+                        );
                         let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        Ok(
-                            http::Response::builder()
-                                .status(200)
-                                .header("grpc-status", "12")
-                                .header("content-type", "application/grpc")
-                                .body(empty_body())
-                                .unwrap(),
-                        )
-                    })
-                }
+                _ => Box::pin(async move {
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .header("grpc-status", "12")
+                        .header("content-type", "application/grpc")
+                        .body(empty_body())
+                        .unwrap())
+                }),
             }
         }
     }

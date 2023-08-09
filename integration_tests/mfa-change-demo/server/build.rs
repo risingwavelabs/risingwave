@@ -1,4 +1,3 @@
-use std::{env, path::PathBuf};
 use std::fs;
 
 fn main() {

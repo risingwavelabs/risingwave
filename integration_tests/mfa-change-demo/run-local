@@ -27,11 +27,11 @@ sleep 3
 
 pip install risingwave 
 python3 server/udf.py > /dev/null 2>&1 &
-sleep 5
 lsof -i:8815  > /dev/null || {
   echo "failed to start udf"
   exit 1
 }
+sleep 5
 
 sleep 1
 
