@@ -460,7 +460,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         delta: Delta,
     ) -> StreamExecutorResult<BTreeMap<StateKey, Record<OwnedRow>>> {
         let snapshot = partition.cache();
-        let part_with_delta = DeltaBTreeMap::new(snapshot, delta);
+        let part_with_delta = DeltaBTreeMap::new(snapshot, &delta);
         let delta = part_with_delta.delta();
         assert!(!delta.is_empty(), "if there's no delta, we won't be here");
 
@@ -859,7 +859,7 @@ mod tests {
             // test all empty
             let snapshot = create_snapshot!();
             let delta = create_delta!();
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(2),
                 FrameBound::Preceding(1),
@@ -871,7 +871,7 @@ mod tests {
             // test insert delta only
             let snapshot = create_snapshot!();
             let delta = create_delta!((1, Insert), (2, Insert), (3, Insert));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(2),
                 FrameBound::Preceding(1),
@@ -890,7 +890,7 @@ mod tests {
             // test simple
             let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((2, Insert), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             {
                 let calls = vec![create_call(Frame::rows(
@@ -945,7 +945,7 @@ mod tests {
             // test multiple calls
             let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((2, Insert), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             let calls = vec![
                 create_call(Frame::rows(
@@ -972,7 +972,7 @@ mod tests {
             // test lag corner case
             let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((1, Delete), (2, Delete), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(1),
@@ -993,7 +993,7 @@ mod tests {
             // test lead corner case
             let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((4, Delete), (5, Delete), (6, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Following(1),
@@ -1014,7 +1014,7 @@ mod tests {
             // test lag/lead(x, 0) corner case
             let snapshot = create_snapshot!(1, 2, 3, 4);
             let delta = create_delta!((2, Delete), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             let calls = vec![create_call(Frame::rows(
                 FrameBound::CurrentRow,
@@ -1027,7 +1027,7 @@ mod tests {
             // test lag/lead(x, 0) corner case 2
             let snapshot = create_snapshot!(1, 2, 3, 4, 5);
             let delta = create_delta!((2, Delete), (3, Insert), (4, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             let calls = vec![create_call(Frame::rows(
                 FrameBound::CurrentRow,

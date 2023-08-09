@@ -18,11 +18,11 @@ use std::ops::Bound;
 
 use enum_as_inner::EnumAsInner;
 
-/// [`DeltaBTreeMap`] wraps a [`BTreeMap`] reference as a snapshot and an owned delta [`BTreeMap`],
+/// [`DeltaBTreeMap`] wraps two [`BTreeMap`] references respectively as snapshot and delta,
 /// providing cursor that can iterate over the updated version of the snapshot.
-pub(super) struct DeltaBTreeMap<'part, K: Ord, V> {
-    snapshot: &'part BTreeMap<K, V>,
-    delta: BTreeMap<K, Change<V>>,
+pub(super) struct DeltaBTreeMap<'a, K: Ord, V> {
+    snapshot: &'a BTreeMap<K, V>,
+    delta: &'a BTreeMap<K, Change<V>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumAsInner)]
@@ -31,26 +31,26 @@ pub(super) enum Change<V> {
     Delete,
 }
 
-impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
-    pub fn new(snapshot: &'part BTreeMap<K, V>, delta: BTreeMap<K, Change<V>>) -> Self {
+impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
+    pub fn new(snapshot: &'a BTreeMap<K, V>, delta: &'a BTreeMap<K, Change<V>>) -> Self {
         Self { snapshot, delta }
     }
 
     /// Get a reference to the snapshot.
-    pub fn snapshot(&self) -> &'part BTreeMap<K, V> {
+    pub fn snapshot(&self) -> &'a BTreeMap<K, V> {
         self.snapshot
     }
 
     /// Get a reference to the delta.
-    pub fn delta(&self) -> &BTreeMap<K, Change<V>> {
-        &self.delta
+    pub fn delta(&self) -> &'a BTreeMap<K, Change<V>> {
+        self.delta
     }
 
     /// Get the first key in the updated version of the snapshot.
     pub fn first_key(&self) -> Option<&K> {
         let cursor = CursorWithDelta {
             snapshot: self.snapshot,
-            delta: &self.delta,
+            delta: self.delta,
             curr_key_value: None,
         };
         cursor.peek_next().map(|(key, _)| key)
@@ -60,7 +60,7 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
     pub fn last_key(&self) -> Option<&K> {
         let cursor = CursorWithDelta {
             snapshot: self.snapshot,
-            delta: &self.delta,
+            delta: self.delta,
             curr_key_value: None,
         };
         cursor.peek_prev().map(|(key, _)| key)
@@ -87,7 +87,7 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
         };
         Some(CursorWithDelta {
             snapshot: self.snapshot,
-            delta: &self.delta,
+            delta: self.delta,
             curr_key_value: Some(curr_key_value),
         })
     }
@@ -111,7 +111,7 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
             CursorWithDelta::peek_impl(PeekDirection::Next, next_ss_entry, next_dt_entry);
         CursorWithDelta {
             snapshot: self.snapshot,
-            delta: &self.delta,
+            delta: self.delta,
             curr_key_value,
         }
     }
@@ -135,7 +135,7 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
             CursorWithDelta::peek_impl(PeekDirection::Prev, prev_ss_entry, prev_dt_entry);
         CursorWithDelta {
             snapshot: self.snapshot,
-            delta: &self.delta,
+            delta: self.delta,
             curr_key_value,
         }
     }
@@ -319,7 +319,7 @@ mod tests {
     fn test_empty() {
         let map: BTreeMap<i32, &str> = BTreeMap::new();
         let delta = BTreeMap::new();
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), None);
         assert_eq!(delta_map.last_key(), None);
@@ -333,7 +333,7 @@ mod tests {
         let mut delta = BTreeMap::new();
         delta.insert(1, Change::Delete);
         delta.insert(2, Change::Delete);
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
         assert_eq!(delta_map.first_key(), None);
         assert_eq!(delta_map.last_key(), None);
         assert_eq!(delta_map.find(&1), None);
@@ -348,7 +348,7 @@ mod tests {
         map.insert(2, "2");
         map.insert(5, "5");
         let delta = BTreeMap::new();
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&5));
@@ -394,7 +394,7 @@ mod tests {
         let mut delta = BTreeMap::new();
         delta.insert(1, Change::Insert("1"));
         delta.insert(2, Change::Insert("2"));
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&2));
@@ -436,7 +436,7 @@ mod tests {
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
         delta.insert(1, Change::Delete);
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&3));
         assert_eq!(delta_map.last_key(), Some(&3));
@@ -469,7 +469,7 @@ mod tests {
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
         delta.insert(3, Change::Delete);
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&1));
@@ -492,7 +492,7 @@ mod tests {
         let mut delta = BTreeMap::new();
         delta.insert(1, Change::Delete);
         delta.insert(3, Change::Delete);
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), None);
         assert_eq!(delta_map.last_key(), None);
@@ -510,7 +510,7 @@ mod tests {
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
         delta.insert(2, Change::Insert("2"));
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&3));
@@ -539,7 +539,7 @@ mod tests {
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
         delta.insert(1, Change::Insert("1 new"));
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&3));
@@ -566,7 +566,7 @@ mod tests {
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
         delta.insert(3, Change::Insert("3 new"));
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&3));
@@ -597,7 +597,7 @@ mod tests {
         delta.insert(1, Change::Insert("1 new"));
         delta.insert(3, Change::Delete);
         delta.insert(4, Change::Insert("4"));
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&0));
         assert_eq!(delta_map.last_key(), Some(&4));
@@ -661,7 +661,7 @@ mod tests {
         delta.insert(5, Change::Delete);
         delta.insert(7, Change::Delete);
         delta.insert(9, Change::Delete);
-        let delta_map = DeltaBTreeMap::new(&map, delta);
+        let delta_map = DeltaBTreeMap::new(&map, &delta);
 
         assert_eq!(delta_map.first_key(), Some(&0));
         assert_eq!(delta_map.last_key(), Some(&3));
