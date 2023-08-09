@@ -657,6 +657,10 @@ mod tests {
             &self,
             _request: Request<ForceStopActorsRequest>,
         ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            self.inner.actor_streams.lock().unwrap().clear();
+            self.inner.actor_ids.lock().unwrap().clear();
+            self.inner.actor_infos.lock().unwrap().clear();
+
             Ok(Response::new(ForceStopActorsResponse::default()))
         }
 
@@ -1033,6 +1037,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
+        tokio::time::sleep(Duration::from_secs(2)).await;
         services
             .drop_materialized_views(vec![table_id])
             .await

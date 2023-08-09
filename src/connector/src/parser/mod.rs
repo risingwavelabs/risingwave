@@ -31,7 +31,10 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::catalog::{
+    SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
+};
+pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -582,6 +585,9 @@ pub struct AvroProperties {
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
     pub enable_upsert: bool,
+    pub record_name: Option<String>,
+    pub key_record_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -591,7 +597,10 @@ pub struct ProtobufProperties {
     pub row_schema_location: String,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub client_config: SchemaRegistryAuth,
+    pub enable_upsert: bool,
     pub topic: String,
+    pub key_message_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -686,6 +695,14 @@ impl SpecificParserConfig {
             (SourceFormat::Plain, SourceEncode::Avro)
             | (SourceFormat::Upsert, SourceEncode::Avro) => {
                 let mut config = AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    key_record_name: info.key_message_name.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     upsert_primary_key: info.upsert_avro_primary_key.clone(),
@@ -704,7 +721,8 @@ impl SpecificParserConfig {
                 }
                 EncodingProperties::Avro(config)
             }
-            (SourceFormat::Plain, SourceEncode::Protobuf) => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
+            | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
                 if info.row_schema_location.is_empty() {
                     return Err(
                         ProtocolError("protobuf file location not provided".to_string()).into(),
@@ -714,8 +732,14 @@ impl SpecificParserConfig {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
+                    key_message_name: info.key_message_name.clone(),
                     ..Default::default()
                 };
+                if format == SourceFormat::Upsert {
+                    config.enable_upsert = true;
+                }
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
@@ -728,6 +752,14 @@ impl SpecificParserConfig {
             }
             (SourceFormat::Debezium, SourceEncode::Avro) => {
                 EncodingProperties::Avro(AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
+                    key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: SchemaRegistryAuth::from(props),

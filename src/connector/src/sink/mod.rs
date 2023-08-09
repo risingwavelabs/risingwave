@@ -339,9 +339,9 @@ impl SinkConfig {
     }
 }
 
-pub async fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
     let config = SinkConfig::from_hashmap(param.properties.clone())?;
-    SinkImpl::new(config, param).await
+    SinkImpl::new(config, param)
 }
 
 #[derive(Debug)]
@@ -387,7 +387,7 @@ macro_rules! dispatch_sink {
 }
 
 impl SinkImpl {
-    pub async fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
+    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
@@ -410,9 +410,7 @@ impl SinkImpl {
                 param.pk_indices,
                 param.sink_type.is_append_only(),
             )?),
-            SinkConfig::Iceberg(cfg) => {
-                SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema()).await?)
-            }
+            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema())?),
         })
     }
 }
