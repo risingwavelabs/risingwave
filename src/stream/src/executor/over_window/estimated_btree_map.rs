@@ -17,20 +17,20 @@ use std::collections::BTreeMap;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 
 pub struct EstimatedBTreeMap<K, V> {
-    cache: BTreeMap<K, V>,
+    inner: BTreeMap<K, V>,
     heap_size: KvSize,
 }
 
 impl<K, V> EstimatedBTreeMap<K, V> {
     pub fn new() -> Self {
         Self {
-            cache: BTreeMap::new(),
+            inner: BTreeMap::new(),
             heap_size: KvSize::new(),
         }
     }
 
     pub fn inner(&self) -> &BTreeMap<K, V> {
-        &self.cache
+        &self.inner
     }
 }
 
@@ -48,16 +48,21 @@ where
     pub fn insert(&mut self, key: K, row: V) {
         let key_size = self.heap_size.add_val(&key);
         self.heap_size.add_val(&row);
-        if let Some(old_row) = self.cache.insert(key, row) {
+        if let Some(old_row) = self.inner.insert(key, row) {
             self.heap_size.sub_size(key_size);
             self.heap_size.sub_val(&old_row);
         }
     }
 
     pub fn remove(&mut self, key: &K) {
-        if let Some(row) = self.cache.remove(key) {
+        if let Some(row) = self.inner.remove(key) {
             self.heap_size.sub(key, &row);
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.clear();
+        self.heap_size.set(0);
     }
 }
 
