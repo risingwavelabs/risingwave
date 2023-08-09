@@ -295,6 +295,11 @@ pub(crate) mod tests {
                 table_infos: level.table_infos.clone(),
             })
             .collect();
+        compact_task.input_ssts.push(InputLevel {
+            level_idx: group.levels.last().unwrap().level_idx,
+            table_infos: group.levels.last().unwrap().table_infos.clone(),
+            level_type: group.levels.last().unwrap().level_type,
+        });
 
         // assert compact_task
         assert_eq!(compact_task.input_ssts.len(), SST_COUNT as usize);
