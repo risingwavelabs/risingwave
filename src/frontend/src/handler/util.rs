@@ -26,15 +26,19 @@ use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
-use risingwave_sqlparser::ast::display_comma_separated;
+use risingwave_sqlparser::ast::{
+    display_comma_separated, ColumnDef, CreateSourceStatement, Ident, Statement,
+};
+use risingwave_sqlparser::parser::Parser;
 
+use crate::binder::unbind_data_type;
 use crate::catalog::IndexCatalog;
 use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
@@ -255,6 +259,32 @@ pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option
     with_properties
         .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
+}
+
+/// `alter_definition_add_column` adds a new column to the definition of the relation.
+pub fn alter_definition_add_column(definition: &str, column: &ColumnCatalog) -> RwResult<String> {
+    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
+    let mut stmt = ast
+        .into_iter()
+        .exactly_one()
+        .expect("should contains only one statement");
+    let column = ColumnCatalog::from(column.clone()).column_desc;
+
+    match &mut stmt {
+        Statement::CreateSource {
+            stmt: CreateSourceStatement { columns, .. },
+        } => {
+            columns.push(ColumnDef {
+                name: Ident::new_unchecked(column.name),
+                data_type: Some(unbind_data_type(&column.data_type)?),
+                collation: None,
+                options: vec![],
+            });
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(stmt.to_string())
 }
 
 #[cfg(test)]

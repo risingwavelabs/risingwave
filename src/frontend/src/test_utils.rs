@@ -23,9 +23,8 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    FunctionId, IndexId, SourceVersionId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME,
+    FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -42,7 +41,6 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
-use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -466,15 +464,8 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_source_column(
-        &self,
-        source_id: u32,
-        source_version: SourceVersionId,
-        added_column: PbColumnCatalog,
-    ) -> Result<()> {
-        self.catalog
-            .write()
-            .alter_source_column_by_id(&source_id, source_version, added_column);
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
         Ok(())
     }
 

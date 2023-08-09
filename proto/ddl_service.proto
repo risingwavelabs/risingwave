@@ -68,13 +68,11 @@ message DropSourceResponse {
   uint64 version = 2;
 }
 
-message AlterSourceColumnRequest {
-  uint32 source_id = 1;
-  uint64 source_version = 2;
-  plan_common.ColumnCatalog added_column = 3;
+message AlterSourceRequest {
+  catalog.Source source = 1;
 }
 
-message AlterSourceColumnResponse {
+message AlterSourceResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -328,7 +326,7 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
-  rpc AlterSourceColumn(AlterSourceColumnRequest) returns (AlterSourceColumnResponse);
+  rpc AlterSourceColumn(AlterSourceRequest) returns (AlterSourceResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

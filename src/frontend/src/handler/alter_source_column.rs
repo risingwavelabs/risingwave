@@ -20,15 +20,13 @@ use risingwave_source::source_desc::extract_source_struct;
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
 use super::create_table::bind_sql_columns;
+use super::util::alter_definition_add_column;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::Binder;
 
 // Note for future drop column:
 // 1. Dependencies of generated columns
-
-// TODO:
-// 1. change the definition of source
 
 /// Handle `ALTER TABLE [ADD] COLUMN` statements.
 pub async fn handle_alter_source_column(
@@ -46,18 +44,21 @@ pub async fn handle_alter_source_column(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let original_catalog = {
+    let (db_id, schema_id, mut catalog) = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
+        println!("Schema_name: {schema_name}");
+        let db = reader.get_database_by_name(db_name)?;
+        let schema = db.get_schema_by_name(schema_name).unwrap();
 
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
-        source.clone()
+        (db.id(), schema.id(), (**source).clone())
     };
 
     // Currently only allow source without schema registry
-    let SourceStruct { encode, .. } = extract_source_struct(&original_catalog.info)?;
+    let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
             return Err(RwError::from(ErrorCode::NotImplemented(
@@ -74,8 +75,8 @@ pub async fn handle_alter_source_column(
         _ => {}
     }
 
-    let columns = &original_catalog.columns;
-    let diff_column = match operation {
+    let columns = &mut catalog.columns;
+    match operation {
         AlterSourceOperation::AddColumn { column_def } => {
             let new_column_name = column_def.name.real_value();
             if columns
@@ -91,16 +92,20 @@ pub async fn handle_alter_source_column(
                 .iter()
                 .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
                 .next();
-            bound_column
+            println!("Def: {}", catalog.definition);
+            catalog.definition = alter_definition_add_column(&catalog.definition, &bound_column)?;
+            println!("Def: {}", catalog.definition);
+            columns.push(bound_column);
         }
         _ => unreachable!(),
-    };
+    }
 
-    let new_version = original_catalog.version() + 1;
+    // update version
+    catalog.version += 1;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_source_column(original_catalog.id, new_version, diff_column.to_protobuf())
+        .alter_source_column(catalog.to_prost(schema_id, db_id))
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
@@ -166,5 +171,9 @@ pub mod tests {
 
         // Check version
         assert_eq!(source.version + 1, altered_source.version);
+
+        // Check definition
+        let altered_sql = r#"CREATE SOURCE s (v1 INT, v2 CHARACTER VARYING) WITH (connector = 'kafka', topic = 'abc', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE JSON"#;
+        assert_eq!(altered_sql, altered_source.definition);
     }
 }

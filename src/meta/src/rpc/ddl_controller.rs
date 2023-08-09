@@ -16,7 +16,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::SourceVersionId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -26,7 +25,6 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
-use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tracing::log::warn;
 use tracing::Instrument;
@@ -96,7 +94,7 @@ pub enum DdlCommand {
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
-    AlterSourceColumn(SourceId, SourceVersionId, PbColumnCatalog),
+    AlterSourceColumn(Source),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
 }
@@ -194,10 +192,7 @@ where
                 DdlCommand::DropConnection(connection_id) => {
                     ctrl.drop_connection(connection_id).await
                 }
-                DdlCommand::AlterSourceColumn(source_id, source_version, added_column) => {
-                    ctrl.alter_source_column(source_id, source_version, added_column)
-                        .await
-                }
+                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
             }
         }
         .in_current_span();
@@ -281,15 +276,9 @@ where
         Ok(version)
     }
 
-    async fn alter_source_column(
-        &self,
-        source_id: SourceId,
-        source_version: SourceVersionId,
-        added_column: PbColumnCatalog,
-    ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager
-            .alter_source_column(source_id, source_version, added_column)
-            .await
+    // Maybe we can unify `alter_source_column` and `alter_source_name`.
+    async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.alter_source_column(source).await
     }
 
     async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {

@@ -27,8 +27,8 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, SourceVersionId, TableId as StreamingJobId, TableOption,
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
+    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
+    DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
@@ -37,7 +37,6 @@ use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -117,7 +116,6 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
-use self::utils::alter_relation_add_column;
 use crate::manager::catalog::utils::{
     alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
     refcnt_inc_connection, ReplaceTableExprRewriter,
@@ -1548,27 +1546,21 @@ where
         .await
     }
 
-    pub async fn alter_source_column(
-        &self,
-        source_id: SourceId,
-        source_version: SourceVersionId,
-        added_column: PbColumnCatalog,
-    ) -> MetaResult<NotificationVersion> {
+    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        let source_id = source.get_id();
+        let source_version = source.get_version();
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_source_id(source_id)?;
 
-        let mut source = database_core.sources.get(&source_id).unwrap().clone();
-        source.definition =
-            alter_relation_add_column(&source.definition, &added_column).map_err(|e| anyhow!(e))?;
-        if source.get_version() >= source_version {
+        let original_source = database_core.sources.get(&source_id).unwrap().clone();
+        if original_source.get_version() >= source_version {
             return Err(MetaError::permission_denied(format!(
                 "Meta source version {} is newer than frontend source version {}",
                 source.get_version(),
                 source_version,
             )));
         }
-        source.columns.push(added_column);
 
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         sources.insert(source_id, source.clone());

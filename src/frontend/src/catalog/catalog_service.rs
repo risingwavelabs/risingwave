@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SourceVersionId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -25,13 +25,12 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::create_connection_request;
-use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, SourceId};
+use super::{DatabaseId, TableId};
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -87,12 +86,7 @@ pub trait CatalogWriter: Send + Sync {
         mapping: ColIndexMapping,
     ) -> Result<()>;
 
-    async fn alter_source_column(
-        &self,
-        source_id: SourceId,
-        source_version: SourceVersionId,
-        added_column: PbColumnCatalog,
-    ) -> Result<()>;
+    async fn alter_source_column(&self, source: PbSource) -> Result<()>;
 
     async fn create_index(
         &self,
@@ -228,16 +222,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_source_column(
-        &self,
-        source_id: SourceId,
-        source_version: SourceVersionId,
-        added_column: PbColumnCatalog,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_source_column(source_id, source_version, added_column)
-            .await?;
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        let version = self.meta_client.alter_source_column(source).await?;
         self.wait_version(version).await
     }
 

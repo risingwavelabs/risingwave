@@ -25,7 +25,7 @@ use either::Either;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use lru::LruCache;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SourceVersionId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -71,7 +71,6 @@ use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{PbReschedule, *};
-use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -418,16 +417,9 @@ impl MetaClient {
     }
 
     // only adding columns is supported
-    pub async fn alter_source_column(
-        &self,
-        source_id: u32,
-        source_version: SourceVersionId,
-        added_column: PbColumnCatalog,
-    ) -> Result<CatalogVersion> {
-        let request = AlterSourceColumnRequest {
-            source_id,
-            source_version,
-            added_column: Some(added_column),
+    pub async fn alter_source_column(&self, source: PbSource) -> Result<CatalogVersion> {
+        let request = AlterSourceRequest {
+            source: Some(source),
         };
         let resp = self.inner.alter_source_column(request).await?;
         Ok(resp.version)
@@ -1651,7 +1643,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
-            ,{ ddl_client, alter_source_column, AlterSourceColumnRequest, AlterSourceColumnResponse }
+            ,{ ddl_client, alter_source_column, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }

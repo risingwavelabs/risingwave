@@ -588,22 +588,14 @@ where
 
     async fn alter_source_column(
         &self,
-        request: Request<AlterSourceColumnRequest>,
-    ) -> Result<Response<AlterSourceColumnResponse>, Status> {
-        let AlterSourceColumnRequest {
-            source_id,
-            source_version,
-            added_column,
-        } = request.into_inner();
+        request: Request<AlterSourceRequest>,
+    ) -> Result<Response<AlterSourceResponse>, Status> {
+        let AlterSourceRequest { source } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSourceColumn(
-                source_id,
-                source_version,
-                added_column.unwrap(),
-            ))
+            .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
             .await?;
-        Ok(Response::new(AlterSourceColumnResponse {
+        Ok(Response::new(AlterSourceResponse {
             status: None,
             version,
         }))
