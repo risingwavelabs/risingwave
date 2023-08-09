@@ -92,7 +92,7 @@ async fn test_full_scan() {
     let task = FullScanTask {
         sst_retention_time_sec: 10000,
     };
-    let scan_result = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
+    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
         .unwrap();
     assert!(scan_result.is_empty());
@@ -100,7 +100,7 @@ async fn test_full_scan() {
     let task = FullScanTask {
         sst_retention_time_sec: 6000,
     };
-    let scan_result = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
+    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
         .unwrap();
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1]);
@@ -108,7 +108,7 @@ async fn test_full_scan() {
     let task = FullScanTask {
         sst_retention_time_sec: 2000,
     };
-    let scan_result = Vacuum::full_scan_inner(task, object_metadata_iter)
+    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter)
         .await
         .unwrap();
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1, 2]);
