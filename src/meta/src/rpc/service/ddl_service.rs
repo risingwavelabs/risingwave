@@ -592,12 +592,14 @@ where
     ) -> Result<Response<AlterSourceColumnResponse>, Status> {
         let AlterSourceColumnRequest {
             source_id,
+            source_version,
             added_column,
         } = request.into_inner();
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterSourceColumn(
                 source_id,
+                source_version,
                 added_column.unwrap(),
             ))
             .await?;

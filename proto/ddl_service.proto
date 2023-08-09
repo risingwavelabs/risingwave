@@ -70,7 +70,8 @@ message DropSourceResponse {
 
 message AlterSourceColumnRequest {
   uint32 source_id = 1;
-  plan_common.ColumnCatalog added_column = 2;
+  uint64 source_version = 2;
+  plan_common.ColumnCatalog added_column = 3;
 }
 
 message AlterSourceColumnResponse {

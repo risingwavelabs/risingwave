@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SourceVersionId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -31,7 +31,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::DatabaseId;
+use super::{DatabaseId, SourceId};
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -89,7 +89,8 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_source_column(
         &self,
-        source_id: u32,
+        source_id: SourceId,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) -> Result<()>;
 
@@ -229,12 +230,13 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_source_column(
         &self,
-        source_id: u32,
+        source_id: SourceId,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .alter_source_column(source_id, added_column)
+            .alter_source_column(source_id, source_version, added_column)
             .await?;
         self.wait_version(version).await
     }

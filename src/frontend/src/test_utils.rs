@@ -23,8 +23,9 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
+    FunctionId, IndexId, SourceVersionId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -468,11 +469,12 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_source_column(
         &self,
         source_id: u32,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) -> Result<()> {
         self.catalog
             .write()
-            .alter_source_column_by_id(&source_id, added_column);
+            .alter_source_column_by_id(&source_id, source_version, added_column);
         Ok(())
     }
 

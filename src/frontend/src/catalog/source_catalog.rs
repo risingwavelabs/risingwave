@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
@@ -43,6 +43,7 @@ pub struct SourceCatalog {
     pub connection_id: Option<ConnectionId>,
     pub created_at_epoch: Option<Epoch>,
     pub initialized_at_epoch: Option<Epoch>,
+    pub version: SourceVersionId,
 }
 
 impl SourceCatalog {
@@ -71,7 +72,13 @@ impl SourceCatalog {
             optional_associated_table_id: self
                 .associated_table_id
                 .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
+            version: self.version,
         }
+    }
+
+    /// Get a reference to the table catalog's version.
+    pub fn version(&self) -> SourceVersionId {
+        self.version
     }
 }
 
@@ -100,6 +107,7 @@ impl From<&PbSource> for SourceCatalog {
             .map(|id| match id {
                 OptionalAssociatedTableId::AssociatedTableId(id) => id,
             });
+        let version = prost.version;
 
         let connection_id = prost.connection_id;
 
@@ -119,6 +127,7 @@ impl From<&PbSource> for SourceCatalog {
             connection_id,
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
+            version,
         }
     }
 }

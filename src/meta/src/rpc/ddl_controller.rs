@@ -16,6 +16,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::SourceVersionId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -95,7 +96,7 @@ pub enum DdlCommand {
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
-    AlterSourceColumn(SourceId, PbColumnCatalog),
+    AlterSourceColumn(SourceId, SourceVersionId, PbColumnCatalog),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
 }
@@ -193,8 +194,9 @@ where
                 DdlCommand::DropConnection(connection_id) => {
                     ctrl.drop_connection(connection_id).await
                 }
-                DdlCommand::AlterSourceColumn(source_id, added_column) => {
-                    ctrl.alter_source_column(source_id, added_column).await
+                DdlCommand::AlterSourceColumn(source_id, source_version, added_column) => {
+                    ctrl.alter_source_column(source_id, source_version, added_column)
+                        .await
                 }
             }
         }
@@ -282,10 +284,11 @@ where
     async fn alter_source_column(
         &self,
         source_id: SourceId,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) -> MetaResult<NotificationVersion> {
         self.catalog_manager
-            .alter_source_column(source_id, added_column)
+            .alter_source_column(source_id, source_version, added_column)
             .await
     }
 

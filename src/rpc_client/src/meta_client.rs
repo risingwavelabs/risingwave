@@ -25,7 +25,7 @@ use either::Either;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use lru::LruCache;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SourceVersionId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -421,10 +421,12 @@ impl MetaClient {
     pub async fn alter_source_column(
         &self,
         source_id: u32,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) -> Result<CatalogVersion> {
         let request = AlterSourceColumnRequest {
             source_id,
+            source_version,
             added_column: Some(added_column),
         };
         let resp = self.inner.alter_source_column(request).await?;

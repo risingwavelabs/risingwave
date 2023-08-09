@@ -96,9 +96,11 @@ pub async fn handle_alter_source_column(
         _ => unreachable!(),
     };
 
+    let new_version = original_catalog.version() + 1;
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_source_column(original_catalog.id, diff_column.to_protobuf())
+        .alter_source_column(original_catalog.id, new_version, diff_column.to_protobuf())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
@@ -161,5 +163,8 @@ pub mod tests {
 
         // Check the old columns and IDs are not changed.
         assert_eq!(columns["v1"], altered_columns["v1"]);
+
+        // Check version
+        assert_eq!(source.version + 1, altered_source.version);
     }
 }

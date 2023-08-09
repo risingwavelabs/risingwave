@@ -27,8 +27,8 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
-    DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
+    valid_table_name, SourceVersionId, TableId as StreamingJobId, TableOption,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
@@ -1551,6 +1551,7 @@ where
     pub async fn alter_source_column(
         &self,
         source_id: SourceId,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
@@ -1560,6 +1561,13 @@ where
         let mut source = database_core.sources.get(&source_id).unwrap().clone();
         source.definition =
             alter_relation_add_column(&source.definition, &added_column).map_err(|e| anyhow!(e))?;
+        if source.get_version() >= source_version {
+            return Err(MetaError::permission_denied(format!(
+                "Meta source version {} is newer than frontend source version {}",
+                source.get_version(),
+                source_version,
+            )));
+        }
         source.columns.push(added_column);
 
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);

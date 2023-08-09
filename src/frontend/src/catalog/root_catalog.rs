@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SourceVersionId, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -501,6 +501,7 @@ impl Catalog {
     pub fn alter_source_column_by_id(
         &mut self,
         source_id: &SourceId,
+        source_version: SourceVersionId,
         added_column: PbColumnCatalog,
     ) {
         let (mut database_id, mut schema_id) = (0, 0);
@@ -521,6 +522,7 @@ impl Catalog {
                 .get_source_by_id(&database_id, &schema_id, source_id)
                 .unwrap()
                 .to_prost(schema_id, database_id);
+            source.version = source_version;
             source.columns.push(added_column);
             self.update_source(&source);
         }
