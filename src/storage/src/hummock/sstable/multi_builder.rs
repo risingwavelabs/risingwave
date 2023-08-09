@@ -700,7 +700,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let v = vec![5u8; 200];
+        let v = vec![5u8; 220];
         let epoch = 12;
         builder
             .add_full_key(
