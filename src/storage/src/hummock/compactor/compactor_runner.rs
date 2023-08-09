@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
-use super::compaction_utils::estimate_task_memory_capacity;
+use super::compaction_utils::estimate_task_output_capacity;
 use super::task_progress::TaskProgress;
 use super::TaskConfig;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -52,20 +52,18 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
-        let (capacity, total_input_file_size, _) =
-            estimate_task_memory_capacity(context.clone(), &task);
-        options.capacity = capacity;
+
+        options.capacity = estimate_task_output_capacity(context.clone(), &task);
         let kv_count = task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|sst| sst.total_key_count)
             .sum::<u64>() as usize;
-        let multiplier = total_input_file_size / (capacity + 1);
-        let single_file_kv_count = kv_count / std::cmp::max(multiplier, 1);
         let use_block_based_filter =
-            BlockedXor16FilterBuilder::is_kv_count_too_large(single_file_kv_count)
+            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count)
                 || task.target_level > 0;
+
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),

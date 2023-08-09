@@ -180,8 +180,13 @@ where
                 if switch_builder {
                     need_seal_current = true;
                 } else if builder.reach_capacity() {
-                    need_seal_current = self.split_weight_by_vnode == 0
-                        || (self.is_target_level_l0_or_lbase && vnode_changed);
+                    if self.split_weight_by_vnode == 0
+                        || builder.reach_max_sst_size()
+                    {
+                        need_seal_current = true;
+                    } else {
+                        need_seal_current = self.is_target_level_l0_or_lbase && vnode_changed;
+                    }
                 }
             }
             if need_seal_current && let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
@@ -228,6 +233,7 @@ where
         let mut switch_builder = false;
         let mut vnode_changed = false;
         if self.split_by_table && user_key.table_id.table_id != self.last_table_id {
+            // table_id change
             self.last_table_id = user_key.table_id.table_id;
             switch_builder = true;
             self.last_vnode = 0;
@@ -244,6 +250,7 @@ where
                 vnode_changed = true;
             }
             if key_vnode > self.largest_vnode_in_current_partition {
+                // vnode partition change
                 switch_builder = true;
 
                 // SAFETY: `self.split_weight_by_vnode > 1` here.
@@ -411,7 +418,11 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
+    use crate::hummock::sstable::utils::CompressionAlgorithm;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, test_key_of, test_user_key_of, DEFAULT_MAX_KEY_COUNT,
+        DEFAULT_MAX_SST_SIZE,
+    };
     use crate::hummock::{
         create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
         SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
