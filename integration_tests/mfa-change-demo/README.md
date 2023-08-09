@@ -16,7 +16,7 @@ Run it in local.
 
 1. Start kafka and risingwave. Then create source and mv in risingwave. can run this script
 
-```./run.sh```
+```./run_local.sh```
 
 we can change recwave-start.sql and server/src/serving to add new demands or modift it.
 
