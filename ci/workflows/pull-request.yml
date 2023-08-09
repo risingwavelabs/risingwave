@@ -3,8 +3,6 @@ auto-retry: &auto-retry
     # Agent terminated because the AWS EC2 spot instance killed by AWS.
     - signal_reason: agent_stop
       limit: 3
-    - exit_status: 255
-      limit: 3
 
 steps:
   - label: "check ci image rebuild"
@@ -172,6 +170,20 @@ steps:
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end iceberg sink v2 test"
+    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"

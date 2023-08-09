@@ -147,6 +147,9 @@ pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
 pub type WatermarkCacheStateTable<S> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
 
+pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
+    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
+
 // initialize
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
     StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
