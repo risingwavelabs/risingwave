@@ -372,7 +372,7 @@ impl LocalHummockStorage {
             let size = SharedBufferBatch::measure_batch_size(&sorted_items)
                 + SharedBufferBatch::measure_delete_range_size(&delete_ranges);
             self.write_limiter.wait_permission(self.table_id).await;
-            let limiter: &MemoryLimiter = self.memory_limiter.as_ref();
+            let limiter = self.memory_limiter.as_ref();
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
                 tracker
             } else {

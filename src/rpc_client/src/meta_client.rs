@@ -987,7 +987,7 @@ impl MetaClient {
         let req = GetTablesRequest {
             table_ids: table_ids.to_vec(),
         };
-        let resp: GetTablesResponse = self.inner.get_tables(req).await?;
+        let resp = self.inner.get_tables(req).await?;
         Ok(resp.tables)
     }
 
