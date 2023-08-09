@@ -184,8 +184,8 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
         BlockedXor16FilterBuilder::new(capacity)
     }
 
-    fn switch_builder(&mut self) {
-        let block = self.current.finish(None);
+    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) {
+        let block = self.current.finish(memory_limiter);
         self.data.put_u32_le(block.len() as u32);
         self.data.extend(block);
         self.block_count += 1;
