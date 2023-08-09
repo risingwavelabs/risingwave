@@ -1,0 +1,72 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::collections::BTreeMap;
+
+use risingwave_common::estimate_size::{EstimateSize, KvSize};
+
+pub struct EstimatedBTreeMap<K, V> {
+    cache: BTreeMap<K, V>,
+    heap_size: KvSize,
+}
+
+impl<K, V> EstimatedBTreeMap<K, V> {
+    pub fn new() -> Self {
+        Self {
+            cache: BTreeMap::new(),
+            heap_size: KvSize::new(),
+        }
+    }
+
+    pub fn inner(&self) -> &BTreeMap<K, V> {
+        &self.cache
+    }
+}
+
+impl<K, V> Default for EstimatedBTreeMap<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V> EstimatedBTreeMap<K, V>
+where
+    K: EstimateSize + Ord,
+    V: EstimateSize,
+{
+    pub fn insert(&mut self, key: K, row: V) {
+        let key_size = self.heap_size.add_val(&key);
+        self.heap_size.add_val(&row);
+        if let Some(old_row) = self.cache.insert(key, row) {
+            self.heap_size.sub_size(key_size);
+            self.heap_size.sub_val(&old_row);
+        }
+    }
+
+    pub fn remove(&mut self, key: &K) {
+        if let Some(row) = self.cache.remove(key) {
+            self.heap_size.sub(key, &row);
+        }
+    }
+}
+
+impl<K, V> EstimateSize for EstimatedBTreeMap<K, V>
+where
+    K: EstimateSize,
+    V: EstimateSize,
+{
+    fn estimated_heap_size(&self) -> usize {
+        self.heap_size.size()
+    }
+}
