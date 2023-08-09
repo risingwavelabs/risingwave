@@ -869,6 +869,10 @@ where
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
+            trace!(
+                table_id = %self.table_id,
+                "refresh watermark cache for state table"
+            );
             if let Some(ref watermark) = self.prev_cleaned_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
@@ -911,11 +915,16 @@ where
                     filler.insert_unchecked(DefaultOrdered(pk), ());
                 }
                 filler.finish();
+                assert!(self.watermark_cache.is_synced());
 
                 let n_cache_entries = self.watermark_cache.len();
                 if n_cache_entries < self.watermark_cache.capacity() {
                     self.watermark_cache.set_table_row_count(n_cache_entries);
                 }
+                trace!(
+                    table_id = %self.table_id,
+                    watermark_cache_size = n_cache_entries,
+                )
             }
         }
 
@@ -952,9 +961,21 @@ where
         let should_clean_watermark = match watermark {
             Some(ref watermark) => {
                 if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
+
                     if let Some(key) = self.watermark_cache.lowest_key() {
+                        trace!(
+                            table_id = %self.table_id,
+                            watermark = ?watermark,
+                            key = ?key,
+                            "watermark_has_key"
+                        );
                         watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
                     } else {
+                        trace!(
+                            table_id = %self.table_id,
+                            watermark = ?watermark,
+                            "watermark_has_no_key"
+                        );
                         // Watermark cache is synced,
                         // And there's no key in watermark cache.
                         // That implies table is empty.
@@ -962,6 +983,12 @@ where
                         false
                     }
                 } else {
+                    trace!(
+                        table_id = %self.table_id,
+                        watermark = ?watermark,
+                        is_synced = self.watermark_cache.is_synced(),
+                        use_watermark_cache = USE_WATERMARK_CACHE,
+                    );
                     // Either we are not using watermark cache,
                     // Or watermark_cache is not synced.
                     // In either case we should clean watermark.
@@ -970,6 +997,12 @@ where
             }
             None => false,
         };
+        trace!(
+            table_id = %self.table_id,
+            watermark = ?watermark,
+            should_clean_watermark,
+            "checked if should clean watermark"
+        );
 
         let watermark_suffix = watermark.as_ref().map(|watermark| {
             serialize_pk(
