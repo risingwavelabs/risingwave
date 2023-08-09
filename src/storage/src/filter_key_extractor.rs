@@ -505,6 +505,7 @@ mod tests {
             dist_key_in_pk: vec![],
             cardinality: None,
             created_at_epoch: None,
+            cleaned_by_watermark: false,
         }
     }
 

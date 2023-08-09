@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
+use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
+use futures::Stream;
 use itertools::Itertools;
 use thiserror::Error;
 use tokio::io::AsyncRead;
@@ -29,6 +32,7 @@ use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
     StreamingUploader,
 };
+use crate::object::ObjectMetadataIter;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -205,8 +209,8 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        Ok(self
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let list_result = self
             .objects
             .lock()
             .await
@@ -218,7 +222,8 @@ impl ObjectStore for InMemObjectStore {
                 None
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
-            .collect_vec())
+            .collect_vec();
+        Ok(Box::pin(InMemObjectIter::new(list_result)))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -282,9 +287,33 @@ fn get_obj_meta(path: &str, obj: &Bytes) -> ObjectResult<ObjectMetadata> {
     })
 }
 
+struct InMemObjectIter {
+    list_result: VecDeque<ObjectMetadata>,
+}
+
+impl InMemObjectIter {
+    fn new(list_result: Vec<ObjectMetadata>) -> Self {
+        Self {
+            list_result: list_result.into(),
+        }
+    }
+}
+
+impl Stream for InMemObjectIter {
+    type Item = ObjectResult<ObjectMetadata>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(i) = self.list_result.pop_front() {
+            return Poll::Ready(Some(Ok(i)));
+        }
+        Poll::Ready(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use futures::StreamExt;
     use itertools::enumerate;
 
     use super::*;
@@ -364,40 +393,47 @@ mod tests {
         assert_eq!(metadata.total_size, 6);
     }
 
+    async fn list_all(prefix: &str, store: &InMemObjectStore) -> Vec<ObjectMetadata> {
+        let mut iter = store.list(prefix).await.unwrap();
+        let mut result = vec![];
+        while let Some(r) = iter.next().await {
+            result.push(r.unwrap());
+        }
+        result
+    }
+
     #[tokio::test]
     async fn test_list() {
         let payload = Bytes::from("123456");
         let store = InMemObjectStore::new();
-        assert!(store.list("").await.unwrap().is_empty());
+        assert!(list_all("", &store).await.is_empty());
 
         let paths = vec!["001/002/test.obj", "001/003/test.obj"];
         for (i, path) in enumerate(paths.clone()) {
-            assert_eq!(store.list("").await.unwrap().len(), i);
+            assert_eq!(list_all("", &store).await.len(), i);
             store.upload(path, payload.clone()).await.unwrap();
-            assert_eq!(store.list("").await.unwrap().len(), i + 1);
+            assert_eq!(list_all("", &store).await.len(), i + 1);
         }
 
-        let list_path = store
-            .list("")
+        let list_path = list_all("", &store)
             .await
-            .unwrap()
             .iter()
             .map(|p| p.key.clone())
             .collect_vec();
         assert_eq!(list_path, paths);
 
         for i in 0..=5 {
-            assert_eq!(store.list(&paths[0][0..=i]).await.unwrap().len(), 2);
+            assert_eq!(list_all(&paths[0][0..=i], &store).await.len(), 2);
         }
         for i in 6..=paths[0].len() - 1 {
-            assert_eq!(store.list(&paths[0][0..=i]).await.unwrap().len(), 1);
+            assert_eq!(list_all(&paths[0][0..=i], &store).await.len(), 1)
         }
-        assert!(store.list("003").await.unwrap().is_empty());
+        assert!(list_all("003", &store).await.is_empty());
 
         for (i, path) in enumerate(paths.clone()) {
-            assert_eq!(store.list("").await.unwrap().len(), paths.len() - i);
+            assert_eq!(list_all("", &store).await.len(), paths.len() - i);
             store.delete(path).await.unwrap();
-            assert_eq!(store.list("").await.unwrap().len(), paths.len() - i - 1);
+            assert_eq!(list_all("", &store).await.len(), paths.len() - i - 1);
         }
     }
 
@@ -410,7 +446,7 @@ mod tests {
         store.upload("/abc", block1).await.unwrap();
         store.upload("/klm", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 2);
+        assert_eq!(list_all("", &store).await.len(), 2);
 
         let str_list = [
             String::from("/abc"),
@@ -420,6 +456,6 @@ mod tests {
 
         store.delete_objects(&str_list).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 0);
+        assert_eq!(list_all("", &store).await.len(), 0);
     }
 }
