@@ -1813,8 +1813,15 @@ where
                         );
                     }
 
-                    if let Some(target_parallelism) = target_parallelism && target_parallel_unit_ids.len() > target_parallelism {
-                        target_parallel_unit_ids = target_parallel_unit_ids.into_iter().take(target_parallelism).collect();
+                    if let Some(target_parallelism) = target_parallelism {
+                        if target_parallel_unit_ids.len() < target_parallelism {
+                            bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                        }
+
+                        target_parallel_unit_ids = target_parallel_unit_ids
+                            .into_iter()
+                            .take(target_parallelism)
+                            .collect();
                     }
 
                     let to_expand_parallel_units = target_parallel_unit_ids

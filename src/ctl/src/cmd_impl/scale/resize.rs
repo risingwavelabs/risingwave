@@ -126,7 +126,6 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         fragments,
     } = resize;
 
-    // let (exclude, include, target) = (exclude_workers, include_workers, target_parallelism);
     let worker_changes = {
         let exclude_worker_ids =
             worker_input_to_worker_ids(exclude_workers.unwrap_or_default(), false);
