@@ -961,7 +961,6 @@ where
         let should_clean_watermark = match watermark {
             Some(ref watermark) => {
                 if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
-
                     if let Some(key) = self.watermark_cache.lowest_key() {
                         trace!(
                             table_id = %self.table_id,

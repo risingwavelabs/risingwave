@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::XmlNode;
+use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -29,6 +29,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamDynamicFilter {
     pub base: PlanBase,
     core: generic::DynamicFilter<PlanRef>,
+    cleaned_by_watermark: bool,
 }
 
 impl StreamDynamicFilter {
@@ -44,7 +45,12 @@ impl StreamDynamicFilter {
             false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
-        Self { base, core }
+        let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
+        Self {
+            base,
+            core,
+            cleaned_by_watermark,
+        }
     }
 
     pub fn left_index(&self) -> usize {
@@ -53,14 +59,12 @@ impl StreamDynamicFilter {
 
     /// 1. Check the comparator.
     /// 2. RHS input has to be temporal filter.
-    pub fn cleaned_by_watermark(&self) -> bool {
-        let expr = self.core.predicate();
+    pub fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
+        let expr = core.predicate();
         if let Some(ExprImpl::FunctionCall(function_call)) = expr.as_expr_unless_true() {
             match function_call.func_type() {
-                | ExprType::GreaterThan
-                | ExprType::GreaterThanOrEqual => {
-                    let (_, lhs, _rhs) = function_call.clone().decompose_as_binary();
-                    let rhs_input = self.core.right();
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    let rhs_input = core.right();
                     if let Some(stream_exchange) = rhs_input.as_stream_exchange() {
                         if let Some(node) = stream_exchange.input().as_stream_project() {
                             node.input().as_stream_now().is_some()
@@ -75,9 +79,8 @@ impl StreamDynamicFilter {
             }
         } else {
             false
-       }
+        }
     }
-
 }
 
 impl Distill for StreamDynamicFilter {
@@ -90,6 +93,10 @@ impl Distill for StreamDynamicFilter {
             vec.push(("output_watermarks", ow));
         }
         vec.push(("output", column_names_pretty(self.schema())));
+        vec.push((
+            "cleaned_by_watermark",
+            Pretty::display(&self.cleaned_by_watermark),
+        ));
         childless_record("StreamDynamicFilter", vec)
     }
 }
@@ -113,10 +120,7 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
-        let cleaned_by_watermark = self.cleaned_by_watermark();
-        println!("predicate: {:#?}", self.core.predicate());
-        println!("predicate: {:?}", self.core.predicate());
-        println!("cleaned_by_watermark: {:?}", cleaned_by_watermark);
+        let cleaned_by_watermark = self.cleaned_by_watermark;
         let condition = self
             .core
             .predicate()
