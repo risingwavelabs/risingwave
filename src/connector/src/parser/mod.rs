@@ -374,6 +374,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
+/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
+/// committed to avoid potential OOM.
+const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
+
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
@@ -383,6 +387,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
     let mut split_offset_mapping = HashMap::<SplitId, String>::new();
 
+    struct Transaction {
+        id: Box<str>,
+        len: usize,
+    }
     let mut current_transaction = None;
     let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
 
@@ -391,15 +399,32 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         let batch = batch?;
         let batch_len = batch.len();
 
-        if builder.is_empty() && current_transaction.is_none() {
+        if let Some(Transaction { len, id }) = &mut current_transaction {
+            // Dirty state. The last batch is not yielded due to uncommitted transaction.
+            if *len > MAX_ROWS_FOR_TRANSACTION {
+                // Large transaction. Force commit.
+                tracing::warn!(
+                    id,
+                    len,
+                    "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
+                );
+                *len = 0; // reset `len` while keeping `id`
+                yield_asap = false;
+                yield StreamChunkWithState {
+                    chunk: builder.take(batch_len),
+                    split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                };
+            } else {
+                // Normal transaction. After the transaction is committed, we should yield the last
+                // batch immediately, so set `yield_asap` to true.
+                yield_asap = true;
+            }
+        } else {
             // Clean state. Reserve capacity for the builder.
+            assert!(builder.is_empty());
             assert!(!yield_asap);
             assert!(split_offset_mapping.is_empty());
             let _ = builder.take(batch_len);
-        } else {
-            // Dirty state. The last batch is not yielded due to uncommitted transaction.
-            // After the transaction is committed, we should yield the last batch immediately.
-            yield_asap = true;
         }
 
         for (i, msg) in batch.into_iter().enumerate() {
@@ -416,9 +441,14 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 .await
             {
                 Ok(Either::Left(WriteGuard(_))) => {
+                    // new_op_num - old_op_num is the number of rows added to the builder
                     let new_op_num = builder.op_num();
 
-                    // new_op_num - old_op_num is the number of rows added to the builder
+                    // Aggregate the number of rows in the current transaction.
+                    if let Some(Transaction { len, .. }) = &mut current_transaction {
+                        *len += new_op_num - old_op_num;
+                    }
+
                     for _ in old_op_num..new_op_num {
                         // TODO: support more kinds of SourceMeta
                         if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
@@ -445,22 +475,15 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 Ok(Either::Right(txn_ctl)) => {
                     match txn_ctl {
                         TransactionControl::Begin { id } => {
-                            if let Some(current_id) = &current_transaction {
-                                tracing::warn!(
-                                    "already in transaction, current: {}, new: {}",
-                                    current_id,
-                                    id
-                                );
+                            if let Some(Transaction { id: current_id, .. }) = &current_transaction {
+                                tracing::warn!(current_id, id, "already in transaction");
                             }
-                            current_transaction = Some(id);
+                            current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
-                            if current_transaction.as_ref() != Some(&id) {
-                                tracing::warn!(
-                                    "transaction id mismatch, current: {:?}, actual: {}",
-                                    current_transaction,
-                                    id
-                                );
+                            let current_id = current_transaction.as_ref().map(|t| &t.id);
+                            if current_id != Some(&id) {
+                                tracing::warn!(?current_id, id, "transaction id mismatch");
                             }
                             current_transaction = None;
                         }
@@ -477,10 +500,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 }
 
-                Err(e) => {
-                    tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                Err(error) => {
+                    tracing::warn!(%error, "message parsing failed, skipping");
                     // This will throw an error for batch
-                    parser.source_ctx().report_user_source_error(e)?;
+                    parser.source_ctx().report_user_source_error(error)?;
                     continue;
                 }
             }
