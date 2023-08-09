@@ -12,14 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_DDL_PROGRESS_TABLE_NAME: &str = "rw_ddl_progress";
+pub const RW_DDL_PROGRESS: BuiltinTable = BuiltinTable {
+    name: "rw_ddl_progress",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int64, "ddl_id"),
+        (DataType::Varchar, "ddl_statement"),
+        (DataType::Varchar, "progress"),
+    ],
+    pk: &[0],
+};
 
-pub const RW_DDL_PROGRESS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int64, "ddl_id"),
-    (DataType::Varchar, "ddl_statement"),
-    (DataType::Varchar, "progress"),
-];
+impl SysCatalogReaderImpl {
+    pub async fn read_ddl_progress(&self) -> Result<Vec<OwnedRow>> {
+        let ddl_progress = self
+            .meta_client
+            .list_ddl_progress()
+            .await?
+            .into_iter()
+            .map(|s| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(s.id as i64)),
+                    Some(ScalarImpl::Utf8(s.statement.into())),
+                    Some(ScalarImpl::Utf8(s.progress.into())),
+                ])
+            })
+            .collect_vec();
+        Ok(ddl_progress)
+    }
+}

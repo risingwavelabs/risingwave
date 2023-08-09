@@ -5,7 +5,7 @@
 coverage:
   status:
     patch: off # disable patch status
-    project: 
+    project:
       default: false  # disable the default status that measures entire project
       rust:
         only_pulls: true # no status will be posted for commits not on a pull request

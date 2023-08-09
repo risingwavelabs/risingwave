@@ -13,6 +13,9 @@
 // limitations under the License.
 
 pub mod catalog;
+pub mod clickhouse;
+pub mod coordinate;
+pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod redis;
@@ -21,21 +24,27 @@ pub mod utils;
 
 use std::collections::HashMap;
 
+use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnCatalog, Schema};
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
+use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::ConnectorClient;
+use risingwave_rpc_client::{ConnectorClient, MetaClient};
 use thiserror::Error;
 pub use tracing;
 
 use self::catalog::SinkType;
-use crate::sink::catalog::SinkId;
+use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::iceberg::{IcebergSink, ICEBERG_SINK};
+use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::clickhouse::CLICKHOUSE_SINK;
+use crate::sink::iceberg::IcebergConfig;
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -49,29 +58,94 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SinkParam {
+    pub sink_id: SinkId,
+    pub properties: HashMap<String, String>,
+    pub columns: Vec<ColumnDesc>,
+    pub pk_indices: Vec<usize>,
+    pub sink_type: SinkType,
+}
+
+impl SinkParam {
+    pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let table_schema = pb_param.table_schema.expect("should contain table schema");
+        Self {
+            sink_id: SinkId::from(pb_param.sink_id),
+            properties: pb_param.properties,
+            columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
+            pk_indices: table_schema
+                .pk_indices
+                .iter()
+                .map(|i| *i as usize)
+                .collect(),
+            sink_type: SinkType::from_proto(
+                PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
+            ),
+        }
+    }
+
+    pub fn to_proto(&self) -> PbSinkParam {
+        PbSinkParam {
+            sink_id: self.sink_id.sink_id,
+            properties: self.properties.clone(),
+            table_schema: Some(TableSchema {
+                columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+                pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
+            }),
+            sink_type: self.sink_type.to_proto().into(),
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self.columns.iter().map(Field::from).collect(),
+        }
+    }
+}
+
+impl From<SinkCatalog> for SinkParam {
+    fn from(sink_catalog: SinkCatalog) -> Self {
+        let columns = sink_catalog
+            .visible_columns()
+            .map(|col| col.column_desc.clone())
+            .collect();
+        Self {
+            sink_id: sink_catalog.id,
+            properties: sink_catalog.properties,
+            columns,
+            pk_indices: sink_catalog.downstream_pk,
+            sink_type: sink_catalog.sink_type,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
+    pub meta_client: Option<MetaClient>,
 }
 
 #[async_trait]
 pub trait Sink {
-    type Writer: SinkWriter;
+    type Writer: SinkWriter<CommitMetadata = ()>;
     type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
-        _connector_rpc_endpoint: Option<String>,
+        _connector_client: Option<ConnectorClient>,
     ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
 
 #[async_trait]
-pub trait SinkWriter: Send {
+pub trait SinkWriter: Send + 'static {
+    type CommitMetadata: Send = ();
     /// Begin a new epoch
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
 
@@ -80,7 +154,7 @@ pub trait SinkWriter: Send {
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
     /// Clean up
     async fn abort(&mut self) -> Result<()>;
@@ -91,7 +165,7 @@ pub trait SinkWriter: Send {
 
 #[async_trait]
 // An old version of SinkWriter for backward compatibility
-pub trait SinkWriterV1: Send {
+pub trait SinkWriterV1: Send + 'static {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -164,7 +238,7 @@ pub trait SinkCommitCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()>;
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
 }
 
 pub struct DummySinkCommitCoordinator;
@@ -175,7 +249,7 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
         Ok(())
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<Bytes>) -> Result<()> {
+    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
         Ok(())
     }
 }
@@ -186,7 +260,9 @@ pub enum SinkConfig {
     Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
     Kinesis(Box<KinesisSinkConfig>),
+    Iceberg(IcebergConfig),
     BlackHole,
+    ClickHouse(Box<ClickHouseConfig>),
 }
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -251,35 +327,21 @@ impl SinkConfig {
             KINESIS_SINK => Ok(SinkConfig::Kinesis(Box::new(
                 KinesisSinkConfig::from_hashmap(properties)?,
             ))),
+            CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
+                ClickHouseConfig::from_hashmap(properties)?,
+            ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
+            ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
+                properties,
+            )?)),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
-        }
-    }
-
-    pub fn get_connector(&self) -> &'static str {
-        match self {
-            SinkConfig::Kafka(_) => "kafka",
-            SinkConfig::Redis(_) => "redis",
-            SinkConfig::Remote(_) => "remote",
-            SinkConfig::BlackHole => "blackhole",
-            SinkConfig::Kinesis(_) => "kinesis",
         }
     }
 }
 
-pub fn build_sink(
-    config: SinkConfig,
-    columns: &[ColumnCatalog],
-    pk_indices: Vec<usize>,
-    sink_type: SinkType,
-    sink_id: SinkId,
-) -> Result<SinkImpl> {
-    // The downstream sink can only see the visible columns.
-    let schema: Schema = columns
-        .iter()
-        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
-        .collect();
-    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id)
+pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+    let config = SinkConfig::from_hashmap(param.properties.clone())?;
+    SinkImpl::new(config, param)
 }
 
 #[derive(Debug)]
@@ -289,6 +351,22 @@ pub enum SinkImpl {
     Remote(RemoteSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
+    ClickHouse(ClickHouseSink),
+    Iceberg(IcebergSink),
+}
+
+impl SinkImpl {
+    pub fn get_connector(&self) -> &'static str {
+        match self {
+            SinkImpl::Kafka(_) => "kafka",
+            SinkImpl::Redis(_) => "redis",
+            SinkImpl::Remote(_) => "remote",
+            SinkImpl::BlackHole(_) => "blackhole",
+            SinkImpl::Kinesis(_) => "kinesis",
+            SinkImpl::ClickHouse(_) => "clickhouse",
+            SinkImpl::Iceberg(_) => "iceberg",
+        }
+    }
 }
 
 #[macro_export]
@@ -302,36 +380,37 @@ macro_rules! dispatch_sink {
             SinkImpl::Remote($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
             SinkImpl::Kinesis($sink) => $body,
+            SinkImpl::ClickHouse($sink) => $body,
+            SinkImpl::Iceberg($sink) => $body,
         }
     }};
 }
 
 impl SinkImpl {
-    pub fn new(
-        cfg: SinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        sink_type: SinkType,
-        sink_id: SinkId,
-    ) -> Result<Self> {
+    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )),
-            SinkConfig::Remote(cfg) => {
-                SinkImpl::Remote(RemoteSink::new(cfg, schema, pk_indices, sink_id, sink_type))
-            }
+            SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
+            SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
+                *cfg,
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
+            )?),
+            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema())?),
         })
     }
 }
@@ -345,18 +424,28 @@ pub enum SinkError {
     #[error("Kinesis error: {0}")]
     Kinesis(anyhow::Error),
     #[error("Remote sink error: {0}")]
-    Remote(String),
+    Remote(anyhow::Error),
     #[error("Json parse error: {0}")]
     JsonParse(String),
+    #[error("Iceberg error: {0}")]
+    Iceberg(String),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]
     Coordinator(anyhow::Error),
+    #[error("ClickHouse error: {0}")]
+    ClickHouse(String),
 }
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(format!("{}", value))
+        SinkError::Remote(anyhow_error!("{}", value))
+    }
+}
+
+impl From<ClickHouseError> for SinkError {
+    fn from(value: ClickHouseError) -> Self {
+        SinkError::ClickHouse(format!("{}", value))
     }
 }
 

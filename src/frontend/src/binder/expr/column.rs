@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -91,6 +92,17 @@ impl Binder {
                     err = e;
                 }
             }
+        }
+        // `CTID` is a system column in postgres.
+        // https://www.postgresql.org/docs/current/ddl-system-columns.html
+        //
+        // We return an empty string here to support some tools such as DataGrip.
+        //
+        // FIXME: The type of `CTID` should be `tid`.
+        // FIXME: The `CTID` column should be unique, so literal may break something.
+        // FIXME: At least we should add a notice here.
+        if let ErrorCode::ItemNotFound(_) = err && column_name == "ctid" {
+            return Ok(Literal::new(Some("".into()), DataType::Varchar).into())
         }
         Err(err.into())
     }

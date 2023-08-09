@@ -981,14 +981,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         OwnedRow::new(new_row)
     }
 
-    /// Used to forward `eq_join_oneside` to show join side in stack.  
+    /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_left(
         args: EqJoinArgs<'_, K, S>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
         Self::eq_join_oneside::<{ SideType::Left }>(args)
     }
 
-    /// Used to forward `eq_join_oneside` to show join side in stack.  
+    /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_right(
         args: EqJoinArgs<'_, K, S>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
@@ -1038,6 +1038,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ),
         };
 
+        let join_matched_join_keys = ctx
+            .streaming_metrics
+            .join_matched_join_keys
+            .with_label_values(&[&ctx.id.to_string(), &side_update.ht.table_id().to_string()]);
+
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
             Self::evict_cache(side_update, side_match, cnt_rows_received);
@@ -1051,10 +1056,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             } else {
                 None
             };
+
+            if let Some(rows) = &matched_rows {
+                join_matched_join_keys.observe(rows.len() as _);
+            } else {
+                join_matched_join_keys.observe(0.0)
+            }
+
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
-                    let mut append_only_matched_row = None;
+                    let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
                     if let Some(mut matched_rows) = matched_rows {
                         let mut matched_rows_to_clean = vec![];
                         for (matched_row_ref, matched_row) in

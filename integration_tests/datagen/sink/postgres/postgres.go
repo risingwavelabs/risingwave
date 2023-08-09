@@ -45,3 +45,7 @@ func (p *PostgresSink) WriteRecord(ctx context.Context, format string, record si
 	}
 	return err
 }
+
+func (p *PostgresSink) Flush(ctx context.Context) error {
+	return nil
+}

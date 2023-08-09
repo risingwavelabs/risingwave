@@ -27,9 +27,9 @@ use risingwave_connector::source::{
     SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::table_schema::Column;
-use risingwave_pb::connector_service::TableSchema;
+use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -37,7 +37,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, SourceId};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -48,9 +48,9 @@ pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>
 
 pub struct SourceManager<S: MetaStore> {
     pub(crate) paused: Mutex<()>,
+    env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
     core: Mutex<SourceManagerCore<S>>,
-    connector_rpc_endpoint: Option<String>,
     metrics: Arc<MetaMetrics>,
 }
 
@@ -71,6 +71,7 @@ struct ConnectorSourceWorker {
     period: Duration,
     metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
+    connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
 }
 
@@ -83,6 +84,7 @@ impl ConnectorSourceWorker {
                 info: SourceEnumeratorInfo {
                     source_id: self.source_id,
                 },
+                connector_client: self.connector_client.clone(),
             }),
         )
         .await?;
@@ -93,16 +95,16 @@ impl ConnectorSourceWorker {
     }
 
     pub async fn create(
-        connector_rpc_endpoint: &Option<String>,
+        connector_client: &Option<ConnectorClient>,
         source: &Source,
         period: Duration,
+        splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        // init cdc properties
-        if let Some(endpoint) = connector_rpc_endpoint {
+        if properties.is_cdc_connector() {
             let table_schema = Self::extract_source_schema(source);
-            properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
+            properties.init_cdc_properties(Some(table_schema));
         }
         let enumerator = SplitEnumeratorImpl::create(
             properties.clone(),
@@ -111,10 +113,11 @@ impl ConnectorSourceWorker {
                 info: SourceEnumeratorInfo {
                     source_id: source.id,
                 },
+                connector_client: connector_client.clone(),
             }),
         )
         .await?;
-        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+
         Ok(Self {
             source_id: source.id,
             source_name: source.name.clone(),
@@ -123,6 +126,7 @@ impl ConnectorSourceWorker {
             period,
             metrics,
             connector_properties: properties,
+            connector_client: connector_client.clone(),
             fail_cnt: 0,
         })
     }
@@ -180,7 +184,7 @@ impl ConnectorSourceWorker {
         Ok(())
     }
 
-    fn extract_source_schema(source: &Source) -> TableSchema {
+    fn extract_source_schema(source: &Source) -> PbTableSchema {
         let pk_indices = source
             .pk_column_ids
             .iter()
@@ -193,15 +197,12 @@ impl ConnectorSourceWorker {
             })
             .collect_vec();
 
-        TableSchema {
+        PbTableSchema {
             columns: source
                 .columns
                 .iter()
                 .flat_map(|col| &col.column_desc)
-                .map(|col| Column {
-                    name: col.name.clone(),
-                    data_type: col.column_type.clone(),
-                })
+                .cloned()
                 .collect(),
             pk_indices,
         }
@@ -516,7 +517,7 @@ where
     const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        connector_rpc_endpoint: Option<String>,
+        env: MetaSrvEnv<S>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
@@ -525,22 +526,25 @@ where
         let mut managed_sources = HashMap::new();
         {
             let sources = catalog_manager.list_sources().await;
-
             for source in sources {
-                Self::create_source_worker(
-                    &connector_rpc_endpoint,
-                    &source,
+                Self::create_source_worker_async(
+                    env.connector_client(),
+                    source,
                     &mut managed_sources,
-                    false,
                     metrics.clone(),
                 )
-                .await?
+                .await
             }
         }
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager.list_table_fragments().await {
+        for table_fragments in fragment_manager
+            .get_fragment_read_guard()
+            .await
+            .table_fragments()
+            .values()
+        {
             source_fragments.extend(table_fragments.stream_source_fragments());
             actor_splits.extend(table_fragments.actor_splits.clone());
         }
@@ -553,10 +557,10 @@ where
         ));
 
         Ok(Self {
+            env,
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
-            connector_rpc_endpoint,
             metrics,
         })
     }
@@ -694,7 +698,7 @@ where
             tracing::warn!("source {} already registered", source.get_id());
         } else {
             Self::create_source_worker(
-                &self.connector_rpc_endpoint,
+                self.env.connector_client(),
                 source,
                 &mut core.managed_sources,
                 true,
@@ -705,21 +709,75 @@ where
         Ok(())
     }
 
+    async fn create_source_worker_async(
+        connector_client: Option<ConnectorClient>,
+        source: Source,
+        managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
+        metrics: Arc<MetaMetrics>,
+    ) {
+        tracing::info!("spawning new watcher for source {}", source.id);
+
+        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+        let current_splits_ref = splits.clone();
+        let source_id = source.id;
+
+        let handle = tokio::spawn(async move {
+            let mut ticker = time::interval(Self::SOURCE_TICK_INTERVAL);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            let mut worker = loop {
+                ticker.tick().await;
+
+                match ConnectorSourceWorker::create(
+                    &connector_client,
+                    &source,
+                    Duration::from_secs(10),
+                    splits.clone(),
+                    metrics.clone(),
+                )
+                .await
+                {
+                    Ok(worker) => {
+                        break worker;
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to create source worker: {}", e);
+                    }
+                }
+            };
+
+            worker.run(sync_call_rx).await
+        });
+
+        managed_sources.insert(
+            source_id,
+            ConnectorSourceWorkerHandle {
+                handle,
+                sync_call_tx,
+                splits: current_splits_ref,
+            },
+        );
+    }
+
     async fn create_source_worker(
-        connector_rpc_endpoint: &Option<String>,
+        connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         force_tick: bool,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
+        let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let mut worker = ConnectorSourceWorker::create(
-            connector_rpc_endpoint,
+            &connector_client,
             source,
             Duration::from_secs(10),
+            current_splits_ref.clone(),
             metrics,
         )
         .await?;
-        let current_splits_ref = worker.current_splits.clone();
+
         tracing::info!("spawning new watcher for source {}", source.id);
 
         // don't force tick in process of recovery. One source down should not lead to meta recovery
@@ -779,7 +837,7 @@ where
 
         if !diff.is_empty() {
             let command = Command::SourceSplitAssignment(diff);
-            tracing::debug!("pushing down command {:#?}", command);
+            tracing::info!(command = ?command, "pushing down split assignment command");
             self.barrier_scheduler.run_command(command).await?;
         }
 

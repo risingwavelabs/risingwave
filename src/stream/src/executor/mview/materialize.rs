@@ -76,6 +76,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         input: BoxedExecutor,
         store: S,
         key: Vec<ColumnOrder>,
+        executor_id: u64,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
@@ -109,7 +110,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
-                identity: "MaterializeExecutor".to_string(),
+                identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
             conflict_behavior,
@@ -205,6 +206,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         table_id: TableId,
         keys: Vec<ColumnOrder>,
         column_ids: Vec<ColumnId>,
+        executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
@@ -234,7 +236,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
-                identity: "MaterializeExecutor".to_string(),
+                identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
             conflict_behavior,
@@ -307,15 +309,14 @@ impl MaterializeBuffer {
     ) -> Self {
         let (data_chunk, ops) = stream_chunk.into_parts();
 
-        let value_chunk = if let Some(ref value_indices) = value_indices {
-            data_chunk.clone().reorder_columns(value_indices)
+        let values = if let Some(ref value_indices) = value_indices {
+            data_chunk.project(value_indices).serialize()
         } else {
-            data_chunk.clone()
+            data_chunk.serialize()
         };
-        let values = value_chunk.serialize();
 
         let mut pks = vec![vec![]; data_chunk.capacity()];
-        let key_chunk = data_chunk.reorder_columns(pk_indices);
+        let key_chunk = data_chunk.project(pk_indices);
         key_chunk
             .rows_with_holes()
             .zip_eq_fast(pks.iter_mut())
@@ -330,7 +331,9 @@ impl MaterializeBuffer {
         let mut buffer = MaterializeBuffer::new();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq_debug(vis.iter()) {
+                for ((op, key, value), vis) in
+                    izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter())
+                {
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
@@ -340,7 +343,7 @@ impl MaterializeBuffer {
                 }
             }
             Vis::Compact(_) => {
-                for (op, key, value) in izip!(ops, pks, values) {
+                for (op, key, value) in izip!(ops.iter(), pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
                         Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
@@ -717,6 +720,7 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
+                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::NoCheck,
             )
@@ -833,6 +837,7 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
+                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::Overwrite,
             )
@@ -965,6 +970,7 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
+                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::Overwrite,
             )
@@ -1147,6 +1153,7 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
+                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::IgnoreConflict,
             )
@@ -1279,6 +1286,7 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
+                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::IgnoreConflict,
             )

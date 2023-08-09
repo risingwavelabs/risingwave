@@ -15,11 +15,11 @@
     └─StreamHashJoin [window, append_only] { type: Inner, predicate: ts1 = ts2 AND a1 = a2, output_watermarks: [ts1, ts2], output: [ts1, a1, b1, ts2, a2, b2, _row_id, _row_id] }
       ├─StreamExchange { dist: HashShard(ts1, a1) }
       │ └─StreamRowIdGen { row_id_index: 3 }
-      │   └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (ts1 - '00:00:01':Interval) }] }
+      │   └─StreamWatermarkFilter { watermark_descs: [Desc { column: ts1, expr: (ts1 - '00:00:01':Interval) }], output_watermarks: [ts1] }
       │     └─StreamSource { source: t1, columns: [ts1, a1, b1, _row_id] }
       └─StreamExchange { dist: HashShard(ts2, a2) }
         └─StreamRowIdGen { row_id_index: 3 }
-          └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (ts2 - '00:00:01':Interval) }] }
+          └─StreamWatermarkFilter { watermark_descs: [Desc { column: ts2, expr: (ts2 - '00:00:01':Interval) }], output_watermarks: [ts2] }
             └─StreamSource { source: t2, columns: [ts2, a2, b2, _row_id] }
 - name: Window join expression reorder
   sql: |
@@ -37,9 +37,9 @@
     └─StreamHashJoin [window, append_only] { type: Inner, predicate: ts1 = ts2 AND a1 = a2, output_watermarks: [ts1, ts2], output: [ts1, a1, b1, ts2, a2, b2, _row_id, _row_id] }
       ├─StreamExchange { dist: HashShard(ts1, a1) }
       │ └─StreamRowIdGen { row_id_index: 3 }
-      │   └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (ts1 - '00:00:01':Interval) }] }
+      │   └─StreamWatermarkFilter { watermark_descs: [Desc { column: ts1, expr: (ts1 - '00:00:01':Interval) }], output_watermarks: [ts1] }
       │     └─StreamSource { source: t1, columns: [ts1, a1, b1, _row_id] }
       └─StreamExchange { dist: HashShard(ts2, a2) }
         └─StreamRowIdGen { row_id_index: 3 }
-          └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (ts2 - '00:00:01':Interval) }] }
+          └─StreamWatermarkFilter { watermark_descs: [Desc { column: ts2, expr: (ts2 - '00:00:01':Interval) }], output_watermarks: [ts2] }
             └─StreamSource { source: t2, columns: [ts2, a2, b2, _row_id] }

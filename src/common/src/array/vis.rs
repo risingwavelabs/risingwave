@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use auto_enums::auto_enum;
+use either::Either;
 use itertools::repeat_n;
 
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::buffer::{Bitmap, BitmapBuilder, BitmapIter, BitmapOnesIter};
 use crate::estimate_size::EstimateSize;
 
 /// `Vis` is a visibility bitmap of rows.
@@ -57,11 +57,11 @@ impl Vis {
         self.as_ref().is_set(idx)
     }
 
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = bool> + '_ {
+    pub fn iter(&self) -> Iter<'_> {
         self.as_ref().iter()
     }
 
-    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
+    pub fn iter_ones(&self) -> OnesIter<'_> {
         self.as_ref().iter_ones()
     }
 
@@ -107,6 +107,35 @@ impl EstimateSize for Vis {
     }
 }
 
+impl std::ops::BitAndAssign<&Bitmap> for Vis {
+    fn bitand_assign(&mut self, rhs: &Bitmap) {
+        match self {
+            Vis::Bitmap(lhs) => lhs.bitand_assign(rhs),
+            Vis::Compact(_) => *self = Vis::Bitmap(rhs.clone()),
+        }
+    }
+}
+
+impl std::ops::BitAndAssign<Bitmap> for Vis {
+    fn bitand_assign(&mut self, rhs: Bitmap) {
+        match self {
+            Vis::Bitmap(lhs) => lhs.bitand_assign(&rhs),
+            Vis::Compact(_) => *self = Vis::Bitmap(rhs),
+        }
+    }
+}
+
+impl std::ops::BitAnd<&Bitmap> for &Vis {
+    type Output = Vis;
+
+    fn bitand(self, rhs: &Bitmap) -> Self::Output {
+        match self {
+            Vis::Bitmap(lhs) => Vis::Bitmap(lhs.bitand(rhs)),
+            Vis::Compact(_) => Vis::Bitmap(rhs.clone()),
+        }
+    }
+}
+
 impl<'a, 'b> std::ops::BitAnd<&'b Vis> for &'a Vis {
     type Output = Vis;
 
@@ -145,6 +174,9 @@ pub enum VisRef<'a> {
     Compact(usize), // equivalent to all ones of this size
 }
 
+pub type Iter<'a> = Either<BitmapIter<'a>, itertools::RepeatN<bool>>;
+pub type OnesIter<'a> = Either<BitmapOnesIter<'a>, std::ops::Range<usize>>;
+
 impl<'a> VisRef<'a> {
     pub fn is_empty(self) -> bool {
         match self {
@@ -173,19 +205,17 @@ impl<'a> VisRef<'a> {
         }
     }
 
-    #[auto_enum(ExactSizeIterator)]
-    pub fn iter(self) -> impl ExactSizeIterator<Item = bool> + 'a {
+    pub fn iter(self) -> Iter<'a> {
         match self {
-            VisRef::Bitmap(b) => b.iter(),
-            VisRef::Compact(c) => repeat_n(true, c),
+            VisRef::Bitmap(b) => Either::Left(b.iter()),
+            VisRef::Compact(c) => Either::Right(repeat_n(true, c)),
         }
     }
 
-    #[auto_enum(Iterator)]
-    pub fn iter_ones(self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter_ones(self) -> OnesIter<'a> {
         match self {
-            VisRef::Bitmap(b) => b.iter_ones(),
-            VisRef::Compact(c) => 0..c,
+            VisRef::Bitmap(b) => Either::Left(b.iter_ones()),
+            VisRef::Compact(c) => Either::Right(0..c),
         }
     }
 }

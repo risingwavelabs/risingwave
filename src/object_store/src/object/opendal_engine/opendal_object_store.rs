@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
+
 use bytes::Bytes;
 use fail::fail_point;
-use futures::future::try_join_all;
-use futures::StreamExt;
+use futures::future::{try_join_all, BoxFuture};
+use futures::{FutureExt, Stream, StreamExt};
 use itertools::Itertools;
 use opendal::services::Memory;
-use opendal::{Metakey, Operator, Writer};
+use opendal::{Entry, Error, Lister, Metakey, Operator, Writer};
 use tokio::io::AsyncRead;
 
 use crate::object::{
-    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectMetadataIter,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -149,33 +152,9 @@ impl ObjectStore for OpendalObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut object_lister = self.op.scan(prefix).await?;
-        let mut metadata_list = vec![];
-        while let Some(obj) = object_lister.next().await {
-            let object = obj?;
-
-            let key = object.path().to_string();
-
-            let om = self
-                .op
-                .metadata(&object, Metakey::LastModified | Metakey::ContentLength)
-                .await?;
-
-            let last_modified = match om.last_modified() {
-                Some(t) => t.timestamp() as f64,
-                None => 0_f64,
-            };
-
-            let total_size = om.content_length() as usize;
-            let metadata = ObjectMetadata {
-                key,
-                last_modified,
-                total_size,
-            };
-            metadata_list.push(metadata);
-        }
-        Ok(metadata_list)
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let lister = self.op.scan(prefix).await?;
+        Ok(Box::pin(OpenDalObjectIter::new(lister, self.op.clone())))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -225,11 +204,112 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 }
 
+struct OpenDalObjectIter {
+    lister: Option<Lister>,
+    op: Option<Operator>,
+    #[allow(clippy::type_complexity)]
+    next_future: Option<BoxFuture<'static, (Option<Result<Entry, Error>>, Lister)>>,
+    #[allow(clippy::type_complexity)]
+    metadata_future: Option<BoxFuture<'static, (Result<ObjectMetadata, Error>, Operator)>>,
+}
+
+impl OpenDalObjectIter {
+    fn new(lister: Lister, op: Operator) -> Self {
+        Self {
+            lister: Some(lister),
+            op: Some(op),
+            next_future: None,
+            metadata_future: None,
+        }
+    }
+}
+
+impl Stream for OpenDalObjectIter {
+    type Item = ObjectResult<ObjectMetadata>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(metadata_future) = self.metadata_future.as_mut() {
+            let (result, op) = ready!(metadata_future.poll_unpin(cx));
+            self.op = Some(op);
+            return match result {
+                Ok(m) => {
+                    self.metadata_future = None;
+                    Poll::Ready(Some(Ok(m)))
+                }
+                Err(e) => {
+                    self.metadata_future = None;
+                    Poll::Ready(Some(Err(e.into())))
+                }
+            };
+        }
+        if let Some(next_future) = self.next_future.as_mut() {
+            let (option, lister) = ready!(next_future.poll_unpin(cx));
+            self.lister = Some(lister);
+            return match option {
+                None => {
+                    self.next_future = None;
+                    Poll::Ready(None)
+                }
+                Some(result) => {
+                    self.next_future = None;
+                    match result {
+                        Ok(object) => {
+                            let op = self.op.take().expect("op should not be None");
+                            let f = async move {
+                                let key = object.path().to_string();
+                                // FIXME: How does opendal metadata cache work?
+                                // Will below line result in one IO per object?
+                                let om = match op
+                                    .metadata(
+                                        &object,
+                                        Metakey::LastModified | Metakey::ContentLength,
+                                    )
+                                    .await
+                                {
+                                    Ok(om) => om,
+                                    Err(e) => return (Err(e), op),
+                                };
+                                let last_modified = match om.last_modified() {
+                                    Some(t) => t.timestamp() as f64,
+                                    None => 0_f64,
+                                };
+                                let total_size = om.content_length() as usize;
+                                let metadata = ObjectMetadata {
+                                    key,
+                                    last_modified,
+                                    total_size,
+                                };
+                                (Ok(metadata), op)
+                            };
+                            self.metadata_future = Some(Box::pin(f));
+                            self.poll_next(cx)
+                        }
+                        Err(e) => Poll::Ready(Some(Err(e.into()))),
+                    }
+                }
+            };
+        }
+        let mut lister = self.lister.take().expect("list should not be None");
+        let f = async move { (lister.next().await, lister) };
+        self.next_future = Some(Box::pin(f));
+        self.poll_next(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
 
     use super::*;
+
+    async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
+        let mut iter = store.list(prefix).await.unwrap();
+        let mut result = vec![];
+        while let Some(r) = iter.next().await {
+            result.push(r.unwrap());
+        }
+        result
+    }
 
     fn gen_test_payload() -> Vec<u8> {
         let mut ret = Vec::new();
@@ -300,16 +380,16 @@ mod tests {
         store.upload("prefix/abc", block1).await.unwrap();
         store.upload("prefix/xyz", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 3);
-        assert_eq!(store.list("prefix/").await.unwrap().len(), 2);
+        assert_eq!(list_all("", &store).await.len(), 3);
+        assert_eq!(list_all("prefix/", &store).await.len(), 2);
         let str_list = [String::from("prefix/abc"), String::from("prefix/xyz")];
 
         store.delete_objects(&str_list).await.unwrap();
 
         assert!(store.read("prefix/abc/", None).await.is_err());
         assert!(store.read("prefix/xyz/", None).await.is_err());
-        assert_eq!(store.list("").await.unwrap().len(), 1);
-        assert_eq!(store.list("prefix/").await.unwrap().len(), 0);
+        assert_eq!(list_all("", &store).await.len(), 1);
+        assert_eq!(list_all("prefix/", &store).await.len(), 0);
     }
 
     #[tokio::test]

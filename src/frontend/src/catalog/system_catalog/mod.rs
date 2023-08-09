@@ -21,10 +21,9 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use paste::paste;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
+    ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
+    NON_RESERVED_SYS_CATALOG_ID,
 };
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
@@ -36,6 +35,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::system_catalog::information_schema::*;
 use crate::catalog::system_catalog::pg_catalog::*;
 use crate::catalog::system_catalog::rw_catalog::*;
+use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
@@ -44,7 +44,7 @@ use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SystemCatalog {
+pub struct SystemTableCatalog {
     pub id: TableId,
 
     pub name: String,
@@ -59,10 +59,15 @@ pub struct SystemCatalog {
     pub owner: u32,
 }
 
-impl SystemCatalog {
+impl SystemTableCatalog {
     /// Get a reference to the system catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    pub fn with_id(mut self, id: TableId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Get a reference to the system catalog's columns.
@@ -114,6 +119,89 @@ impl SysCatalogReaderImpl {
             auth_context,
         }
     }
+}
+
+pub struct BuiltinTable {
+    name: &'static str,
+    schema: &'static str,
+    columns: &'static [SystemCatalogColumnsDef<'static>],
+    pk: &'static [usize],
+}
+
+pub struct BuiltinView {
+    name: &'static str,
+    schema: &'static str,
+    columns: &'static [SystemCatalogColumnsDef<'static>],
+    sql: String,
+}
+
+pub enum BuiltinCatalog {
+    Table(&'static BuiltinTable),
+    View(&'static BuiltinView),
+}
+
+impl BuiltinCatalog {
+    fn name(&self) -> &'static str {
+        match self {
+            BuiltinCatalog::Table(t) => t.name,
+            BuiltinCatalog::View(v) => v.name,
+        }
+    }
+}
+
+impl From<&BuiltinTable> for SystemTableCatalog {
+    fn from(val: &BuiltinTable) -> Self {
+        SystemTableCatalog {
+            id: TableId::placeholder(),
+            name: val.name.to_string(),
+            columns: val
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(idx, c)| ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(c.0.clone(), c.1, idx as i32),
+                    is_hidden: false,
+                })
+                .collect(),
+            pk: val.pk.to_vec(),
+            owner: DEFAULT_SUPER_USER_ID,
+        }
+    }
+}
+
+impl From<&BuiltinView> for ViewCatalog {
+    fn from(val: &BuiltinView) -> Self {
+        ViewCatalog {
+            id: 0,
+            name: val.name.to_string(),
+            columns: val
+                .columns
+                .iter()
+                .map(|c| Field::with_name(c.0.clone(), c.1.to_string()))
+                .collect(),
+            sql: val.sql.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
+            properties: Default::default(),
+        }
+    }
+}
+
+// TODO: support struct column and type name when necessary.
+pub(super) type SystemCatalogColumnsDef<'a> = (DataType, &'a str);
+
+/// `infer_dummy_view_sql` returns a dummy SQL statement for a view with the given columns that
+/// returns no rows. For example, with columns `a` and `b`, it returns `SELECT NULL::integer AS a,
+/// NULL::varchar AS b WHERE 1 != 1`.
+// FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+#[inline(always)]
+fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
+    format!(
+        "SELECT {} WHERE 1 != 1",
+        columns
+            .iter()
+            .map(|(ty, name)| format!("NULL::{} AS {}", ty, name))
+            .join(", ")
+    )
 }
 
 /// get acl items of `object` in string, ignore public.
@@ -183,124 +271,155 @@ fn get_acl_items(
     res
 }
 
-// TODO: support struct column and type name when necessary.
-pub(super) type SystemCatalogColumnsDef<'a> = (DataType, &'a str);
-
-/// `def_sys_catalog` defines a table with given id, name and columns.
-macro_rules! def_sys_catalog {
-    ($id:expr, $name:ident, $columns:expr, $pk:expr) => {
-        SystemCatalog {
-            id: TableId::new($id),
-            name: $name.to_string(),
-            columns: $columns
-                .iter()
-                .enumerate()
-                .map(|(idx, col)| ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        column_id: (idx as i32).into(),
-                        data_type: col.0.clone(),
-                        name: col.1.to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                        generated_or_default_column: None,
-                    },
-                    is_hidden: false,
-                })
-                .collect::<Vec<_>>(),
-            pk: $pk, // change this when multi-column pk is needed in some system table.
-            owner: DEFAULT_SUPER_USER_ID,
-        }
-    };
+pub struct SystemCatalog {
+    table_by_schema_name: HashMap<&'static str, Vec<Arc<SystemTableCatalog>>>,
+    table_name_by_id: HashMap<TableId, &'static str>,
+    view_by_schema_name: HashMap<&'static str, Vec<Arc<ViewCatalog>>>,
 }
 
-pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemCatalog>> {
-    SYS_CATALOG_MAP.get(schema_name).map(Clone::clone)
+pub fn get_sys_tables_in_schema(schema_name: &str) -> Option<Vec<Arc<SystemTableCatalog>>> {
+    SYS_CATALOGS
+        .table_by_schema_name
+        .get(schema_name)
+        .map(Clone::clone)
+}
+
+pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>>> {
+    SYS_CATALOGS
+        .view_by_schema_name
+        .get(schema_name)
+        .map(Clone::clone)
 }
 
 macro_rules! prepare_sys_catalog {
-    ($( { $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),* $(,)?) => {
-        /// `SYS_CATALOG_MAP` includes all system catalogs.
-        pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
-            let mut hash_map: HashMap<&str, Vec<SystemCatalog>> = HashMap::new();
+    ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
+        pub(crate) static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
+            let mut table_by_schema_name = HashMap::new();
+            let mut table_name_by_id = HashMap::new();
+            let mut view_by_schema_name = HashMap::new();
             $(
-                paste!{
-                    let sys_catalog = def_sys_catalog!(${index()} + 1, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk);
-                    hash_map.entry([<$schema_name _SCHEMA_NAME>]).or_insert(vec![]).push(sys_catalog);
+                let id = (${index()} + 1) as u32;
+                match $builtin_catalog {
+                    BuiltinCatalog::Table(table) => {
+                        let sys_table: SystemTableCatalog = table.into();
+                        table_by_schema_name.entry(table.schema).or_insert(vec![]).push(Arc::new(sys_table.with_id(id.into())));
+                        table_name_by_id.insert(id.into(), table.name);
+                    },
+                    BuiltinCatalog::View(view) => {
+                        let sys_view: ViewCatalog = view.into();
+                        view_by_schema_name.entry(view.schema).or_insert(vec![]).push(Arc::new(sys_view.with_id(id)));
+                    },
                 }
             )*
-            hash_map
+            assert!(table_name_by_id.len() < NON_RESERVED_SYS_CATALOG_ID as usize, "too many system catalogs");
+
+            SystemCatalog {
+                table_by_schema_name,
+                table_name_by_id,
+                view_by_schema_name,
+            }
         });
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
             async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
-                match table_id.table_id - 1 {
-                    $(
-                        ${index()} => {
+                let table_name = SYS_CATALOGS.table_name_by_id.get(table_id).unwrap();
+                $(
+                    if $builtin_catalog.name() == *table_name {
+                        $(
                             let rows = self.$func();
                             $(let rows = rows.$await;)?
-                            rows
-                        },
-                    )*
-                    _ => unreachable!(),
-                }
+                            return rows;
+                        )?
+                    }
+                )*
+                unreachable!()
             }
         }
-    };
+    }
 }
 
-// If you added a new system catalog, be sure to add a corresponding entry here.
+// `prepare_sys_catalog!` macro is used to generate all builtin system catalogs.
 prepare_sys_catalog! {
-    { PG_CATALOG, PG_TYPE, vec![0], read_types },
-    { PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
-    { PG_CATALOG, PG_CAST, vec![0], read_cast },
-    { PG_CATALOG, PG_MATVIEWS, vec![0, 1], read_mviews_info await },
-    { PG_CATALOG, PG_USER, vec![0], read_user_info },
-    { PG_CATALOG, PG_CLASS, vec![0], read_class_info },
-    { PG_CATALOG, PG_INDEX, vec![0], read_index_info },
-    { PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
-    { PG_CATALOG, PG_COLLATION, vec![0], read_collation_info },
-    { PG_CATALOG, PG_AM, vec![0], read_am_info },
-    { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
-    { PG_CATALOG, PG_VIEWS, vec![0, 1], read_views_info },
-    { PG_CATALOG, PG_ATTRIBUTE, vec![0, 4], read_pg_attribute },
-    { PG_CATALOG, PG_DATABASE, vec![0], read_database_info },
-    { PG_CATALOG, PG_DESCRIPTION, vec![0], read_description_info },
-    { PG_CATALOG, PG_SETTINGS, vec![0], read_settings_info },
-    { PG_CATALOG, PG_KEYWORDS, vec![0], read_keywords_info },
-    { PG_CATALOG, PG_ATTRDEF, vec![0], read_attrdef_info },
-    { PG_CATALOG, PG_ROLES, vec![0], read_roles_info },
-    { PG_CATALOG, PG_SHDESCRIPTION, vec![0], read_shdescription_info },
-    { PG_CATALOG, PG_TABLESPACE, vec![0], read_tablespace_info },
-    { PG_CATALOG, PG_STAT_ACTIVITY, vec![0], read_stat_activity },
-    { PG_CATALOG, PG_ENUM, vec![0], read_enum_info },
-    { PG_CATALOG, PG_CONVERSION, vec![0], read_conversion_info },
-    { PG_CATALOG, PG_INDEXES, vec![0, 2], read_indexes_info },
-    { PG_CATALOG, PG_INHERITS, vec![0], read_inherits_info },
-    { PG_CATALOG, PG_CONSTRAINT, vec![0], read_constraint_info },
-    { PG_CATALOG, PG_TABLES, vec![], read_pg_tables_info },
-    { PG_CATALOG, PG_PROC, vec![0], read_pg_proc_info },
-    { PG_CATALOG, PG_SHADOW, vec![1], read_user_info_shadow },
-    { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
-    { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
-    { RW_CATALOG, RW_DATABASES, vec![0], read_rw_database_info },
-    { RW_CATALOG, RW_SCHEMAS, vec![0], read_rw_schema_info },
-    { RW_CATALOG, RW_USERS, vec![0], read_rw_user_info },
-    { RW_CATALOG, RW_TABLES, vec![0], read_rw_table_info },
-    { RW_CATALOG, RW_MATERIALIZED_VIEWS, vec![0], read_rw_mview_info },
-    { RW_CATALOG, RW_INDEXES, vec![0], read_rw_indexes_info },
-    { RW_CATALOG, RW_SOURCES, vec![0], read_rw_sources_info },
-    { RW_CATALOG, RW_SINKS, vec![0], read_rw_sinks_info },
-    { RW_CATALOG, RW_CONNECTIONS, vec![0], read_rw_connections_info },
-    { RW_CATALOG, RW_FUNCTIONS, vec![0], read_rw_functions_info },
-    { RW_CATALOG, RW_VIEWS, vec![0], read_rw_views_info },
-    { RW_CATALOG, RW_WORKER_NODES, vec![0], read_rw_worker_nodes_info },
-    { RW_CATALOG, RW_PARALLEL_UNITS, vec![0], read_rw_parallel_units_info },
-    { RW_CATALOG, RW_TABLE_FRAGMENTS, vec![0], read_rw_table_fragments_info await },
-    { RW_CATALOG, RW_FRAGMENTS, vec![0], read_rw_fragment_distributions_info await },
-    { RW_CATALOG, RW_ACTORS, vec![0], read_rw_actor_states_info await },
-    { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
-    { RW_CATALOG, RW_DDL_PROGRESS, vec![], read_ddl_progress await },
-    { RW_CATALOG, RW_TABLE_STATS, vec![], read_table_stats },
-    { RW_CATALOG, RW_RELATION_INFO, vec![], read_relation_info await },
+    { BuiltinCatalog::View(&PG_TYPE) },
+    { BuiltinCatalog::View(&PG_NAMESPACE) },
+    { BuiltinCatalog::View(&PG_CAST) },
+    { BuiltinCatalog::View(&PG_MATVIEWS) },
+    { BuiltinCatalog::View(&PG_USER) },
+    { BuiltinCatalog::View(&PG_CLASS) },
+    { BuiltinCatalog::View(&PG_INDEX) },
+    { BuiltinCatalog::View(&PG_OPCLASS) },
+    { BuiltinCatalog::View(&PG_COLLATION) },
+    { BuiltinCatalog::View(&PG_AM) },
+    { BuiltinCatalog::View(&PG_OPERATOR) },
+    { BuiltinCatalog::View(&PG_VIEWS) },
+    { BuiltinCatalog::View(&PG_ATTRIBUTE) },
+    { BuiltinCatalog::View(&PG_DATABASE) },
+    { BuiltinCatalog::View(&PG_DESCRIPTION) },
+    { BuiltinCatalog::View(&PG_SETTINGS) },
+    { BuiltinCatalog::View(&PG_KEYWORDS) },
+    { BuiltinCatalog::View(&PG_ATTRDEF) },
+    { BuiltinCatalog::View(&PG_ROLES) },
+    { BuiltinCatalog::View(&PG_SHDESCRIPTION) },
+    { BuiltinCatalog::View(&PG_TABLESPACE) },
+    { BuiltinCatalog::View(&PG_STAT_ACTIVITY) },
+    { BuiltinCatalog::View(&PG_ENUM) },
+    { BuiltinCatalog::View(&PG_CONVERSION) },
+    { BuiltinCatalog::View(&PG_INDEXES) },
+    { BuiltinCatalog::View(&PG_INHERITS) },
+    { BuiltinCatalog::View(&PG_CONSTRAINT) },
+    { BuiltinCatalog::View(&PG_TABLES) },
+    { BuiltinCatalog::View(&PG_PROC) },
+    { BuiltinCatalog::View(&PG_SHADOW) },
+    { BuiltinCatalog::View(&PG_LOCKS) },
+    { BuiltinCatalog::View(&PG_EXTENSION) },
+    { BuiltinCatalog::View(&PG_DEPEND) },
+    { BuiltinCatalog::View(&INFORMATION_SCHEMA_COLUMNS) },
+    { BuiltinCatalog::View(&INFORMATION_SCHEMA_TABLES) },
+    { BuiltinCatalog::Table(&RW_DATABASES), read_rw_database_info },
+    { BuiltinCatalog::Table(&RW_SCHEMAS), read_rw_schema_info },
+    { BuiltinCatalog::Table(&RW_USERS), read_rw_user_info },
+    { BuiltinCatalog::Table(&RW_USER_SECRETS), read_rw_user_secrets_info },
+    { BuiltinCatalog::Table(&RW_TABLES), read_rw_table_info },
+    { BuiltinCatalog::Table(&RW_MATERIALIZED_VIEWS), read_rw_mview_info },
+    { BuiltinCatalog::Table(&RW_INDEXES), read_rw_indexes_info },
+    { BuiltinCatalog::Table(&RW_SOURCES), read_rw_sources_info },
+    { BuiltinCatalog::Table(&RW_SINKS), read_rw_sinks_info },
+    { BuiltinCatalog::Table(&RW_CONNECTIONS), read_rw_connections_info },
+    { BuiltinCatalog::Table(&RW_FUNCTIONS), read_rw_functions_info },
+    { BuiltinCatalog::Table(&RW_VIEWS), read_rw_views_info },
+    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info },
+    { BuiltinCatalog::Table(&RW_PARALLEL_UNITS), read_rw_parallel_units_info },
+    { BuiltinCatalog::Table(&RW_TABLE_FRAGMENTS), read_rw_table_fragments_info await },
+    { BuiltinCatalog::Table(&RW_FRAGMENTS), read_rw_fragment_distributions_info await },
+    { BuiltinCatalog::Table(&RW_ACTORS), read_rw_actor_states_info await },
+    { BuiltinCatalog::Table(&RW_META_SNAPSHOT), read_meta_snapshot await },
+    { BuiltinCatalog::Table(&RW_DDL_PROGRESS), read_ddl_progress await },
+    { BuiltinCatalog::Table(&RW_TABLE_STATS), read_table_stats },
+    { BuiltinCatalog::Table(&RW_RELATION_INFO), read_relation_info await },
+    { BuiltinCatalog::Table(&RW_SYSTEM_TABLES), read_system_table_info },
+    { BuiltinCatalog::View(&RW_RELATIONS) },
+    { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
+    { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use crate::catalog::system_catalog::SYS_CATALOGS;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_builtin_view_definition() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let sqls = SYS_CATALOGS
+            .view_by_schema_name
+            .values()
+            .flat_map(|v| v.iter().map(|v| v.sql.clone()))
+            .collect_vec();
+        for sql in sqls {
+            frontend.query_formatted_result(sql).await;
+        }
+    }
 }

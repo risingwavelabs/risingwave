@@ -146,6 +146,7 @@ pub fn build(
                     inputs_type: &args,
                     ret_type: (&return_type).into(),
                     set_returning: true,
+                    deprecated: false,
                 }
             ))
         })?;

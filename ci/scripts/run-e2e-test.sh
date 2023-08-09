@@ -47,6 +47,9 @@ sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
+echo "--- e2e, ci-3streaming-2serving-3fe, Apache Superset"
+sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
+
 echo "--- e2e, ci-3streaming-2serving-3fe, python udf"
 python3 e2e_test/udf/test.py &
 sleep 2

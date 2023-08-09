@@ -28,7 +28,7 @@ use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
@@ -44,7 +44,7 @@ pub struct BoundBaseTable {
 #[derive(Debug, Clone)]
 pub struct BoundSystemTable {
     pub table_id: TableId,
-    pub sys_table_catalog: SystemCatalog,
+    pub sys_table_catalog: Arc<SystemTableCatalog>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,7 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
-        let resolve_sys_table_relation = |sys_table_catalog: &SystemCatalog| {
+        let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
             let table = BoundSystemTable {
                 table_id: sys_table_catalog.id(),
                 sys_table_catalog: sys_table_catalog.clone(),
@@ -95,6 +95,11 @@ impl Binder {
                             table_name,
                         ) {
                             resolve_sys_table_relation(sys_table_catalog)
+                        } else if let Ok((view_catalog, _)) =
+                            self.catalog
+                                .get_view_by_name(&self.db_name, schema_path, table_name)
+                        {
+                            self.resolve_view_relation(&view_catalog.clone())?
                         } else {
                             return Err(ErrorCode::NotImplemented(
                                 format!(
@@ -141,13 +146,10 @@ impl Binder {
                     let user_name = &self.auth_context.user_name;
 
                     for path in self.search_path.path() {
-                        if is_system_schema(path) {
-                            if let Ok(sys_table_catalog) =
-                                self.catalog
-                                    .get_sys_table_by_name(&self.db_name, path, table_name)
-                            {
-                                return Ok(resolve_sys_table_relation(sys_table_catalog));
-                            }
+                        if is_system_schema(path) &&
+                            let Ok(sys_table_catalog) =
+                                self.catalog.get_sys_table_by_name(&self.db_name, path, table_name) {
+                            return Ok(resolve_sys_table_relation(sys_table_catalog));
                         } else {
                             let schema_name = if path == USER_NAME_WILD_CARD {
                                 user_name
@@ -248,7 +250,19 @@ impl Binder {
                 view_catalog.name, view_catalog.sql, e
             ))
         })?;
+
         let columns = view_catalog.columns.clone();
+
+        if !itertools::equal(
+            query.schema().fields().iter().map(|f| &f.data_type),
+            view_catalog.columns.iter().map(|f| &f.data_type),
+        ) {
+            return Err(ErrorCode::BindError(format!(
+                "failed to bind view {}. The SQL's schema is different from catalog's schema sql: {}, bound schema: {:?}, catalog schema: {:?}",
+                view_catalog.name, view_catalog.sql, query.schema(), columns
+            )).into());
+        }
+
         let share_id = match self.shared_views.get(&view_catalog.id) {
             Some(share_id) => *share_id,
             None => {

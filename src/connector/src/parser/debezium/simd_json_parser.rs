@@ -14,38 +14,31 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use simd_json::{BorrowedValue, Mutable};
 
-use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::parser::unified::AccessImpl;
+use crate::parser::AccessBuilder;
 
 #[derive(Debug)]
-pub struct DebeziumJsonParser {
-    pub(crate) rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
+pub struct DebeziumJsonAccessBuilder {
+    value: Option<Vec<u8>>,
 }
 
-impl DebeziumJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
-        Ok(Self {
-            rw_columns,
-            source_ctx,
-        })
+impl DebeziumJsonAccessBuilder {
+    pub fn new() -> Result<Self> {
+        Ok(Self { value: None })
     }
+}
 
+impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    pub async fn parse_inner(
-        &self,
-        mut payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        self.value = Some(payload);
+        let mut event: BorrowedValue<'_> =
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+                .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
 
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)
@@ -53,29 +46,10 @@ impl DebeziumJsonParser {
             event
         };
 
-        let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
-
-        let row_op = DebeziumChangeEvent::with_value(accessor);
-
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
-    }
-}
-
-impl ByteStreamSourceParser for DebeziumJsonParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
-    }
-
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
-    }
-
-    async fn parse_one<'a>(
-        &'a mut self,
-        payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        Ok(AccessImpl::Json(JsonAccess::new_with_options(
+            payload,
+            &JsonParseOptions::DEBEZIUM,
+        )))
     }
 }
 
@@ -92,9 +66,11 @@ mod tests {
     };
     use serde_json::Value;
 
-    use super::*;
-    use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
-
+    use crate::parser::{
+        DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
+    };
+    use crate::source::SourceContextRef;
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
             let mut json_string = String::new();
@@ -108,15 +84,32 @@ mod tests {
         }
     }
 
+    async fn build_parser(
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+    ) -> DebeziumParser {
+        let props = SpecificParserConfig {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            protocol_config: ProtocolProperties::Debezium,
+        };
+        DebeziumParser::new(props, rw_columns, source_ctx)
+            .await
+            .unwrap()
+    }
+
     async fn parse_one(
-        parser: DebeziumJsonParser,
+        mut parser: DebeziumParser,
         columns: Vec<SourceColumnDesc>,
         payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         chunk
@@ -155,7 +148,7 @@ mod tests {
             let columns = get_test1_columns();
 
             for data in input {
-                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let parser = build_parser(columns.clone(), Default::default()).await;
                 let [(_op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -186,7 +179,7 @@ mod tests {
             let columns = get_test1_columns();
 
             for data in input {
-                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let parser = build_parser(columns.clone(), Default::default()).await;
                 let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -217,7 +210,7 @@ mod tests {
 
             for data in input {
                 let columns = get_test1_columns();
-                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let parser = build_parser(columns.clone(), Default::default()).await;
                 let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -255,7 +248,7 @@ mod tests {
             let columns = get_test1_columns();
 
             for data in input {
-                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let parser = build_parser(columns.clone(), Default::default()).await;
                 let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
@@ -314,7 +307,7 @@ mod tests {
 
             let columns = get_test2_columns();
 
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
 
             let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
@@ -349,7 +342,7 @@ mod tests {
             let data = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":-1,"O_INT":-1111,"O_REAL":-11.11,"O_DOUBLE":-111.11111,"O_DECIMAL":-111.11,"O_CHAR":"yes please","O_DATE":"1000-01-01","O_TIME":0,"O_DATETIME":0,"O_TIMESTAMP":"1970-01-01T00:00:01Z","O_JSON":"{\"k1\": \"v1\", \"k2\": 11}"},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678088861000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":789,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678088861249,"transaction":null}}"#;
 
             let columns = get_test2_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -384,7 +377,7 @@ mod tests {
             let data = br#"{"payload":{"before":{"O_KEY":111,"O_BOOL":0,"O_TINY":3,"O_INT":3333,"O_REAL":33.33,"O_DOUBLE":333.33333,"O_DECIMAL":333.33,"O_CHAR":"no thanks","O_DATE":"9999-12-31","O_TIME":86399000000,"O_DATETIME":99999999999000,"O_TIMESTAMP":"2038-01-09T03:14:07Z","O_JSON":"{\"k1\":\"v1_updated\",\"k2\":33}"},"after":null,"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678090653000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1643,"row":0,"thread":4,"query":null},"op":"d","ts_ms":1678090653611,"transaction":null}}"#;
 
             let columns = get_test2_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -421,7 +414,7 @@ mod tests {
 
             let columns = get_test2_columns();
 
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -462,13 +455,13 @@ mod tests {
                 SourceColumnDesc::simple("O_REAL", DataType::Float32, ColumnId::from(4)),
                 SourceColumnDesc::simple("O_DOUBLE", DataType::Float64, ColumnId::from(5)),
             ];
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let mut parser = build_parser(columns.clone(), Default::default()).await;
 
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
             // i64 overflow
             let data0 = br#"{"payload":{"before":null,"after":{"O_KEY":9223372036854775808,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
             if let Err(e) = parser
-                .parse_inner(data0.to_vec(), builder.row_writer())
+                .parse_inner(None, Some(data0.to_vec()), builder.row_writer())
                 .await
             {
                 println!("{:?}", e.to_string());
@@ -478,7 +471,7 @@ mod tests {
             // bool incorrect value
             let data1 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":2,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
             if let Err(e) = parser
-                .parse_inner(data1.to_vec(), builder.row_writer())
+                .parse_inner(None, Some(data1.to_vec()), builder.row_writer())
                 .await
             {
                 println!("{:?}", e.to_string());
@@ -488,7 +481,7 @@ mod tests {
             // i16 overflow
             let data2 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":32768,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
             if let Err(e) = parser
-                .parse_inner(data2.to_vec(), builder.row_writer())
+                .parse_inner(None, Some(data2.to_vec()), builder.row_writer())
                 .await
             {
                 println!("{:?}", e.to_string());
@@ -498,7 +491,7 @@ mod tests {
             // i32 overflow
             let data3 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":2147483648,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
             if let Err(e) = parser
-                .parse_inner(data3.to_vec(), builder.row_writer())
+                .parse_inner(None, Some(data3.to_vec()), builder.row_writer())
                 .await
             {
                 println!("{:?}", e.to_string());
@@ -508,7 +501,7 @@ mod tests {
             // float32 overflow
             let data4 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":3.80282347E38,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
             if let Err(e) = parser
-                .parse_inner(data4.to_vec(), builder.row_writer())
+                .parse_inner(None, Some(data4.to_vec()), builder.row_writer())
                 .await
             {
                 println!("{:?}", e.to_string());
@@ -527,11 +520,11 @@ mod tests {
                 DataType::Float64,
                 ColumnId::from(0),
             )];
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let mut parser = build_parser(columns.clone(), Default::default()).await;
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
             let data = br#"{"payload":{"before":null,"after":{"O_DOUBLE":1.797695E308},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678174483000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":563,"row":0,"thread":3,"query":null},"op":"c","ts_ms":1678174483866,"transaction":null}}"#;
             if let Err(e) = parser
-                .parse_inner(data.to_vec(), builder.row_writer())
+                .parse_inner(None, Some(data.to_vec()), builder.row_writer())
                 .await
             {
                 println!("{:?}", e.to_string());
@@ -639,7 +632,7 @@ mod tests {
             // this test covers an insert event on the table above
             let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P1Y2M3DT4H5M6.78S","o_date":"1999-09-09"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684733351963,"snapshot":"last","db":"test","sequence":"[null,\"26505352\"]","schema":"public","table":"orders","txId":729,"lsn":26505352,"xmin":null},"op":"r","ts_ms":1684733352110,"transaction":null}}"#;
             let columns = get_temporal_test_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -694,7 +687,7 @@ mod tests {
             // this test covers an insert event on the table above
             let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_smallint":32767,"o_integer":2147483647,"o_bigint":9223372036854775807,"o_real":9.999,"o_double":9.999999,"o_numeric":123456.789,"o_numeric_6_3":123.456,"o_money":123.12},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684404343201,"snapshot":"last","db":"test","sequence":"[null,\"26519216\"]","schema":"public","table":"orders","txId":729,"lsn":26519216,"xmin":null},"op":"r","ts_ms":1684404343349,"transaction":null}}"#;
             let columns = get_numeric_test_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
@@ -733,7 +726,7 @@ mod tests {
             // this test covers an insert event on the table above
             let data = br#"{"payload":{"before":null,"after":{"o_key":1,"o_boolean":false,"o_bit":true,"o_bytea":"ASNFZ4mrze8=","o_json":"{\"k1\": \"v1\", \"k2\": 11}","o_xml":"<!--hahaha-->","o_uuid":"60f14fe2-f857-404a-b586-3b5375b3259f","o_point":{"x":1.0,"y":2.0,"wkb":"AQEAAAAAAAAAAADwPwAAAAAAAABA","srid":null},"o_enum":"polar","o_char":"h","o_varchar":"ha","o_character":"h","o_character_varying":"hahaha"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684743927178,"snapshot":"last","db":"test","sequence":"[null,\"26524528\"]","schema":"public","table":"orders","txId":730,"lsn":26524528,"xmin":null},"op":"r","ts_ms":1684743927343,"transaction":null}}"#;
             let columns = get_other_types_test_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let parser = build_parser(columns.clone(), Default::default()).await;
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()

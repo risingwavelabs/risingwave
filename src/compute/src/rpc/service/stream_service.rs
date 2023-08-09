@@ -20,13 +20,14 @@ use risingwave_common::error::tonic_err;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
+use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
 use tonic::{Code, Request, Response, Status};
 use tracing::Instrument;
 
@@ -177,32 +178,52 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let (collect_result, checkpoint) = self
+        let CollectResult {
+            create_mview_progress,
+            kind,
+        } = self
             .mgr
             .collect_barrier(req.prev_epoch)
             .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await
             .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
-        // Must finish syncing data written in the epoch before respond back to ensure persistence
-        // of the state.
-        let synced_sstables = if checkpoint {
-            let span = TracingContext::from_protobuf(&req.tracing_context).attach(
-                tracing::info_span!("sync_epoch", prev_epoch = req.prev_epoch),
-            );
 
-            self.mgr
-                .sync_epoch(req.prev_epoch)
-                .instrument(span)
-                .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
-                .await?
-        } else {
-            vec![]
+        let synced_sstables = match kind {
+            BarrierKind::Unspecified => unreachable!(),
+            BarrierKind::Initial => {
+                if let Some(hummock) = self.env.state_store().as_hummock() {
+                    let mce = hummock.get_pinned_version().max_committed_epoch();
+                    assert_eq!(
+                        mce, req.prev_epoch,
+                        "first epoch should match with the current version",
+                    );
+                }
+                tracing::info!(
+                    epoch = req.prev_epoch,
+                    "ignored syncing data for the first barrier"
+                );
+                Vec::new()
+            }
+            BarrierKind::Barrier => Vec::new(),
+            BarrierKind::Checkpoint => {
+                let span = TracingContext::from_protobuf(&req.tracing_context).attach(
+                    tracing::info_span!("sync_epoch", prev_epoch = req.prev_epoch),
+                );
+
+                // Must finish syncing data written in the epoch before respond back to ensure
+                // persistence of the state.
+                self.mgr
+                    .sync_epoch(req.prev_epoch)
+                    .instrument(span)
+                    .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
+                    .await?
+            }
         };
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
             status: None,
-            create_mview_progress: collect_result.create_mview_progress,
+            create_mview_progress,
             synced_sstables: synced_sstables
                 .into_iter()
                 .map(

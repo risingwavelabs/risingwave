@@ -64,6 +64,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
             | expr_node::Type::ToTimestamp1
+            | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
             | expr_node::Type::SubtractWithTimeZone
@@ -181,7 +182,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
-            | expr_node::Type::StringToArray =>
+            | expr_node::Type::StringToArray
+            | expr_node::Type::Format =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call

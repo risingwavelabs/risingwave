@@ -8,7 +8,15 @@ create table s0 (v1 int, v2 varchar) with (
 ) FORMAT PLAIN ENCODE CSV (delimiter = ',');
 
 statement ok
-create table s0 (v1 int, v2 varchar) with (
+create table t0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_csv_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
+
+statement ok
+create source s0 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_csv_topic',
   properties.bootstrap.server = 'message_queue:29092',
@@ -157,7 +165,7 @@ create table s8_no_schema_field (
 
 statement ok
 create table s9 with (
-  connector = 'kafka', 
+  connector = 'kafka',
   topic = 'avro_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
@@ -165,7 +173,7 @@ create table s9 with (
 
 statement ok
 create table s10 with (
-  connector = 'kafka', 
+  connector = 'kafka',
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
@@ -173,7 +181,7 @@ create table s10 with (
 
 statement ok
 create table s11 with (
-  connector = 'kafka', 
+  connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
@@ -183,8 +191,8 @@ create table s11 with (
 statement ok
 CREATE TABLE s12(
     id int,
-    code string, 
-    timestamp bigint, 
+    code string,
+    timestamp bigint,
     xfas struct<device_model_id int, device_make_id int, ip string>[],
     contacts struct<emails string[], phones string[]>,
     jsonb jsonb)
@@ -257,7 +265,7 @@ create table s16 (v1 int, v2 varchar) with (
 
 statement ok
 create source s17 with (
-  connector = 'kafka', 
+  connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
@@ -266,7 +274,7 @@ create source s17 with (
 
 statement ok
 create source s18 with (
-  connector = 'kafka', 
+  connector = 'kafka',
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
@@ -274,7 +282,7 @@ create source s18 with (
 
 # we cannot use confluent schema registry when connector is not kafka
 statement error
-create table s19 
+create table s19
 with (
   connector = 'kinesis',
   topic = 'topic',
@@ -330,7 +338,7 @@ create source s24 (id bytea) with (
 ) FORMAT PLAIN ENCODE BYTES
 
 # bytes format only accept one column
-statement error 
+statement error
 create source s25 (v1 bytea, v2 int) with (
   connector = 'kafka',
   topic = 'kafka_source_format_bytes',
@@ -339,7 +347,7 @@ create source s25 (v1 bytea, v2 int) with (
 ) FORMAT PLAIN ENCODE BYTES
 
 # bytes format only accept bytea type
-statement error 
+statement error
 create source s26 (id int) with (
   connector = 'kafka',
   topic = 'kafka_source_format_bytes',
@@ -368,6 +376,20 @@ WITH (
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers_no_schema_field')
 FORMAT DEBEZIUM_MONGO ENCODE JSON
+
+statement error
+CREATE TABLE upsert_students (
+    "ID" INT PRIMARY KEY,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+) append only with (
+	connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_json')
+FORMAT UPSERT ENCODE JSON
 
 # we cannot create upsert_json source without pk
 statement error
@@ -425,12 +447,31 @@ CREATE TABLE dbz_ignore_case_json (
     topic = 'debezium_ignore_case_json'
 ) FORMAT DEBEZIUM ENCODE JSON
 
+# create kafka source with additional rdkafka properties
+statement ok
+create table source_with_rdkafka_props (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+  properties.queued.min.messages = 10000,
+  properties.queued.max.messages.kbytes = 65536
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 1s
+
+query IT rowsort
+select v1, v2 from t0;
+----
+1 1
+2 22
+3 333
+4 4444
+
 
 query IT rowsort
 select v1, v2 from s0;
@@ -441,7 +482,10 @@ select v1, v2 from s0;
 4 4444
 
 statement ok
-drop table s0
+drop source s0
+
+statement ok
+drop table t0
 
 query IT rowsort
 select * from s1
@@ -518,7 +562,7 @@ create materialized view source_mv1 as select * from s6;
 statement ok
 create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s6 where v1 > 3;
 
-statement ok 
+statement ok
 create materialized view source_mv3 as select * from s24;
 
 # Wait for source
@@ -636,7 +680,7 @@ select * from s23;
 \x31324344
 \xdeadbeef
 
-query II 
+query II
 SELECT
 	*
 FROM
@@ -649,7 +693,7 @@ ORDER BY
 1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
 1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
 
-query II 
+query II
 SELECT
 	*
 FROM
@@ -663,7 +707,7 @@ ORDER BY
 1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
 
 
-query II 
+query II
 SELECT
 	*
 FROM
@@ -692,11 +736,16 @@ order by
 56166    1
 56166    2
 
-query I 
+query I
 SELECT * FROM source_mv3 ORDER BY id;
 ----
 \x6b6b
 \x776561776566776566
+
+query I
+select count(*) from source_with_rdkafka_props
+----
+4
 
 statement ok
 drop materialized view source_mv1
@@ -704,7 +753,7 @@ drop materialized view source_mv1
 statement ok
 drop materialized view source_mv2
 
-statement ok 
+statement ok
 drop materialized view source_mv3
 
 statement ok
@@ -769,3 +818,6 @@ DROP TABLE upsert_students;
 
 statement ok
 drop table dbz_ignore_case_json;
+
+statement ok
+drop table source_with_rdkafka_props;

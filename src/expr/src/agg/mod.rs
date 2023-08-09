@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use dyn_clone::DynClone;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::types::{DataType, DataTypeName, Datum};
 
 use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
@@ -25,7 +28,6 @@ mod def;
 // concrete aggregators
 mod approx_count_distinct;
 mod array_agg;
-mod count_star;
 mod general;
 mod jsonb_agg;
 mod mode;
@@ -33,40 +35,33 @@ mod percentile_cont;
 mod percentile_disc;
 mod string_agg;
 
-// wrappers
-// XXX(wrj): should frontend plan these as operators?
-mod distinct;
-mod filter;
-mod orderby;
-mod projection;
-
 pub use self::def::*;
-use self::distinct::Distinct;
-use self::filter::*;
-use self::orderby::ProjectionOrderBy;
-use self::projection::Projection;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]
-pub trait Aggregator: Send + DynClone + 'static {
+pub trait Aggregator: Send + Sync + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
-    /// `update_single` update the aggregator with a single row with type checked at runtime.
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        self.update_multi(input, row_id, row_id + 1).await
-    }
+    /// Update the aggregator with multiple rows.
+    async fn update(&mut self, input: &StreamChunk) -> Result<()>;
 
-    /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()>;
+    /// Update the aggregator with a range of rows.
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()>;
 
-    /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
-    /// After `output` the aggregator is reset to initial state.
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// Get the output value.
+    fn get_output(&self) -> Result<Datum>;
+
+    /// Output the aggregate state and reset to initial state.
+    fn output(&mut self) -> Result<Datum>;
+
+    /// Reset the state.
+    fn reset(&mut self);
+
+    /// Get the current value state.
+    fn get_state(&self) -> Datum;
+
+    /// Set the current value state.
+    fn set_state(&mut self, state: Datum);
 
     /// The estimated size of the state.
     fn estimated_size(&self) -> usize;
@@ -76,8 +71,17 @@ dyn_clone::clone_trait_object!(Aggregator);
 
 pub type BoxedAggState = Box<dyn Aggregator>;
 
+impl EstimateSize for BoxedAggState {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_size()
+    }
+}
+
 /// Build an `Aggregator` from `AggCall`.
-pub fn build(agg: AggCall) -> Result<BoxedAggState> {
+///
+/// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
+/// `AggCall`. Such operations should be done in batch or streaming executors.
+pub fn build(agg: &AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
     let args = (agg.args.arg_types().iter())
@@ -93,29 +97,11 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
                     func: agg.kind,
                     inputs_type: &args,
                     ret_type,
-                    set_returning: false
+                    set_returning: false,
+                    deprecated: false,
                 }
             ))
         })?;
 
-    let mut aggregator = (desc.build)(agg.clone())?;
-
-    if agg.distinct {
-        aggregator = Box::new(Distinct::new(aggregator));
-    }
-    if agg.column_orders.is_empty() {
-        aggregator = Box::new(Projection::new(agg.args.val_indices().to_vec(), aggregator));
-    } else {
-        aggregator = Box::new(ProjectionOrderBy::new(
-            agg.args.arg_types().to_vec(),
-            agg.args.val_indices().to_vec(),
-            agg.column_orders,
-            aggregator,
-        ));
-    }
-    if let Some(expr) = agg.filter {
-        aggregator = Box::new(Filter::new(expr, aggregator));
-    }
-
-    Ok(aggregator)
+    (desc.build)(agg)
 }

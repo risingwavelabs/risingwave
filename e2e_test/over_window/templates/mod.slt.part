@@ -127,7 +127,7 @@ select * from v_c order by id;
 100005  100  200  1  717  810  717   723   701   806   806
 100006  105  204  5  703  828  703  NULL  NULL  NULL  NULL
 
-query II
+query iiiiiii
 select * from v_d order by id;
 ----
 100001  100  200  1  701  805  1  1
@@ -136,6 +136,16 @@ select * from v_d order by id;
 100004  103  200  2  702  808  1  1
 100005  100  200  1  717  810  2  4
 100006  105  204  5  703  828  1  1
+
+query iiiiiiiiii
+select * from v_expr order by id;
+----
+100001 100 200 1 701 805 805 0 701 NULL 1402
+100002 100 200 2 799 806 806 0 701 703 1446
+100003 100 200 2 723 807 807 0 701 801 1446
+100004 103 200 2 702 808 808 0 702 NULL 1404
+100005 100 200 1 717 810 810 0 701 725 1434
+100006 105 204 5 703 828 828 0 703 NULL 1406
 
 include ./cross_check.slt.part
 
@@ -163,12 +173,19 @@ select * from v_c order by id;
 100005  100  200  1  717  810  717   701   701  NULL  NULL
 100006  105  204  5  703  828  703  NULL  NULL  NULL  NULL
 
-query II
+query iiiiiii
 select * from v_d order by id;
 ----
 100001  100  200  1  701  805  1  1
 100005  100  200  1  717  810  2  2
 100006  105  204  5  703  828  1  1
+
+query iiiiiiiiii
+select * from v_expr order by id;
+----
+100001 100 200 1 701 805 805 0 701 NULL 1402
+100005 100 200 1 717 810 810 0 701 703 1434
+100006 105 204 5 703 828 828 0 703 NULL 1406
 
 include ./cross_check.slt.part
 

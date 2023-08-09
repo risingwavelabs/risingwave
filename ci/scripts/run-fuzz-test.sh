@@ -11,6 +11,14 @@ if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
      NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test" 2> >(tee);
 fi
 
+extract_error_sql() {
+  cat "$1" \
+   | grep -E "(\[EXECUTING|\[TEST)" \
+   | sed 's/.*\[EXECUTING .*\]: //' \
+   | sed 's/.*\[TEST.*\]: //' \
+   | sed 's/$/;/' > $LOGDIR/error.sql.log
+}
+
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     while getopts 'p:' opt; do
         case ${opt} in
@@ -30,9 +38,9 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
 
     download_and_prepare_rw "$profile" common
 
-    echo "--- Download artifacts"
-    download-and-decompress-artifact risingwave_simulation .
-    chmod +x ./risingwave_simulation
+    #    echo "--- Download artifacts"
+    #    download-and-decompress-artifact risingwave_simulation .
+    #    chmod +x ./risingwave_simulation
 
     echo "--- Download sqlsmith e2e bin"
     download-and-decompress-artifact sqlsmith-"$profile" target/debug/
@@ -45,7 +53,13 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     echo "--- e2e, ci-3cn-1fe, run fuzzing"
     ./target/debug/sqlsmith test \
       --count "$SQLSMITH_COUNT" \
-      --testdata ./src/tests/sqlsmith/tests/testdata
+      --testdata ./src/tests/sqlsmith/tests/testdata > $LOGDIR/fuzzing.log 2>&1 && rm $LOGDIR/*
+
+    if [[ -e $LOGDIR/fuzzing.log ]]; then
+        echo "Fuzzing failed"
+        extract_error_sql $LOGDIR/fuzzing.log
+        exit 1
+    fi
 
     # Sqlsmith does not write to stdout, so we need this to ensure buildkite
     # shows the right timing.

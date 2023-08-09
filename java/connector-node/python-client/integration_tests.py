@@ -19,6 +19,7 @@ import json
 import grpc
 import connector_service_pb2_grpc
 import connector_service_pb2
+import plan_common_pb2
 import data_pb2
 import psycopg2
 
@@ -27,11 +28,11 @@ def make_mock_schema():
     # todo
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(
-                name="id", data_type=data_pb2.DataType(type_name=2)
+            plan_common_pb2.ColumnDesc(
+                name="id", column_type=data_pb2.DataType(type_name=2)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="name", data_type=data_pb2.DataType(type_name=7)
+            plan_common_pb2.ColumnDesc(
+                name="name", column_type=data_pb2.DataType(type_name=7)
             ),
         ],
         pk_indices=[0],
@@ -42,26 +43,26 @@ def make_mock_schema():
 def make_mock_schema_stream_chunk():
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(
-                name="v1", data_type=data_pb2.DataType(type_name=1)
+            plan_common_pb2.ColumnDesc(
+                name="v1", column_type=data_pb2.DataType(type_name=1)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="v2", data_type=data_pb2.DataType(type_name=2)
+            plan_common_pb2.ColumnDesc(
+                name="v2", column_type=data_pb2.DataType(type_name=2)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="v3", data_type=data_pb2.DataType(type_name=3)
+            plan_common_pb2.ColumnDesc(
+                name="v3", column_type=data_pb2.DataType(type_name=3)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="v4", data_type=data_pb2.DataType(type_name=4)
+            plan_common_pb2.ColumnDesc(
+                name="v4", column_type=data_pb2.DataType(type_name=4)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="v5", data_type=data_pb2.DataType(type_name=5)
+            plan_common_pb2.ColumnDesc(
+                name="v5", column_type=data_pb2.DataType(type_name=5)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="v6", data_type=data_pb2.DataType(type_name=6)
+            plan_common_pb2.ColumnDesc(
+                name="v6", column_type=data_pb2.DataType(type_name=6)
             ),
-            connector_service_pb2.TableSchema.Column(
-                name="v7", data_type=data_pb2.DataType(type_name=7)
+            plan_common_pb2.ColumnDesc(
+                name="v7", column_type=data_pb2.DataType(type_name=7)
             ),
         ],
         pk_indices=[0],
@@ -88,14 +89,14 @@ def load_json_payload(input_file):
         row_ops = []
         for row in batch:
             row_ops.append(
-                connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
+                connector_service_pb2.SinkWriterStreamRequest.WriteBatch.JsonPayload.RowOp(
                     op_type=row["op_type"], line=str(row["line"])
                 )
             )
 
         payloads.append(
             {
-                "json_payload": connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(
+                "json_payload": connector_service_pb2.SinkWriterStreamRequest.WriteBatch.JsonPayload(
                     row_ops=row_ops
                 )
             }
@@ -108,7 +109,7 @@ def load_stream_chunk_payload(input_file):
     sink_input = load_binary_input(input_file)
     payloads.append(
         {
-            "stream_chunk_payload": connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(
+            "stream_chunk_payload": connector_service_pb2.SinkWriterStreamRequest.WriteBatch.StreamChunkPayload(
                 binary_data=sink_input
             )
         }
@@ -119,17 +120,19 @@ def load_stream_chunk_payload(input_file):
 def test_sink(prop, format, payload_input, table_schema):
     # read input, Add StartSink request
     request_list = [
-        connector_service_pb2.SinkStreamRequest(
-            start=connector_service_pb2.SinkStreamRequest.StartSink(
+        connector_service_pb2.SinkWriterStreamRequest(
+            start=connector_service_pb2.SinkWriterStreamRequest.StartSink(
                 format=format,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=prop["connector"],
+                sink_param=connector_service_pb2.SinkParam(
+                    sink_id=0,
                     properties=prop,
                     table_schema=table_schema,
                 ),
             )
         )
     ]
+
+    response_count = 1
 
     with grpc.insecure_channel("localhost:50051") as channel:
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
@@ -138,34 +141,36 @@ def test_sink(prop, format, payload_input, table_schema):
         # construct request
         for payload in payload_input:
             request_list.append(
-                connector_service_pb2.SinkStreamRequest(
-                    start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(
+                connector_service_pb2.SinkWriterStreamRequest(
+                    begin_epoch=connector_service_pb2.SinkWriterStreamRequest.BeginEpoch(
                         epoch=epoch
                     )
                 )
             )
             request_list.append(
-                connector_service_pb2.SinkStreamRequest(
-                    write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                        batch_id=batch_id,
-                        epoch=epoch,
-                        **payload,
+                connector_service_pb2.SinkWriterStreamRequest(
+                    write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(
+                        batch_id=batch_id, epoch=epoch, **payload
                     )
                 )
             )
 
             request_list.append(
-                connector_service_pb2.SinkStreamRequest(
-                    sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)
+                connector_service_pb2.SinkWriterStreamRequest(
+                    barrier=connector_service_pb2.SinkWriterStreamRequest.Barrier(
+                        epoch=epoch, is_checkpoint=True
+                    )
                 )
             )
+            response_count += 1
             epoch += 1
             batch_id += 1
         # send request
-        response_iter = stub.SinkStream(iter(request_list))
+        response_iter = stub.SinkWriterStream(iter(request_list))
         for req in request_list:
+            print("REQUEST", req)
+        for _ in range(response_count):
             try:
-                print("REQUEST", req)
                 print("RESPONSE OK:", next(response_iter))
             except Exception as e:
                 print("Integration test failed: ", e)
