@@ -156,10 +156,6 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
-    /// id.
-    pub mv_info: IntGaugeVec,
-    pub mv_info_with_actor_id: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -500,23 +496,13 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["materialized_view_id", "table_id", "actor_id", "table_name"],
-            registry
-        )
-        .unwrap();
-
-        let mv_info = register_int_gauge_vec_with_registry!(
-            "materialized_info",
-            "Mapping from materialized view id to (table id, table name)",
-            &["id", "table_id", "table_name"],
-            registry
-        )
-        .unwrap();
-
-        let mv_info_with_actor_id = register_int_gauge_vec_with_registry!(
-            "materialized_info_with_actor_id",
-            "Mapping from materialized view id to (actor id, mv name)",
-            &["id", "actor_id", "mv_name"],
+            &[
+                "materialized_view_id",
+                "table_id",
+                "actor_id",
+                "table_name",
+                "table_type"
+            ],
             registry
         )
         .unwrap();
@@ -629,8 +615,6 @@ impl MetaMetrics {
             source_enumerator_metrics,
             actor_info,
             table_info,
-            mv_info,
-            mv_info_with_actor_id,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -726,8 +710,6 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            meta_metrics.mv_info.reset();
-            meta_metrics.mv_info_with_actor_id.reset();
             let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
@@ -775,22 +757,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                         &table_id_str,
                                         &actor_id_str,
                                         &table.name,
+                                        table.table_type().as_str_name(),
                                     ])
                                     .set(1);
-                                meta_metrics
-                                    .mv_info
-                                    .with_label_values(&[&mv_id_str, &table_id_str, &table.name])
-                                    .set(1);
-                                if mv_id_str == table_id_str {
-                                    meta_metrics
-                                        .mv_info_with_actor_id
-                                        .with_label_values(&[
-                                            &mv_id_str,
-                                            &actor_id_str,
-                                            &table.name,
-                                        ])
-                                        .set(1);
-                                }
                             });
                         }
                     }
