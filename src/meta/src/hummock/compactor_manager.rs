@@ -72,7 +72,13 @@ impl Compactor {
         .into()));
 
         self.sender
-            .send(Ok(SubscribeCompactionEventResponse { event: Some(event) }))
+            .send(Ok(SubscribeCompactionEventResponse {
+                event: Some(event),
+                create_at: SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
+            }))
             .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(())
@@ -85,6 +91,10 @@ impl Compactor {
                     context_id: self.context_id,
                     task_id,
                 })),
+                create_at: SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
             }))
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
