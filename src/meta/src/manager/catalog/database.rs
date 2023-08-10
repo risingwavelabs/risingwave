@@ -157,10 +157,18 @@ impl DatabaseManager {
         )
     }
 
-    pub fn get_table_name_mapping(&self) -> HashMap<TableId, String> {
+    pub fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
         self.tables
             .values()
-            .map(|table| (table.id, table.name.clone()))
+            .map(|table| {
+                (
+                    table.id,
+                    (
+                        table.name.clone(),
+                        table.table_type().as_str_name().to_string(),
+                    ),
+                )
+            })
             .collect()
     }
 

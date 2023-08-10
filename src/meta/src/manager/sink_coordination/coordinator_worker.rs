@@ -60,7 +60,7 @@ impl CoordinatorWorker {
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
         connector_client: Option<ConnectorClient>,
     ) {
-        let sink = match build_sink(first_writer_request.param.clone()).await {
+        let sink = match build_sink(first_writer_request.param.clone()) {
             Ok(sink) => sink,
             Err(e) => {
                 error!(

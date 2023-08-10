@@ -193,7 +193,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Tempo(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::Tempo(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::Kafka(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
