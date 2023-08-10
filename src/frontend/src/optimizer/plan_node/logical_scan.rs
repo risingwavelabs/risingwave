@@ -22,6 +22,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::ChainType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -557,7 +558,23 @@ impl ToStream for LogicalScan {
         }
         if self.predicate().always_true() {
             // TODO(kwannoel): Use optimizer ctx here to allow toggling different table scans.
-            Ok(StreamTableScan::new(self.core.clone()).into())
+            if self
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_streaming_enable_arrangement_backfill()
+            {
+                Ok(StreamTableScan::new_with_chain_type(
+                    self.core.clone(),
+                    ChainType::ArrangementBackfill,
+                )
+                .into())
+            } else {
+                Ok(
+                    StreamTableScan::new_with_chain_type(self.core.clone(), ChainType::Backfill)
+                        .into(),
+                )
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

@@ -105,6 +105,7 @@ const SYNCHRONIZE_SEQSCANS: usize = 29;
 const STATEMENT_TIMEOUT: usize = 30;
 const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
+const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 33;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -310,6 +311,8 @@ type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, true>;
+// TODO: Revert to false before merging.
+type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, true>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
@@ -398,6 +401,9 @@ pub struct ConfigMap {
 
     /// Enable bushy join for streaming queries. Defaults to true.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
+    /// Enable arrangement backfill for streaming queries. Defaults to false.
+    streaming_enable_arrangement_backfill: StreamingEnableArrangementBackfill,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     enable_join_ordering: EnableJoinOrdering,
@@ -512,6 +518,8 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             self.streaming_enable_bushy_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableArrangementBackfill::entry_name()) {
+            self.streaming_enable_arrangement_backfill = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             self.enable_join_ordering = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -610,6 +618,8 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             Ok(self.streaming_enable_bushy_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableArrangementBackfill::entry_name()) {
+            Ok(self.streaming_enable_arrangement_backfill.to_string())
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             Ok(self.enable_join_ordering.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -733,6 +743,11 @@ impl ConfigMap {
                 name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_bushy_join.to_string(),
                 description: String::from("Enable bushy join in streaming queries.")
+            },
+            VariableInfo{
+                name : StreamingEnableArrangementBackfill::entry_name().to_lowercase(),
+                setting : self.streaming_enable_arrangement_backfill.to_string(),
+                description: String::from("Enable arrangement backfill in streaming queries.")
             },
             VariableInfo{
                 name : EnableJoinOrdering::entry_name().to_lowercase(),
@@ -894,6 +909,10 @@ impl ConfigMap {
 
     pub fn get_streaming_enable_bushy_join(&self) -> bool {
         *self.streaming_enable_bushy_join
+    }
+
+    pub fn get_streaming_enable_arrangement_backfill(&self) -> bool {
+        *self.streaming_enable_arrangement_backfill
     }
 
     pub fn get_enable_join_ordering(&self) -> bool {
