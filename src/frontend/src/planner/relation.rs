@@ -63,6 +63,7 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
+        let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
             Rc::new(base_table.table_catalog.table_desc()),
@@ -74,7 +75,7 @@ impl Planner {
                 .collect(),
             self.ctx(),
             base_table.for_system_time_as_of_proctime,
-            base_table.table_catalog.cardinality,
+            table_cardinality,
         )
         .into())
     }

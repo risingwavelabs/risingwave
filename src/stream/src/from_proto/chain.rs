@@ -23,7 +23,9 @@ use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
-use crate::executor::{ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor};
+use crate::executor::{
+    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
+};
 
 pub struct ChainExecutorBuilder;
 
@@ -140,7 +142,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 // TODO: refactor it with from_table_catalog in the future.
 
                 let state_table = if let Ok(table) = node.get_state_table() {
-                    Some(StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone()).await)
+                    Some(
+                        StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone())
+                            .await,
+                    )
                 } else {
                     None
                 };
@@ -174,7 +179,12 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .boxed()
                 } else {
                     let upstream_table = node.get_arrangement_table().unwrap();
-                    let upstream_table = ReplicatedStateTable::from_table_catalog(upstream_table, state_store.clone(), vnodes).await;
+                    let upstream_table = ReplicatedStateTable::from_table_catalog(
+                        upstream_table,
+                        state_store.clone(),
+                        vnodes,
+                    )
+                    .await;
                     ArrangementBackfillExecutor::new(
                         upstream_table,
                         mview,
@@ -184,6 +194,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                         schema,
                         params.pk_indices,
                         stream.streaming_metrics.clone(),
+                        params.env.config().developer.chunk_size,
                     )
                     .boxed()
                 }

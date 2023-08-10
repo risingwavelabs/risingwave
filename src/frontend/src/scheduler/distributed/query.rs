@@ -437,8 +437,10 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID, TableDesc};
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ConflictBehavior, TableDesc, DEFAULT_SUPER_USER_ID,
+    };
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
@@ -514,33 +516,53 @@ pub(crate) mod tests {
         let ctx = OptimizerContext::mock().await;
         let table_id = 0.into();
         let table_catalog: TableCatalog = TableCatalog {
-                id: table_id,
-                associated_source_id: None,
-                name: "test".to_string(),
-                columns: vec![
-                    ColumnCatalog { column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0), is_hidden: false },
-                    ColumnCatalog { column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1), is_hidden: false },
-                    ColumnCatalog { column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2), is_hidden: false },
-                ],
-                pk: vec![],
-                stream_key: vec![],
-                table_type: TableType::Table,
-                distribution_key: vec![],
-                append_only: false,
-                owner: DEFAULT_SUPER_USER_ID,
-                properties: WithOptions::new([(PROPERTIES_RETENTION_SECOND_KEY.into(), TABLE_OPTION_DUMMY_RETENTION_SECOND.to_string())].into_iter().collect()),
-                fragment_id: 0, // FIXME
-                dml_fragment_id: None, // FIXME
-                vnode_col_index: None,
-                row_id_index: None,
-                value_indices: vec![0, 1, 2],
-                definition: "".to_string(),
-                conflict_behavior: ConflictBehavior::NoCheck,
-                read_prefix_len_hint: 0,
-                version: None,
-                watermark_columns: FixedBitSet::with_capacity(3),
-                dist_key_in_pk: vec![],
-            };
+            id: table_id,
+            associated_source_id: None,
+            name: "test".to_string(),
+            columns: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2),
+                    is_hidden: false,
+                },
+            ],
+            pk: vec![],
+            stream_key: vec![],
+            table_type: TableType::Table,
+            distribution_key: vec![],
+            append_only: false,
+            owner: DEFAULT_SUPER_USER_ID,
+            properties: WithOptions::new(
+                [(
+                    PROPERTIES_RETENTION_SECOND_KEY.into(),
+                    TABLE_OPTION_DUMMY_RETENTION_SECOND.to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            fragment_id: 0,        // FIXME
+            dml_fragment_id: None, // FIXME
+            vnode_col_index: None,
+            row_id_index: None,
+            value_indices: vec![0, 1, 2],
+            definition: "".to_string(),
+            conflict_behavior: ConflictBehavior::NoCheck,
+            read_prefix_len_hint: 0,
+            version: None,
+            watermark_columns: FixedBitSet::with_capacity(3),
+            dist_key_in_pk: vec![],
+            cardinality: Cardinality::unknown(),
+            cleaned_by_watermark: false,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+        };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
             Rc::new(TableDesc {

@@ -68,6 +68,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
+        table_cardinality: Cardinality,
     ) -> Self {
         generic::Scan::new(
             table_name,
@@ -79,6 +80,7 @@ impl LogicalScan {
             ctx,
             Condition::true_cond(),
             for_system_time_as_of_proctime,
+            table_cardinality,
         )
         .into()
     }
