@@ -74,6 +74,7 @@ public class SinkCoordinatorStreamObserver
                                 .setCommit(
                                         ConnectorServiceProto.SinkCoordinatorStreamResponse
                                                 .CommitResponse.newBuilder()
+                                                .setEpoch(request.getCommit().getEpoch())
                                                 .build())
                                 .build());
 
