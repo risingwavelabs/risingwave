@@ -784,8 +784,10 @@ where
             .fragment_manager
             .select_table_fragments_by_table_id(&id.into())
             .await?;
+        let old_internal_table_ids = old_table_fragments.internal_table_ids();
+        let old_internal_tables = self.catalog_manager.get_tables(&old_internal_table_ids).await;
 
-        fragment_graph.fit_internal_table_ids(old_table_fragments.internal_table_ids())?;
+        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.

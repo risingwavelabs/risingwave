@@ -40,7 +40,7 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -356,30 +356,25 @@ impl StreamFragmentGraph {
     //    is fixed by `sorted_by` and the visiting order of nodes in the fragment,
     //    which is fixed.
     /// Set internal tables' `table_id`s according to a list of internal tables
-    pub fn fit_internal_table_ids(&mut self, mut old_ids: Vec<u32>) -> MetaResult<()> {
+    pub fn fit_internal_table_ids(&mut self, mut old_tables: Vec<Table>) -> MetaResult<()> {
         let mut new_ids = Vec::new();
         for fragment in self.fragments.values() {
             for table in &fragment.internal_tables {
                 new_ids.push(table.id);
             }
         }
-        if new_ids.len() != old_ids.len() {
-            return Err(MetaError::invalid_parameter(format!(
-                "New table and old table have different number of internal tables.
-                 Old has {}, new has {}",
-                old_ids.len(),
-                new_ids.len(),
-            )));
-        }
-        old_ids.sort();
+        assert_eq!(new_ids.len(), old_tables.len());
+        old_tables.sort_by(|a, b| a.id.cmp(&b.id));
         new_ids.sort();
         let id_map = new_ids
-            .iter()
-            .zip_eq_fast(old_ids.iter())
+            .into_iter()
+            .zip_eq_fast(old_tables.into_iter())
             .collect::<HashMap<_, _>>();
         for fragment in self.fragments.values_mut() {
             for table in &mut fragment.internal_tables {
-                table.id = **id_map.get(&table.id).unwrap();
+                let old_table = id_map.get(&table.id).unwrap();
+                assert_eq!(old_table.get_columns(), table.get_columns());
+                table.id = old_table.get_id();
             }
         }
         Ok(())
