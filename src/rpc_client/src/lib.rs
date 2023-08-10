@@ -240,9 +240,10 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
                 .await?
                 .into_inner();
 
-        let first_response = response_stream.next().await.ok_or_else(|| {
-            RpcError::Internal(anyhow!("get empty response from start sink request"))
-        })??;
+        let first_response = response_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("get empty response from start sink request"))??;
 
         Ok((
             Self {
