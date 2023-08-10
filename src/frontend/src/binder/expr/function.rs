@@ -849,6 +849,61 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_relation_size", dispatch_by_len(vec![
+                    (1, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    })),
+                    (2, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        match inputs[1].as_literal() {
+                            Some(literal) if literal.return_type() == DataType::Varchar => {
+                                match literal
+                                     .get_data()
+                                     .as_ref()
+                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
+                                     .as_utf8()
+                                     .as_ref() {
+                                        "main" => {
+                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                                                BoundQuery {
+                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
+                                                    order: vec![],
+                                                    limit: None,
+                                                    offset: None,
+                                                    with_ties: false,
+                                                    extra_order_exprs: vec![],
+                                                },
+                                                SubqueryKind::Scalar,
+                                            ))))
+                                        },
+                                        // Thess options are invalid in RW so we return 0 value as the result
+                                        "fsm"|"vm"|"init" => {
+                                            Ok(ExprImpl::literal_int(0))
+                                        },
+                                        _ => Err(ErrorCode::ExprError("invalid fork name".into()).into())
+                                    }
+                            },
+                            _ => Err(ErrorCode::ExprError(
+                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
+                            )
+                            .into())
+                        }
+                    })),
+                    ]
+                )),
                 ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
