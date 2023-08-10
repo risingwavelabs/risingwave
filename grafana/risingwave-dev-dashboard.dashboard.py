@@ -1749,7 +1749,6 @@ def section_hummock(panels):
             "Materialized View Read Size",
             "",
             [
-                
                 *quantile(
                     lambda quantile, legend: panels.target(
                         f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_iter_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id) + sum((histogram_quantile({quantile}, sum(rate({metric("state_store_get_key_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({metric("state_store_get_value_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id)',
@@ -1771,7 +1770,6 @@ def section_hummock(panels):
                     ),
                     [90, 99, "max"],
                 ),
-               
             ],
         ),
 
