@@ -142,6 +142,9 @@ pub struct MetaMetrics {
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
 
+    pub compaction_event_consumed_latency: Histogram,
+    pub compaction_event_loop_iteration_latency: Histogram,
+
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
@@ -568,6 +571,22 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "storage_compaction_event_consumed_latency",
+            "The latency(ms) of each event being consumed",
+            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
+        );
+        let compaction_event_consumed_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "storage_compaction_event_loop_iteration_latency",
+            "The latency(ms) of each iteration of the compaction event loop",
+            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
+        );
+        let compaction_event_loop_iteration_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -628,6 +647,8 @@ impl MetaMetrics {
             move_state_table_count,
             state_table_count,
             branched_sst_count,
+            compaction_event_consumed_latency,
+            compaction_event_loop_iteration_latency,
         }
     }
 
