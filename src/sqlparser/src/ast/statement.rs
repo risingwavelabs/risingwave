@@ -618,9 +618,9 @@ impl SourceSchemaV2 {
             };
         let consume_string_from_options =
             |row_options: &BTreeMap<String, String>, key: &str| -> Result<AstString, ParserError> {
-                try_consume_string_from_options(row_options, key).ok_or(ParserError::ParserError(
-                    format!("missing field {} in row format options", key),
-                ))
+                try_consume_string_from_options(row_options, key).ok_or_else(|| {
+                    ParserError::ParserError(format!("missing field {} in row format options", key))
+                })
             };
         let get_schema_location =
             |row_options: &BTreeMap<String, String>| -> Result<(AstString, bool), ParserError> {

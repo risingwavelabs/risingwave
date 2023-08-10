@@ -147,7 +147,7 @@ fn get_property_required(
     with_properties
         .get(property)
         .map(|s| s.to_lowercase())
-        .ok_or(anyhow!("Required property \"{property}\" is not provided"))
+        .ok_or_else(|| anyhow!("Required property \"{property}\" is not provided"))
 }
 
 #[inline(always)]

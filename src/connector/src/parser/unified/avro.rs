@@ -127,9 +127,9 @@ impl<'a> AvroParseOptions<'a> {
                         .find(|field| field.0 == field_name)
                         .map(|field| &field.1)
                 };
-                let scale = match find_in_records("scale").ok_or(AccessError::Other(anyhow!(
-                    "scale field not found in VariableScaleDecimal"
-                )))? {
+                let scale = match find_in_records("scale").ok_or_else(|| {
+                    AccessError::Other(anyhow!("scale field not found in VariableScaleDecimal"))
+                })? {
                     Value::Int(scale) => Ok(*scale),
                     avro_value => Err(AccessError::Other(anyhow!(
                         "scale field in VariableScaleDecimal is not int, got {:?}",
@@ -137,9 +137,9 @@ impl<'a> AvroParseOptions<'a> {
                     ))),
                 }?;
 
-                let value: BigInt = match find_in_records("value").ok_or(AccessError::Other(
-                    anyhow!("value field not found in VariableScaleDecimal"),
-                ))? {
+                let value: BigInt = match find_in_records("value").ok_or_else(|| {
+                    AccessError::Other(anyhow!("value field not found in VariableScaleDecimal"))
+                })? {
                     Value::Bytes(bytes) => Ok(BigInt::from_signed_bytes_be(bytes)),
                     avro_value => Err(AccessError::Other(anyhow!(
                         "value field in VariableScaleDecimal is not bytes, got {:?}",
