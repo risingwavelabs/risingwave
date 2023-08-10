@@ -61,9 +61,9 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         let metadata = self.inner.barrier(is_checkpoint).await?;
         if is_checkpoint {
-            let metadata = metadata.ok_or(SinkError::Coordinator(anyhow!(
-                "should get metadata on checkpoint barrier"
-            )))?;
+            let metadata = metadata.ok_or_else(|| {
+                SinkError::Coordinator(anyhow!("should get metadata on checkpoint barrier"))
+            })?;
             // TODO: add metrics to measure time to commit
             self.coordinator_stream_handle
                 .commit(self.epoch, metadata)
