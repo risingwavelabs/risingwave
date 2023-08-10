@@ -27,31 +27,11 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 <!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
 - [ ] My PR contains critical fixes that are necessary to be merged into the latest release. (Please check out the [details](https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md))
 
-## Documentation
+## Release note
 
-- [ ] My PR contains user-facing changes.
+If this PR includes changes that directly affect users or other significant modifications relevant to the community, kindly draft a release note to provide a concise summary of these changes. Please prioritize highlighting the impact these changes will have on users.
 
-<!--
 
-You can ignore or delete the section below if your PR does not contain user-facing changes.
-
-Otherwise, please write a release note below.
-
--->
-
-<details><summary>Click here for Documentation</summary>
-
-### Types of user-facing changes
-
-Please keep the types that apply to your changes, and remove the others.
-
-- Installation and deployment
-- Connector (sources & sinks)
-- SQL commands, functions, and operators
-- RisingWave cluster configuration changes
-- Other (please specify in the release note below)
-
-### Release note
 
 <!--
 Please create a release note for your changes.
