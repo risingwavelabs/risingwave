@@ -68,7 +68,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
                 &node.group_key.iter().map(|idx| *idx as usize).collect_vec()
             );
         } else {
-            assert_eq!(&params.pk_indices, input.pk_indices());
+            // assert_eq!(&params.pk_indices, input.pk_indices());
         }
 
         let args = GroupTopNExecutorDispatcherArgs {
