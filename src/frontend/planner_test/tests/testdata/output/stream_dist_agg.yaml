@@ -19,7 +19,7 @@
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [max(s.v)] }
       └─StreamSimpleAgg { aggs: [max(s.v), count] }
-        └─StreamTableScan { table: s, columns: [s.v, s.o], pk: [], dist: Single }
+        └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -29,15 +29,15 @@
             ├── result table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
-            └── Chain { table: s, columns: [s.v, s.o], pk: [], dist: Single }
+            └── Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
                 ├── state table: 2
                 ├── Upstream
                 └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_v ]
-    ├── primary key: [ $0 DESC ]
-    ├── value indices: [ 0 ]
+    ├── columns: [ s_v, s_t__row_id ]
+    ├── primary key: [ $0 DESC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
@@ -49,9 +49,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -76,7 +76,7 @@
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(s.v)] }
       └─StreamSimpleAgg { aggs: [sum(s.v), count] }
-        └─StreamTableScan { table: s, columns: [s.v, s.o], pk: [], dist: Single }
+        └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -86,7 +86,7 @@
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
-            └── Chain { table: s, columns: [s.v, s.o], pk: [], dist: Single }
+            └── Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
                 ├── state table: 1
                 ├── Upstream
                 └── BatchPlanNode
@@ -99,9 +99,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -126,7 +126,7 @@
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count(s.v)] }
       └─StreamSimpleAgg { aggs: [count(s.v), count] }
-        └─StreamTableScan { table: s, columns: [s.v, s.o], pk: [], dist: Single }
+        └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -136,7 +136,7 @@
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
-            └── Chain { table: s, columns: [s.v, s.o], pk: [], dist: Single }
+            └── Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
                 ├── state table: 1
                 ├── Upstream
                 └── BatchPlanNode
@@ -149,9 +149,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -177,8 +177,8 @@
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC))] }
       └─StreamSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC)), count] }
-        └─StreamProject { exprs: [s.s, ',':Varchar, s.v] }
-          └─StreamTableScan { table: s, columns: [s.v, s.s, s.o], pk: [], dist: Single }
+        └─StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
+          └─StreamTableScan { table: s, columns: [s.v, s.s, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -188,16 +188,16 @@
             ├── result table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
-            └── StreamProject { exprs: [s.s, ',':Varchar, s.v] }
-                └── Chain { table: s, columns: [s.v, s.s, s.o], pk: [], dist: Single }
+            └── StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
+                └── Chain { table: s, columns: [s.v, s.s, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
                     ├── state table: 2
                     ├── Upstream
                     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_v, s_s, ',':Varchar ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── columns: [ s_v, s_t__row_id, s_s, ',':Varchar ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
@@ -209,9 +209,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1228,7 +1228,7 @@
     └─StreamProject { exprs: [max(s.v), s.k] }
       └─StreamHashAgg { group_key: [s.k], aggs: [max(s.v), count] }
         └─StreamExchange { dist: HashShard(s.k) }
-          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o], pk: [], dist: Single }
+          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
@@ -1241,14 +1241,15 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: s, columns: [s.k, s.v, s.o], pk: [], dist: Single } { state table: 2 }
+    Chain { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    ├── state table: 2
     ├── Upstream
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_k, s_v ]
-    ├── primary key: [ $0 ASC, $1 DESC ]
-    ├── value indices: [ 1 ]
+    ├── columns: [ s_k, s_v, s_t__row_id ]
+    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
@@ -1260,9 +1261,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1447,7 +1448,7 @@
     └─StreamProject { exprs: [sum(s.v), s.k] }
       └─StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count] }
         └─StreamExchange { dist: HashShard(s.k) }
-          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o], pk: [], dist: Single }
+          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
@@ -1460,7 +1461,8 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: s, columns: [s.k, s.v, s.o], pk: [], dist: Single } { state table: 1 }
+    Chain { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    ├── state table: 1
     ├── Upstream
     └── BatchPlanNode
 
@@ -1472,9 +1474,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1659,7 +1661,7 @@
     └─StreamProject { exprs: [count(s.v), s.k] }
       └─StreamHashAgg { group_key: [s.k], aggs: [count(s.v), count] }
         └─StreamExchange { dist: HashShard(s.k) }
-          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o], pk: [], dist: Single }
+          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
@@ -1672,7 +1674,8 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: s, columns: [s.k, s.v, s.o], pk: [], dist: Single } { state table: 1 }
+    Chain { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    ├── state table: 1
     ├── Upstream
     └── BatchPlanNode
 
@@ -1684,9 +1687,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1892,8 +1895,8 @@
     └─StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), s.k] }
       └─StreamHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), count] }
         └─StreamExchange { dist: HashShard(s.k) }
-          └─StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
-            └─StreamTableScan { table: s, columns: [s.k, s.o, s.s], pk: [], dist: Single }
+          └─StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o, s.t._row_id] }
+            └─StreamTableScan { table: s, columns: [s.k, s.o, s.s, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
@@ -1906,15 +1909,16 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
-    └── Chain { table: s, columns: [s.k, s.o, s.s], pk: [], dist: Single } { state table: 2 }
+    StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o, s.t._row_id] }
+    └── Chain { table: s, columns: [s.k, s.o, s.s, s.t._row_id], pk: [s.t._row_id], dist: Single }
+        ├── state table: 2
         ├── Upstream
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_k, s_o, s_s, ',':Varchar ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── columns: [ s_k, s_o, s_t__row_id, s_s, ',':Varchar ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
@@ -1926,9 +1930,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, o, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0

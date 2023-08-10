@@ -1830,7 +1830,7 @@
     ORDER BY bid_count DESC
     LIMIT 1000;
   stream_plan: |-
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [], pk_columns: [bid_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
       └─StreamTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -1862,7 +1862,7 @@
                             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [], pk_columns: [bid_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
         └── StreamTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 } { state table: 0 }
@@ -1871,10 +1871,7 @@
     Fragment 1
     StreamGroupTopN { order: [count($expr5) DESC], limit: 1000, offset: 0, group_key: [$expr6] } { state table: 1 }
     └── StreamProject { exprs: [$expr2, $expr3, count($expr5), Vnode($expr2) as $expr6] }
-        └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] }
-            ├── result table: 2
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
                 ├── left table: 3
                 ├── right table: 5
@@ -1908,12 +1905,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { state table: 10 }
 
-    Table 0
-    ├── columns: [ $expr2, $expr3, count($expr5), $expr6 ]
-    ├── primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 0 { columns: [ $expr2, $expr3, count($expr5), $expr6 ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ $expr2, $expr3, count($expr5), $expr6 ]
@@ -1923,12 +1915,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 3
 
-    Table 2
-    ├── columns: [ $expr2, $expr3, count($expr5), count ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 2, 3 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 2
+    Table 2 { columns: [ $expr2, $expr3, count($expr5), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
     Table 3 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1940,23 +1927,13 @@
 
     Table 7 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 8
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id ]
-    ├── primary key: [ $3 ASC, $4 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    Table 8 { columns: [ event_type, auction, bid, $expr1, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
     Table 9 { columns: [ $expr4 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 10 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4294967294
-    ├── columns: [ auction_id, auction_item_name, bid_count ]
-    ├── primary key: [ $2 DESC ]
-    ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 2 }
 
 - id: nexmark_q106
   before:

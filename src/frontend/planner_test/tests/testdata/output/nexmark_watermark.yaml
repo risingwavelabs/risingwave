@@ -2381,7 +2381,7 @@
                   └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr4, _row_id] }
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [], pk_columns: [bid_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr2, $expr3, count($expr4)] }
       └─StreamTopN { order: [count($expr4) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -2411,7 +2411,7 @@
                                     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [], pk_columns: [bid_count], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr2, $expr3, count($expr4)] }
         └── StreamTopN { order: [count($expr4) DESC], limit: 1000, offset: 0 } { state table: 0 }
@@ -2420,10 +2420,7 @@
     Fragment 1
     StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [$expr5] } { state table: 1 }
     └── StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as $expr5] }
-        └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] }
-            ├── result table: 2
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] } { result table: 2, state tables: [], distinct tables: [] }
             └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }
                 ├── left table: 3
                 ├── right table: 5
@@ -2468,7 +2465,7 @@
 
     Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count ], primary key: [ $2 DESC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 2 }
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
