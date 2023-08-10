@@ -117,6 +117,10 @@ pub struct MetaMetrics {
     pub current_version_object_count: IntGauge,
     /// Total size of objects that is referenced by current version.
     pub current_version_object_size: IntGauge,
+    /// Total number of objects that includes dangling objects.
+    pub total_object_count: IntGauge,
+    /// Total size of objects that includes dangling objects.
+    pub total_object_size: IntGauge,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -155,9 +159,6 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
-    /// id.
-    pub mv_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -394,6 +395,18 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let total_object_count = register_int_gauge_with_registry!(
+            "storage_total_object_count",
+            "Total number of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
+            registry
+        ).unwrap();
+
+        let total_object_size = register_int_gauge_with_registry!(
+            "storage_total_object_size",
+            "Total size of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
+            registry
+        ).unwrap();
+
         let delta_log_count = register_int_gauge_with_registry!(
             "storage_delta_log_count",
             "total number of hummock version delta log",
@@ -498,15 +511,13 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["materialized_view_id", "table_id", "actor_id", "table_name"],
-            registry
-        )
-        .unwrap();
-
-        let mv_info = register_int_gauge_vec_with_registry!(
-            "materialized_info",
-            "Mapping from materialized view id to (table id, table name)",
-            &["id", "table_id", "table_name"],
+            &[
+                "materialized_view_id",
+                "table_id",
+                "actor_id",
+                "table_name",
+                "table_type"
+            ],
             registry
         )
         .unwrap();
@@ -595,6 +606,8 @@ impl MetaMetrics {
             old_version_object_size,
             current_version_object_count,
             current_version_object_size,
+            total_object_count,
+            total_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -619,7 +632,6 @@ impl MetaMetrics {
             source_enumerator_metrics,
             actor_info,
             table_info,
-            mv_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -725,7 +737,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                     None => (worker_node.id, "".to_owned()),
                 })
                 .collect();
-            let table_name_mapping = catalog_manager.get_table_name_mapping().await;
+            let table_name_and_type_mapping =
+                catalog_manager.get_table_name_and_type_mapping().await;
+
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {
                 let mv_id_str = table_fragments.table_id().to_string();
@@ -754,12 +768,14 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
 
                         // Report a dummy gauge metrics with (table id, actor id, table
                         // name) as its label
+
                         for table_id in &fragment.state_table_ids {
                             let table_id_str = table_id.to_string();
-                            let table_name = table_name_mapping
+                            let (table_name, table_type) = table_name_and_type_mapping
                                 .get(table_id)
                                 .cloned()
-                                .unwrap_or_else(|| "unknown".to_string());
+                                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+
                             meta_metrics
                                 .table_info
                                 .with_label_values(&[
@@ -767,11 +783,8 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                     &table_id_str,
                                     &actor_id_str,
                                     &table_name,
+                                    &table_type,
                                 ])
-                                .set(1);
-                            meta_metrics
-                                .mv_info
-                                .with_label_values(&[&mv_id_str, &table_id_str, &table_name])
                                 .set(1);
                         }
                     }

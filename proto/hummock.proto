@@ -474,7 +474,12 @@ message TriggerManualCompactionResponse {
 }
 
 message ReportFullScanTaskRequest {
+  // Object ids that satisfying conditions specified by FullScanTask.
   repeated uint64 object_ids = 1;
+  // Total count of objects before filtered by conditions specified by FullScanTask.
+  uint64 total_object_count = 2;
+  // Total size of objects before filtered by conditions specified by FullScanTask.
+  uint64 total_object_size = 3;
 }
 
 message ReportFullScanTaskResponse {

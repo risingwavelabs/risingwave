@@ -145,6 +145,7 @@ async fn compaction_test(
         dist_key_in_pk: vec![],
         cardinality: None,
         created_at_epoch: None,
+        cleaned_by_watermark: false,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;

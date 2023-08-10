@@ -39,17 +39,19 @@ drop table t;
 statement ok
 create materialized view mv as select * from abs(-1);
 
-# TODO: support this
-statement error not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
+statement ok
+drop materialized view mv;
+
+statement ok
 create materialized view mv2 as select * from range(1,2);
 
-query IR
-select * from mv;
+query I
+select * from mv2;
 ----
 1
 
 statement ok
-drop materialized view mv;
+drop materialized view mv2;
 
 statement ok
 create materialized view mv as select min(1), string_agg('abc', ',');

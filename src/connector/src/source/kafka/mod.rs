@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -29,7 +27,6 @@ pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
-use crate::deserialize_duration_from_string;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
@@ -40,7 +37,7 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 ///
 /// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct RdKafkaPropertiesConsumer {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
@@ -111,13 +108,6 @@ pub struct KafkaProperties {
     #[serde(rename = "upsert")]
     pub upsert: Option<String>,
 
-    #[serde(
-        rename = "properties.sync.call.timeout",
-        deserialize_with = "deserialize_duration_from_string",
-        default = "default_kafka_sync_call_timeout"
-    )]
-    pub sync_call_timeout: Duration,
-
     #[serde(flatten)]
     pub common: KafkaCommon,
 
@@ -134,9 +124,6 @@ impl KafkaProperties {
     }
 }
 
-const fn default_kafka_sync_call_timeout() -> Duration {
-    Duration::from_secs(5)
-}
 const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
 
 impl RdKafkaPropertiesConsumer {
