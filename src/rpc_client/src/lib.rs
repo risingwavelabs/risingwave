@@ -240,12 +240,9 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
                 .await?
                 .into_inner();
 
-        let first_response = response_stream
-            .next()
-            .await
-            .ok_or(RpcError::Internal(anyhow!(
-                "get empty response from start sink request"
-            )))??;
+        let first_response = response_stream.next().await.ok_or_else(|| {
+            RpcError::Internal(anyhow!("get empty response from start sink request"))
+        })??;
 
         Ok((
             Self {
@@ -261,7 +258,7 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
             .response_stream
             .next()
             .await
-            .ok_or(RpcError::Internal(anyhow!("end of response stream")))??)
+            .ok_or_else(|| RpcError::Internal(anyhow!("end of response stream")))??)
     }
 
     pub async fn send_request(&mut self, request: REQ) -> Result<()> {

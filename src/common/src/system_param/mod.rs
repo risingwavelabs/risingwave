@@ -266,7 +266,7 @@ macro_rules! impl_set_system_param {
                         let v = if let Some(v) = value {
                             v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
-                            $default.ok_or(format!("{} does not have a default value", key))?
+                            $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);
