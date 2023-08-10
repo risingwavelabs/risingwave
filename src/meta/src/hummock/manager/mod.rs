@@ -2461,7 +2461,8 @@ where
 
                     compactor_stream = compactor_streams_change_rx.recv() => {
                         if let Some((context_id, stream)) = compactor_stream {
-                                push_stream(context_id, stream, &mut compactor_request_streams);
+                            tracing::info!("compactor {} enters the cluster", context_id);
+                            push_stream(context_id, stream, &mut compactor_request_streams);
                         }
                     },
 
@@ -2472,7 +2473,16 @@ where
                             (Some(Ok(req)), stream) => {
                                 (req.event.unwrap(), req.create_at, stream)
                             }
+
+                            (Some(Err(err)), _stream) => {
+                                tracing::warn!("compactor {} leaving the cluster with err {:?}", context_id, err);
+                                hummock_manager.compactor_manager
+                                    .remove_compactor(context_id);
+                                continue
+                            }
+
                             _ => {
+                                tracing::warn!("compactor {} leaving the cluster", context_id);
                                 hummock_manager.compactor_manager
                                     .remove_compactor(context_id);
                                 continue
@@ -2614,6 +2624,7 @@ where
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
                         } else {
+                            tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
                             hummock_manager.compactor_manager
                                 .remove_compactor(context_id);
                         }
