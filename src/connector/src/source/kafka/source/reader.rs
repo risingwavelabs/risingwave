@@ -90,7 +90,7 @@ impl SplitReader for KafkaSplitReader {
             );
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None)?;
         let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
