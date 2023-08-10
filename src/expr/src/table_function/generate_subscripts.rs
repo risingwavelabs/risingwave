@@ -65,7 +65,8 @@ fn generate_subscripts(
 ) -> Result<impl Iterator<Item = i32>> {
     let (mut cur, end) = generate_subscripts_inner(array, dim, reverse);
 
-    // if we don't branch reverse inside, then we have to box it outside to have the same time
+    // if we don't branch reverse inside, then we have to box it outside to have the same type
+    // different closures different anonymous types, or range and reverse range.
     let mut next = move || {
         if reverse {
             if cur <= end {
