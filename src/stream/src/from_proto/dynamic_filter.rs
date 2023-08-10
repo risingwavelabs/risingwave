@@ -20,7 +20,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
 use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
@@ -56,30 +56,48 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        // TODO: use consistent operation for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let state_table_l = StateTable::from_table_catalog_inconsistent_op(
-            node.get_left_table()?,
-            store.clone(),
-            Some(vnodes),
-        )
-        .await;
-
         let state_table_r =
-            StateTable::from_table_catalog_inconsistent_op(node.get_right_table()?, store, None)
-                .await;
+            StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
-        Ok(Box::new(DynamicFilterExecutor::new(
-            params.actor_context,
-            source_l,
-            source_r,
-            key_l,
-            params.pk_indices,
-            params.executor_id,
-            comparator,
-            state_table_l,
-            state_table_r,
-            params.executor_stats,
-            params.env.config().developer.chunk_size,
-        )))
+        let left_table = node.get_left_table()?;
+        if left_table.get_cleaned_by_watermark() {
+            let state_table_l = WatermarkCacheStateTable::from_table_catalog(
+                node.get_left_table()?,
+                store,
+                Some(vnodes),
+            )
+            .await;
+
+            Ok(Box::new(DynamicFilterExecutor::new(
+                params.actor_context,
+                source_l,
+                source_r,
+                key_l,
+                params.pk_indices,
+                params.executor_id,
+                comparator,
+                state_table_l,
+                state_table_r,
+                params.executor_stats,
+                params.env.config().developer.chunk_size,
+            )))
+        } else {
+            let state_table_l =
+                StateTable::from_table_catalog(node.get_left_table()?, store, Some(vnodes)).await;
+
+            Ok(Box::new(DynamicFilterExecutor::new(
+                params.actor_context,
+                source_l,
+                source_r,
+                key_l,
+                params.pk_indices,
+                params.executor_id,
+                comparator,
+                state_table_l,
+                state_table_r,
+                params.executor_stats,
+                params.env.config().developer.chunk_size,
+            )))
+        }
     }
 }

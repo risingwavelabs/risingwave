@@ -204,7 +204,8 @@
     create table t(x int[], y int[], k int primary key);
     select *, (select sum(i) from unnest(x) i) as sum_x from t;
   expected_outputs:
-    - batch_error
+    - batch_plan
+    - stream_plan
 - name: CorrelatedInputRef in ProjectSet and apply on condition is true.
   sql: |
     create table t(x int[], y int[], k int primary key);
