@@ -233,7 +233,7 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
         request_sender
             .send(first_request)
             .await
-            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+            .map_err(|err| anyhow!(err.to_string()))?;
 
         let mut response_stream =
             init_stream_fn(Request::new(ReceiverStream::new(request_receiver)))
@@ -259,12 +259,14 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
             .response_stream
             .next()
             .await
-            .ok_or_else(|| RpcError::Internal(anyhow!("end of response stream")))??)
+            .ok_or_else(|| anyhow!("end of response stream"))??)
     }
 
     pub async fn send_request(&mut self, request: REQ) -> Result<()> {
-        self.request_sender.send(request).await.map_err(|_| {
-            RpcError::Internal(anyhow!("unable to send request {}", type_name::<REQ>()))
-        })
+        Ok(self
+            .request_sender
+            .send(request)
+            .await
+            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()))?)
     }
 }
