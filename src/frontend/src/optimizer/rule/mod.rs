@@ -134,6 +134,8 @@ mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
 mod apply_limit_transpose_rule;
 pub use apply_limit_transpose_rule::*;
+mod apply_over_window_transpose_rule;
+pub use apply_over_window_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -191,6 +193,7 @@ macro_rules! for_all_rules {
             , { ApplyTopNTransposeRule }
             , { TableFunctionToProjectSetRule }
             , { ApplyLimitTransposeRule }
+            , { ApplyOverWindowTransposeRule }
         }
     };
 }

@@ -187,6 +187,7 @@ static GENERAL_UNNESTING_PUSH_DOWN_APPLY: LazyLock<OptimizationStage> = LazyLock
             ApplyLimitTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
             ApplyUnionTransposeRule::create(),
+            ApplyOverWindowTransposeRule::create(),
             CrossJoinEliminateRule::create(),
             ApplyShareEliminateRule::create(),
         ],
