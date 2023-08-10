@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -153,23 +154,24 @@ where
                 if new_permits == 0 {
                     new_permits = Semaphore::MAX_PERMITS;
                 }
-                if permits == new_permits {
-                    continue;
+                match permits.cmp(&new_permits) {
+                    Ordering::Less => {
+                        semaphore_clone.add_permits(new_permits - permits);
+                    }
+                    Ordering::Equal => continue,
+                    Ordering::Greater => {
+                        semaphore_clone
+                            .acquire_many((permits - new_permits) as u32)
+                            .await
+                            .unwrap()
+                            .forget();
+                    }
                 }
-
                 tracing::info!(
-                    "max_concurrent_creating_streaming_jobs changed to {}",
+                    "max_concurrent_creating_streaming_jobs changed from {} to {}",
+                    permits,
                     new_permits
                 );
-                if permits < new_permits {
-                    semaphore_clone.add_permits(new_permits - permits);
-                } else if permits > new_permits {
-                    semaphore_clone
-                        .acquire_many((permits - new_permits) as u32)
-                        .await
-                        .unwrap()
-                        .forget();
-                }
                 permits = new_permits;
             }
         });
