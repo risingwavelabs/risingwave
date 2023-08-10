@@ -13,12 +13,16 @@
 // limitations under the License.
 
 use std::cmp;
+use std::collections::VecDeque;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::upload_part::UploadPartOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
@@ -32,8 +36,8 @@ use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
-use futures::future::try_join_all;
-use futures::stream;
+use futures::future::{try_join_all, BoxFuture, FutureExt};
+use futures::{stream, Stream};
 use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
@@ -46,7 +50,7 @@ use super::{
     BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
     ObjectStore, StreamingUploader,
 };
-use crate::object::try_update_failure_metric;
+use crate::object::{try_update_failure_metric, ObjectMetadataIter};
 
 type PartId = i32;
 
@@ -518,41 +522,12 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut ret: Vec<ObjectMetadata> = vec![];
-        let mut next_continuation_token = None;
-        // list_objects_v2 returns up to 1000 keys and truncated the exceeded parts.
-        // Use `continuation_token` given by last response to fetch more parts of the result,
-        // until result is no longer truncated.
-        loop {
-            let mut request = self
-                .client
-                .list_objects_v2()
-                .bucket(&self.bucket)
-                .prefix(prefix);
-            if let Some(continuation_token) = next_continuation_token.take() {
-                request = request.continuation_token(continuation_token);
-            }
-            let result = request.send().await?;
-            let is_truncated = result.is_truncated;
-            ret.append(
-                &mut result
-                    .contents()
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|obj| ObjectMetadata {
-                        key: obj.key().expect("key required").to_owned(),
-                        last_modified: obj.last_modified().map(|l| l.as_secs_f64()).unwrap_or(0f64),
-                        total_size: obj.size() as usize,
-                    })
-                    .collect_vec(),
-            );
-            next_continuation_token = result.next_continuation_token;
-            if !is_truncated {
-                break;
-            }
-        }
-        Ok(ret)
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        Ok(Box::pin(S3ObjectIter::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            prefix.to_string(),
+        )))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -844,6 +819,97 @@ impl S3ObjectStoreConfig {
                 .unwrap_or(s3_objstore_config::object_store_req_retry_max_attempts()),
         )
         .map(jitter)
+    }
+}
+
+struct S3ObjectIter {
+    buffer: VecDeque<ObjectMetadata>,
+    client: Client,
+    bucket: String,
+    prefix: String,
+    next_continuation_token: Option<String>,
+    is_truncated: bool,
+    #[allow(clippy::type_complexity)]
+    send_future: Option<
+        BoxFuture<
+            'static,
+            Result<(Vec<ObjectMetadata>, Option<String>, bool), SdkError<ListObjectsV2Error>>,
+        >,
+    >,
+}
+
+impl S3ObjectIter {
+    fn new(client: Client, bucket: String, prefix: String) -> Self {
+        Self {
+            buffer: VecDeque::default(),
+            client,
+            bucket,
+            prefix,
+            next_continuation_token: None,
+            is_truncated: true,
+            send_future: None,
+        }
+    }
+}
+
+impl Stream for S3ObjectIter {
+    type Item = ObjectResult<ObjectMetadata>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(e) = self.buffer.pop_front() {
+            return Poll::Ready(Some(Ok(e)));
+        }
+        if let Some(f) = self.send_future.as_mut() {
+            return match ready!(f.poll_unpin(cx)) {
+                Ok((more, next_continuation_token, is_truncated)) => {
+                    self.next_continuation_token = next_continuation_token;
+                    self.is_truncated = is_truncated;
+                    self.buffer.extend(more);
+                    self.send_future = None;
+                    self.poll_next(cx)
+                }
+                Err(e) => {
+                    self.send_future = None;
+                    Poll::Ready(Some(Err(e.into())))
+                }
+            };
+        }
+        if !self.is_truncated {
+            return Poll::Ready(None);
+        }
+        let mut request = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(&self.prefix);
+        if let Some(continuation_token) = self.next_continuation_token.as_ref() {
+            request = request.continuation_token(continuation_token);
+        }
+        let f = async move {
+            match request.send().await {
+                Ok(r) => {
+                    let more = r
+                        .contents()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|obj| ObjectMetadata {
+                            key: obj.key().expect("key required").to_owned(),
+                            last_modified: obj
+                                .last_modified()
+                                .map(|l| l.as_secs_f64())
+                                .unwrap_or(0f64),
+                            total_size: obj.size() as usize,
+                        })
+                        .collect_vec();
+                    let is_truncated = r.is_truncated;
+                    let next_continuation_token = r.next_continuation_token;
+                    Ok((more, next_continuation_token, is_truncated))
+                }
+                Err(e) => Err(e),
+            }
+        };
+        self.send_future = Some(Box::pin(f));
+        self.poll_next(cx)
     }
 }
 

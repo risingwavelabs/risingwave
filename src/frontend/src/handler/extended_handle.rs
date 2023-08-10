@@ -77,7 +77,7 @@ pub struct PortalResult {
 pub fn handle_parse(
     session: Arc<SessionImpl>,
     statement: Statement,
-    specific_param_types: Vec<DataType>,
+    specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     session.clear_cancel_query_flag();
     let str_sql = statement.to_string();
@@ -127,7 +127,7 @@ pub fn handle_parse(
 
 pub fn handle_bind(
     prepare_statement: PrepareStatement,
-    params: Vec<Bytes>,
+    params: Vec<Option<Bytes>>,
     param_formats: Vec<Format>,
     result_formats: Vec<Format>,
 ) -> Result<Portal> {

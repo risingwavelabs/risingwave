@@ -23,7 +23,7 @@ use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::Result as RwResult;
-use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl};
+use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
@@ -127,9 +127,9 @@ impl<'a> AvroParseOptions<'a> {
                         .find(|field| field.0 == field_name)
                         .map(|field| &field.1)
                 };
-                let scale = match find_in_records("scale").ok_or(AccessError::Other(anyhow!(
-                    "scale field not found in VariableScaleDecimal"
-                )))? {
+                let scale = match find_in_records("scale").ok_or_else(|| {
+                    AccessError::Other(anyhow!("scale field not found in VariableScaleDecimal"))
+                })? {
                     Value::Int(scale) => Ok(*scale),
                     avro_value => Err(AccessError::Other(anyhow!(
                         "scale field in VariableScaleDecimal is not int, got {:?}",
@@ -137,9 +137,9 @@ impl<'a> AvroParseOptions<'a> {
                     ))),
                 }?;
 
-                let value: BigInt = match find_in_records("value").ok_or(AccessError::Other(
-                    anyhow!("value field not found in VariableScaleDecimal"),
-                ))? {
+                let value: BigInt = match find_in_records("value").ok_or_else(|| {
+                    AccessError::Other(anyhow!("value field not found in VariableScaleDecimal"))
+                })? {
                     Value::Bytes(bytes) => Ok(BigInt::from_signed_bytes_be(bytes)),
                     avro_value => Err(AccessError::Other(anyhow!(
                         "value field in VariableScaleDecimal is not bytes, got {:?}",
@@ -153,7 +153,13 @@ impl<'a> AvroParseOptions<'a> {
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
             }
-
+            // ---- Time -----
+            (Some(DataType::Time), Value::TimeMillis(ms)) => Time::with_milli(*ms as u32)
+                .map_err(|_| create_error())?
+                .into(),
+            (Some(DataType::Time), Value::TimeMicros(us)) => Time::with_micro(*us as u64)
+                .map_err(|_| create_error())?
+                .into(),
             // ---- Date -----
             (Some(DataType::Date) | None, Value::Date(days)) => {
                 Date::with_days(days + unix_epoch_days())

@@ -668,10 +668,12 @@ impl SessionImpl {
         let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
         let connection = schema
             .get_connection_by_name(connection_name)
-            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
-                "connection {} not found",
-                connection_name
-            ))))?;
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "connection {} not found",
+                    connection_name
+                )))
+            })?;
         Ok(connection.clone())
     }
 
@@ -963,7 +965,7 @@ impl Session for SessionImpl {
     fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
-        params_types: Vec<DataType>,
+        params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types)?
@@ -975,7 +977,7 @@ impl Session for SessionImpl {
     fn bind(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> std::result::Result<Portal, BoxedError> {

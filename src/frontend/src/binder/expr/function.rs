@@ -135,9 +135,10 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
-            &function_name,
-            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        if let Ok(schema) = self.first_valid_schema() &&
+            let Some(func) = schema.get_function_by_name_args(
+                &function_name,
+                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
         ) {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
@@ -950,6 +951,7 @@ impl Binder {
                 }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
@@ -978,6 +980,7 @@ impl Binder {
                 ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
