@@ -355,7 +355,7 @@ impl StreamFragmentGraph {
     // 2. Order of internal table id is based on iter order of fragments, which
     //    is fixed by `sorted_by` and the visiting order of nodes in the fragment,
     //    which is fixed.
-    /// Set internal tables' table_ids according to a list of internal tables
+    /// Set internal tables' `table_id`s according to a list of internal tables
     pub fn fit_internal_table_ids(&mut self, mut old_ids: Vec<u32>) -> MetaResult<()> {
         let mut new_ids = Vec::new();
         for fragment in self.fragments.values() {
