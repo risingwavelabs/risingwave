@@ -739,7 +739,7 @@ pub struct SystemConfig {
     #[serde(default = "default::system::telemetry_enabled")]
     pub telemetry_enabled: Option<bool>,
 
-    /// Max number of concurrent creating mviews.
+    /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
 }
