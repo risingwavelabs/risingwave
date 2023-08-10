@@ -159,7 +159,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         if self.limit_attr.max_one_row() {
             Some(self.group_key.clone())
         } else {
-            Some(self.input.logical_pk().to_vec())
+            let mut pk = self.input.logical_pk().to_vec();
+            for i in &self.group_key {
+                if !pk.contains(i) {
+                    pk.push(*i);
+                }
+            }
+            Some(pk)
         }
     }
 
