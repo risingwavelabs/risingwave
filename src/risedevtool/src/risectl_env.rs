@@ -24,7 +24,6 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
     let mut env = String::new();
     for item in services {
         if let ServiceConfig::ComputeNode(c) = item {
-
             // RW_HUMMOCK_URL
             // If the cluster is launched without a shared storage, we will skip this.
             {
@@ -58,7 +57,6 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
                 )
                 .unwrap();
             }
-
             break;
         }
     }
@@ -68,14 +66,12 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
             writeln!(
                 env,
                 "export RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",
-            ).unwrap();
-            let port = &c.listen_port;
-            writeln!(
-                env,
-                "export RW_FRONTEND_PORT=\"{port}\"",
-            ).unwrap();
+            )
+            .unwrap();
+            let port = &c.port;
+            writeln!(env, "export RW_FRONTEND_PORT=\"{port}\"",).unwrap();
+            break;
         }
-        break;
     }
     Ok(env)
 }

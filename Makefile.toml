@@ -1193,5 +1193,14 @@ script = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-psql -h localhost -p 4566 -U root -d dev "$@"
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
 '''
