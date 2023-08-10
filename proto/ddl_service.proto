@@ -163,6 +163,16 @@ message AlterRelationNameRequest {
   string new_name = 20;
 }
 
+message AlterMaterializedViewToTableRequest {
+  catalog.Table table = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+}
+
+message AlterMaterializedViewToTableResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message AlterRelationNameResponse {
   common.Status status = 1;
   uint64 version = 2;
@@ -326,6 +336,7 @@ service DdlService {
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
+  rpc AlterMaterializedViewToTable(AlterMaterializedViewToTableRequest) returns (AlterMaterializedViewToTableResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

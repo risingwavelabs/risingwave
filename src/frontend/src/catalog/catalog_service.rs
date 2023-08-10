@@ -139,6 +139,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()>;
 
+    async fn alter_materialized_view_to_table(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
     async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()>;
 
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
@@ -374,6 +380,19 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .alter_relation_name(Relation::SourceId(source_id), source_name)
             .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_materialized_view_to_table(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_materialized_view_to_table(table, graph)
+            .await?;
+
         self.wait_version(version).await
     }
 }

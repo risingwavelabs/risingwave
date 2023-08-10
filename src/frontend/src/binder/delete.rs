@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::catalog::{Schema, TableVersionId, INITIAL_TABLE_VERSION_ID};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
@@ -80,7 +80,9 @@ impl Binder {
         }
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
-        let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let table_version_id = table_catalog
+            .version_id()
+            .unwrap_or(INITIAL_TABLE_VERSION_ID);
 
         let table = self.bind_table(schema_name, &table_name, None)?;
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;

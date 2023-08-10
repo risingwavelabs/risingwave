@@ -17,6 +17,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -98,6 +99,7 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
+    AlterMaterializedViewToTable(StreamingJob, StreamFragmentGraphProto),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
 }
@@ -266,6 +268,10 @@ where
                     ctrl.drop_connection(connection_id).await
                 }
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
+                DdlCommand::AlterMaterializedViewToTable(stream_job, fragment_graph) => {
+                    ctrl.alter_materialized_view_to_table(stream_job, fragment_graph)
+                        .await
+                }
             }
         }
         .in_current_span();
@@ -853,6 +859,110 @@ where
         Ok(fragment_graph)
     }
 
+    async fn prepare_alter_materialized_view_to_table(
+        &self,
+        stream_job: &mut StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+    ) -> MetaResult<StreamFragmentGraph> {
+        // 1. Build fragment graph.
+        let fragment_graph =
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
+                .await?;
+
+        // 2. Set the graph-related fields and freeze the `stream_job`.
+        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+
+        // 3. Mark current relation as "updating".
+        self.catalog_manager
+            .start_alter_materialized_view_to_table_procedure(stream_job.table().unwrap())
+            .await?;
+
+        Ok(fragment_graph)
+    }
+
+    async fn build_alter_materialized_view_to_table(
+        &self,
+        env: StreamEnvironment,
+        stream_job: &StreamingJob,
+        mut fragment_graph: StreamFragmentGraph,
+    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
+        let id = stream_job.id();
+        let default_parallelism = fragment_graph.default_parallelism();
+
+        let upstream_mview_fragments = self
+            .fragment_manager
+            .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
+            .await?;
+
+        let old_table_fragments = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&id.into())
+            .await?;
+
+        let old_internal_table_ids = old_table_fragments.internal_table_ids();
+        let old_internal_tables = self
+            .catalog_manager
+            .get_tables(&old_internal_table_ids)
+            .await;
+
+        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        let original_table_fragment = self.fragment_manager.get_mview_fragment(id.into()).await?;
+
+        let downstream_fragments = self
+            .fragment_manager
+            .get_downstream_chain_fragments(id.into())
+            .await?;
+
+        let complete_graph = CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
+            fragment_graph,
+            upstream_mview_fragments,
+            original_table_fragment.fragment_id,
+            downstream_fragments,
+        )?;
+
+        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let default_parallelism =
+            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+
+        let actor_graph_builder =
+            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+
+        let ActorGraphBuildResult {
+            graph,
+            building_locations,
+            existing_locations,
+            dispatchers,
+            merge_updates,
+        } = actor_graph_builder
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .await?;
+
+        let dummy_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::Table }>()
+            .await? as u32;
+
+        let table_fragments = TableFragments::new(
+            dummy_id.into(),
+            graph,
+            &building_locations.actor_locations,
+            env,
+        );
+
+        let ctx = ReplaceTableContext {
+            old_table_fragments,
+            building_locations,
+            existing_locations,
+            table_properties: stream_job.properties(),
+            merge_updates,
+            dispatchers,
+        };
+
+        Ok((ctx, table_fragments))
+    }
+
     /// `build_replace_table` builds a table replacement and returns the context and new table
     /// fragments.
     async fn build_replace_table(
@@ -947,9 +1057,23 @@ where
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
+            dispatchers,
         };
 
         Ok((ctx, table_fragments))
+    }
+
+    async fn finish_alter_materialized_view_to_table(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> MetaResult<NotificationVersion> {
+        let StreamingJob::MaterializedView(table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
+
+        self.catalog_manager
+            .finish_alter_materialized_view_to_table_procedure(table)
+            .await
     }
 
     async fn finish_replace_table(
@@ -974,6 +1098,58 @@ where
         self.catalog_manager
             .cancel_replace_table_procedure(table)
             .await
+    }
+
+    async fn cancel_alter_materialized_view_to_table(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> MetaResult<()> {
+        let StreamingJob::MaterializedView(table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
+
+        self.catalog_manager
+            .cancel_alter_materialized_view_to_table(table)
+            .await
+    }
+
+    async fn alter_materialized_view_to_table(
+        &self,
+        mut stream_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+    ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+
+        let fragment_graph = self
+            .prepare_alter_materialized_view_to_table(&mut stream_job, fragment_graph)
+            .await?;
+
+        let StreamingJob::MaterializedView(_) = &stream_job else {
+            bail!("should be materialized view")
+        };
+
+        let result = try {
+            let (ctx, table_fragments) = self
+                .build_alter_materialized_view_to_table(env, &stream_job, fragment_graph)
+                .await?;
+
+            self.stream_manager
+                .replace_table(table_fragments, ctx)
+                .await?;
+        };
+
+        match result {
+            Ok(_) => {
+                self.finish_alter_materialized_view_to_table(&stream_job)
+                    .await
+            }
+            Err(err) => {
+                self.cancel_alter_materialized_view_to_table(&stream_job)
+                    .await?;
+                Err(err)
+            }
+        }
     }
 
     async fn alter_relation_name(

@@ -735,6 +735,29 @@ where
         }
         Ok(Response::new(GetTablesResponse { tables }))
     }
+
+    async fn alter_materialized_view_to_table(
+        &self,
+        request: Request<AlterMaterializedViewToTableRequest>,
+    ) -> Result<Response<AlterMaterializedViewToTableResponse>, Status> {
+        let req = request.into_inner();
+
+        let stream_job = StreamingJob::MaterializedView(req.table.unwrap());
+        let fragment_graph = req.fragment_graph.unwrap();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterMaterializedViewToTable(
+                stream_job,
+                fragment_graph,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterMaterializedViewToTableResponse {
+            status: None,
+            version,
+        }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>

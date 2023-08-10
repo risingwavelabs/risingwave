@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
@@ -2053,6 +2053,68 @@ where
         }
     }
 
+    pub async fn start_alter_materialized_view_to_table_procedure(
+        &self,
+        table: &Table,
+    ) -> MetaResult<()> {
+        // same as `start_replace_table_procedure`, but we don't check dependent_relations and
+        // version
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(table.database_id)?;
+        database_core.ensure_schema_id(table.schema_id)?;
+
+        let key = (table.database_id, table.schema_id, table.name.clone());
+
+        if database_core.has_in_progress_creation(&key) {
+            bail!("table is in altering procedure");
+        } else {
+            database_core.mark_creating(&key);
+            Ok(())
+        }
+    }
+
+    pub async fn finish_alter_materialized_view_to_table_procedure(
+        &self,
+        table: &Table,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            tables.contains_key(&table.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "table must exist and be in altering procedure"
+        );
+
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        database_core.in_progress_creation_tracker.remove(&key);
+
+        let mut table = table.clone();
+
+        table.table_type = PbTableType::Table.into();
+        tables.insert(table.id, table.clone());
+        commit_meta!(self, tables, indexes)?;
+
+        // Group notification
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table).into(),
+                    }]
+                    .into_iter()
+                    .collect_vec(),
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn finish_replace_table_procedure(
         &self,
@@ -2125,6 +2187,24 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
 
         assert!(table.dependent_relations.is_empty());
+
+        assert!(
+            database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must exist and must be in altering procedure"
+        );
+
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        // occur after it's created. We may need to add a new tracker for `alter` procedure.s
+        database_core.unmark_creating(&key);
+        Ok(())
+    }
+
+    pub async fn cancel_alter_materialized_view_to_table(&self, table: &Table) -> MetaResult<()> {
+        // same as cancel_replace_table_procedure, no dependent_relations check
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let key = (table.database_id, table.schema_id, table.name.clone());
 
         assert!(
             database_core.tables.contains_key(&table.id)

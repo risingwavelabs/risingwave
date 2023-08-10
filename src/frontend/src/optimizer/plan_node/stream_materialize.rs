@@ -64,19 +64,21 @@ impl StreamMaterialize {
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
+        conflict_behavior: Option<ConflictBehavior>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
         let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
+        let conflict_behavior = conflict_behavior.unwrap_or(ConflictBehavior::NoCheck);
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,
             columns,
             definition,
-            ConflictBehavior::NoCheck,
+            conflict_behavior,
             None,
             None,
             table_type,

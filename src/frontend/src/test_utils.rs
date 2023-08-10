@@ -50,6 +50,7 @@ use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -484,6 +485,17 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
         unreachable!()
+    }
+
+    async fn alter_materialized_view_to_table(
+        &self,
+        table: PbTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let mut table = table;
+        table.table_type = TableType::Table.to_prost() as i32;
+        self.catalog.write().update_table(&table);
+        Ok(())
     }
 }
 

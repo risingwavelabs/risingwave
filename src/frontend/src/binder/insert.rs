@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
+use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId, INITIAL_TABLE_VERSION_ID};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -109,7 +109,9 @@ impl Binder {
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
-        let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let table_version_id = table_catalog
+            .version_id()
+            .unwrap_or(INITIAL_TABLE_VERSION_ID);
         let table_visible_columns = table_catalog
             .columns()
             .iter()

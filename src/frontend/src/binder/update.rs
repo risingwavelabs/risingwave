@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::catalog::{Schema, TableVersionId, INITIAL_TABLE_VERSION_ID};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
@@ -98,7 +98,9 @@ impl Binder {
 
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
-        let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let table_version_id = table_catalog
+            .version_id()
+            .unwrap_or(INITIAL_TABLE_VERSION_ID);
 
         let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
 

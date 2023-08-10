@@ -1,0 +1,147 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v int primary key);
+
+statement ok
+create materialized view m as select * from t;
+
+statement ok
+create materialized view m1 as select * from m;
+
+statement ok
+insert into t values (1);
+
+statement ok
+alter materialized view m to table;
+
+query I rowsort
+select v from t;
+----
+1
+
+query I rowsort
+select v from m;
+----
+1
+
+query I rowsort
+select v from m1;
+----
+1
+
+
+statement ok
+insert into t values (2);
+
+query I rowsort
+select v from m;
+----
+1
+2
+
+query I rowsort
+select v from m1;
+----
+1
+2
+
+statement ok
+insert into m values (3);
+
+query I rowsort
+select v from m;
+----
+1
+2
+3
+
+query I rowsort
+select v from m1;
+----
+1
+2
+3
+
+statement ok
+insert into t values (3);
+
+query I rowsort
+select v from m;
+----
+1
+2
+3
+
+statement ok
+delete from t where v = 1;
+
+query I rowsort
+select v from m;
+----
+2
+3
+
+query I rowsort
+select v from m1;
+----
+2
+3
+
+# Errors
+statement error Alter a table that has been converted from a materialized view has not been implemented
+alter table m add column v int;
+
+# TODO, Please make modifications here after supporting ‘create table as’.
+query TT
+show create table m;
+----
+public.m CREATE MATERIALIZED VIEW m AS SELECT * FROM t
+
+statement ok
+drop materialized view m1;
+
+statement error Invalid input syntax: Use `DROP TABLE` to drop a table.
+drop materialized view m;
+
+statement ok
+drop table m;
+
+statement ok
+drop table t;
+
+statement ok
+create table t (v int primary key);
+
+statement ok
+create materialized view m as select v from t;
+
+statement ok
+create index i on m(v);
+
+statement ok
+insert into t values (1);
+
+query I rowsort
+select v from i;
+----
+1
+
+statement ok
+alter materialized view m to table;
+
+statement ok
+insert into m values (2);
+
+query I rowsort
+select v from i;
+----
+1
+2
+
+statement ok
+drop table m;
+
+statement ok
+drop table t;

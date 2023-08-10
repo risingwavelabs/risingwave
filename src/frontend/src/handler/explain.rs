@@ -125,6 +125,7 @@ async fn do_handle_explain(
                         name,
                         columns,
                         emit_mode,
+                        None,
                     )
                     .map(|x| x.0),
 

@@ -82,6 +82,13 @@ pub async fn handle_alter_table_column(
         .context("unable to parse original table definition")?
         .try_into()
         .unwrap();
+
+    if matches!(definition, Statement::CreateView { .. }) {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Alter a table that has been converted from a materialized view has not been implemented.".to_string(),
+        )));
+    }
+
     let Statement::CreateTable { columns, .. } = &mut definition else {
         panic!("unexpected statement: {:?}", definition);
     };

@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ConflictBehavior;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -81,6 +82,7 @@ pub fn gen_create_mv_plan(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    conflict_behavior: Option<ConflictBehavior>,
 ) -> Result<(PlanRef, PbTable)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
@@ -112,8 +114,12 @@ pub fn gen_create_mv_plan(
         }
         plan_root.set_out_names(col_names)?;
     }
-    let materialize =
-        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
+    let materialize = plan_root.gen_materialize_plan(
+        table_name,
+        definition,
+        emit_on_window_close,
+        conflict_behavior,
+    )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -173,8 +179,15 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_string());
         }
 
-        let (plan, table) =
-            gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
+        let (plan, table) = gen_create_mv_plan(
+            &session,
+            context.into(),
+            query,
+            name,
+            columns,
+            emit_mode,
+            None,
+        )?;
         let context = plan.plan_base().ctx.clone();
         let mut graph = build_graph(plan);
         graph.parallelism = session

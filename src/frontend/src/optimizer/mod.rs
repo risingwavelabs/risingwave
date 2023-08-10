@@ -507,10 +507,10 @@ impl PlanRoot {
         mv_name: String,
         definition: String,
         emit_on_window_close: bool,
+        conflict_behavior: Option<ConflictBehavior>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
-
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -521,6 +521,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            conflict_behavior,
         )
     }
 
@@ -543,6 +544,7 @@ impl PlanRoot {
             definition,
             TableType::Index,
             cardinality,
+            None,
         )
     }
 

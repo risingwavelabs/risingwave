@@ -2946,6 +2946,8 @@ impl Parser {
             } else {
                 return self.expected("TO after RENAME", self.peek_token());
             }
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::TABLE]) {
+            AlterViewOperation::ToTable
         } else {
             return self.expected(
                 &format!(

@@ -89,6 +89,7 @@ pub enum AlterIndexOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
     RenameView { view_name: ObjectName },
+    ToTable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -177,6 +178,9 @@ impl fmt::Display for AlterViewOperation {
         match self {
             AlterViewOperation::RenameView { view_name } => {
                 write!(f, "RENAME TO {view_name}")
+            }
+            AlterViewOperation::ToTable => {
+                write!(f, "TO TABLE")
             }
         }
     }

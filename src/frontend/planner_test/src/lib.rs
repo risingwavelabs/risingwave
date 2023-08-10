@@ -746,6 +746,7 @@ impl TestCase {
                     ObjectName(vec!["test".into()]),
                     vec![],
                     Some(emit_mode),
+                    None,
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
