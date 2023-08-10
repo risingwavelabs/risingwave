@@ -21,9 +21,9 @@ use crate::{add_hummock_backend, HummockInMemoryStrategy, ServiceConfig};
 
 pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
     // Pick one of the compute node and generate risectl config
+    let mut env = String::new();
     for item in services {
         if let ServiceConfig::ComputeNode(c) = item {
-            let mut env = String::new();
 
             // RW_HUMMOCK_URL
             // If the cluster is launched without a shared storage, we will skip this.
@@ -59,8 +59,23 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
                 .unwrap();
             }
 
-            return Ok(env);
+            break;
         }
     }
-    Ok("".into())
+    for item in services {
+        if let ServiceConfig::Frontend(c) = item {
+            let listen_address = &c.listen_address;
+            writeln!(
+                env,
+                "export RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",
+            ).unwrap();
+            let port = &c.listen_port;
+            writeln!(
+                env,
+                "export RW_FRONTEND_PORT=\"{port}\"",
+            ).unwrap();
+        }
+        break;
+    }
+    Ok(env)
 }
