@@ -293,11 +293,13 @@ impl Compactor {
         ) * compact_task.splits.len() as u64;
 
         tracing::info!(
-            "Ready to handle compaction task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                compact_task.compaction_group_id,
                 compact_task.task_id,
                 compact_task_statistics,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
+                compact_task.existing_table_ids,
                 parallelism,
                 task_memory_capacity_with_parallelism
             );
@@ -481,6 +483,7 @@ impl Compactor {
         let pid = sysinfo::get_current_pid().unwrap();
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
+        const MAX_CONSUMED_LATENCY_MS: u64 = 500;
 
         assert_ge!(
             compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -560,23 +563,22 @@ impl Compactor {
                                 });
                             }
 
-                            if !progress_list.is_empty() {
-                                if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
-                                    event: Some(RequestEvent::HeartBeat(
-                                        HeartBeat {
-                                            progress: progress_list
-                                        }
-                                    )),
-                                    create_at: SystemTime::now()
+                            if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                                event: Some(RequestEvent::HeartBeat(
+                                    HeartBeat {
+                                        progress: progress_list
+                                    }
+                                )),
+                                create_at: SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .expect("Clock may have gone backwards")
                                     .as_millis() as u64,
-                                }) {
-                                    tracing::warn!("Failed to report task progress. {e:?}");
-                                    // re subscribe stream
-                                    continue 'start_stream;
-                                }
+                            }) {
+                                tracing::warn!("Failed to report task progress. {e:?}");
+                                // re subscribe stream
+                                continue 'start_stream;
                             }
+
 
                             let mut pending_pull_task_count = 0;
                             if pull_task_ack.load(Ordering::SeqCst) {
@@ -594,9 +596,9 @@ impl Compactor {
                                             }
                                         )),
                                         create_at: SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .expect("Clock may have gone backwards")
-                                        .as_millis() as u64,
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .expect("Clock may have gone backwards")
+                                            .as_millis() as u64,
                                     }) {
                                         tracing::warn!("Failed to pull task {e:?}");
 
@@ -656,7 +658,7 @@ impl Compactor {
                             };
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
-                            let consumed_time_ms = SystemTime::now()
+                            let consumed_latency_ms = SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .expect("Clock may have gone backwards")
                                 .as_millis()
@@ -665,7 +667,16 @@ impl Compactor {
                             context
                                 .compactor_metrics
                                 .compaction_event_consumed_latency
-                                .observe(consumed_time_ms as _);
+                                .observe(consumed_latency_ms as _);
+
+                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
+                                tracing::warn!(
+                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
+                                    event,
+                                    create_at,
+                                    consumed_latency_ms
+                                );
+                            }
 
                             let meta_client = hummock_meta_client.clone();
                             executor.spawn(async move {
@@ -688,9 +699,9 @@ impl Compactor {
                                                 }
                                             )),
                                             create_at: SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .expect("Clock may have gone backwards")
-                                            .as_millis() as u64,
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .expect("Clock may have gone backwards")
+                                                .as_millis() as u64,
                                         }) {
                                             tracing::warn!("Failed to report task {task_id:?} . {e:?}");
                                         }

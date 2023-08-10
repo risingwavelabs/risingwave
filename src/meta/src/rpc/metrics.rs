@@ -583,16 +583,16 @@ impl MetaMetrics {
 
         let opts = histogram_opts!(
             "storage_compaction_event_consumed_latency",
-            "The latency of each event being consumed",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+            "The latency(ms) of each event being consumed",
+            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
         );
         let compaction_event_consumed_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "storage_compaction_event_loop_iteration_latency",
-            "The latency of each iteration of the compaction event loop",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+            "The latency(ms) of each iteration of the compaction event loop",
+            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
         );
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
