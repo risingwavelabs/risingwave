@@ -2143,8 +2143,12 @@ where
         self.core.lock().await.database.list_source_ids(schema_id)
     }
 
-    pub async fn get_table_name_mapping(&self) -> HashMap<TableId, String> {
-        self.core.lock().await.database.get_table_name_mapping()
+    pub async fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
+        self.core
+            .lock()
+            .await
+            .database
+            .get_table_name_and_type_mapping()
     }
 
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery

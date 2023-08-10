@@ -28,7 +28,7 @@ def section_actor_info(panels):
                           [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
         panels.table_info("Materialized View Info",
                           "Mapping from materialized view table id to it's internal table ids",
-                           [panels.table_target(f"{metric('materialized_info')}")], excluded_cols),
+                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
     ]
 
 
@@ -609,8 +609,10 @@ def section_object_storage(outer_panels):
 
 
 def section_streaming(panels):
-    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
     sink_filter = "executor_identity=~\".*SinkExecutor.*\""
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
+    mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
@@ -711,13 +713,18 @@ def section_streaming(panels):
                 ),
             ],
         ),
+
         panels.timeseries_rowsps(
             "Materialized View Throughput(rows/s)",
             "The figure shows the number of rows written into each materialized executor actor per second.",
             [
                 panels.target(
                     f"rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])",
-                    "MV={{executor_identity}} {{actor_id}} @ {{instance}}",
+                    "{{executor_identity}} {{actor_id}} @ {{instance}}",
+                ),
+                panels.target(
+                   mv_throughput_query,
+                    "materialized view {{table_name}} table_id {{materialized_view_id}}",
                 ),
             ],
         ),
@@ -850,7 +857,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_executor_row_count')}[$__rate_interval]) > 0",
-                            "{{actor_id}}->{{executor_identity}}",
+                            "actor {{actor_id}}->{{executor_identity}}",
                         ),
                     ],
                 ),
@@ -2323,6 +2330,8 @@ Objects are classified into 3 groups:
 - not referenced by versions: these object are being deleted from object store.
 - referenced by non-current versions: these objects are stale (not in the latest version), but those old versions may still be in use (e.g. long-running pinning). Thus those objects cannot be deleted at the moment.
 - referenced by current version: these objects are in the latest version.
+
+Additionally, a metric on all objects (including dangling ones) is updated with low-frequency. The metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.
                     """,
                     [
                         panels.target(f"{metric('storage_stale_object_count')}",
@@ -2331,6 +2340,8 @@ Objects are classified into 3 groups:
                                       "referenced by non-current versions"),
                         panels.target(f"{metric('storage_current_version_object_count')}",
                                       "referenced by current version"),
+                        panels.target(f"{metric('storage_total_object_count')}",
+                                      "all objects (including dangling ones)"),
                     ],
                 ),
                 panels.timeseries_bytes(
@@ -2343,6 +2354,8 @@ Objects are classified into 3 groups:
                                       "referenced by non-current versions"),
                         panels.target(f"{metric('storage_current_version_object_size')}",
                                       "referenced by current version"),
+                        panels.target(f"{metric('storage_total_object_size')}",
+                                      "all objects, including dangling ones"),
                     ],
                 ),
                 panels.timeseries_count(

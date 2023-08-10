@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::XmlNode;
+use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::generic::DynamicFilter;
 use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -29,6 +29,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamDynamicFilter {
     pub base: PlanBase,
     core: generic::DynamicFilter<PlanRef>,
+    cleaned_by_watermark: bool,
 }
 
 impl StreamDynamicFilter {
@@ -44,11 +45,34 @@ impl StreamDynamicFilter {
             false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
-        Self { base, core }
+        let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
+        Self {
+            base,
+            core,
+            cleaned_by_watermark,
+        }
     }
 
     pub fn left_index(&self) -> usize {
         self.core.left_index()
+    }
+
+    /// 1. Check the comparator.
+    /// 2. RHS input should only have 1 columns, which is the watermark column.
+    ///    We check that the watermark should be set.
+    pub fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
+        let expr = core.predicate();
+        if let Some(ExprImpl::FunctionCall(function_call)) = expr.as_expr_unless_true() {
+            match function_call.func_type() {
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    let rhs_input = core.right();
+                    rhs_input.watermark_columns().contains(0)
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 }
 
@@ -62,6 +86,12 @@ impl Distill for StreamDynamicFilter {
             vec.push(("output_watermarks", ow));
         }
         vec.push(("output", column_names_pretty(self.schema())));
+        if self.cleaned_by_watermark {
+            vec.push((
+                "cleaned_by_watermark",
+                Pretty::display(&self.cleaned_by_watermark),
+            ));
+        }
         childless_record("StreamDynamicFilter", vec)
     }
 }
@@ -85,16 +115,7 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
-        let cleaned_by_watermark = if let Some(condition) = self.core.predicate().as_expr_unless_true()
-            && let Some((_input_expr, cmp, _now_expr)) = condition.as_now_comparison_cond() {
-            // Only GT / GTE will undergo state cleaning.
-            // As such, we only need cache for these cases.
-            matches!(cmp, ExprType::GreaterThan | ExprType::GreaterThanOrEqual)
-            // NOTE(kwannoel): `now_expr` is checked within `as_now_comparison_cond`.
-            // so we don't need to check it here.
-        } else {
-            false
-        };
+        let cleaned_by_watermark = self.cleaned_by_watermark;
         let condition = self
             .core
             .predicate()
