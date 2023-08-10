@@ -3463,7 +3463,7 @@ dependencies = [
  "futures",
  "log",
  "once_cell",
- "opendal 0.39.0",
+ "opendal",
  "ordered-float 3.7.0",
  "parquet",
  "regex",
@@ -4644,40 +4644,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "quick-xml 0.27.1",
- "reqsign 0.13.0",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "opendal"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad95e460e5976ab1b74f398ab856c59f8417b3dd32202329e3491dcbe3a6b84"
-dependencies = [
- "anyhow",
- "async-compat",
- "async-trait",
- "backon",
- "base64 0.21.2",
- "bytes",
- "chrono",
- "flagset",
- "futures",
- "http",
- "hyper",
- "log",
- "md-5",
- "once_cell",
- "parking_lot 0.12.1",
- "percent-encoding",
- "pin-project",
- "quick-xml 0.29.0",
- "reqsign 0.14.1",
+ "reqsign",
  "reqwest",
  "serde",
  "serde_json",
@@ -5797,16 +5764,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick-xml"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81b9228215d82c7b61490fec1de287136b5de6f5700f6e58ea9ad61a7964ca51"
-dependencies = [
- "memchr",
- "serde",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6012,37 +5969,6 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "quick-xml 0.28.2",
- "rand",
- "reqwest",
- "rsa",
- "rust-ini",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "tokio",
-]
-
-[[package]]
-name = "reqsign"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3228e570df74d69d3d3236a71371f1edd748a3e4eb728ea1f29d403bc10fc727"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.21.2",
- "chrono",
- "form_urlencoded",
- "hex",
- "hmac",
- "home",
- "http",
- "jsonwebtoken",
- "log",
- "once_cell",
- "percent-encoding",
- "quick-xml 0.29.0",
  "rand",
  "reqwest",
  "rsa",
@@ -6568,7 +6494,7 @@ dependencies = [
  "moka",
  "nexmark",
  "num-bigint",
- "opendal 0.38.1",
+ "opendal",
  "parking_lot 0.12.1",
  "prometheus",
  "prost",
@@ -6942,7 +6868,7 @@ dependencies = [
  "itertools 0.11.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.38.1",
+ "opendal",
  "prometheus",
  "risingwave_common",
  "spin 0.9.8",
