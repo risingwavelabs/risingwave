@@ -22,6 +22,7 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -39,7 +40,7 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -273,6 +274,7 @@ impl StreamFragmentGraph {
         let fragments: HashMap<_, _> = proto
             .fragments
             .into_iter()
+            .sorted_by(|a, b| a.0.cmp(&b.0))
             .map(|(id, fragment)| {
                 let id = fragment_id_gen.to_global_id(id);
                 let fragment = BuildingFragment::new(id, fragment, job, table_id_gen);
@@ -343,6 +345,44 @@ impl StreamFragmentGraph {
             }
         }
         tables
+    }
+
+    // For two tables with same definition, there is an id-order-preserving bijection
+    // between their internal tables:
+    // 1. `fragments` in `StreamFragmentGraph` is a map from `LocalFragmentId` to
+    //    `StreamFragment` and `LocalFragmentId` is based on the visiting order of
+    //    plan, which is fixed.
+    // 2. Order of internal table id is based on iter order of fragments, which
+    //    is fixed by `sorted_by` and the visiting order of nodes in the fragment,
+    //    which is fixed.
+    /// Set internal tables' table_ids according to a list of internal tables
+    pub fn fit_internal_table_ids(&mut self, mut old_ids: Vec<u32>) -> MetaResult<()> {
+        let mut new_ids = Vec::new();
+        for fragment in self.fragments.values() {
+            for table in &fragment.internal_tables {
+                new_ids.push(table.id);
+            }
+        }
+        if new_ids.len() != old_ids.len() {
+            return Err(MetaError::invalid_parameter(format!(
+                "New table and old table have different number of internal tables.
+                 Old has {}, new has {}",
+                old_ids.len(),
+                new_ids.len(),
+            )));
+        }
+        old_ids.sort();
+        new_ids.sort();
+        let id_map = new_ids
+            .iter()
+            .zip_eq_fast(old_ids.iter())
+            .collect::<HashMap<_, _>>();
+        for fragment in self.fragments.values_mut() {
+            for table in &mut fragment.internal_tables {
+                table.id = **id_map.get(&table.id).unwrap();
+            }
+        }
+        Ok(())
     }
 
     /// Returns the fragment id where the table is materialized.
