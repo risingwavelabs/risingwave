@@ -86,10 +86,12 @@ impl Distill for StreamDynamicFilter {
             vec.push(("output_watermarks", ow));
         }
         vec.push(("output", column_names_pretty(self.schema())));
-        vec.push((
-            "cleaned_by_watermark",
-            Pretty::display(&self.cleaned_by_watermark),
-        ));
+        if self.cleaned_by_watermark {
+            vec.push((
+                "cleaned_by_watermark",
+                Pretty::display(&self.cleaned_by_watermark),
+            ));
+        }
         childless_record("StreamDynamicFilter", vec)
     }
 }
