@@ -55,7 +55,7 @@ pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
     vec_rem
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockLocation {
     pub offset: usize,
     pub size: usize,

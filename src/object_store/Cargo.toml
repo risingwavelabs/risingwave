@@ -24,6 +24,7 @@ hyper = "0.14"
 hyper-tls = "0.5.0"
 itertools = "0.11"
 opendal = "0.38"
+parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
 spin = "0.9"
