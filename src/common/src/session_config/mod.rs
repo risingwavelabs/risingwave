@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 33] = [
+const CONFIG_KEYS: [&str; 34] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -68,6 +68,7 @@ const CONFIG_KEYS: [&str; 33] = [
     "STATEMENT_TIMEOUT",
     "LOCK_TIMEOUT",
     "ROW_SECURITY",
+    "STREAMING_ENABLE_ARRANGEMENT_BACKFILL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
