@@ -260,13 +260,12 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        let (table_desc, arrangement_table) = if self.chain_type == ChainType::ArrangementBackfill {
-            (
-                None,
-                Some(self.get_upstream_state_table().to_internal_table_prost()),
-            )
+        let table_desc = Some(self.logical.table_desc.to_protobuf());
+
+        let arrangement_table = if self.chain_type == ChainType::ArrangementBackfill {
+            Some(self.get_upstream_state_table().to_internal_table_prost())
         } else {
-            (Some(self.logical.table_desc.to_protobuf()), None)
+            None
         };
 
         PbStreamNode {
