@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 26] = [
+const CONFIG_KEYS: [&str; 27] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -61,6 +61,7 @@ const CONFIG_KEYS: [&str; 26] = [
     "SERVER_VERSION",
     "SERVER_VERSION_NUM",
     "RW_FORCE_SPLIT_DISTINCT_AGG",
+    "CDC_BACKFILL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -91,7 +92,7 @@ const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
-const CDC_BACKFILL: usize = 33;
+const CDC_BACKFILL: usize = 26;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -471,6 +472,8 @@ impl ConfigMap {
             self.interval_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             self.batch_parallelism = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
+            self.cdc_backfill = val.as_slice().try_into()?
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }

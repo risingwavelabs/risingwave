@@ -40,15 +40,18 @@ pub struct SchemaTableName {
     pub table_name: String,
 }
 
+const TABLE_NAME_KEY: &str = "table.name";
+const SCHEMA_NAME_KEY: &str = "schema.name";
+
 impl SchemaTableName {
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
         let table_name = properties
-            .get("table.name")
+            .get(TABLE_NAME_KEY)
             .map(|c| c.to_ascii_lowercase())
             .unwrap_or_default();
 
         let schema_name = properties
-            .get("table.name")
+            .get(SCHEMA_NAME_KEY)
             .map(|c| c.to_ascii_lowercase())
             .unwrap_or_default();
 
@@ -277,7 +280,6 @@ pub struct MySqlExternalTableReader {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ExternalTableConfig {
     #[serde(rename = "hostname")]
     pub host: String,
@@ -331,12 +333,16 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(cdc_props: CdcProperties) -> ConnectorResult<Self> {
-        let rw_schema = cdc_props.schema();
+    pub async fn new(
+        properties: HashMap<String, String>,
+        rw_schema: Schema,
+    ) -> ConnectorResult<Self> {
         let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(cdc_props.props).unwrap(),
+            serde_json::to_value(properties).unwrap(),
         )
-        .map_err(|e| ConnectorError::Config(anyhow!(e)))?;
+        .map_err(|e| {
+            ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))
+        })?;
 
         let database_url = format!(
             "mysql://{}:{}@{}:{}/{}",
@@ -465,20 +471,19 @@ mod tests {
             pk_indices: vec![0],
             sink_type: SinkType::AppendOnly,
         };
-        let pb_sink = param.to_proto();
-        let cdc_props = CdcProperties {
-            source_type: "mysql".to_string(),
-            props: convert_args!(hashmap!(
+
+        let rw_schema = param.schema();
+        let props = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
                 "password" => "123456",
                 "database.name" => "mydb",
-                "table.name" => "t1")),
-            table_schema: pb_sink.table_schema.unwrap(),
-        };
+                "table.name" => "t1"));
 
-        let reader = MySqlExternalTableReader::new(cdc_props).await.unwrap();
+        let reader = MySqlExternalTableReader::new(props, rw_schema)
+            .await
+            .unwrap();
         let offset = reader.current_binlog_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 

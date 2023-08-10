@@ -25,6 +25,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::external::BinlogOffset;
+use risingwave_connector::source::SplitImpl;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -34,13 +35,14 @@ use crate::executor::backfill::upstream_table::snapshot::{
 };
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    construct_initial_finished_state, get_consumed_binlog_offset, get_new_pos, mapping_chunk,
+    construct_initial_finished_state, get_chunk_last_binlog_offset, get_new_pos, mapping_chunk,
     mapping_message, mark_cdc_chunk, restore_backfill_progress,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
+    StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -68,6 +70,11 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// TODO(siyuan): most code can be reused, I want to implement the cdc backfill logic first then
 /// unify the two executor to one
 pub struct CdcBackfillExecutor<S: StateStore> {
+    /// dumb field for binding the StateStore trait
+    dumb_store: S,
+
+    actor_ctx: ActorContextRef,
+
     /// Upstream table
     upstream_table: ExternalStorageTable,
 
@@ -96,6 +103,8 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        store: S,
+        actor_ctx: ActorContextRef,
         upstream_table: ExternalStorageTable,
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
@@ -107,6 +116,7 @@ where
         chunk_size: usize,
     ) -> Self {
         Self {
+            dumb_store: store,
             info: ExecutorInfo {
                 schema,
                 pk_indices,
@@ -119,11 +129,14 @@ where
             actor_id: 0,
             metrics,
             chunk_size,
+            actor_ctx,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        tracing::info!("cdc backfill started");
+
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
@@ -147,6 +160,38 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
 
+        tracing::info!("cdc backfill got first barrier: {:?}", first_barrier);
+        let mut valid_backfill = false;
+        if let Some(mutation) = first_barrier.mutation.as_ref() {
+            match mutation.as_ref() {
+                Mutation::Add { splits, .. }
+                | Mutation::Update {
+                    actor_splits: splits,
+                    ..
+                } => {
+                    valid_backfill = match splits.get(&self.actor_ctx.id) {
+                        None => false,
+                        Some(_) => true,
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !valid_backfill {
+            #[for_await]
+            for msg in upstream {
+                if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                    if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
+                        state_table.commit_no_data_expected(barrier.epoch);
+                    }
+                    yield msg;
+                }
+            }
+            return Ok(());
+        }
+
+        tracing::info!("valid cdc backfill executor");
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
         }
@@ -239,6 +284,10 @@ where
         if to_backfill {
             // init the last binlog offset
             last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
+            tracing::info!(
+                "start the bacfill loop, initial binlog offset: {:?}",
+                last_binlog_offset
+            );
 
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
@@ -277,7 +326,7 @@ where
 
                                             // record the consumed binlog offset which will be
                                             // persisted later
-                                            consumed_binlog_offset = get_consumed_binlog_offset(
+                                            consumed_binlog_offset = get_chunk_last_binlog_offset(
                                                 upstream_table_reader.inner().table_reader(),
                                                 &chunk,
                                             )?;
@@ -332,6 +381,23 @@ where
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    // skip changelog chunk that less than last_binlog_offset
+                                    if let Some(last_binlog_offset) = &last_binlog_offset {
+                                        let binlog_offset = get_chunk_last_binlog_offset(
+                                            &upstream_table_reader.inner().table_reader(),
+                                            &chunk,
+                                        )?;
+                                        if let Some(chunk_binlog_offset) = binlog_offset {
+                                            if chunk_binlog_offset < *last_binlog_offset {
+                                                tracing::info!(
+                                                    "skip changelog chunk: offset: {:?}, {:#?}",
+                                                    chunk_binlog_offset,
+                                                    chunk
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                    }
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }
@@ -344,6 +410,7 @@ where
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
+                                    tracing::info!("snapshot read stream ends");
                                     // TODO(siyuan): handle the case when snapshot read stream ends.
                                     // End of the snapshot read stream.
                                     // We should not mark the chunk anymore,
@@ -369,7 +436,12 @@ where
                                     current_pk_pos =
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
 
-                                    tracing::info!("snapshot chunk: {:#?}", chunk);
+                                    tracing::info!(
+                                        "snapshot got chunk: pos: {:?}, {:#?}",
+                                        current_pk_pos,
+                                        chunk
+                                    );
+
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                     total_snapshot_processed_rows += chunk_cardinality;
@@ -385,7 +457,7 @@ where
             }
         }
 
-        tracing::trace!(
+        tracing::info!(
             actor = self.actor_id,
             "Backfill has already finished and forward messages directly to the downstream"
         );

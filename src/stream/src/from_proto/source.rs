@@ -19,7 +19,7 @@ use risingwave_connector::source::cdc::CdcProperties;
 use risingwave_connector::source::external::{
     ExternalTableReaderImpl, MySqlExternalTableReader, SchemaTableName,
 };
-use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -134,7 +134,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 )?))
             } else {
                 let source_exec = SourceExecutor::new(
-                    params.actor_context,
+                    params.actor_context.clone(),
                     schema.clone(),
                     params.pk_indices.clone(),
                     Some(stream_source_core),
@@ -155,6 +155,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 };
 
                 if can_backfill && let Some(table_desc) = source_info.upstream_table.clone() {
+                    tracing::info!("building cdc backfill source");
                     let upstream_table_name = SchemaTableName::from_properties(&source.properties);
                     let pk_indices = table_desc
                         .pk
@@ -168,12 +169,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                         .collect_vec();
 
-
                     let external_table = ExternalStorageTable::new(
                          TableId::new(table_desc.table_id),
                         upstream_table_name.table_name,
                         upstream_table_name.schema_name,
-                        ExternalTableReaderImpl::MYSQL(MySqlExternalTableReader::new(CdcProperties::default()).await?),
+                        ExternalTableReaderImpl::MYSQL(MySqlExternalTableReader::new(source.properties.clone(), schema.clone()).await?),
                         schema.clone(),
                         order_types.clone(),
                         pk_indices.clone(),
@@ -181,18 +181,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         Distribution::fallback(),
                     );
 
-                    let dumb_state = StateTable::new_without_distribution(
-                        store.clone(),
-                        source_id,
-                        vec![],
-                        vec![],
-                        vec![],
-                    ).await;
-
                     let cdc_backfill = CdcBackfillExecutor::new(
+                        store,
+                        params.actor_context.clone(),
                         external_table,
                         Box::new(source_exec),
-                        Some(dumb_state),
+                        None,
                         (0..source.columns.len()).collect_vec(),
                         None,
                         schema.clone(),

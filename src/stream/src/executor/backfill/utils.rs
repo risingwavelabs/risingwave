@@ -38,8 +38,6 @@ use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, StateTableInner};
-
-
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -349,13 +347,11 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
     Ok(is_finished)
 }
 
+// TODO(siyuan)
 pub(crate) async fn restore_backfill_progress<S: StateStore>(
-    state_table: &StateTable<S>,
+    _state_table: &StateTable<S>,
     _state_len: usize,
 ) -> StreamExecutorResult<(Option<OwnedRow>, bool)> {
-    debug_assert!(!state_table.vnode_bitmap().is_empty());
-    todo!("restore_backfill_progress");
-    // TODO
     let is_finished = false;
     Ok((None, is_finished))
 }
@@ -444,11 +440,12 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
         .into_owned_row()
 }
 
-pub(crate) fn get_consumed_binlog_offset(
+pub(crate) fn get_chunk_last_binlog_offset(
     table_reader: &ExternalTableReaderImpl,
     chunk: &StreamChunk,
 ) -> StreamExecutorResult<Option<BinlogOffset>> {
     if let Some(meta) = chunk.meta() {
+        assert!(!meta.offsets.is_empty());
         let off = meta.offsets.last().unwrap();
         Ok(Some(table_reader.deserialize_binlog_offset(off.value())?))
     } else {

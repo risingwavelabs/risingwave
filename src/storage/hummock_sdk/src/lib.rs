@@ -67,8 +67,6 @@ macro_rules! info_in_release {
         {
             #[cfg(debug_assertions)]
             {
-                use tracing::debug;
-                debug!($($arg)*);
             }
             #[cfg(not(debug_assertions))]
             {

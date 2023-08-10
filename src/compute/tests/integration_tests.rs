@@ -262,7 +262,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         Distribution::fallback(),
     );
 
-    let cdc_backfill = CdcBackfillExecutor::<PanicStateStore>::new(
+    let cdc_backfill = CdcBackfillExecutor::new(
+        memory_state_store.clone(),
         external_table,
         Box::new(mock_offset_executor),
         None,

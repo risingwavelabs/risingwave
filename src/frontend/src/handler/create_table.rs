@@ -472,9 +472,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
     );
 
     if can_backfill && context.session_ctx().config().get_cdc_backfill() {
+        tracing::info!("cdc backfill enabled");
+        const CDC_SNAPSHOT_MODE: &str = "debezium.snapshot.mode";
+        // configure debezium connector only emit changelogs
+        properties.insert(CDC_SNAPSHOT_MODE.into(), "never".into());
+
         let pk_column_indices = {
             let mut id_to_idx = HashMap::new();
-
             columns.iter().enumerate().for_each(|(idx, c)| {
                 id_to_idx.insert(c.column_id(), idx);
             });
@@ -483,7 +487,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
                 .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
                 .collect_vec()
         };
-
         let pk = pk_column_indices
             .iter()
             .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
@@ -502,6 +505,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
             watermark_columns: Default::default(),
             versioned: false,
         };
+        tracing::info!("upstream table desc: {:?}", upstream_table_desc);
         source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
     }
 
