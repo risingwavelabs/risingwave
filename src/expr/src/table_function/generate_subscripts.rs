@@ -58,7 +58,7 @@ use super::*;
 /// 1
 /// ```
 #[function("generate_subscripts(list, int32, boolean) -> setof int32")]
-fn generate_subscripts(
+fn generate_subscripts_reverse(
     array: ListRef<'_>,
     dim: i32,
     reverse: bool,
@@ -80,6 +80,50 @@ fn generate_subscripts(
         Some(ret)
     };
     Ok(std::iter::from_fn(next))
+}
+
+/// ```slt
+/// query I
+/// SELECT generate_subscripts(ARRAY['foo', 'bar', null], -1, false) AS s;
+/// ----
+///
+/// query I
+/// SELECT generate_subscripts(ARRAY['foo', 'bar', null], 0, false) AS s;
+/// ----
+///
+/// query I
+/// SELECT generate_subscripts(ARRAY['foo', 'bar', null], 1) AS s;
+/// ----
+/// 1
+/// 2
+/// 3
+///
+/// query I
+/// SELECT generate_subscripts(ARRAY['foo', 'bar', null], 1) AS s;
+/// ----
+/// 1
+/// 2
+/// 3
+///
+/// query I
+/// SELECT generate_subscripts(ARRAY[ARRAY['foo'], ARRAY['bar'], ARRAY[null]], 0) AS s;
+/// ----
+///
+/// query I
+/// SELECT generate_subscripts(ARRAY[ARRAY['foo'], ARRAY['bar'], ARRAY[null]], 1) AS s;
+/// ----
+/// 1
+/// 2
+/// 3
+///
+/// query I
+/// SELECT generate_subscripts(ARRAY[ARRAY['foo'], ARRAY['bar'], ARRAY[null]], 2) AS s;
+/// ----
+/// 1
+/// ```
+#[function("generate_subscripts(list, int32) -> setof int32")]
+fn generate_subscripts(array: ListRef<'_>, dim: i32) -> Result<impl Iterator<Item = i32>> {
+    generate_subscripts_reverse(array, dim, false)
 }
 
 fn generate_subscripts_inner(array: ListRef<'_>, dim: i32, reverse: bool) -> (i32, i32) {
