@@ -14,6 +14,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -259,6 +260,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                 {
                     let resp = SubscribeCompactionEventResponse {
                         event: Some(ResponseEvent::CompactTask(task)),
+                        create_at: SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .expect("Clock may have gone backwards")
+                            .as_millis() as u64,
                     };
 
                     let _ = task_tx.send(Ok(resp));

@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -2443,8 +2443,16 @@ where
                     compactor_request_streams.push(future);
                 };
 
+            let mut event_loop_iteration_now = Instant::now();
             loop {
                 let shutdown_rx_shared = shutdown_rx_shared.clone();
+
+                // report
+                hummock_manager
+                    .metrics
+                    .compaction_event_loop_iteration_latency
+                    .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                event_loop_iteration_now = Instant::now();
 
                 tokio::select! {
                     _ = shutdown_rx_shared => {
@@ -2460,12 +2468,28 @@ where
                     result = pending_on_none(compactor_request_streams.next()) => {
                         let mut compactor_alive = true;
                         let (context_id, compactor_stream_req) = result;
-                        let (event, stream) = match compactor_stream_req {
+                        let (event, create_at, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
-                                (req.event.unwrap(), stream)
+                                (req.event.unwrap(), req.create_at, stream)
                             }
-                            _ => continue,
+                            _ => {
+                                hummock_manager.compactor_manager
+                                    .remove_compactor(context_id);
+                                continue
+                            },
                         };
+
+                        {
+                            let consumed_time_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                            - create_at;
+                            hummock_manager.metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_time_ms as _);
+                        }
 
                         match event {
                             RequestEvent::PullTask(PullTask {
@@ -2494,9 +2518,6 @@ where
                                                             e
                                                         );
 
-                                                        hummock_manager.compactor_manager
-                                                            .remove_compactor(compactor.context_id());
-
                                                         compactor_alive = false;
                                                         break;
                                                     }
@@ -2524,8 +2545,6 @@ where
                                             );
 
                                             compactor_alive = false;
-                                            hummock_manager.compactor_manager
-                                                .remove_compactor(context_id);
                                         }
                                     }
                                 } else {
@@ -2591,8 +2610,12 @@ where
                             }
                         }
 
+
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
+                        } else {
+                            hummock_manager.compactor_manager
+                                .remove_compactor(context_id);
                         }
                     }
                 }

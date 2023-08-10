@@ -46,6 +46,8 @@ pub struct CompactorMetrics {
     pub preload_io_count: GenericCounter<AtomicU64>,
     pub refill_cache_duration: Histogram,
     pub refill_data_file_cache_count: CounterVec,
+    pub compaction_event_consumed_latency: Histogram,
+    pub compaction_event_loop_iteration_latency: Histogram,
 }
 
 impl CompactorMetrics {
@@ -230,6 +232,22 @@ impl CompactorMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "compactor_compaction_event_consumed_latency",
+            "The latency of each event being consumed",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let compaction_event_consumed_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "compactor_compaction_event_loop_iteration_latency",
+            "The latency of each iteration of the compaction event loop",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let compaction_event_loop_iteration_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             compaction_upload_sst_counts,
             compact_write_bytes,
@@ -255,6 +273,8 @@ impl CompactorMetrics {
             preload_io_count,
             refill_cache_duration,
             refill_data_file_cache_count,
+            compaction_event_consumed_latency,
+            compaction_event_loop_iteration_latency,
         }
     }
 

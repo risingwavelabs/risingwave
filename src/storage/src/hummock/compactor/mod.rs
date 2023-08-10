@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use await_tree::InstrumentAwait;
 pub use compaction_executor::CompactionExecutor;
@@ -532,7 +532,17 @@ impl Compactor {
                 let mut last_workload = CompactorWorkload::default();
 
                 // This inner loop is to consume stream or report task progress.
+                let mut event_loop_iteration_now = Instant::now();
                 'consume_stream: loop {
+                    {
+                        // report
+                        compactor_context
+                            .compactor_metrics
+                            .compaction_event_loop_iteration_latency
+                            .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                        event_loop_iteration_now = Instant::now();
+                    }
+
                     let running_task_count = running_task_count.clone();
                     let pull_task_ack = pull_task_ack.clone();
                     let request_sender = request_sender.clone();
@@ -550,16 +560,22 @@ impl Compactor {
                                 });
                             }
 
-                            if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
-                                event: Some(RequestEvent::HeartBeat(
-                                    HeartBeat {
-                                        progress: progress_list
-                                    }
-                                )),
-                            }) {
-                                tracing::warn!("Failed to report task progress. {e:?}");
-                                // re subscribe stream
-                                continue 'start_stream;
+                            if !progress_list.is_empty() {
+                                if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                                    event: Some(RequestEvent::HeartBeat(
+                                        HeartBeat {
+                                            progress: progress_list
+                                        }
+                                    )),
+                                    create_at: SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .expect("Clock may have gone backwards")
+                                    .as_millis() as u64,
+                                }) {
+                                    tracing::warn!("Failed to report task progress. {e:?}");
+                                    // re subscribe stream
+                                    continue 'start_stream;
+                                }
                             }
 
                             let mut pending_pull_task_count = 0;
@@ -577,8 +593,12 @@ impl Compactor {
                                                 pull_task_count: pending_pull_task_count,
                                             }
                                         )),
+                                        create_at: SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .expect("Clock may have gone backwards")
+                                        .as_millis() as u64,
                                     }) {
-                                        tracing::warn!("Failed to report task progress. {e:?}");
+                                        tracing::warn!("Failed to pull task {e:?}");
 
                                         // re subscribe stream
                                         continue 'start_stream;
@@ -629,14 +649,24 @@ impl Compactor {
                     };
 
                     match event {
-                        Some(Ok(SubscribeCompactionEventResponse { event })) => {
+                        Some(Ok(SubscribeCompactionEventResponse { event, create_at })) => {
                             let event = match event {
                                 Some(event) => event,
                                 None => continue 'consume_stream,
                             };
-
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
+                            let consumed_time_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                                - create_at;
+                            context
+                                .compactor_metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_time_ms as _);
+
                             let meta_client = hummock_meta_client.clone();
                             executor.spawn(async move {
                                 let running_task_count = running_task_count.clone();
@@ -657,6 +687,10 @@ impl Compactor {
                                                     table_stats_change:to_prost_table_stats_map(table_stats),
                                                 }
                                             )),
+                                            create_at: SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .expect("Clock may have gone backwards")
+                                            .as_millis() as u64,
                                         }) {
                                             tracing::warn!("Failed to report task {task_id:?} . {e:?}");
                                         }
