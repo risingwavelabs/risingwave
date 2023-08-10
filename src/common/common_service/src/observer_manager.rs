@@ -101,13 +101,20 @@ where
         let mut notification_vec = Vec::new();
         let init_notification = loop {
             // notification before init notification must be received successfully.
-            let Ok(Some(notification)) = self.rx.message().await else {
-                bail!("receives meta's notification err");
-            };
-            if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
-                notification_vec.push(notification);
-            } else {
-                break notification;
+            match self.rx.message().await {
+                Ok(Some(notification)) => {
+                    if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
+                        notification_vec.push(notification);
+                    } else {
+                        break notification;
+                    }
+                }
+                Ok(None) => {
+                    bail!("notification channel from meta is closed");
+                }
+                Err(err) => {
+                    bail!("receives meta's notification err: {:?}", err);
+                }
             }
         };
 
@@ -154,7 +161,8 @@ where
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// call the `handle_initialization_notification` and `handle_notification` to update node data.
     pub async fn start(mut self) -> JoinHandle<()> {
-        if matches!(self.wait_init_notification().await, Err(_)) {
+        if let Err(err) = self.wait_init_notification().await {
+            tracing::warn!("Receives meta's notification err {:?}", err);
             self.re_subscribe().await;
         }
 
@@ -189,7 +197,10 @@ where
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if !matches!(self.wait_init_notification().await, Err(_)) {
+                    if let Err(err) = self.wait_init_notification().await {
+                        tracing::warn!("Receives meta's notification err {:?}", err);
+                        continue;
+                    } else {
                         break;
                     }
                 }
