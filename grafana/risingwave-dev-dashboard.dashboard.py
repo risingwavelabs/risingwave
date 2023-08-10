@@ -2406,6 +2406,48 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                                       "full_gc_last_object_id_watermark"),
                     ],
                 ),
+
+                panels.timeseries_latency_ms(
+                    "Compaction Event Loop Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"meta consumed latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"meta iteration latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"compactor consumed latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"compactor iteration latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+                    ],
+                ),
             ],
         )
     ]
