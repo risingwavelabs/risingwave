@@ -149,9 +149,14 @@ impl LevelCompactionPicker {
             return None;
         }
 
+        let max_target_level_size = std::cmp::min(
+            self.config.max_compaction_bytes / 8,
+            self.config.sub_level_max_compaction_bytes,
+        );
         let mut skip_by_pending = false;
         let mut input_levels = vec![];
         let mut min_write_amp_meet = false;
+        let mut min_overlap_meet = true;
         for input in l0_select_tables_vec {
             let l0_select_tables = input
                 .sstable_infos
@@ -184,8 +189,11 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            if input.total_file_size >= target_level_size {
+            if target_level_size <= input.total_file_size {
                 min_write_amp_meet = true;
+                if target_level_size <= max_target_level_size {
+                    min_overlap_meet = true;
+                }
             }
 
             input_levels.push((input, target_level_size, target_level_ssts));
@@ -198,89 +206,64 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        let mut exist_small_task = false;
-        let max_target_level_size = std::cmp::min(
-            self.config.max_compaction_bytes / 8,
-            self.config.sub_level_max_compaction_bytes,
-        );
-        for idx in 0..target_level.table_infos.len() {
-            let mut last_overlap_info = overlap_strategy.create_overlap_info();
-            let mut total_file_size = 0;
-            let mut target_level_files = vec![];
-            for end in idx..target_level.table_infos.len() {
-                let next_sst = &target_level.table_infos[end];
-                if end > idx && total_file_size + next_sst.file_size > max_target_level_size {
-                    break;
-                }
-                if level_handlers[self.target_level].is_pending_compact(&next_sst.sst_id) {
-                    break;
-                }
-                total_file_size += next_sst.file_size;
-                target_level_files.push(next_sst.clone());
-                let key_range = next_sst.key_range.as_ref().unwrap();
-                if end > 0 && end + 1 < target_level.table_infos.len() {
-                    last_overlap_info.update_key_range(key_range);
-                } else if end == 0 {
-                    let mut key_range = key_range.clone();
-                    key_range.left.clear();
-                    last_overlap_info.update_key_range(&key_range);
-                } else {
-                    let mut key_range = key_range.clone();
-                    key_range.right.clear();
-                    last_overlap_info.update_key_range(&key_range);
-                }
-
-                let picker = L0IncludeSstPicker::new(
-                    overlap_strategy.clone(),
-                    self.config.max_compaction_bytes / 2,
-                    self.config.level0_max_compact_file_number / 2,
-                );
-                let input = picker.pick_tables(
-                    last_overlap_info.as_ref(),
-                    &l0.sub_levels,
-                    &level_handlers[0],
-                );
-
-                if !input.sstable_infos.is_empty() {
-                    let mut overlap_info = overlap_strategy.create_overlap_info();
-                    for (i, ssts) in input.sstable_infos.iter().enumerate().rev() {
-                        if i + 1 != input.sstable_infos.len() {
-                            let r =
-                                overlap_info.check_multiple_overlap(&l0.sub_levels[i].table_infos);
-                            for j in r {
-                                assert!(ssts.iter().any(
-                                    |sst| sst.sst_id == l0.sub_levels[i].table_infos[j].sst_id
-                                ));
-                            }
-                        }
-                        for sst in ssts {
-                            overlap_info.update(sst);
-                        }
+        let mut exist_small_task = min_overlap_meet;
+        if !min_overlap_meet {
+            for idx in 0..target_level.table_infos.len() {
+                let mut expand_overlap_info = overlap_strategy.create_overlap_info();
+                let mut overlap_info = overlap_strategy.create_overlap_info();
+                let mut total_file_size = 0;
+                let mut target_level_files = vec![];
+                for end in idx..target_level.table_infos.len() {
+                    let next_sst = &target_level.table_infos[end];
+                    if total_file_size + next_sst.file_size > max_target_level_size {
+                        break;
                     }
-                    let r = overlap_info.check_multiple_overlap(&target_level.table_infos);
-                    assert!(
-                        idx <= r.start && r.end <= end + 1,
-                        "[{},{}] found: {:?}",
-                        idx,
-                        end,
-                        r
+                    if level_handlers[self.target_level].is_pending_compact(&next_sst.sst_id) {
+                        break;
+                    }
+                    total_file_size += next_sst.file_size;
+                    target_level_files.push(next_sst.clone());
+                    let key_range = next_sst.key_range.as_ref().unwrap();
+                    overlap_info.update_key_range(key_range);
+                    if end > 0 && end + 1 < target_level.table_infos.len() {
+                        expand_overlap_info.update_key_range(key_range);
+                    } else if end == 0 {
+                        let mut key_range = key_range.clone();
+                        key_range.left.clear();
+                        expand_overlap_info.update_key_range(&key_range);
+                    } else {
+                        let mut key_range = key_range.clone();
+                        key_range.right.clear();
+                        expand_overlap_info.update_key_range(&key_range);
+                    }
+
+                    let picker = L0IncludeSstPicker::new(
+                        overlap_strategy.clone(),
+                        self.config.max_compaction_bytes / 2,
+                        self.config.level0_max_compact_file_number / 2,
                     );
-                }
-                if input.total_file_size > total_file_size && input.sstable_infos.len() > 1 {
-                    min_write_amp_meet = true;
-                    exist_small_task = true;
-                    input_levels.push((input, total_file_size, target_level_files.clone()));
+                    let input = picker.pick_tables(
+                        expand_overlap_info.as_ref(),
+                        overlap_info.as_ref(),
+                        &l0.sub_levels,
+                        &level_handlers[0],
+                    );
+
+                    if input.total_file_size > total_file_size && input.sstable_infos.len() > 1 {
+                        min_write_amp_meet = true;
+                        exist_small_task = true;
+                        input_levels.push((input, total_file_size, target_level_files.clone()));
+                    }
                 }
             }
+            input_levels.sort_by(|(a, _, _), (b, _, _)| {
+                b.sstable_infos
+                    .len()
+                    .cmp(&a.sstable_infos.len())
+                    .then_with(|| a.total_file_count.cmp(&b.total_file_count))
+                    .then_with(|| a.total_file_size.cmp(&b.total_file_size))
+            });
         }
-        input_levels.sort_by_key(|(input, _, _)| input.sstable_infos.len());
-        input_levels.sort_by(|(a, _, _), (b, _, _)| {
-            b.sstable_infos
-                .len()
-                .cmp(&a.sstable_infos.len())
-                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
-                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
-        });
 
         if !min_write_amp_meet && strict_check {
             // If the write-amplification of all candidate task are large, we may hope to wait base
@@ -296,7 +279,7 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            if exist_small_task && target_file_size > self.config.sub_level_max_compaction_bytes {
+            if exist_small_task && target_file_size > max_target_level_size {
                 continue;
             }
 
@@ -539,7 +522,15 @@ pub mod tests {
 
     #[test]
     fn test_compact_l0_to_l1() {
-        let mut picker = create_compaction_picker_for_test();
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .level0_sub_level_compact_level_count(2)
+                .max_bytes_for_level_base(200)
+                .sub_level_max_compaction_bytes(150)
+                .build(),
+        );
+        let mut picker = LevelCompactionPicker::new(1, config);
         let l0 = generate_level(
             0,
             vec![
@@ -864,7 +855,7 @@ pub mod tests {
                 .max_compaction_bytes(500000)
                 .sub_level_max_compaction_bytes(50000)
                 .max_bytes_for_level_base(500000)
-                .level0_sub_level_compact_level_count(1)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
@@ -898,11 +889,11 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(
             2,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
         );
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(
             3,
             ret.input_levels

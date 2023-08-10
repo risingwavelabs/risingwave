@@ -38,9 +38,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
-    version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
-    HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
-    SstObjectIdRange, INVALID_VERSION_ID,
+    append_sstable_info_to_string, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
+    HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
+    HummockSstableObjectId, HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -892,6 +892,21 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
+            if compact_task.target_level != 0 {
+                let mut output_info = String::default();
+                for level in &compact_task.input_ssts {
+                    for sst in &level.table_infos {
+                        append_sstable_info_to_string(&mut output_info, sst);
+                    }
+                }
+                tracing::info!(
+                    "TrivialMove group-{} target level: {}, ssts: {}",
+                    compaction_group_id,
+                    compact_task.target_level,
+                    output_info
+                );
+            }
+
             self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
