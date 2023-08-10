@@ -1414,24 +1414,20 @@
         └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
           └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
-        └─StreamExchange { dist: HashShard(bidder, auction) }
-          └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
-            └─StreamRowIdGen { row_id_index: 7 }
-              └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id, bidder, auction], pk_columns: [_row_id, bidder, auction], pk_conflict: NoCheck }
+    └─StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
+      └─StreamExchange { dist: HashShard(bidder, auction) }
+        └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+          └─StreamRowIdGen { row_id_index: 7 }
+            └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id, bidder, auction], pk_columns: [_row_id, bidder, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamExchange Hash([7]) from 1
+    └── StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] } { state table: 0 }
+        └── StreamExchange Hash([1, 0]) from 1
 
     Fragment 1
-    StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] } { state table: 0 }
-    └── StreamExchange Hash([1, 0]) from 2
-
-    Fragment 2
     StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
     └── StreamRowIdGen { row_id_index: 7 }
         └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 1 }
@@ -1447,10 +1443,10 @@
 
     Table 4294967294
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id ]
-    ├── primary key: [ $7 ASC ]
+    ├── primary key: [ $7 ASC, $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 7 ]
-    └── read pk prefix len hint: 1
+    ├── distribution key: [ 1, 0 ]
+    └── read pk prefix len hint: 3
 
 - id: nexmark_q19
   before:
@@ -2076,7 +2072,7 @@
             └─BatchExchange { order: [], dist: HashShard(auction) }
               └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [], pk_columns: [bid_count], pk_conflict: NoCheck }
     └─StreamProject { exprs: [id, item_name, count(auction)] }
       └─StreamTopN { order: [count(auction) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -2092,7 +2088,7 @@
                       └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [], pk_columns: [bid_count], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [id, item_name, count(auction)] }
         └── StreamTopN { order: [count(auction) DESC], limit: 1000, offset: 0 } { state table: 0 }
@@ -2101,7 +2097,10 @@
     Fragment 1
     StreamGroupTopN { order: [count(auction) DESC], limit: 1000, offset: 0, group_key: [$expr1] } { state table: 1 }
     └── StreamProject { exprs: [id, item_name, count(auction), Vnode(id) as $expr1] }
-        └── StreamHashAgg [append_only] { group_key: [id, item_name], aggs: [count(auction), count] } { result table: 2, state tables: [], distinct tables: [] }
+        └── StreamHashAgg [append_only] { group_key: [id, item_name], aggs: [count(auction), count] }
+            ├── result table: 2
+            ├── state tables: []
+            ├── distinct tables: []
             └── StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: [id, item_name, auction, _row_id, _row_id] }
                 ├── left table: 3
                 ├── right table: 5
@@ -2112,13 +2111,19 @@
 
     Fragment 2
     StreamRowIdGen { row_id_index: 10 }
-    └── StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] } { source state table: 7 }
+    └── StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
+        └── source state table: 7
 
     Fragment 3
     StreamRowIdGen { row_id_index: 7 }
     └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 8 }
 
-    Table 0 { columns: [ id, item_name, count(auction), $expr1 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0
+    ├── columns: [ id, item_name, count(auction), $expr1 ]
+    ├── primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 1
     ├── columns: [ id, item_name, count(auction), $expr1 ]
@@ -2128,7 +2133,12 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 3
 
-    Table 2 { columns: [ id, item_name, count(auction), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 2
+    ├── columns: [ id, item_name, count(auction), count ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 2
 
     Table 3
     ├── columns: [ id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id ]
@@ -2137,7 +2147,12 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 4 { columns: [ id, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4
+    ├── columns: [ id, _row_id, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 5
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id ]
@@ -2146,13 +2161,23 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 6 { columns: [ auction, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6
+    ├── columns: [ auction, _row_id, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 7 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 2 }
+    Table 4294967294
+    ├── columns: [ auction_id, auction_item_name, bid_count ]
+    ├── primary key: [ $2 DESC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
 - id: nexmark_q106
   before:
