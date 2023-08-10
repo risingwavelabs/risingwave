@@ -67,21 +67,19 @@ fn generate_subscripts(
 
     // if we don't branch reverse inside, then we have to box it outside to have the same type
     // different closures different anonymous types, or range and reverse range.
-    let mut next = move || {
+    let next = move || {
         if reverse {
             if cur <= end {
                 return None;
             }
-        } else {
-            if cur >= end {
-                return None;
-            }
+        } else if cur >= end {
+            return None;
         }
         let ret = cur;
         cur += if reverse { -1 } else { 1 };
         Some(ret)
     };
-    Ok(std::iter::from_fn(move || next()))
+    Ok(std::iter::from_fn(next))
 }
 
 fn generate_subscripts_inner(array: ListRef<'_>, dim: i32, reverse: bool) -> (i32, i32) {
@@ -97,14 +95,10 @@ fn generate_subscripts_inner(array: ListRef<'_>, dim: i32, reverse: bool) -> (i3
         }
         // Although RW's array can be zig-zag, we just look at the first element.
         2.. => match array.elem_at(0) {
-            Some(datum_ref) => match datum_ref {
-                Some(scalar_ref) => match scalar_ref {
-                    ScalarRefImpl::List(list) => generate_subscripts_inner(list, dim - 1, reverse),
-                    _ => nothing,
-                },
-                None => nothing,
-            },
-            None => nothing,
+            Some(Some(ScalarRefImpl::List(list))) => {
+                generate_subscripts_inner(list, dim - 1, reverse)
+            }
+            _ => nothing,
         },
     }
 }
