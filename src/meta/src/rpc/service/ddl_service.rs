@@ -595,7 +595,7 @@ where
         }))
     }
 
-    async fn alter_source_column(
+    async fn alter_source(
         &self,
         request: Request<AlterSourceRequest>,
     ) -> Result<Response<AlterSourceResponse>, Status> {

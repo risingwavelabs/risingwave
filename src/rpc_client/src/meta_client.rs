@@ -422,7 +422,7 @@ impl MetaClient {
         let request = AlterSourceRequest {
             source: Some(source),
         };
-        let resp = self.inner.alter_source_column(request).await?;
+        let resp = self.inner.alter_source(request).await?;
         Ok(resp.version)
     }
 
@@ -1669,7 +1669,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
-            ,{ ddl_client, alter_source_column, AlterSourceRequest, AlterSourceResponse }
+            ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
