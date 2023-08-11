@@ -785,7 +785,10 @@ where
             .select_table_fragments_by_table_id(&id.into())
             .await?;
         let old_internal_table_ids = old_table_fragments.internal_table_ids();
-        let old_internal_tables = self.catalog_manager.get_tables(&old_internal_table_ids).await;
+        let old_internal_tables = self
+            .catalog_manager
+            .get_tables(&old_internal_table_ids)
+            .await;
 
         fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 

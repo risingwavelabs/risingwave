@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -40,7 +40,7 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -363,6 +363,14 @@ impl StreamFragmentGraph {
                 new_ids.push(table.id);
             }
         }
+        if new_ids.len() != old_tables.len() {
+            return Err(MetaError::from(anyhow!(
+                "Different number of internal tables.\n
+                New: {}, Old: {}",
+                new_ids.len(),
+                old_tables.len(),
+            )));
+        }
         assert_eq!(new_ids.len(), old_tables.len());
         old_tables.sort_by(|a, b| a.id.cmp(&b.id));
         new_ids.sort();
@@ -373,7 +381,15 @@ impl StreamFragmentGraph {
         for fragment in self.fragments.values_mut() {
             for table in &mut fragment.internal_tables {
                 let old_table = id_map.get(&table.id).unwrap();
-                assert_eq!(old_table.get_columns(), table.get_columns());
+                if old_table.get_columns() != table.get_columns() {
+                    return Err(MetaError::from(anyhow!(
+                        "Mismatch of internal tables.\n
+                        Old table: {:?}\n
+                        New table: {:?}\n",
+                        old_table,
+                        table
+                    )));
+                }
                 table.id = old_table.get_id();
             }
         }
