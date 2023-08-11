@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
     command:
       - compactor-node
       - "--listen-addr"
@@ -25,6 +25,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<$HADOOP_HOME/etc/hadoop>:/opt/hadoop/etc/hadoop"
     env_file: multiple_object_storage.env
     container_name: compactor-0
     healthcheck:
@@ -35,7 +36,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
     command:
       - compute-node
       - "--listen-addr"
@@ -60,6 +61,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<$HADOOP_HOME/etc/hadoop>:/opt/hadoop/etc/hadoop"
     env_file: multiple_object_storage.env
     container_name: compute-node-0
     healthcheck:
@@ -105,6 +107,7 @@ services:
     depends_on: []
     volumes:
       - "etcd-0:/etcd-data"
+      - "<$HADOOP_HOME/etc/hadoop>:/opt/hadoop/etc/hadoop"
     environment: {}
     container_name: etcd-0
     healthcheck:
@@ -118,7 +121,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
     command:
       - frontend-node
       - "--listen-addr"
@@ -141,6 +144,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<$HADOOP_HOME/etc/hadoop>:/opt/hadoop/etc/hadoop"
     environment:
       RUST_BACKTRACE: "1"
     container_name: frontend-node-0
@@ -175,7 +179,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
     command:
       - meta-node
       - "--listen-addr"
@@ -193,7 +197,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+hdfs://<name_node>@<data_path>"
+      - "hummock+hdfs://<namenode/cluster_name>@<data_directory>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -209,6 +213,7 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<$HADOOP_HOME/etc/hadoop>:/opt/hadoop/etc/hadoop"
     env_file: multiple_object_storage.env
     container_name: meta-node-0
     healthcheck:
@@ -245,7 +250,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:latest
+    image: ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051
