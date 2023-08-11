@@ -260,10 +260,20 @@ where
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
             Arc::from(table_columns.into_boxed_slice()),
         );
-        assert_eq!(
-            row_serde.kind().is_column_aware(),
-            table_catalog.version.is_some()
-        );
+        if !IS_REPLICATED {
+            // If normal state table has versioning, that means it supports
+            // Schema change. In that case, the row encoding should be column aware as well.
+            // Otherwise both will be false.
+            assert_eq!(
+                table_catalog.version.is_some(),
+                row_serde.kind().is_column_aware()
+            );
+        } else {
+            // If state table is replicated, it won't support schema change.
+            // In that case, there should NOT be versioning,
+            // But because it follows upstream table encoding, it can still be column aware.
+            assert!(table_catalog.version.is_none())
+        }
 
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
