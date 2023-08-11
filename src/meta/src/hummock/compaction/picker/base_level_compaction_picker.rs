@@ -600,8 +600,9 @@ pub mod tests {
 
         let mut local_stats = LocalPickerStatistic::default();
         push_table_level0_overlapping(&mut levels, generate_table(8, 1, 199, 233, 3));
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none());
+        let _ = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
 
         // Don't pick overlapping sub-level 8
         levels_handler[0].remove_task(1);
