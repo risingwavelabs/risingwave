@@ -1185,3 +1185,22 @@ cat << EOF > src/config/example.toml
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
+
+[tasks.psql]
+category = "RiseDev - PSQL Client"
+description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+'''
