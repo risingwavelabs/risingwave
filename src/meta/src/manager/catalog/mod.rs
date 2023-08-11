@@ -1548,18 +1548,13 @@ where
 
     pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
-        let source_version = source.get_version();
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_source_id(source_id)?;
 
         let original_source = database_core.sources.get(&source_id).unwrap().clone();
-        if original_source.get_version() >= source_version {
-            return Err(MetaError::permission_denied(format!(
-                "Meta source version {} is newer than frontend source version {}",
-                source.get_version(),
-                source_version,
-            )));
+        if original_source.get_version() + 1 != source.get_version() {
+            bail!("source version is stale");
         }
 
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
