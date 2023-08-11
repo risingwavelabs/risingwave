@@ -137,11 +137,11 @@ pub struct Binder {
 pub struct ParameterTypes(Arc<RwLock<HashMap<u64, Option<DataType>>>>);
 
 impl ParameterTypes {
-    pub fn new(specified_param_types: Vec<DataType>) -> Self {
+    pub fn new(specified_param_types: Vec<Option<DataType>>) -> Self {
         let map = specified_param_types
             .into_iter()
             .enumerate()
-            .map(|(index, data_type)| ((index + 1) as u64, Some(data_type)))
+            .map(|(index, data_type)| ((index + 1) as u64, data_type))
             .collect::<HashMap<u64, Option<DataType>>>();
         Self(Arc::new(RwLock::new(map)))
     }
@@ -194,7 +194,11 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(session: &SessionImpl, bind_for: BindFor, param_types: Vec<DataType>) -> Binder {
+    fn new_inner(
+        session: &SessionImpl,
+        bind_for: BindFor,
+        param_types: Vec<Option<DataType>>,
+    ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
@@ -219,7 +223,10 @@ impl Binder {
         Self::new_inner(session, BindFor::Batch, vec![])
     }
 
-    pub fn new_with_param_types(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
+    pub fn new_with_param_types(
+        session: &SessionImpl,
+        param_types: Vec<Option<DataType>>,
+    ) -> Binder {
         Self::new_inner(session, BindFor::Batch, param_types)
     }
 
@@ -237,7 +244,7 @@ impl Binder {
 
     pub fn new_for_stream_with_param_types(
         session: &SessionImpl,
-        param_types: Vec<DataType>,
+        param_types: Vec<Option<DataType>>,
     ) -> Binder {
         Self::new_inner(session, BindFor::Stream, param_types)
     }
@@ -369,7 +376,7 @@ pub mod test_utils {
     }
 
     #[cfg(test)]
-    pub fn mock_binder_with_param_types(param_types: Vec<DataType>) -> Binder {
+    pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
     }
 }

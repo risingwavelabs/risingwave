@@ -618,9 +618,9 @@ impl SourceSchemaV2 {
             };
         let consume_string_from_options =
             |row_options: &BTreeMap<String, String>, key: &str| -> Result<AstString, ParserError> {
-                try_consume_string_from_options(row_options, key).ok_or(ParserError::ParserError(
-                    format!("missing field {} in row format options", key),
-                ))
+                try_consume_string_from_options(row_options, key).ok_or_else(|| {
+                    ParserError::ParserError(format!("missing field {} in row format options", key))
+                })
             };
         let get_schema_location =
             |row_options: &BTreeMap<String, String>| -> Result<(AstString, bool), ParserError> {
@@ -1031,8 +1031,6 @@ impl ParseTo for CreateSinkStatement {
 
         let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
 
-        let emit_mode = p.parse_emit_mode()?;
-
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
             CreateSink::From(from_name)
@@ -1042,6 +1040,8 @@ impl ParseTo for CreateSinkStatement {
         } else {
             p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
         };
+
+        let emit_mode = p.parse_emit_mode()?;
 
         impl_parse_to!(with_properties: WithProperties, p);
         if with_properties.0.is_empty() {
@@ -1067,6 +1067,9 @@ impl fmt::Display for CreateSinkStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
         impl_fmt_display!(sink_from, v, self);
+        if let Some(ref emit_mode) = self.emit_mode {
+            v.push(format!("EMIT {}", emit_mode));
+        }
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }

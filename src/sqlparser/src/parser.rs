@@ -1970,14 +1970,14 @@ impl Parser {
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        self.expect_keyword(Keyword::AS)?;
+        let query = Box::new(self.parse_query()?);
         let emit_mode = if materialized {
             self.parse_emit_mode()?
         } else {
             None
         };
-        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
-        self.expect_keyword(Keyword::AS)?;
-        let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
         Ok(Statement::CreateView {
             if_not_exists,

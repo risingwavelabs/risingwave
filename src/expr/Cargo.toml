@@ -17,14 +17,14 @@ normal = ["workspace-hack", "ctor"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-array = "44"
-arrow-schema = "44"
+arrow-array = "45"
+arrow-schema = "45"
 async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.8", features = ["case-insensitive"] }
-ctor = "0.1"
+ctor = "0.2"
 dyn-clone = "1"
 easy-ext = "1"
 either = "1"

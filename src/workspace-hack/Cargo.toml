@@ -37,14 +37,14 @@ fixedbitset = { version = "0.4" }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
-futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly"] }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
+indexmap = { version = "1", default-features = false, features = ["std"] }
 itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -53,17 +53,18 @@ lexical-util = { version = "0.8", default-features = false, features = ["format"
 lexical-write-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
-lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
+lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 multimap = { version = "0.8" }
-num = { version = "0.4" }
+nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
-num-complex = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -97,7 +98,6 @@ tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time", "parking_lot"] }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
@@ -126,14 +126,14 @@ fixedbitset = { version = "0.4" }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
-futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly"] }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
+indexmap = { version = "1", default-features = false, features = ["std"] }
 itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -142,17 +142,18 @@ lexical-util = { version = "0.8", default-features = false, features = ["format"
 lexical-write-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
-lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
+lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 multimap = { version = "0.8" }
-num = { version = "0.4" }
+nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
-num-complex = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -189,7 +190,6 @@ tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time", "parking_lot"] }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }

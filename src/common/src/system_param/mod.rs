@@ -179,7 +179,13 @@ macro_rules! impl_system_params_from_kv {
             });
             derive_missing_fields(&mut ret);
             if !kvs.is_empty() {
-                Err(format!("unrecognized system params {:?}", kvs))
+                let unrecognized_params = kvs.into_iter().map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                    )
+                }).collect::<Vec<_>>();
+                Err(format!("unrecognized system params {:?}", unrecognized_params))
             } else {
                 Ok(ret)
             }
@@ -260,7 +266,7 @@ macro_rules! impl_set_system_param {
                         let v = if let Some(v) = value {
                             v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
-                            $default.ok_or(format!("{} does not have a default value", key))?
+                            $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);

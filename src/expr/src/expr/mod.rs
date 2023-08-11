@@ -56,7 +56,6 @@ mod expr_unary;
 mod expr_vnode;
 
 mod build;
-pub(crate) mod data_types;
 pub(crate) mod template;
 pub(crate) mod template_fast;
 pub mod test_utils;
@@ -75,7 +74,7 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
-use super::{ExprError, Result};
+pub use super::{ExprError, Result};
 
 /// Interface of an expression.
 ///
@@ -186,9 +185,6 @@ impl dyn Expression {
 
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
-
-/// A reference to a dynamically typed [`Expression`].
-pub type ExpressionRef = Arc<dyn Expression>;
 
 /// Controls the behavior when a compute error happens.
 ///

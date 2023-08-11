@@ -346,11 +346,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id
-                ))
+                )
             })?;
 
         let mut core = self.stream_source_core.unwrap();
@@ -379,12 +379,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         core.split_state_store.init_epoch(barrier.epoch);
 
-        core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
-
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -394,6 +388,9 @@ impl<S: StateStore> SourceExecutor<S> {
                 *ele = recover_state;
             }
         }
+
+        // init in-memory split states with persisted state if any
+        core.init_split_state(boot_state.clone());
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
@@ -531,16 +528,17 @@ impl<S: StateStore> SourceExecutor<S> {
                             .flat_map(|(split_id, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_core
-                                    .as_ref()
+                                    .as_mut()
                                     .unwrap()
                                     .stream_source_splits
-                                    .get(split_id);
+                                    .get_mut(split_id);
 
                                 origin_split_impl.map(|split_impl| {
-                                    (split_id.clone(), split_impl.update(offset.clone()))
+                                    split_impl.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((split_id.clone(), split_impl.clone()))
                                 })
                             })
-                            .collect();
+                            .try_collect()?;
 
                         self.stream_source_core
                             .as_mut()
@@ -582,10 +580,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
                     self.actor_ctx.id
-                ))
+                )
             })?;
         yield Message::Barrier(barrier);
 

@@ -61,7 +61,6 @@ pub(super) mod handlers {
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::StackTraceResponse;
-    use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
     use super::*;
@@ -70,8 +69,6 @@ pub(super) mod handlers {
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
-    type TableId = i32;
-    type TableActors = (TableId, Vec<StreamActor>);
 
     pub fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
@@ -168,34 +165,20 @@ pub(super) mod handlers {
     pub async fn list_actors<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<ActorLocation>>> {
-        let node_actors = srv.fragment_manager.all_node_actors(true).await;
+        let mut node_actors = srv.fragment_manager.all_node_actors(true).await;
         let nodes = srv
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
         let actors = nodes
-            .iter()
+            .into_iter()
             .map(|node| ActorLocation {
                 node: Some(node.clone()),
-                actors: node_actors.get(&node.id).cloned().unwrap_or_default(),
+                actors: node_actors.remove(&node.id).unwrap_or_default(),
             })
             .collect::<Vec<_>>();
 
         Ok(Json(actors))
-    }
-
-    pub async fn list_table_fragments<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<TableActors>>> {
-        let table_fragments = srv
-            .fragment_manager
-            .list_table_fragments()
-            .await
-            .iter()
-            .map(|f| (f.table_id().table_id() as i32, f.actors()))
-            .collect::<Vec<_>>();
-
-        Ok(Json(table_fragments))
     }
 
     pub async fn list_fragments<S: MetaStore>(
@@ -247,7 +230,6 @@ where
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters::<S>))
             .route("/actors", get(list_actors::<S>))
-            .route("/fragments", get(list_table_fragments::<S>))
             .route("/fragments2", get(list_fragments::<S>))
             .route("/materialized_views", get(list_materialized_views::<S>))
             .route("/tables", get(list_tables::<S>))
@@ -270,14 +252,12 @@ where
         let app = if let Some(ui_path) = ui_path {
             let static_file_router = Router::new().nest_service(
                 "/",
-                get_service(ServeDir::new(ui_path)).handle_error(
-                    |error: std::io::Error| async move {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", error),
-                        )
-                    },
-                ),
+                get_service(ServeDir::new(ui_path)).handle_error(|e| async move {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Unhandled internal error: {e}",),
+                    )
+                }),
             );
             Router::new()
                 .fallback_service(static_file_router)

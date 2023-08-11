@@ -279,14 +279,20 @@ where
         &self,
         request: Request<ReportFullScanTaskRequest>,
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
+        let req = request.into_inner();
         let hummock_manager = self.hummock_manager.clone();
+        hummock_manager
+            .metrics
+            .total_object_count
+            .set(req.total_object_count as _);
+        hummock_manager
+            .metrics
+            .total_object_size
+            .set(req.total_object_size as _);
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match hummock_manager
-                .complete_full_gc(request.into_inner().object_ids)
-                .await
-            {
+            match hummock_manager.complete_full_gc(req.object_ids).await {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }

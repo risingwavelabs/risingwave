@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use risingwave_common::array::*;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
@@ -22,8 +25,8 @@ use crate::agg::AggCall;
 use crate::Result;
 
 #[build_aggregate("mode(*) -> auto")]
-fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    Ok(Box::new(Mode::new(agg.return_type)))
+fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(Box::new(Mode::new(agg.return_type.clone())))
 }
 
 /// Computes the mode, the most frequent value of the aggregated argument (arbitrarily choosing the
@@ -102,22 +105,43 @@ impl Aggregator for Mode {
         self.return_type.clone()
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let array = input.column_at(0);
-        for row_id in start_row_id..end_row_id {
-            self.add_datum(array.value_at(row_id));
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        for (_, row) in input.rows() {
+            self.add_datum(row.datum_at(0));
         }
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        builder.append(self.cur_mode.clone());
+    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+        for (_, row) in input.rows_in(range) {
+            self.add_datum(row.datum_at(0));
+        }
         Ok(())
+    }
+
+    fn get_output(&self) -> Result<Datum> {
+        Ok(self.cur_mode.clone())
+    }
+
+    fn output(&mut self) -> Result<Datum> {
+        let result = self.get_output()?;
+        self.reset();
+        Ok(result)
+    }
+
+    fn reset(&mut self) {
+        self.cur_mode = None;
+        self.cur_mode_freq = 0;
+        self.cur_item = None;
+        self.cur_item_freq = 0;
+    }
+
+    fn get_state(&self) -> Datum {
+        unimplemented!("get_state is not supported for mode");
+    }
+
+    fn set_state(&mut self, _: Datum) {
+        unimplemented!("set_state is not supported for mode");
     }
 
     fn estimated_size(&self) -> usize {

@@ -303,7 +303,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             #[for_await]
             for chunk in stream {
                 for output_chunk in
-                    output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
+                    output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
                 {
                     yield output_chunk
                 }
@@ -324,7 +324,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             };
             #[for_await]
             for chunk in stream {
-                yield chunk?.reorder_columns(&self.output_indices)
+                yield chunk?.project(&self.output_indices)
             }
         }
     }

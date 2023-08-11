@@ -41,7 +41,7 @@ const CHUNK_SIZE: usize = 1024;
 fn bench_expr(c: &mut Criterion) {
     use itertools::Itertools;
 
-    let input = DataChunk::new(
+    let input = StreamChunk::from(DataChunk::new(
         vec![
             BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into_ref(),
             I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
@@ -150,12 +150,12 @@ fn bench_expr(c: &mut Criterion) {
             SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
             JsonbArray::from_iter(
-                (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
+                (1..=CHUNK_SIZE).map(|i| JsonbVal::from(serde_json::Value::Number(i.into()))),
             )
             .into_ref(),
         ],
         CHUNK_SIZE,
-    );
+    ));
     let inputrefs = [
         InputRefExpression::new(DataType::Boolean, 0),
         InputRefExpression::new(DataType::Int16, 1),
@@ -283,7 +283,7 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        let agg = match build_agg(AggCall {
+        let agg = match build_agg(&AggCall {
             kind: sig.func,
             args: AggArgs::Unary(
                 sig.inputs_type[0].into(),
@@ -305,12 +305,9 @@ fn bench_expr(c: &mut Criterion) {
         let agg = RefCell::new(agg);
         c.bench_function(&format!("{sig:?}"), |bencher| {
             #[allow(clippy::await_holding_refcell_ref)]
-            bencher.to_async(FuturesExecutor).iter(|| async {
-                agg.borrow_mut()
-                    .update_multi(&input, 0, CHUNK_SIZE)
-                    .await
-                    .unwrap()
-            })
+            bencher
+                .to_async(FuturesExecutor)
+                .iter(|| async { agg.borrow_mut().update(&input).await.unwrap() })
         });
     }
 }
@@ -381,7 +378,7 @@ fn bench_raw(c: &mut Criterion) {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         #[allow(clippy::useless_conversion)]
-        fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
+        fn checked_add(a: i32, b: i32) -> std::result::Result<i32, Error> {
             let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
             let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
             a.checked_add(b).ok_or(Error::Overflow)
@@ -403,7 +400,7 @@ fn bench_raw(c: &mut Criterion) {
             let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
             let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
             #[allow(clippy::useless_conversion)]
-            fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
+            fn checked_add(a: i32, b: i32) -> std::result::Result<i32, Error> {
                 let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
                 let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
                 a.checked_add(b).ok_or(Error::Overflow)

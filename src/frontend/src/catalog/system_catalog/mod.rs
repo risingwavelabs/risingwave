@@ -372,6 +372,8 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_PROC) },
     { BuiltinCatalog::View(&PG_SHADOW) },
     { BuiltinCatalog::View(&PG_LOCKS) },
+    { BuiltinCatalog::View(&PG_EXTENSION) },
+    { BuiltinCatalog::View(&PG_DEPEND) },
     { BuiltinCatalog::View(&INFORMATION_SCHEMA_COLUMNS) },
     { BuiltinCatalog::View(&INFORMATION_SCHEMA_TABLES) },
     { BuiltinCatalog::Table(&RW_DATABASES), read_rw_database_info },
