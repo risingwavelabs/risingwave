@@ -1,6 +1,6 @@
-# Descriptive
+# Description
 
-Feature store dome.
+Feature store demo.
 
 We simulate functionality of feature store demo by using a simple business scenario. We use 'simulator' to simulate a constant stream of user modifying mfa. 
 
