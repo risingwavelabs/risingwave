@@ -274,7 +274,6 @@ impl StreamFragmentGraph {
         let fragments: HashMap<_, _> = proto
             .fragments
             .into_iter()
-            .sorted_by(|a, b| a.0.cmp(&b.0))
             .map(|(id, fragment)| {
                 let id = fragment_id_gen.to_global_id(id);
                 let fragment = BuildingFragment::new(id, fragment, job, table_id_gen);
@@ -347,14 +346,6 @@ impl StreamFragmentGraph {
         tables
     }
 
-    // For two tables with same definition, there is an id-order-preserving bijection
-    // between their internal tables:
-    // 1. `fragments` in `StreamFragmentGraph` is a map from `LocalFragmentId` to
-    //    `StreamFragment` and `LocalFragmentId` is based on the visiting order of
-    //    plan, which is fixed.
-    // 2. Order of internal table id is based on iter order of fragments, which
-    //    is fixed by `sorted_by` and the visiting order of nodes in the fragment,
-    //    which is fixed.
     /// Set internal tables' `table_id`s according to a list of internal tables
     pub fn fit_internal_table_ids(&mut self, mut old_tables: Vec<Table>) -> MetaResult<()> {
         let mut new_ids = Vec::new();
@@ -371,7 +362,13 @@ impl StreamFragmentGraph {
                 old_tables.len(),
             )));
         }
-        assert_eq!(new_ids.len(), old_tables.len());
+        if new_ids.len() != old_tables.len() {
+            return Err(MetaError::from(anyhow!(
+                "Numbers of internal tables mismatch. New: {}, Old: {}",
+                new_ids.len(),
+                old_tables.len()
+            )));
+        }
         old_tables.sort_by(|a, b| a.id.cmp(&b.id));
         new_ids.sort();
         let id_map = new_ids
