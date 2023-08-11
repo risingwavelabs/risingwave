@@ -4,7 +4,6 @@ package ddl_service;
 
 import "catalog.proto";
 import "common.proto";
-import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
