@@ -145,14 +145,10 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
-
-        // TODO(siyuan): init logic
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        // TODO: restore backfill offset from persistent state check whether backfill is finished/
-        // or needed.
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {
             let is_finished = check_all_vnode_finished(state_table, state_len).await?;
             if is_finished {
@@ -335,6 +331,11 @@ where
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    tracing::info!(
+                                        "bacfill recv chunk: rows {}",
+                                        chunk.cardinality()
+                                    );
+
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }

@@ -364,6 +364,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     ..
                 } => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                        tracing::info!(
+                            "source exector: actor {:?} boot with splits: {:?}",
+                            self.actor_ctx.id,
+                            splits
+                        );
                         boot_state = splits.clone();
                     }
                 }
@@ -549,7 +554,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .collect::<Vec<&str>>(),
                         )
                         .inc_by(chunk.cardinality() as u64);
-                    tracing::info!("[src] chunk meta: {:?}", chunk.meta());
                     yield Message::Chunk(chunk);
                 }
             }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
+use std::pin::{pin, Pin};
 use std::sync::Arc;
 
 use either::Either;
@@ -135,7 +135,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        tracing::info!("cdc backfill started");
+        tracing::info!("cdc backfill started: actor {:?}", self.actor_ctx.id);
 
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -150,7 +150,7 @@ where
         let upstream_table_id = self.upstream_table.table_id().table_id;
         let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
 
-        let mut upstream = self.upstream.execute();
+        let mut upstream = self.upstream.execute().peekable();
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
@@ -161,7 +161,7 @@ where
         let init_epoch = first_barrier.epoch.prev;
 
         tracing::info!("cdc backfill got first barrier: {:?}", first_barrier);
-        let mut valid_backfill = false;
+        let mut invalid_backfill = false;
         if let Some(mutation) = first_barrier.mutation.as_ref() {
             match mutation.as_ref() {
                 Mutation::Add { splits, .. }
@@ -169,16 +169,21 @@ where
                     actor_splits: splits,
                     ..
                 } => {
-                    valid_backfill = match splits.get(&self.actor_ctx.id) {
-                        None => false,
-                        Some(_) => true,
+                    invalid_backfill = match splits.get(&self.actor_ctx.id) {
+                        None => true,
+                        Some(splits) => splits.is_empty(),
                     }
                 }
                 _ => {}
             }
         }
 
-        if !valid_backfill {
+        if invalid_backfill {
+            tracing::info!("invalid cdc backfill: actor {:?}", self.actor_ctx.id);
+
+            // The first barrier message should be propagated.
+            yield Message::Barrier(first_barrier);
+
             #[for_await]
             for msg in upstream {
                 if let Some(msg) = mapping_message(msg?, &self.output_indices) {
@@ -188,10 +193,12 @@ where
                     yield msg;
                 }
             }
+
+            // exit the executor
             return Ok(());
         }
 
-        tracing::info!("valid cdc backfill executor");
+        tracing::info!("valid cdc backfill: actor {:?}", self.actor_ctx.id);
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
         }
@@ -251,7 +258,7 @@ where
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
 
-        let mut last_binlog_offset: Option<BinlogOffset>;
+        let mut last_binlog_offset: Option<BinlogOffset> = None;
 
         let mut consumed_binlog_offset: Option<BinlogOffset> = None;
 
@@ -284,9 +291,13 @@ where
         if to_backfill {
             // init the last binlog offset
             last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
+            // drive the upstream first
+            let first_chunk = Pin::new(&mut upstream).peek().await;
+
             tracing::info!(
-                "start the bacfill loop, initial binlog offset: {:?}",
-                last_binlog_offset
+                "start the bacfill loop: [initial] binlog offset: {:?}, peek chunk: {:#?}",
+                last_binlog_offset,
+                first_chunk
             );
 
             'backfill_loop: loop {
@@ -381,13 +392,23 @@ where
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
-                                    // skip changelog chunk that less than last_binlog_offset
+                                    let chunk_binlog_offset = get_chunk_last_binlog_offset(
+                                        &upstream_table_reader.inner().table_reader(),
+                                        &chunk,
+                                    )?;
+
+                                    tracing::info!(
+                                        "recv changelog chunk: bin offset: {:?}, chunk: {:#?}",
+                                        chunk_binlog_offset,
+                                        chunk
+                                    );
+
+                                    // Since we don't need changelog before the
+                                    // `last_binlog_offset`,
+                                    // just skip the chunk that only contains events before
+                                    // `last_binlog_offset`.
                                     if let Some(last_binlog_offset) = &last_binlog_offset {
-                                        let binlog_offset = get_chunk_last_binlog_offset(
-                                            &upstream_table_reader.inner().table_reader(),
-                                            &chunk,
-                                        )?;
-                                        if let Some(chunk_binlog_offset) = binlog_offset {
+                                        if let Some(chunk_binlog_offset) = chunk_binlog_offset {
                                             if chunk_binlog_offset < *last_binlog_offset {
                                                 tracing::info!(
                                                     "skip changelog chunk: offset: {:?}, {:#?}",
@@ -410,7 +431,10 @@ where
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
-                                    tracing::info!("snapshot read stream ends");
+                                    tracing::info!(
+                                        "snapshot read stream ends: last_binlog_offset {:?}",
+                                        last_binlog_offset
+                                    );
                                     // TODO(siyuan): handle the case when snapshot read stream ends.
                                     // End of the snapshot read stream.
                                     // We should not mark the chunk anymore,
@@ -459,46 +483,8 @@ where
 
         tracing::info!(
             actor = self.actor_id,
-            "Backfill has already finished and forward messages directly to the downstream"
+            "CdcBackfill has already finished and forward messages directly to the downstream"
         );
-
-        // Wait for first barrier to come after backfill is finished.
-        // So we can update our progress + persist the status.
-        while let Some(Ok(msg)) = upstream.next().await {
-            if let Some(msg) = mapping_message(msg, &self.output_indices) {
-                // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg && !is_finished {
-                    // If snapshot was empty, we do not need to backfill,
-                    // but we still need to persist the finished state.
-                    // We currently persist it on the second barrier here rather than first.
-                    // This is because we can't update state table in first epoch,
-                    // since it expects to have been initialized in previous epoch
-                    // (there's no epoch before the first epoch).
-                    if is_snapshot_empty {
-                        current_pk_pos =
-                            Some(construct_initial_finished_state(pk_in_output_indices.len()))
-                    }
-
-                    // We will update current_pos at least once,
-                    // since snapshot read has to be non-empty,
-                    // Or snapshot was empty and we construct a placeholder state.
-                    debug_assert_ne!(current_pk_pos, None);
-
-                    Self::persist_state(
-                        barrier.epoch,
-                        &mut self.state_table,
-                        true,
-                        &current_pk_pos,
-                        &mut old_state,
-                        &mut current_state,
-                    )
-                    .await?;
-                    yield msg;
-                    break;
-                }
-                yield msg;
-            }
-        }
 
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
@@ -509,6 +495,32 @@ where
                 if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
                         state_table.commit_no_data_expected(barrier.epoch);
                     }
+                if let Message::Chunk(chunk) = &msg {
+                    let chunk_binlog_offset = get_chunk_last_binlog_offset(
+                        &upstream_table_reader.inner().table_reader(),
+                        &chunk,
+                    )?;
+
+                    tracing::info!(
+                        "recv changelog chunk: bin offset: {:?}, chunk: {:#?}",
+                        chunk_binlog_offset,
+                        chunk
+                    );
+
+                    if let Some(last_binlog_offset) = &last_binlog_offset {
+                        if let Some(chunk_binlog_offset) = chunk_binlog_offset {
+                            if chunk_binlog_offset < *last_binlog_offset {
+                                tracing::info!(
+                                    "[after backfill] skip changelog chunk: offset: {:?}, {:#?}",
+                                    chunk_binlog_offset,
+                                    chunk
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 yield msg;
             }
         }

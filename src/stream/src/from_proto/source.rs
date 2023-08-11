@@ -192,7 +192,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         schema.clone(),
                         pk_indices,
                         params.executor_stats,
-                        source_ctrl_opts.chunk_size,
+                        4,  // todo: make this configurable
                     );
                     Ok(Box::new(cdc_backfill))
 
