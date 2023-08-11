@@ -264,6 +264,8 @@ where
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
         // Otherwise both will be false.
+        // NOTE(kwannoel): Replicated table will follow upstream table's versioning. I'm not sure
+        // If ALTER TABLE will propagate to this replicated table as well. Ideally it won't
         assert_eq!(
             table_catalog.version.is_some(),
             row_serde.kind().is_column_aware()
