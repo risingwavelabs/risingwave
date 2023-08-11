@@ -652,12 +652,8 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        ret.add_pending_task(0, &mut levels_handler);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        ret.add_pending_task(1, &mut levels_handler);
-
+        // trivial_move
+        ret.add_pending_task(0, &mut levels_handler); // pending only for test
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
@@ -959,7 +955,7 @@ pub mod tests {
 
         let levels = Levels {
             l0: Some(l0),
-            levels: vec![generate_level(1, vec![generate_table(3, 1, 10, 90, 1)])],
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 1, 100, 1)])],
             member_table_ids: vec![1],
             ..Default::default()
         };
@@ -978,17 +974,19 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(3, ret.input_levels.len());
-        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
-
-        // trivial move do not be limited by level0_sub_level_compact_level_count
+        // println!("ret.input_levels: {:?}", ret.input_levels);
+        // 1. trivial_move
+        assert_eq!(2, ret.input_levels.len());
+        assert!(ret.input_levels[1].table_infos.is_empty());
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
         ret.add_pending_task(0, &mut levels_handler);
+
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(2, ret.input_levels.len());
-        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
-        assert!(ret.input_levels[1].table_infos.is_empty());
+        println!("ret.input_levels: {:?}", ret.input_levels);
+        assert_eq!(3, ret.input_levels.len());
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
     }
 
     #[test]
