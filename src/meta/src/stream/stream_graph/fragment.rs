@@ -17,11 +17,12 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -39,7 +40,7 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -343,6 +344,53 @@ impl StreamFragmentGraph {
             }
         }
         tables
+    }
+
+    /// Set internal tables' `table_id`s according to a list of internal tables
+    pub fn fit_internal_table_ids(&mut self, mut old_tables: Vec<Table>) -> MetaResult<()> {
+        let mut new_ids = Vec::new();
+        for fragment in self.fragments.values() {
+            for table in &fragment.internal_tables {
+                new_ids.push(table.id);
+            }
+        }
+        if new_ids.len() != old_tables.len() {
+            return Err(MetaError::from(anyhow!(
+                "Different number of internal tables.\n
+                New: {}, Old: {}",
+                new_ids.len(),
+                old_tables.len(),
+            )));
+        }
+        if new_ids.len() != old_tables.len() {
+            return Err(MetaError::from(anyhow!(
+                "Numbers of internal tables mismatch. New: {}, Old: {}",
+                new_ids.len(),
+                old_tables.len()
+            )));
+        }
+        old_tables.sort_by(|a, b| a.id.cmp(&b.id));
+        new_ids.sort();
+        let id_map = new_ids
+            .into_iter()
+            .zip_eq_fast(old_tables.into_iter())
+            .collect::<HashMap<_, _>>();
+        for fragment in self.fragments.values_mut() {
+            for table in &mut fragment.internal_tables {
+                let old_table = id_map.get(&table.id).unwrap();
+                if old_table.get_columns() != table.get_columns() {
+                    return Err(MetaError::from(anyhow!(
+                        "Mismatch of internal tables.\n
+                        Old table: {:?}\n
+                        New table: {:?}\n",
+                        old_table,
+                        table
+                    )));
+                }
+                table.id = old_table.get_id();
+            }
+        }
+        Ok(())
     }
 
     /// Returns the fragment id where the table is materialized.
