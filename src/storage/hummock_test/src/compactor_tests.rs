@@ -256,41 +256,33 @@ pub(crate) mod tests {
         )
         .await;
         // 2. get compact task
-        loop {
-            if let Some(mut compact_task) = hummock_manager_ref
-                .get_compact_task(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    &mut default_level_selector(),
-                )
+        while let Some(mut compact_task) = hummock_manager_ref
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
+            .await
+            .unwrap()
+        {
+            let compaction_filter_flag = CompactionFilterFlag::TTL;
+            compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
+            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+            compact_task.table_options = HashMap::from([(
+                0,
+                TableOption {
+                    retention_seconds: 64,
+                },
+            )]);
+            compact_task.current_epoch_time = 0;
+
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            let (mut result_task, task_stats) =
+                Compactor::compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
+
+            hummock_manager_ref
+                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
                 .await
-                .unwrap()
-            {
-                let compaction_filter_flag = CompactionFilterFlag::TTL;
-                compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
-                compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-                compact_task.table_options = HashMap::from([(
-                    0,
-                    TableOption {
-                        retention_seconds: 64,
-                    },
-                )]);
-                compact_task.current_epoch_time = 0;
-
-                let (_tx, rx) = tokio::sync::oneshot::channel();
-                let (mut result_task, task_stats) =
-                    Compactor::compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx)
-                        .await;
-
-                hummock_manager_ref
-                    .report_compact_task(
-                        &mut result_task,
-                        Some(to_prost_table_stats_map(task_stats)),
-                    )
-                    .await
-                    .unwrap();
-            } else {
-                break;
-            }
+                .unwrap();
         }
 
         let mut val = b"0"[..].repeat(1 << 10);
