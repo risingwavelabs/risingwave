@@ -48,6 +48,12 @@ impl CompactionPicker for LevelCompactionPicker {
             stats.skip_by_overlapping += 1;
             return None;
         }
+        let is_l0_pending_compact =
+            level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
+        if is_l0_pending_compact {
+            stats.skip_by_pending_files += 1;
+            return None;
+        }
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
@@ -156,7 +162,7 @@ impl LevelCompactionPicker {
         let mut skip_by_pending = false;
         let mut input_levels = vec![];
         let mut min_write_amp_meet = false;
-        let mut min_overlap_meet = true;
+        let mut min_overlap_meet = false;
         for input in l0_select_tables_vec {
             let l0_select_tables = input
                 .sstable_infos
