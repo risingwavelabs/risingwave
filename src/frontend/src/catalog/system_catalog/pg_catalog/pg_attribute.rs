@@ -36,6 +36,7 @@ pub static PG_ATTRIBUTE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Int16, "attlen"),
         (DataType::Int16, "attnum"),
         (DataType::Boolean, "attnotnull"),
+        (DataType::Boolean, "atthasdef"),
         (DataType::Boolean, "attisdropped"),
         (DataType::Varchar, "attidentity"),
         (DataType::Varchar, "attgenerated"),
@@ -47,6 +48,7 @@ pub static PG_ATTRIBUTE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                  c.type_len AS attlen, \
                  c.position::smallint AS attnum, \
                  false AS attnotnull, \
+                 false AS atthasdef, \
                  false AS attisdropped, \
                  ''::varchar AS attidentity, \
                  ''::varchar AS attgenerated, \

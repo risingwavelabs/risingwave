@@ -155,9 +155,9 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             ..
         } = column;
 
-        let data_type = data_type.clone().ok_or(ErrorCode::InvalidInputSyntax(
-            "data type is not specified".into(),
-        ))?;
+        let data_type = data_type
+            .clone()
+            .ok_or_else(|| ErrorCode::InvalidInputSyntax("data type is not specified".into()))?;
         if let Some(collation) = collation {
             return Err(ErrorCode::NotImplemented(
                 format!("collation \"{}\"", collation),
