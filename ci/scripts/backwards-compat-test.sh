@@ -38,7 +38,7 @@ QUERY_LOG_FILE="$LOG_DIR/query.log"
 # TODO(kwannoel): automatically derive this by:
 # 1. Fetching major version.
 # 2. Find the earliest minor version of that major version.
-TAG=v0.18.0
+TAG=v1.0
 # Duration to wait for recovery (seconds)
 RECOVERY_DURATION=20
 
