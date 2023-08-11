@@ -268,7 +268,7 @@ pub fn alter_definition_add_column(definition: &str, column: &ColumnCatalog) -> 
         .into_iter()
         .exactly_one()
         .expect("should contains only one statement");
-    let column = ColumnCatalog::from(column.clone()).column_desc;
+    let column = column.clone().column_desc;
 
     match &mut stmt {
         Statement::CreateSource {
