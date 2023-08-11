@@ -48,12 +48,6 @@ impl CompactionPicker for LevelCompactionPicker {
             stats.skip_by_overlapping += 1;
             return None;
         }
-        let is_l0_pending_compact =
-            level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
-        if is_l0_pending_compact {
-            stats.skip_by_pending_files += 1;
-            return None;
-        }
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
