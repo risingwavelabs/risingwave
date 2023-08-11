@@ -196,6 +196,23 @@ class Panels:
             **self.common_options,
         )
 
+    def timeseries_latency_ms(self,
+                           title,
+                           description,
+                           targets,
+                           legendCols=["mean"]):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(
+            title=title,
+            dataSource=self.datasource,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            unit="ms",
+            legendCalcs=legendCols,
+            **self.common_options,
+        )
+
     def timeseries_actor_latency(self,
                                  title,
                                  description,

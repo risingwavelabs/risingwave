@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -25,7 +25,7 @@ use fail::fail_point;
 use function_name::named;
 use futures::future::Either;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
@@ -2426,7 +2426,6 @@ where
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> (JoinHandle<()>, Sender<()>) {
-        use futures::StreamExt;
         let mut compactor_request_streams = FuturesUnordered::new();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let shutdown_rx_shared = shutdown_rx.shared();
@@ -2444,8 +2443,16 @@ where
                     compactor_request_streams.push(future);
                 };
 
+            let mut event_loop_iteration_now = Instant::now();
             loop {
                 let shutdown_rx_shared = shutdown_rx_shared.clone();
+
+                // report
+                hummock_manager
+                    .metrics
+                    .compaction_event_loop_iteration_latency
+                    .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                event_loop_iteration_now = Instant::now();
 
                 tokio::select! {
                     _ = shutdown_rx_shared => {
@@ -2454,19 +2461,54 @@ where
 
                     compactor_stream = compactor_streams_change_rx.recv() => {
                         if let Some((context_id, stream)) = compactor_stream {
-                                push_stream(context_id, stream, &mut compactor_request_streams);
+                            tracing::info!("compactor {} enters the cluster", context_id);
+                            push_stream(context_id, stream, &mut compactor_request_streams);
                         }
                     },
 
                     result = pending_on_none(compactor_request_streams.next()) => {
                         let mut compactor_alive = true;
                         let (context_id, compactor_stream_req) = result;
-                        let (event, stream) = match compactor_stream_req {
+                        let (event, create_at, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
-                                (req.event.unwrap(), stream)
+                                (req.event.unwrap(), req.create_at, stream)
                             }
-                            _ => continue,
+
+                            (Some(Err(err)), _stream) => {
+                                tracing::warn!("compactor {} leaving the cluster with err {:?}", context_id, err);
+                                hummock_manager.compactor_manager
+                                    .remove_compactor(context_id);
+                                continue
+                            }
+
+                            _ => {
+                                tracing::warn!("compactor {} leaving the cluster", context_id);
+                                hummock_manager.compactor_manager
+                                    .remove_compactor(context_id);
+                                continue
+                            },
                         };
+
+                        {
+                            const MAX_CONSUMED_LATENCY_MS: u64 = 500;
+                            let consumed_latency_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                            - create_at;
+                            hummock_manager.metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_latency_ms as _);
+                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
+                                tracing::warn!(
+                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
+                                    event,
+                                    create_at,
+                                    consumed_latency_ms
+                                );
+                            }
+                        }
 
                         match event {
                             RequestEvent::PullTask(PullTask {
@@ -2495,9 +2537,6 @@ where
                                                             e
                                                         );
 
-                                                        hummock_manager.compactor_manager
-                                                            .remove_compactor(compactor.context_id());
-
                                                         compactor_alive = false;
                                                         break;
                                                     }
@@ -2525,8 +2564,6 @@ where
                                             );
 
                                             compactor_alive = false;
-                                            hummock_manager.compactor_manager
-                                                .remove_compactor(context_id);
                                         }
                                     }
                                 } else {
@@ -2592,8 +2629,13 @@ where
                             }
                         }
 
+
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
+                        } else {
+                            tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
+                            hummock_manager.compactor_manager
+                                .remove_compactor(context_id);
                         }
                     }
                 }
@@ -2745,23 +2787,24 @@ async fn write_exclusive_cluster_id(
 ) -> Result<()> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
-
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    let metadata = object_store.list(&cluster_id_dir).await?;
-
-    if metadata.is_empty() {
-        object_store
-            .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
-            .await?;
-        Ok(())
-    } else {
-        let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
-        Err(ObjectError::internal(format!(
-            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `{:?}`.",
-            String::from_utf8(cluster_id.to_vec()).unwrap(), cluster_id_full_path,
+    match object_store.read(&cluster_id_full_path, None).await {
+        Ok(cluster_id) => Err(ObjectError::internal(format!(
+            "Data directory is already used by another cluster with id {:?}, path {}.",
+            String::from_utf8(cluster_id.to_vec()).unwrap(),
+            cluster_id_full_path,
         ))
-        .into())
+        .into()),
+        Err(e) => {
+            if e.is_object_not_found_error() {
+                object_store
+                    .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
+                    .await?;
+                return Ok(());
+            }
+            Err(e.into())
+        }
     }
 }
 
