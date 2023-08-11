@@ -284,6 +284,8 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
+                                    } else {
+                                        upstream_chunk_buffer.clear();
                                     }
 
                                     self.metrics
