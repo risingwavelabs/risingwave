@@ -20,6 +20,7 @@
 #![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
+#![feature(assert_matches)]
 
 pub mod object;
 pub mod scheduler;

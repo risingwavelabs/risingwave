@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::cmp::Ordering;
-use std::collections::btree_map::{BTreeMap, Iter};
+use std::collections::btree_map::{BTreeMap, CursorMut, Iter};
 use std::fmt::Debug;
 use std::ops::{Bound, Range};
 
-use risingwave_common::util::iter_util::ZipEqFast;
-
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct OrdRange<Idx: Ord + Copy + Debug> {
+pub struct OrdRange<Idx: Ord + Copy + Debug> {
     inner: Range<Idx>,
 }
 
@@ -47,9 +46,9 @@ impl<Idx: Ord + Copy + Debug> From<Range<Idx>> for OrdRange<Idx> {
     }
 }
 
-impl<Idx: Ord + Copy + Debug> Into<Range<Idx>> for OrdRange<Idx> {
-    fn into(self) -> Range<Idx> {
-        self.inner
+impl<Idx: Ord + Copy + Debug> From<OrdRange<Idx>> for Range<Idx> {
+    fn from(range: OrdRange<Idx>) -> Self {
+        range.inner
     }
 }
 
@@ -59,7 +58,7 @@ trait RangeExt: Sized {
     fn new(start: Self::Idx, end: Self::Idx) -> Option<Self>;
     fn is_contiguous(lhs: &Self, rhs: &Self) -> bool;
     fn overlaps(lhs: &Self, rhs: &Self) -> bool;
-    fn mergable(lhs: &Self, rhs: &Self) -> bool;
+    fn mergeable(lhs: &Self, rhs: &Self) -> bool;
     fn covers(lhs: &Self, rhs: &Self) -> bool;
     fn merge(lhs: &Self, rhs: &Self) -> Option<Self>;
     fn split(lhs: &Self, rhs: &Self) -> (Option<Self>, Option<Self>);
@@ -84,7 +83,7 @@ impl<Idx: Ord + Copy + Debug> RangeExt for Range<Idx> {
         std::cmp::max(lhs.start, rhs.start) < std::cmp::min(lhs.end, rhs.end)
     }
 
-    fn mergable(lhs: &Self, rhs: &Self) -> bool {
+    fn mergeable(lhs: &Self, rhs: &Self) -> bool {
         Self::is_contiguous(lhs, rhs) || Self::overlaps(lhs, rhs)
     }
 
@@ -93,7 +92,7 @@ impl<Idx: Ord + Copy + Debug> RangeExt for Range<Idx> {
     }
 
     fn merge(lhs: &Self, rhs: &Self) -> Option<Self> {
-        if !Self::mergable(lhs, rhs) {
+        if !Self::mergeable(lhs, rhs) {
             return None;
         }
         Some(std::cmp::min(lhs.start, rhs.start)..std::cmp::max(lhs.end, rhs.end))
@@ -180,19 +179,19 @@ impl<Idx: Ord + Copy + Debug, T> RangeMap<Idx, T> {
 
     pub fn merge<F>(&mut self, range: Range<Idx>, f: F)
     where
-        F: FnOnce(Range<Idx>, Vec<(Range<Idx>, T)>) -> T + Send + 'static,
+        F: FnOnce(Range<Idx>, Vec<(Range<Idx>, T)>) -> T,
     {
-        let range = range.clone().into();
+        let range = range.into();
         let mut cursor = self.ranges.lower_bound_mut(Bound::Included(&range));
 
-        if let Some((r, _)) = cursor.peek_prev() && RangeExt::mergable(&range.inner, &r.inner) {
+        if let Some((r, _)) = cursor.peek_prev() && RangeExt::mergeable(&range.inner, &r.inner) {
             cursor.move_prev();
         }
 
         let mut merged = vec![];
         let mut new_range = range.clone();
 
-        while let Some(r) = cursor.key() && RangeExt::mergable(&range.inner, &r.inner) {
+        while let Some(r) = cursor.key() && RangeExt::mergeable(&range.inner, &r.inner) {
             let (r, v) = cursor.remove_current().unwrap();
             new_range = RangeExt::merge(&new_range.inner, &r.inner).unwrap().into();
             merged.push((r.into(),v));
@@ -202,52 +201,29 @@ impl<Idx: Ord + Copy + Debug, T> RangeMap<Idx, T> {
         self.ranges.insert(new_range, value);
     }
 
-    /// # Panics
-    ///
-    /// This function panics if `f` input length mismatch output length.
-    pub fn split<F>(&mut self, range: Range<Idx>, f: F)
-    where
-        F: FnOnce(Vec<Range<Idx>>) -> Vec<T> + Send + 'static,
-    {
-        let range = range.clone().into();
-        let mut cursor = self.ranges.lower_bound(Bound::Included(&range));
-
-        if let Some((r, _)) = cursor.peek_prev() && RangeExt::overlaps(&range.inner, &r.inner) {
-            cursor.move_prev();
-        }
-
-        let mut ranges = vec![];
-        let mut range: Option<Range<Idx>> = Some(range.into());
-
-        while let Some(r) = range.as_ref() && let Some(cr) = cursor.key() && RangeExt::overlaps(r, &cr.inner) {
-            let (sl, sr) = RangeExt::split(r, &cr.inner);
-            if let Some(r) = sl {
-                ranges.push(r);
-            }
-            range = sr;
-            cursor.move_next();
-        }
-        if let Some(r) = range {
-            ranges.push(r);
-        }
-
-        let values = f(ranges.clone());
-
-        for (range, value) in ranges.into_iter().zip_eq_fast(values.into_iter()) {
-            self.insert(range, value);
-        }
+    pub fn split(&mut self, range: Range<Idx>) -> RangeMapSplitMut<'_, Idx, T> {
+        RangeMapSplitMut::new(self, range)
     }
 
-    pub fn covers(&mut self, range: Range<Idx>) -> Option<Range<Idx>> {
+    pub fn covers(&mut self, range: Range<Idx>) -> Option<RangeMapCoversMut<'_, Idx, T>> {
         let range = range.into();
-        let cursor = self.ranges.lower_bound(Bound::Included(&range));
+        let mut cursor = self.ranges.lower_bound_mut(Bound::Included(&range));
         if let Some((r, _)) = cursor.peek_prev() && RangeExt::covers(&r.inner, &range.inner) {
-            return Some(r.clone().into());
+            cursor.move_prev();
+            return Some(RangeMapCoversMut::new(cursor));
         }
         if let Some(r) = cursor.key() && RangeExt::covers(&r.inner, &range.inner) {
-            return Some(r.clone().into());
+            return Some(RangeMapCoversMut::new(cursor));
         }
         None
+    }
+
+    pub fn len(&self) -> usize {
+        self.ranges.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn iter(&self) -> RangeMapIter<'_, Idx, T> {
@@ -269,6 +245,143 @@ impl<Idx: Ord + Copy + Debug, T> RangeMap<Idx, T> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Entry<Idx: Ord + Copy + Debug> {
+    Range(Range<Idx>),
+    Gap(Range<Idx>),
+}
+
+pub struct RangeMapSplitMut<'a, Idx: Ord + Copy + Debug, T> {
+    map: &'a mut RangeMap<Idx, T>,
+
+    range: Range<Idx>,
+
+    cursor: CursorMut<'a, OrdRange<Idx>, T>,
+
+    entry: Option<Entry<Idx>>,
+
+    buffer: Vec<(OrdRange<Idx>, T)>,
+}
+
+impl<'a, Idx: Ord + Copy + Debug, T> RangeMapSplitMut<'a, Idx, T> {
+    pub fn new(map: &'a mut RangeMap<Idx, T>, range: Range<Idx>) -> Self {
+        let ptr = map as *mut _;
+        let mut cursor = map
+            .ranges
+            .lower_bound_mut(Bound::Included(&range.clone().into()));
+        if let Some((r, _)) = cursor.peek_prev() && RangeExt::overlaps(&range, &r.inner) {
+            cursor.move_prev();
+        }
+        let mut res = Self {
+            map: unsafe { &mut *ptr },
+            range,
+            cursor,
+            entry: None,
+            buffer: vec![],
+        };
+        res.update();
+        res
+    }
+
+    pub fn entry(&self) -> Option<&Entry<Idx>> {
+        self.entry.as_ref()
+    }
+
+    pub fn skip(&mut self) {
+        self.update();
+    }
+
+    pub fn value_mut(&mut self) -> &mut T {
+        assert_matches!(self.entry, Some(Entry::Range(..)));
+        self.cursor.value_mut().unwrap()
+    }
+
+    pub fn insert(&mut self, value: T) {
+        let Some(Entry::Gap(range)) = &self.entry else {
+            panic!("only gap can be inserted, entry: {:?}", self.entry);
+        };
+        self.buffer.push((range.clone().into(), value));
+        self.update();
+    }
+
+    fn update(&mut self) {
+        if matches!(self.entry, Some(Entry::Range(..))) {
+            self.cursor.move_next();
+        }
+
+        // Finish if `range` is empty.
+        if self.range.is_empty() {
+            self.entry = None;
+            return;
+        }
+
+        // Set full if cursor is empty.
+        let Some(r) = self.cursor.key() else {
+            self.entry = Some(Entry::Gap(self.range.clone()));
+            self.range = self.range.end..self.range.end;
+            debug_assert!(self.range.is_empty());
+            return;
+        };
+
+        if r.inner.start <= self.range.start {
+            // 1.
+            //   [ range ]
+            // [  r  ]
+            //
+            // 2.
+            //   [ range ]
+            // [     r     ]
+            self.entry = Some(Entry::Range(r.clone().into()));
+            self.range = r.inner.end..self.range.end;
+        } else {
+            // 1.
+            // [ range ]
+            //   [ r ]
+            //
+            // 2.
+            // [ range ]
+            //      [  r  ]
+            self.entry = Some(Entry::Gap(self.range.start..r.inner.start));
+            self.range = r.inner.start..self.range.end;
+        }
+    }
+}
+
+impl<'a, Idx: Ord + Copy + Debug, T> Drop for RangeMapSplitMut<'a, Idx, T> {
+    fn drop(&mut self) {
+        for (range, value) in self.buffer.drain(..) {
+            self.map.insert(range.into(), value);
+        }
+    }
+}
+
+pub struct RangeMapCoversMut<'a, Idx: Ord + Copy + Debug, T> {
+    cursor: CursorMut<'a, OrdRange<Idx>, T>,
+}
+
+impl<'a, Idx: Ord + Copy + Debug, T> RangeMapCoversMut<'a, Idx, T> {
+    pub fn new(cursor: CursorMut<'a, OrdRange<Idx>, T>) -> Self {
+        assert!(cursor.key().is_some());
+        Self { cursor }
+    }
+
+    pub fn range(&self) -> Range<Idx> {
+        self.cursor.key().cloned().unwrap().into()
+    }
+
+    pub fn value(&self) -> &T {
+        self.cursor.value().unwrap()
+    }
+
+    pub fn value_mut(&mut self) -> &mut T {
+        self.cursor.value_mut().unwrap()
+    }
+
+    pub fn range_value_mut(&mut self) -> (Range<Idx>, &mut T) {
+        (self.range(), self.value_mut())
+    }
+}
+
 pub struct RangeMapIter<'a, Idx: Ord + Copy + Debug, T> {
     iter: Iter<'a, OrdRange<Idx>, T>,
 }
@@ -277,10 +390,7 @@ impl<'a, Idx: Ord + Copy + Debug, T> Iterator for RangeMapIter<'a, Idx, T> {
     type Item = (Range<Idx>, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.iter.next() {
-            None => None,
-            Some((or, v)) => Some((or.clone().into(), v)),
-        }
+        self.iter.next().map(|(or, v)| (or.clone().into(), v))
     }
 }
 
@@ -292,10 +402,7 @@ impl<'a, Idx: Ord + Copy + Debug, T> Iterator for RangeMapKeyIter<'a, Idx, T> {
     type Item = Range<Idx>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.iter.next() {
-            None => None,
-            Some((or, _)) => Some(or.clone().into()),
-        }
+        self.iter.next().map(|(or, _)| or.clone().into())
     }
 }
 
@@ -417,70 +524,105 @@ mod tests {
     #[test]
     fn test_range_map_split() {
         let mut m = RangeMap::new();
+
         // { 0..10 => 0, 10..20 => 1, 20..30 => 2 }
-        m.split(0..10, |ranges| {
-            assert_eq!(ranges, vec![0..10]);
-            vec![0]
-        });
-        m.split(10..20, |ranges| {
-            assert_eq!(ranges, vec![10..20]);
-            vec![1]
-        });
-        m.split(20..30, |ranges| {
-            assert_eq!(ranges, vec![20..30]);
-            vec![2]
-        });
-        assert_eq!(m.keys().collect_vec(), vec![0..10, 10..20, 20..30]);
-        assert_eq!(m.values().copied().collect_vec(), vec![0, 1, 2]);
-        m.split(10..20, |ranges| {
-            assert_eq!(ranges, vec![]);
-            vec![]
-        });
-        m.split(0..30, |ranges| {
-            assert_eq!(ranges, vec![]);
-            vec![]
-        });
+        let mut s = m.split(0..10);
+        assert_eq!(s.entry(), Some(&Entry::Gap(0..10)));
+        s.insert(0);
+        assert_eq!(s.entry(), None);
+        drop(s);
+        let mut s = m.split(10..20);
+        assert_eq!(s.entry(), Some(&Entry::Gap(10..20)));
+        s.insert(1);
+        assert_eq!(s.entry(), None);
+        drop(s);
+        let mut s = m.split(20..30);
+        assert_eq!(s.entry(), Some(&Entry::Gap(20..30)));
+        s.insert(2);
+        assert_eq!(s.entry(), None);
+        drop(s);
         assert_eq!(m.keys().collect_vec(), vec![0..10, 10..20, 20..30]);
         assert_eq!(m.values().copied().collect_vec(), vec![0, 1, 2]);
 
+        let mut s = m.split(10..20);
+        assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
+        assert_eq!(s.value_mut(), &mut 1);
+        s.skip();
+        assert_eq!(s.entry(), None);
+        drop(s);
+
+        let mut s = m.split(0..30);
+        assert_eq!(s.entry(), Some(&Entry::Range(0..10)));
+        assert_eq!(s.value_mut(), &mut 0);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
+        assert_eq!(s.value_mut(), &mut 1);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Range(20..30)));
+        assert_eq!(s.value_mut(), &mut 2);
+        s.skip();
+        assert_eq!(s.entry(), None);
+        drop(s);
+
         let mut m = RangeMap::new();
-        m.split(10..20, |ranges| {
-            assert_eq!(ranges, vec![10..20]);
-            vec![0]
-        });
-        m.split(15..30, |ranges| {
-            assert_eq!(ranges, vec![20..30]);
-            vec![1]
-        });
+        m.insert(10..20, 0);
+
+        let mut s = m.split(15..30);
+        assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
+        assert_eq!(s.value_mut(), &mut 0);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Gap(20..30)));
+        s.insert(1);
+        assert_eq!(s.entry(), None);
+        drop(s);
         assert_eq!(m.keys().collect_vec(), vec![10..20, 20..30]);
         assert_eq!(m.values().copied().collect_vec(), vec![0, 1]);
 
         let mut m = RangeMap::new();
-        m.split(0..30, |ranges| {
-            assert_eq!(ranges, vec![0..30]);
-            vec![0]
-        });
-        m.split(10..20, |ranges| {
-            assert_eq!(ranges, vec![]);
-            vec![]
-        });
+        m.insert(0..30, 0);
+        let mut s = m.split(10..20);
+        assert_eq!(s.entry(), Some(&Entry::Range(0..30)));
+        assert_eq!(s.value_mut(), &mut 0);
+        *s.value_mut() = 1;
+        s.skip();
+        assert_eq!(s.entry(), None);
+        drop(s);
         assert_eq!(m.keys().collect_vec(), vec![0..30]);
-        assert_eq!(m.values().copied().collect_vec(), vec![0]);
+        assert_eq!(m.values().copied().collect_vec(), vec![1]);
 
         let mut m = RangeMap::new();
         m.insert(0..10, 0);
         m.insert(20..30, 1);
         m.insert(30..40, 2);
         m.insert(50..60, 3);
-        m.split(0..70, |ranges| {
-            assert_eq!(ranges, vec![10..20, 40..50, 60..70]);
-            vec![4, 5, 6]
-        });
+
+        let mut s = m.split(0..70);
+        assert_eq!(s.entry(), Some(&Entry::Range(0..10)));
+        assert_eq!(s.value_mut(), &mut 0);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Gap(10..20)));
+        s.insert(4);
+        assert_eq!(s.entry(), Some(&Entry::Range(20..30)));
+        assert_eq!(s.value_mut(), &mut 1);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Range(30..40)));
+        assert_eq!(s.value_mut(), &mut 2);
+        *s.value_mut() = 7;
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Gap(40..50)));
+        s.insert(5);
+        assert_eq!(s.entry(), Some(&Entry::Range(50..60)));
+        assert_eq!(s.value_mut(), &mut 3);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Gap(60..70)));
+        s.insert(6);
+        assert_eq!(s.entry(), None);
+        drop(s);
         assert_eq!(
             m.keys().collect_vec(),
             vec![0..10, 10..20, 20..30, 30..40, 40..50, 50..60, 60..70]
         );
-        assert_eq!(m.values().copied().collect_vec(), vec![0, 4, 1, 2, 5, 3, 6]);
+        assert_eq!(m.values().copied().collect_vec(), vec![0, 4, 1, 7, 5, 3, 6]);
     }
 
     #[test]
@@ -489,8 +631,14 @@ mod tests {
 
         m.insert(10..20, 0);
 
-        assert_eq!(m.covers(10..20), Some(10..20));
-        assert_eq!(m.covers(12..18), Some(10..20));
-        assert_eq!(m.covers(0..30), None);
+        assert_eq!(
+            m.covers(10..20).unwrap().range_value_mut(),
+            (10..20, &mut 0)
+        );
+        assert_eq!(
+            m.covers(12..18).unwrap().range_value_mut(),
+            (10..20, &mut 0)
+        );
+        assert!(m.covers(0..30).is_none());
     }
 }
