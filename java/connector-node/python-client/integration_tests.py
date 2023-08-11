@@ -187,14 +187,13 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
                     param=sink_param
                 )
             ]
-            request_list.extend(
-                [
-                    connector_service_pb2.SinkCoordinatorStreamRequest.CommitMetadata(
-                        epoch=epoch, metadata=[metadata]
-                    )
-                    for (epoch, metadata) in metadata_list
-                ]
-            )
+            request_list += [
+                connector_service_pb2.SinkCoordinatorStreamRequest.CommitMetadata(
+                    epoch=epoch, metadata=[metadata]
+                )
+                for (epoch, metadata) in metadata_list
+            ]
+
             response_iter = stub.SinkCoordinatorStream(request_list)
             try:
                 response = next(response_iter)
