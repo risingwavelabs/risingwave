@@ -141,7 +141,7 @@ pub struct StateTableInner<
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
-pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
+pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 /// `WatermarkCacheStateTable` caches the watermark column.
 /// It will reduce state cleaning overhead.
 pub type WatermarkCacheStateTable<S> =

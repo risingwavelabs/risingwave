@@ -29,6 +29,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -49,9 +50,9 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// - [`ArrangementBackfillExecutor`] can reside on a different CN, so it can be scaled
 ///   independently.
 /// - To synchronize upstream shared buffer, it is initialized with a [`ReplicatedStateTable`].
-pub struct ArrangementBackfillExecutor<S: StateStore> {
+pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     /// Upstream table
-    upstream_table: ReplicatedStateTable<S>,
+    upstream_table: ReplicatedStateTable<S, SD>,
 
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
@@ -73,14 +74,15 @@ pub struct ArrangementBackfillExecutor<S: StateStore> {
     chunk_size: usize,
 }
 
-impl<S> ArrangementBackfillExecutor<S>
+impl<S, SD> ArrangementBackfillExecutor<S, SD>
 where
     S: StateStore,
+    SD: ValueRowSerde,
 {
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn new(
-        upstream_table: ReplicatedStateTable<S>,
+        upstream_table: ReplicatedStateTable<S, SD>,
         upstream: BoxedExecutor,
         state_table: StateTable<S>,
         output_indices: Vec<usize>,
@@ -509,7 +511,7 @@ where
     /// 3. Finished: All iterators finished.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
-        upstream_table: &'a ReplicatedStateTable<S>,
+        upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         chunk_size: usize,
         builders: &'a mut [DataChunkBuilder],
@@ -556,9 +558,10 @@ where
     }
 }
 
-impl<S> Executor for ArrangementBackfillExecutor<S>
+impl<S, SD> Executor for ArrangementBackfillExecutor<S, SD>
 where
     S: StateStore,
+    SD: ValueRowSerde,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
