@@ -56,6 +56,40 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
+        let target_level = levels.get_level(self.target_level);
+        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let min_overlap_picker = MinOverlappingPicker::new(
+            0,
+            self.target_level,
+            self.config.sub_level_max_compaction_bytes,
+            false,
+            overlap_strategy.clone(),
+        );
+        let (select_tables, target_tables) = min_overlap_picker.pick_tables(
+            &l0.sub_levels[0].table_infos,
+            &target_level.table_infos,
+            level_handlers,
+        );
+        // only pick tables for trivial move
+        if !select_tables.is_empty() && target_tables.is_empty() {
+            return Some(CompactionInput {
+                input_levels: vec![
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: select_tables,
+                    },
+                    InputLevel {
+                        level_idx: self.target_level as u32,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: vec![],
+                    },
+                ],
+                target_level: self.target_level,
+                target_sub_level_id: 0,
+            });
+        }
+
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
         if let Some(ret) = self.pick_multi_level_to_base(
             l0,
