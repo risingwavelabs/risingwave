@@ -15,7 +15,7 @@ arrow-array = "45"
 arrow-flight = "45"
 arrow-schema = "45"
 arrow-select = "45"
-futures-util = "0.3.25"
+futures-util = "0.3.28"
 static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
