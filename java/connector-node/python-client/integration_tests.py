@@ -303,7 +303,7 @@ def test_upsert_iceberg_sink(param):
     }
     type = "iceberg"
     # need to make sure all ops as Insert
-    test_sink(prop, **param)
+    test_sink(prop, is_coordinated=True, **param)
 
 
 def test_deltalake_sink(param):
