@@ -280,10 +280,10 @@ impl ClickHouseSinkWriter {
                 .r#type
                 .split("DateTime64(")
                 .last()
-                .ok_or(SinkError::ClickHouse("must have last".to_string()))?
+                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
                 .split(')')
                 .next()
-                .ok_or(SinkError::ClickHouse("must have next".to_string()))?
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
                 .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?
         } else {

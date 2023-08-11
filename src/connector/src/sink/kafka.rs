@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
@@ -42,7 +43,8 @@ use crate::sink::utils::{
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
-use crate::source::kafka::PrivateLinkProducerContext;
+use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
+use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
 };
@@ -238,6 +240,21 @@ impl KafkaConfig {
     }
 }
 
+impl From<KafkaConfig> for KafkaProperties {
+    fn from(val: KafkaConfig) -> Self {
+        KafkaProperties {
+            bytes_per_second: None,
+            max_num_messages: None,
+            scan_startup_mode: None,
+            time_offset: None,
+            consumer_group: None,
+            upsert: None,
+            common: val.common,
+            rdkafka_properties: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct KafkaSink {
     pub config: KafkaConfig,
@@ -290,9 +307,14 @@ impl Sink for KafkaSink {
         }
 
         // Try Kafka connection.
-        // TODO: Reuse the conductor instance we create during validation.
-        KafkaTransactionConductor::new(self.config.clone(), &"validation".to_string()).await?;
-
+        // There is no such interface for kafka producer to validate a connection
+        // use enumerator to validate broker reachability and existence of topic
+        let mut ticker = KafkaSplitEnumerator::new(
+            KafkaProperties::from(self.config.clone()),
+            Arc::new(SourceEnumeratorContext::default()),
+        )
+        .await?;
+        _ = ticker.list_splits().await?;
         Ok(())
     }
 }

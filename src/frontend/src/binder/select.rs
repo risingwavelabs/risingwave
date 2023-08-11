@@ -54,7 +54,7 @@ pub struct BoundSelect {
     pub where_clause: Option<ExprImpl>,
     pub group_by: GroupBy,
     pub having: Option<ExprImpl>,
-    schema: Schema,
+    pub schema: Schema,
 }
 
 impl RewriteExprsRecursive for BoundSelect {
