@@ -29,3 +29,5 @@ jobs:
         run: git diff
 
       - uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Fix "cargo-hakari"
