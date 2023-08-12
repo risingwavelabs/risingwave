@@ -58,6 +58,10 @@ impl LogicalTableFunction {
             table_function,
         }
     }
+
+    pub fn table_function(&self) -> &TableFunction {
+        &self.table_function
+    }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalTableFunction }

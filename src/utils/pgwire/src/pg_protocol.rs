@@ -26,6 +26,7 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
+use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_sqlparser::ast::Statement;
@@ -601,11 +602,19 @@ where
             stmts.into_iter().next()
         };
 
-        let param_types = type_ids
+        let param_types: Vec<Option<DataType>> = type_ids
             .iter()
-            .map(|&id| DataType::from_oid(id))
+            .map(|&id| {
+                // 0 means unspecified type
+                // ref: https://www.postgresql.org/docs/15/protocol-message-formats.html#:~:text=Placing%20a%20zero%20here%20is%20equivalent%20to%20leaving%20the%20type%20unspecified.
+                if id == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(DataType::from_oid(id)?))
+                }
+            })
             .try_collect()
-            .map_err(|err| PsqlError::ParseError(err.into()))?;
+            .map_err(|err: RwError| PsqlError::ParseError(err.into()))?;
 
         let prepare_statement = session
             .parse(stmt, param_types)
