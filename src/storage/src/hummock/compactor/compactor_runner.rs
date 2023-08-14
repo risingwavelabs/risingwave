@@ -31,8 +31,8 @@ use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Comp
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
-    SstableBuilderOptions, SstableStoreRef,
+    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
+    HummockResult, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -52,7 +52,16 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        let kv_count = task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.total_key_count)
+            .sum::<u64>() as usize;
+        let use_block_based_filter =
+            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
@@ -74,6 +83,7 @@ impl CompactorRunner {
                     || task.target_level == task.base_level,
                 split_by_table: task.split_by_state_table,
                 split_weight_by_vnode: task.split_weight_by_vnode,
+                use_block_based_filter,
             },
         );
 
