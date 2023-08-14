@@ -115,16 +115,12 @@ where
         // Table scan scans a subset of the columns of the upstream table.
         println!("pk: {:?}", self.upstream_table.pk_indices());
         println!("output: {:?}", self.output_indices);
-        let pk_indices = self
-            .upstream_table
-            .pk_indices().to_vec();
+        let pk_indices = self.upstream_table.pk_indices().to_vec();
         let state_len = pk_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
-
-        let schema = Arc::new(self.upstream.schema().clone());
 
         let mut upstream = self.upstream.execute();
 
@@ -145,11 +141,12 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
-        println!("{:?}", schema.data_types());
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
-            .map(|_| DataChunkBuilder::new(schema.data_types(), self.chunk_size))
+            .map(|_| {
+                DataChunkBuilder::new(upstream_table.get_data_types().to_vec(), self.chunk_size)
+            })
             .collect_vec();
 
         // If the snapshot is empty, we don't need to backfill.
@@ -320,6 +317,7 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
+                                        println!("snapshot_read: {:#?}", chunk);
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
@@ -339,7 +337,6 @@ where
                     Some(barrier) => barrier,
                     None => bail!("BUG: current_backfill loop exited without a barrier"),
                 };
-                // TODO: Process existing buffered snapshots.
 
                 // Process barrier:
                 // - consume snapshot rows left in builder.

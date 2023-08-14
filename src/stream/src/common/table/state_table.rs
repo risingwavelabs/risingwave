@@ -26,8 +26,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Project, Row, RowExt};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -135,6 +135,13 @@ pub struct StateTableInner<
 
     /// Watermark cache
     watermark_cache: StateTableWatermarkCache,
+
+    /// Data Types
+    /// We will need to use to build data chunks from state table rows.
+    data_types: Vec<DataType>,
+
+    /// Output indices, only applicable for replicated state tables.
+    output_indices: Vec<usize>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -187,6 +194,17 @@ where
             .columns
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        let data_types: Vec<DataType> = table_catalog
+            .columns
+            .iter()
+            .map(|col| {
+                col.get_column_desc()
+                    .unwrap()
+                    .get_column_type()
+                    .unwrap()
+                    .into()
+            })
             .collect();
         let order_types: Vec<OrderType> = table_catalog
             .pk
@@ -277,6 +295,8 @@ where
             StateTableWatermarkCache::new(0)
         };
 
+        let output_indices = vec![];
+
         Self {
             table_id,
             local_store: local_state_store,
@@ -293,6 +313,8 @@ where
             state_clean_watermark: None,
             prev_cleaned_watermark: None,
             watermark_cache,
+            data_types,
+            output_indices,
         }
     }
 
@@ -425,7 +447,10 @@ where
                 TableOption::default(),
             ))
             .await;
-
+        let data_types: Vec<DataType> = table_columns
+            .iter()
+            .map(|col| col.data_type.clone())
+            .collect();
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
@@ -437,6 +462,7 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
+        let output_indices = vec![];
 
         Self {
             table_id,
@@ -462,7 +488,13 @@ where
             state_clean_watermark: None,
             prev_cleaned_watermark: None,
             watermark_cache,
+            data_types,
+            output_indices,
         }
+    }
+
+    pub fn get_data_types(&self) -> &[DataType] {
+        &self.data_types
     }
 
     pub fn table_id(&self) -> u32 {
@@ -562,7 +594,12 @@ where
         match encoded_row {
             Some(encoded_row) => {
                 let row = self.row_serde.deserialize(&encoded_row)?;
-                Ok(Some(OwnedRow::new(row)))
+                let row = if IS_REPLICATED {
+                    row.project(&self.output_indices).to_owned_row()
+                } else {
+                    OwnedRow::new(row)
+                };
+                Ok(Some(row))
             }
             None => Ok(None),
         }
@@ -1111,6 +1148,26 @@ where
             .map(get_second))
     }
 
+    /// Replicated tables might not have all columns in the output, so we need to project the
+    /// output.
+    /// Instead of doing this in the `iter_with_pk_range` function, we do it in a separate function
+    /// to avoid complexity of the `RowStream` type.
+    pub async fn iter_with_pk_range_and_output_indices(
+        &self,
+        pk_range: &(Bound<OwnedRow>, Bound<OwnedRow>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTableInner` owns.
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<ProjectedRowStream<'_, S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>>
+    {
+        Ok(self
+            .iter_with_pk_range(pk_range, vnode, prefetch_options)
+            .await?
+            .map(|row| row.map(|r| r.project(&self.output_indices))))
+    }
+
     pub async fn iter_key_and_val_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
@@ -1259,6 +1316,14 @@ where
     }
 }
 
+pub type ProjectedRowStream<
+    'a,
+    S: StateStore,
+    SD: ValueRowSerde + 'a,
+    const IS_REPLICATED: bool,
+    W: WatermarkBufferStrategy + 'a,
+    const USE_WATERMARK_CACHE: bool,
+> = impl Stream<Item = StreamExecutorResult<Project<'a, OwnedRow>>> + 'a;
 pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
 pub type RowStreamWithPk<'a, S: StateStore, SD: ValueRowSerde + 'a> =

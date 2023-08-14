@@ -125,8 +125,8 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     ///
     /// NOTE(kwannoel): The `output_column_ids` here may be slightly different
     /// from those supplied to associated executors.
-    /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from storage.
-    /// The associated executors may not have these `pk` fields.
+    /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from
+    /// storage. The associated executors may not have these `pk` fields.
     #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,

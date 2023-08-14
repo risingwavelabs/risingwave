@@ -239,6 +239,42 @@ impl StreamTableScan {
             })
             .collect_vec();
 
+        let batch_plan_node = BatchPlanNode {
+            table_desc: Some(self.logical.table_desc.to_protobuf()),
+            column_ids: upstream_column_ids.clone(),
+        };
+
+        let catalog = self
+            .build_backfill_state_catalog(state)
+            .to_internal_table_prost();
+
+        let table_desc = Some(self.logical.table_desc.to_protobuf());
+        println!("table_desc: {:#?}", table_desc);
+
+        println!("output_col_ids: {:#?}", self.logical.output_column_ids());
+        println!("upstream_col_ids: {:#?}", upstream_column_ids);
+
+        // For arrangement backfill we need to maintain 2 sets of output_indices.
+        // 1. output_indices for the updates.
+        // 2. output_indices for the records from the arrangement table.
+        //
+        // Note that output_indices for the updates may not match
+        // output_indices for state table.
+        // Reason being the updates could already have their columns truncated.
+        //
+        // On the other hand the arrangement within backfill is a full replica of the upstream
+        // state table.
+        let table_output_indices = self
+            .get_upstream_state_table()
+            .columns()
+            .iter()
+            .map(|i| {
+                upstream_column_ids
+                    .iter()
+                    .position(|&x| x == i.column_desc.column_id.get_id())
+                    .unwrap() as u32
+            })
+            .collect_vec();
         let output_indices = self
             .logical
             .output_column_ids()
@@ -250,17 +286,6 @@ impl StreamTableScan {
                     .unwrap() as u32
             })
             .collect_vec();
-
-        let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.logical.table_desc.to_protobuf()),
-            column_ids: upstream_column_ids.clone(),
-        };
-
-        let catalog = self
-            .build_backfill_state_catalog(state)
-            .to_internal_table_prost();
-
-        let table_desc = Some(self.logical.table_desc.to_protobuf());
 
         let arrangement_table = if self.chain_type == ChainType::ArrangementBackfill {
             Some(self.get_upstream_state_table().to_internal_table_prost())
