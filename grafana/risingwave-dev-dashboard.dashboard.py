@@ -1602,6 +1602,7 @@ def section_hummock(panels):
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
     file_cache_get_filter = "op='get'"
+
     return [
         panels.row("Hummock"),
         panels.timeseries_latency(
@@ -1743,6 +1744,36 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_bytes(
+            "Materialized View Read Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_iter_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id) + sum((histogram_quantile({quantile}, sum(rate({metric("state_store_get_key_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({metric("state_store_get_value_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id)',
+                        f"read p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+        panels.timeseries_bytes(
+            "Materialized View Write Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_write_batch_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id, table_name)',
+                        f"write p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+
         panels.timeseries_count(
             "Read Item Count - Iter",
             "",
