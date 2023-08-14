@@ -45,8 +45,8 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    create_monotonic_events_from_compaction_delete_events, CachePolicy, CompactionDeleteRanges,
-    HummockError, HummockResult, SstableBuilderOptions,
+    create_monotonic_events_from_compaction_delete_events, BlockedXor16FilterBuilder, CachePolicy,
+    CompactionDeleteRanges, HummockError, HummockResult, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -138,10 +138,12 @@ async fn compact_shared_buffer(
         }
         ret
     });
+    let mut total_key_count = 0;
     for imm in &payload {
+        let tombstones = imm.get_delete_range_tombstones();
+        builder.add_delete_events(tombstones);
+        total_key_count += imm.kv_count();
         let data_size = {
-            let tombstones = imm.get_delete_range_tombstones();
-            builder.add_delete_events(tombstones);
             // calculate encoded bytes of key var length
             (imm.kv_count() * 8 + imm.size()) as u64
         };
@@ -217,6 +219,7 @@ async fn compact_shared_buffer(
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
+    let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
 
     let agg = builder.build_for_compaction();
     for (split_index, key_range) in splits.into_iter().enumerate() {
@@ -226,6 +229,7 @@ async fn compact_shared_buffer(
             context.clone(),
             sub_compaction_sstable_size as usize,
             split_weight_by_vnode as u32,
+            use_block_based_filter,
         );
         let iter = OrderedMergeIteratorInner::new(
             payload.iter().map(|imm| imm.clone().into_forward_iter()),
@@ -443,6 +447,7 @@ impl SharedBufferCompactRunner {
         context: Arc<CompactorContext>,
         sub_compaction_sstable_size: usize,
         split_weight_by_vnode: u32,
+        use_block_based_filter: bool,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -459,6 +464,7 @@ impl SharedBufferCompactRunner {
                 is_target_l0_or_lbase: true,
                 split_by_table: false,
                 split_weight_by_vnode,
+                use_block_based_filter,
             },
         );
         Self {

@@ -111,7 +111,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 16
+    timeout_in_minutes: 17
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
