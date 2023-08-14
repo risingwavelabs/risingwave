@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod const_eval_rewriter;
-mod cse_rewriter;
+mod expr_counter;
+mod input_ref_counter;
 
-pub(crate) use const_eval_rewriter::ConstEvalRewriter;
-pub(crate) use cse_rewriter::CseRewriter;
+pub(crate) use expr_counter::CseExprCounter;
+pub(crate) use input_ref_counter::InputRefCounter;

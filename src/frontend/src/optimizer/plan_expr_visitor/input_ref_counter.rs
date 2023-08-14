@@ -12,8 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod const_eval_rewriter;
-mod cse_rewriter;
+use std::collections::HashMap;
 
-pub(crate) use const_eval_rewriter::ConstEvalRewriter;
-pub(crate) use cse_rewriter::CseRewriter;
+use crate::expr::{ExprVisitor, InputRef};
+
+#[derive(Default)]
+pub struct InputRefCounter {
+    // `input_ref` index -> count
+    pub counter: HashMap<usize, usize>,
+}
+
+impl ExprVisitor<()> for InputRefCounter {
+    fn merge(_: (), _: ()) {}
+
+    fn visit_input_ref(&mut self, input_ref: &InputRef) {
+        self.counter
+            .entry(input_ref.index)
+            .and_modify(|counter| *counter += 1)
+            .or_insert(1);
+    }
+}
