@@ -26,7 +26,8 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    StackTraceRequest, StackTraceResponse,
 };
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
@@ -65,8 +66,10 @@ impl ComputeClient {
     }
 
     pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
-        let exchange_client = ExchangeServiceClient::new(channel.clone());
-        let task_client = TaskServiceClient::new(channel.clone());
+        let exchange_client =
+            ExchangeServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let task_client =
+            TaskServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let monitor_client = MonitorServiceClient::new(channel.clone());
         let config_client = ConfigServiceClient::new(channel);
         Self {
@@ -188,6 +191,15 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .profiling(ProfilingRequest { sleep_s })
+            .await?
+            .into_inner())
+    }
+
+    pub async fn heap_profile(&self, dir: String) -> Result<HeapProfilingResponse> {
+        Ok(self
+            .monitor_client
+            .to_owned()
+            .heap_profiling(HeapProfilingRequest { dir })
             .await?
             .into_inner())
     }

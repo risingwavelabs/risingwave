@@ -29,6 +29,13 @@ use crate::cmd_impl::meta::ReschedulePayload;
 use crate::common::CtlContext;
 use crate::ScaleResizeCommands;
 
+macro_rules! fail {
+    ($($arg:tt)*) => {{
+        println!($($arg)*);
+        exit(1);
+    }};
+}
+
 pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
@@ -41,8 +48,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            println!("Failed to fetch cluster info: {}", e);
-            exit(1);
+            fail!("Failed to fetch cluster info: {}", e);
         }
     };
 
@@ -79,8 +85,12 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         })
         .collect::<HashMap<_, _>>();
 
-    let worker_input_to_worker_id = |inputs: Vec<String>| -> Vec<u32> {
+    let worker_input_to_worker_ids = |inputs: Vec<String>, support_all: bool| -> Vec<u32> {
         let mut result: HashSet<_> = HashSet::new();
+
+        if inputs.len() == 1 && inputs[0].to_lowercase() == "all" && support_all {
+            return streaming_workers_index_by_id.keys().cloned().collect();
+        }
 
         for input in inputs {
             let worker_id = input.parse::<u32>().ok().or_else(|| {
@@ -94,8 +104,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
                     println!("warn: {} and {} are the same worker", input, worker_id);
                 }
             } else {
-                println!("Invalid worker input: {}", input);
-                exit(1);
+                fail!("Invalid worker input: {}", input);
             }
         }
 
@@ -110,53 +119,50 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     let ScaleResizeCommands {
         exclude_workers,
         include_workers,
+        target_parallelism,
         generate,
         output,
         yes,
         fragments,
     } = resize;
 
-    let worker_changes = match (exclude_workers, include_workers) {
-        (None, None) => unreachable!(),
-        (exclude, include) => {
-            let excludes = worker_input_to_worker_id(exclude.unwrap_or_default());
-            let includes = worker_input_to_worker_id(include.unwrap_or_default());
+    let worker_changes = {
+        let exclude_worker_ids =
+            worker_input_to_worker_ids(exclude_workers.unwrap_or_default(), false);
+        let include_worker_ids =
+            worker_input_to_worker_ids(include_workers.unwrap_or_default(), true);
 
-            for worker_input in excludes.iter().chain(includes.iter()) {
-                if !streaming_workers_index_by_id.contains_key(worker_input) {
-                    println!("Invalid worker id: {}", worker_input);
-                    exit(1);
-                }
-            }
+        if let Some(target) = target_parallelism && target == 0 {
+            fail!("Target parallelism must be greater than 0");
+        }
 
-            for include_worker_id in &includes {
-                let worker_is_unschedulable = streaming_workers_index_by_id
-                    .get(include_worker_id)
-                    .and_then(|worker| worker.property.as_ref())
-                    .map(|property| property.is_unschedulable)
-                    .unwrap_or(false);
-
-                if worker_is_unschedulable {
-                    println!(
-                        "Worker {} is unschedulable, should not be included",
-                        include_worker_id
-                    );
-                    exit(1);
-                }
-            }
-
-            WorkerChanges {
-                include_worker_ids: includes,
-                exclude_worker_ids: excludes,
+        for worker_id in exclude_worker_ids.iter().chain(include_worker_ids.iter()) {
+            if !streaming_workers_index_by_id.contains_key(worker_id) {
+                fail!("Invalid worker id: {}", worker_id);
             }
         }
-    };
 
-    if worker_changes.exclude_worker_ids.is_empty() && worker_changes.include_worker_ids.is_empty()
-    {
-        println!("No worker nodes provided");
-        exit(1)
-    }
+        for include_worker_id in &include_worker_ids {
+            let worker_is_unschedulable = streaming_workers_index_by_id
+                .get(include_worker_id)
+                .and_then(|worker| worker.property.as_ref())
+                .map(|property| property.is_unschedulable)
+                .unwrap_or(false);
+
+            if worker_is_unschedulable {
+                fail!(
+                    "Worker {} is unschedulable, should not be included",
+                    include_worker_id
+                );
+            }
+        }
+
+        WorkerChanges {
+            include_worker_ids,
+            exclude_worker_ids,
+            target_parallelism,
+        }
+    };
 
     let all_fragment_ids: HashSet<_> = table_fragments
         .iter()
@@ -171,13 +177,12 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
                 .iter()
                 .any(|fragment_id| !all_fragment_ids.contains(fragment_id))
             {
-                println!(
+                fail!(
                     "Invalid fragment ids: {:?}",
                     provide_fragment_ids
                         .difference(&all_fragment_ids)
                         .collect_vec()
                 );
-                exit(1);
             }
 
             provide_fragment_ids.into_iter().collect()
@@ -200,14 +205,12 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     } = match response {
         Ok(response) => response,
         Err(e) => {
-            println!("Failed to generate plan: {:?}", e);
-            exit(1);
+            fail!("Failed to generate plan: {:?}", e);
         }
     };
 
     if !success {
-        println!("Failed to generate plan, current revision is {}", revision);
-        exit(1);
+        fail!("Failed to generate plan, current revision is {}", revision);
     }
 
     if reschedules.is_empty() {
@@ -254,12 +257,10 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             {
                 Ok(true) => println!("Processing..."),
                 Ok(false) => {
-                    println!("Abort.");
-                    exit(1);
+                    fail!("Abort.");
                 }
                 Err(_) => {
-                    println!("Error with questionnaire, try again later");
-                    exit(-1);
+                    fail!("Error with questionnaire, try again later");
                 }
             }
         }
@@ -268,14 +269,12 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             match meta_client.reschedule(reschedules, revision, false).await {
                 Ok(response) => response,
                 Err(e) => {
-                    println!("Failed to execute plan: {:?}", e);
-                    exit(1);
+                    fail!("Failed to execute plan: {:?}", e);
                 }
             };
 
         if !success {
-            println!("Failed to execute plan, current revision is {}", revision);
-            exit(1);
+            fail!("Failed to execute plan, current revision is {}", revision);
         }
 
         println!(
@@ -297,8 +296,7 @@ pub async fn update_schedulability(
     let GetClusterInfoResponse { worker_nodes, .. } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            println!("Failed to get cluster info: {:?}", e);
-            exit(1);
+            fail!("Failed to get cluster info: {:?}", e);
         }
     };
 
@@ -325,8 +323,7 @@ pub async fn update_schedulability(
                 println!("Warn: {} and {} are the same worker", worker, worker_id);
             }
         } else {
-            println!("Invalid worker id: {}", worker);
-            exit(1);
+            fail!("Invalid worker id: {}", worker);
         }
     }
 

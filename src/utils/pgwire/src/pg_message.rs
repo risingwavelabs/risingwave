@@ -85,7 +85,7 @@ pub struct FeBindMessage {
     pub param_format_codes: Vec<i16>,
     pub result_format_codes: Vec<i16>,
 
-    pub params: Vec<Bytes>,
+    pub params: Vec<Option<Bytes>>,
     pub portal_name: Bytes,
     pub statement_name: Bytes,
 }
@@ -177,7 +177,11 @@ impl FeBindMessage {
         let params = (0..len)
             .map(|_| {
                 let val_len = buf.get_i32();
-                buf.copy_to_bytes(val_len as usize)
+                if val_len == -1 {
+                    None
+                } else {
+                    Some(buf.copy_to_bytes(val_len as usize))
+                }
             })
             .collect();
 

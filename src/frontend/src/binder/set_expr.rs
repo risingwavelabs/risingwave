@@ -159,7 +159,17 @@ impl Binder {
                                 .zip_eq_fast(r_select.select_items.iter_mut())
                                 .enumerate()
                             {
-                                let column_type = align_types(vec![l, r].into_iter())?;
+                                let Ok(column_type) = align_types(vec![l, r].into_iter()) else {
+                                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                                        "{} types {} and {} cannot be matched. Columns' name are `{}` and `{}`.",
+                                        op,
+                                        l_select.schema.fields[i].data_type,
+                                        r_select.schema.fields[i].data_type,
+                                        l_select.schema.fields[i].name,
+                                        r_select.schema.fields[i].name,
+                                    ))
+                                        .into());
+                                };
                                 l_select.schema.fields[i].data_type = column_type.clone();
                                 r_select.schema.fields[i].data_type = column_type;
                             }
@@ -173,10 +183,12 @@ impl Binder {
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "{} types {} and {} cannot be matched",
+                                    "{} types {} and {} cannot be matched. Columns' name are {} and {}.",
                                     op,
                                     a.data_type.prost_type_name().as_str_name(),
                                     b.data_type.prost_type_name().as_str_name(),
+                                    a.name,
+                                    b.name,
                                 ))
                                 .into());
                             }

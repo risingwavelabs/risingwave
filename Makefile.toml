@@ -527,9 +527,7 @@ script = '''
 #!/usr/bin/env bash
 
 tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
-tmux kill-session -t risedev &
-kill_session_pid=$!
-wait $kill_session_pid
+tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
@@ -1061,8 +1059,29 @@ description = "Clean data and start a full RisingWave dev cluster using risedev-
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs"]
+dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
 description = "Kill cluster, dump logs and check logs"
+
+[tasks.wait-processes-exit]
+private = true
+category = "Misc"
+description = "Wait for RisingWave processes to exit"
+script = """
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
+        sleep 1
+    done
+}
+
+wait_for_process meta-node
+wait_for_process compute-node
+wait_for_process frontend
+wait_for_process compactor
+echo "All processes has exited."
+"""
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
@@ -1165,4 +1184,23 @@ cat << EOF > src/config/example.toml
 # Check detailed comments in src/common/src/config.rs
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
+'''
+
+[tasks.psql]
+category = "RiseDev - PSQL Client"
+description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
 '''
