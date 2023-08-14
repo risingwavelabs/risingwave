@@ -46,6 +46,7 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
         batch_size,
         data_types,
         &VarcharProperty::RandomFixedLength(None),
+        1.0,
     )
 }
 

@@ -107,6 +107,35 @@ impl EstimateSize for Vis {
     }
 }
 
+impl std::ops::BitAndAssign<&Bitmap> for Vis {
+    fn bitand_assign(&mut self, rhs: &Bitmap) {
+        match self {
+            Vis::Bitmap(lhs) => lhs.bitand_assign(rhs),
+            Vis::Compact(_) => *self = Vis::Bitmap(rhs.clone()),
+        }
+    }
+}
+
+impl std::ops::BitAndAssign<Bitmap> for Vis {
+    fn bitand_assign(&mut self, rhs: Bitmap) {
+        match self {
+            Vis::Bitmap(lhs) => lhs.bitand_assign(&rhs),
+            Vis::Compact(_) => *self = Vis::Bitmap(rhs),
+        }
+    }
+}
+
+impl std::ops::BitAnd<&Bitmap> for &Vis {
+    type Output = Vis;
+
+    fn bitand(self, rhs: &Bitmap) -> Self::Output {
+        match self {
+            Vis::Bitmap(lhs) => Vis::Bitmap(lhs.bitand(rhs)),
+            Vis::Compact(_) => Vis::Bitmap(rhs.clone()),
+        }
+    }
+}
+
 impl<'a, 'b> std::ops::BitAnd<&'b Vis> for &'a Vis {
     type Output = Vis;
 

@@ -343,8 +343,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_key: vec![],
-            watermark_output_key: vec![],
+            watermark_input_cols: vec![],
+            watermark_output_cols: vec![],
+            nondecreasing_exprs: vec![],
             merge_chunk: false,
         })),
         fields: vec![], // TODO: fill this later

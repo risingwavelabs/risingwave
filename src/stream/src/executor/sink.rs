@@ -100,7 +100,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             downstream_pk,
             sink_type,
         };
-        let sink = build_sink(sink_param.clone()).await?;
+        let sink = build_sink(sink_param.clone())?;
         let input_schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -276,7 +276,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let chunk = if visible_columns.len() != columns.len() {
                         // Do projection here because we may have columns that aren't visible to
                         // the downstream.
-                        chunk.reorder_columns(&visible_columns)
+                        chunk.project(&visible_columns)
                     } else {
                         chunk
                     };
@@ -396,11 +396,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam {
-                connector_params: Default::default(),
-                executor_id: 0,
-                vnode_bitmap: None,
-            },
+            SinkWriterParam::default(),
             columns.clone(),
             properties,
             pk.clone(),
@@ -487,11 +483,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam {
-                connector_params: Default::default(),
-                executor_id: 0,
-                vnode_bitmap: None,
-            },
+            SinkWriterParam::default(),
             columns,
             properties,
             pk.clone(),

@@ -19,8 +19,8 @@ use prometheus::core::{
 };
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Gauge, HistogramVec, IntGauge, IntGaugeVec, Opts, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, HistogramVec,
+    IntGauge, Opts, Registry,
 };
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -66,9 +66,7 @@ pub struct HummockStateStoreMetrics {
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
 
-    // memory
-    pub mem_table_memory_size: IntGaugeVec,
-    pub mem_table_item_count: IntGaugeVec,
+    registry: Registry,
 }
 
 impl HummockStateStoreMetrics {
@@ -165,7 +163,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
                 "state_store_write_batch_duration",
                 "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+                exponential_buckets(0.0001, 2.0, 21).unwrap() // min 1ms ~ max 104s
             );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -173,7 +171,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_write_batch_size",
             "Total size of batched write that have been issued to state store",
-            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
+            exponential_buckets(256.0, 2.0, 25).unwrap() // min 256B ~ max 4GB
         );
         let write_batch_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -243,23 +241,6 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        // todo(wcy-fdu): may replace instance_id with actor_id.
-        let mem_table_memory_size = register_int_gauge_vec_with_registry!(
-            "state_store_mem_table_memory_size",
-            "Memory usage of mem_table",
-            &["table_id", "instance_id"],
-            registry
-        )
-        .unwrap();
-
-        let mem_table_item_count = register_int_gauge_vec_with_registry!(
-            "state_store_mem_table_item_count",
-            "Item counts in mem_table",
-            &["table_id", "instance_id"],
-            registry
-        )
-        .unwrap();
-
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -284,14 +265,17 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
-            mem_table_memory_size,
-            mem_table_item_count,
+            registry,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 }
 
@@ -301,7 +285,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
-    fn get_uploading_memory_usage_ratio(&self) -> f64;
+    fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 struct StateStoreCollector {
@@ -392,7 +376,7 @@ impl Collector for StateStoreCollector {
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
         self.uploading_memory_usage_ratio
-            .set(self.memory_collector.get_uploading_memory_usage_ratio());
+            .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());

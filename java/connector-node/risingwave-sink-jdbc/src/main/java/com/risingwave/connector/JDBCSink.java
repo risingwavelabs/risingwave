@@ -268,14 +268,32 @@ public class JDBCSink extends SinkWriterBase {
     @Override
     public void drop() {
         try {
-            conn.close();
-            upsertPreparedStmt.close();
-            deletePreparedStmt.close();
+            if (upsertPreparedStmt != null) {
+                upsertPreparedStmt.close();
+            }
         } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                    .asRuntimeException();
+            LOG.error("unable to close upsert stmt: %s", e);
+        }
+        try {
+            if (deletePreparedStmt != null) {
+                deletePreparedStmt.close();
+            }
+        } catch (SQLException e) {
+            LOG.error("unable to close delete stmt: %s", e);
+        }
+        try {
+            if (insertPreparedStmt != null) {
+                insertPreparedStmt.close();
+            }
+        } catch (SQLException e) {
+            LOG.error("unable to close insert stmt: %s", e);
+        }
+        try {
+            if (conn != null) {
+                conn.close();
+            }
+        } catch (SQLException e) {
+            LOG.error("unable to close conn: %s", e);
         }
     }
 

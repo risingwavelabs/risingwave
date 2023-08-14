@@ -28,6 +28,7 @@ pub struct TracedPrefetchOptions {
 pub enum TracedCachePolicy {
     Disable,
     Fill(TracedCachePriority),
+    FileFileCache,
     NotFill,
 }
 

@@ -3,6 +3,7 @@ syntax = "proto3";
 package connector_service;
 
 import "catalog.proto";
+import "common.proto";
 import "data.proto";
 import "plan_common.proto";
 
@@ -81,6 +82,7 @@ message SinkWriterStreamResponse {
 
   message CommitResponse {
     uint64 epoch = 1;
+    SinkMetadata metadata = 2;
   }
 
   oneof response {
@@ -96,6 +98,43 @@ message ValidateSinkRequest {
 message ValidateSinkResponse {
   // On validation failure, we return the error.
   ValidationError error = 1;
+}
+
+message SinkMetadata {
+  message SerializedMetadata {
+    bytes metadata = 1;
+  }
+
+  oneof metadata {
+    SerializedMetadata serialized = 1;
+  }
+}
+
+message SinkCoordinatorStreamRequest {
+  message StartCoordinator {
+    SinkParam param = 1;
+  }
+
+  message CommitMetadata {
+    uint64 epoch = 1;
+    repeated SinkMetadata metadata = 2;
+  }
+
+  oneof request {
+    StartCoordinator start = 1;
+    CommitMetadata commit = 2;
+  }
+}
+
+message SinkCoordinatorStreamResponse {
+  message StartResponse {}
+
+  message CommitResponse {}
+
+  oneof response {
+    StartResponse start = 1;
+    CommitResponse commit = 2;
+  }
 }
 
 /* Source Service */
@@ -140,7 +179,44 @@ message ValidateSourceResponse {
 
 service ConnectorService {
   rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
+  rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+}
+
+message CoordinateRequest {
+  // The first request that starts a coordination between sink writer and coordinator.
+  // The service will respond after sink writers of all vnodes have sent the request.
+  message StartCoordinationRequest {
+    common.Buffer vnode_bitmap = 1;
+    SinkParam param = 2;
+  }
+
+  message CommitRequest {
+    uint64 epoch = 1;
+    SinkMetadata metadata = 2;
+  }
+
+  oneof msg {
+    StartCoordinationRequest start_request = 1;
+    CommitRequest commit_request = 2;
+  }
+}
+
+message CoordinateResponse {
+  message StartCoordinationResponse {}
+
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
+
+  oneof msg {
+    StartCoordinationResponse start_response = 1;
+    CommitResponse commit_response = 2;
+  }
+}
+
+service SinkCoordinationService {
+  rpc Coordinate(stream CoordinateRequest) returns (stream CoordinateResponse);
 }

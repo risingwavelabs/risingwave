@@ -46,7 +46,7 @@ use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContex
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
-    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
+    CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -145,6 +145,7 @@ async fn compaction_test(
         dist_key_in_pk: vec![],
         cardinality: None,
         created_at_epoch: None,
+        cleaned_by_watermark: false,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -169,7 +170,8 @@ async fn compaction_test(
         .await?;
 
     let system_params = SystemParams {
-        sstable_size_mb: Some(256),
+        sstable_size_mb: Some(128),
+        parallel_compact_size_mb: Some(512),
         block_size_kb: Some(1024),
         bloom_false_positive: Some(0.001),
         data_directory: Some("hummock_001".to_string()),
@@ -199,7 +201,8 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
-        TieredCache::none(),
+        FileCache::none(),
+        FileCache::none(),
     ));
 
     let store = HummockStorage::new(
@@ -564,23 +567,19 @@ fn run_compactor_thread(
 ) {
     let compactor_context = Arc::new(CompactorContext {
         storage_opts,
-        hummock_meta_client: meta_client.clone(),
+        hummock_meta_client: meta_client,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
-        output_memory_limiter: MemoryLimiter::unlimit(),
+        memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     });
-    risingwave_storage::hummock::compactor::Compactor::start_compactor(
-        compactor_context,
-        meta_client,
-        2.0, // max_compactor_task_multiplier
-    )
+    risingwave_storage::hummock::compactor::Compactor::start_compactor(compactor_context)
 }
 
 #[cfg(test)]

@@ -18,9 +18,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::{childless_record, watermark_fields_pretty, Distill};
+use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
+use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter, WatermarkDerivation};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -35,16 +35,18 @@ pub struct StreamProject {
     watermark_derivations: Vec<(usize, usize)>,
     /// Whether the project executor will merge a chunk on the stream key.
     merge_chunk: bool,
+    /// Nondecreasing expression indices. `Project` can produce watermarks for these expressions.
+    nondecreasing_exprs: Vec<usize>,
 }
 
 impl Distill for StreamProject {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let schema = self.schema();
         let mut vec = self.logical.fields_pretty(schema);
-        let watermark_derivations = &self.watermark_derivations;
-        if !watermark_derivations.is_empty() {
-            let wc = watermark_derivations.iter().map(|(_, i)| *i);
-            vec.push(("output_watermarks", watermark_fields_pretty(wc, schema)));
+        if let Some(display_output_watermarks) =
+            watermark_pretty(&self.base.watermark_columns, schema)
+        {
+            vec.push(("output_watermarks", display_output_watermarks));
         }
         childless_record("StreamProject", vec)
     }
@@ -58,13 +60,24 @@ impl StreamProject {
             .rewrite_provided_distribution(input.distribution());
 
         let mut watermark_derivations = vec![];
+        let mut nondecreasing_exprs = vec![];
         let mut watermark_columns = FixedBitSet::with_capacity(logical.exprs.len());
         for (expr_idx, expr) in logical.exprs.iter().enumerate() {
-            if let Some(input_idx) = try_derive_watermark(expr) {
-                if input.watermark_columns().contains(input_idx) {
-                    watermark_derivations.push((input_idx, expr_idx));
+            match try_derive_watermark(expr) {
+                WatermarkDerivation::Watermark(input_idx) => {
+                    if input.watermark_columns().contains(input_idx) {
+                        watermark_derivations.push((input_idx, expr_idx));
+                        watermark_columns.insert(expr_idx);
+                    }
+                }
+                WatermarkDerivation::Nondecreasing => {
+                    nondecreasing_exprs.push(expr_idx);
                     watermark_columns.insert(expr_idx);
                 }
+                WatermarkDerivation::Constant => {
+                    // XXX(rc): we can produce one watermark on each recovery for this case.
+                }
+                WatermarkDerivation::None => {}
             }
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
@@ -81,6 +94,7 @@ impl StreamProject {
             logical,
             watermark_derivations,
             merge_chunk: merge_chunk.unwrap_or(!input.append_only()),
+            nondecreasing_exprs,
         }
     }
 
@@ -116,6 +130,11 @@ impl_plan_tree_node_for_unary! {StreamProject}
 
 impl StreamNode for StreamProject {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        let (watermark_input_cols, watermark_output_cols) = self
+            .watermark_derivations
+            .iter()
+            .map(|(i, o)| (*i as u32, *o as u32))
+            .unzip();
         PbNodeBody::Project(ProjectNode {
             select_list: self
                 .logical
@@ -134,6 +153,7 @@ impl StreamNode for StreamProject {
                 .map(|(_, y)| *y as u32)
                 .collect(),
             merge_chunk: self.merge_chunk,
+            nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
         })
     }
 }
