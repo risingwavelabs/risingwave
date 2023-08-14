@@ -244,6 +244,9 @@ where
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
+                // We should not buffer rows from previous epoch, else we can have duplicates.
+                assert!(upstream_chunk_buffer.is_empty());
+
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 

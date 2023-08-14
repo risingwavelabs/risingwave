@@ -53,7 +53,7 @@ maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
-opendal = "0.38"
+opendal = "0.39"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11.9", features = ["no-recursion-limit"] }

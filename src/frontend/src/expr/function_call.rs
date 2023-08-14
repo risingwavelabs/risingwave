@@ -21,7 +21,7 @@ use risingwave_expr::vector_op::cast::literal_parsing;
 use thiserror::Error;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::expr::{ExprDisplay, ExprType};
+use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -291,6 +291,11 @@ impl FunctionCall {
             return_type,
             inputs,
         })
+    }
+
+    pub fn is_pure(&self) -> bool {
+        let mut a = ImpureAnalyzer {};
+        !a.visit_function_call(self)
     }
 }
 
