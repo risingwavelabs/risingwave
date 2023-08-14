@@ -417,6 +417,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         table.commit_no_data_expected(epoch);
     }
 
+    let mut has_progress = false;
     for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
         let current_pos = match backfill_progress {
             BackfillProgressPerVnode::Completed | BackfillProgressPerVnode::NotStarted => {
@@ -431,24 +432,28 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         if let Some(old_state) = old_state {
             // No progress for vnode, means no data
             if old_state == current_pos.as_inner() {
-                table.commit_no_data_expected(epoch);
-                return Ok(());
+                continue;
             } else {
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
                     old_row: &old_state[..],
                     new_row: &(*temporary_state),
                 });
-                table.commit(epoch).await?;
+                has_progress = true;
             }
         } else {
             // No existing state, create a new entry.
             table.write_record(Record::Insert {
                 new_row: &(*temporary_state),
             });
-            table.commit(epoch).await?;
+            has_progress = true;
         }
         committed_progress.insert(*vnode, current_pos.as_inner().to_vec());
+    }
+    if has_progress {
+        table.commit(epoch).await?;
+    } else {
+        table.commit_no_data_expected(epoch);
     }
     Ok(())
 }
