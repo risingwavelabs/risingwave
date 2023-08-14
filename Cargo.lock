@@ -5583,7 +5583,6 @@ dependencies = [
 name = "prost-helpers"
 version = "0.1.0"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
  "quote",
  "syn 2.0.28",
