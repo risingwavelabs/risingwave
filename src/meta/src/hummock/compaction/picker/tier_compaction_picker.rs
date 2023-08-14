@@ -154,14 +154,18 @@ impl CompactionPicker for TierCompactionPicker {
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
+    ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>) {
         let l0 = levels.l0.as_ref().unwrap();
+        let mut local_picker_stats = Vec::default();
+        let mut tier_picker_stat = LocalPickerStatistic::new(0, 0, format!("{} -> {} tier", 0, 0));
         if l0.sub_levels.is_empty() {
-            return None;
+            return (None, local_picker_stats);
         }
 
-        self.pick_overlapping_level(l0, &level_handlers[0], stats)
+        let ret = self.pick_overlapping_level(l0, &level_handlers[0], &mut tier_picker_stat);
+        local_picker_stats.push(tier_picker_stat);
+
+        (ret, local_picker_stats)
     }
 }
 
@@ -178,9 +182,7 @@ pub mod tests {
     use crate::hummock::compaction::level_selector::tests::{
         generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
     };
-    use crate::hummock::compaction::picker::{
-        CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
-    };
+    use crate::hummock::compaction::picker::{CompactionPicker, TierCompactionPicker};
     use crate::hummock::level_handler::LevelHandler;
 
     #[test]
@@ -214,10 +216,8 @@ pub mod tests {
                 .build(),
         );
         let mut picker = TierCompactionPicker::new(config);
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels.len(), 4);
         assert_eq!(
             ret.input_levels
@@ -233,7 +233,8 @@ pub mod tests {
             ..Default::default()
         };
         assert!(picker
-            .pick_compaction(&empty_level, &levels_handler, &mut local_stats)
+            .pick_compaction(&empty_level, &levels_handler)
+            .0
             .is_none());
     }
 
@@ -264,13 +265,10 @@ pub mod tests {
                 .build(),
         );
 
-        let mut local_stats = LocalPickerStatistic::default();
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
         let mut picker = TierCompactionPicker::new(config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels.len(), 1);
         assert!(can_concat(&ret.input_levels[0].table_infos));
     }
@@ -311,9 +309,9 @@ pub mod tests {
                 .build(),
         );
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = LocalPickerStatistic::default();
+
         let mut picker = TierCompactionPicker::new(config);
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
         assert!(ret.is_none());
     }
 
@@ -344,17 +342,12 @@ pub mod tests {
                 .build(),
         );
 
-        let mut local_stats = LocalPickerStatistic::default();
         let mut picker = TierCompactionPicker::new(config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(1, ret.input_levels.len());
 
         push_table_level0_overlapping(&mut levels, generate_table(11, 1, 1, 100, 1));
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(1, ret.input_levels.len());
     }
 }

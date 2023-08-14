@@ -36,7 +36,26 @@ pub struct LocalPickerStatistic {
     pub skip_by_count_limit: u64,
     pub skip_by_pending_files: u64,
     pub skip_by_overlapping: u64,
+
+    pub select_level: usize,
+    pub target_level: usize,
+    pub task_label: String,
 }
+
+impl LocalPickerStatistic {
+    fn new(select_level: usize, target_level: usize, task_label: String) -> Self {
+        Self {
+            skip_by_write_amp_limit: 0,
+            skip_by_count_limit: 0,
+            skip_by_pending_files: 0,
+            skip_by_overlapping: 0,
+            select_level,
+            target_level,
+            task_label,
+        }
+    }
+}
+
 pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,
@@ -73,6 +92,5 @@ pub trait CompactionPicker {
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput>;
+    ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>);
 }

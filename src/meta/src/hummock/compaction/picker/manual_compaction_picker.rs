@@ -216,15 +216,21 @@ impl CompactionPicker for ManualCompactionPicker {
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        _stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
+    ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>) {
+        let local_picker_stats = Vec::default();
         if self.option.level == 0 {
             if !self.option.sst_ids.is_empty() {
-                return self.pick_l0_to_sub_level(levels.l0.as_ref().unwrap(), level_handlers);
+                return (
+                    self.pick_l0_to_sub_level(levels.l0.as_ref().unwrap(), level_handlers),
+                    local_picker_stats,
+                );
             } else if self.target_level > 0 {
-                return self.pick_l0_to_base_level(levels, level_handlers);
+                return (
+                    self.pick_l0_to_base_level(levels, level_handlers),
+                    local_picker_stats,
+                );
             } else {
-                return None;
+                return (None, local_picker_stats);
             }
         }
         let mut hint_sst_ids: HashSet<u64> = HashSet::new();
@@ -261,7 +267,7 @@ impl CompactionPicker for ManualCompactionPicker {
             .cloned()
             .collect();
         if select_input_ssts.is_empty() {
-            return None;
+            return (None, local_picker_stats);
         }
         let target_input_ssts = if target_level == level {
             // For intra level compaction, input SSTs must be consecutive.
@@ -291,31 +297,34 @@ impl CompactionPicker for ManualCompactionPicker {
             .iter()
             .any(|table| level_handlers[level].is_pending_compact(&table.sst_id))
         {
-            return None;
+            return (None, local_picker_stats);
         }
         if target_input_ssts
             .iter()
             .any(|table| level_handlers[target_level].is_pending_compact(&table.sst_id))
         {
-            return None;
+            return (None, local_picker_stats);
         }
 
-        Some(CompactionInput {
-            input_levels: vec![
-                InputLevel {
-                    level_idx: level as u32,
-                    level_type: levels.levels[level - 1].level_type,
-                    table_infos: select_input_ssts,
-                },
-                InputLevel {
-                    level_idx: target_level as u32,
-                    level_type: levels.levels[target_level - 1].level_type,
-                    table_infos: target_input_ssts,
-                },
-            ],
-            target_level,
-            target_sub_level_id: 0,
-        })
+        (
+            Some(CompactionInput {
+                input_levels: vec![
+                    InputLevel {
+                        level_idx: level as u32,
+                        level_type: levels.levels[level - 1].level_type,
+                        table_infos: select_input_ssts,
+                    },
+                    InputLevel {
+                        level_idx: target_level as u32,
+                        level_type: levels.levels[target_level - 1].level_type,
+                        table_infos: target_input_ssts,
+                    },
+                ],
+                target_level,
+                target_sub_level_id: 0,
+            }),
+            local_picker_stats,
+        )
     }
 }
 
@@ -408,7 +417,6 @@ pub mod tests {
             LevelHandler::new(1),
             LevelHandler::new(2),
         ];
-        let mut local_stats = LocalPickerStatistic::default();
 
         {
             // test key_range option
@@ -428,9 +436,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(2, result.input_levels[0].table_infos.len());
@@ -449,9 +455,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(3, result.input_levels[0].table_infos.len());
@@ -482,9 +486,7 @@ pub mod tests {
                 target_level,
             );
 
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(1, result.input_levels[0].table_infos.len());
@@ -522,9 +524,7 @@ pub mod tests {
                 target_level,
             );
 
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
 
             assert_eq!(1, result.input_levels[0].table_infos.len());
             assert_eq!(2, result.input_levels[1].table_infos.len());
@@ -655,13 +655,7 @@ pub mod tests {
         };
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 0);
-        assert!(picker
-            .pick_compaction(
-                &levels,
-                &levels_handler,
-                &mut LocalPickerStatistic::default()
-            )
-            .is_none());
+        assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none());
     }
 
     #[test]
@@ -684,19 +678,15 @@ pub mod tests {
             option.clone(),
             0,
         );
-        let mut local_stats = LocalPickerStatistic::default();
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+
+        assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none());
 
         // pick_l0_to_base_level
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
         let mut expected = vec![vec![5, 6], vec![7, 8], vec![9, 10]];
         expected.reverse();
-        let result = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(result.input_levels.len(), 4);
         assert!(is_l0_to_lbase(&result));
         assert_eq!(result.target_level, 1);
@@ -730,9 +720,7 @@ pub mod tests {
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
         let mut expected = vec![vec![5, 6], vec![7, 8]];
         expected.reverse();
-        let result = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(result.input_levels.len(), 3);
         assert!(is_l0_to_lbase(&result));
         assert_eq!(result.target_level, 1);
@@ -764,7 +752,7 @@ pub mod tests {
             (0, vec![8, 9], vec![vec![7, 8], vec![9, 10]]),
             (0, vec![6, 8, 9], vec![vec![5, 6], vec![7, 8], vec![9, 10]]),
         ];
-        let mut local_stats = LocalPickerStatistic::default();
+
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let expected = expected.iter().rev().cloned().collect_vec();
             let option = ManualCompactionOption {
@@ -783,9 +771,7 @@ pub mod tests {
                 // l0 to l0 will ignore target_level
                 input_level + 1,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             assert!(is_l0_to_l0(&result));
             assert_eq!(result.input_levels.len(), expected.len());
             for (i, e) in expected.iter().enumerate().take(result.input_levels.len()) {
@@ -806,7 +792,7 @@ pub mod tests {
         let (levels, mut levels_handler) = generate_test_levels();
         let input_level = 0;
         let target_level = input_level + 1;
-        let mut local_stats = LocalPickerStatistic::default();
+
         {
             let option = ManualCompactionOption {
                 sst_ids: vec![],
@@ -824,9 +810,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none())
+            assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none())
         }
 
         {
@@ -846,9 +830,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             assert_eq!(result.input_levels.len(), 4);
             assert!(is_l0_to_lbase(&result));
             assert_eq!(result.target_level, 1);
@@ -890,9 +872,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             assert_eq!(result.input_levels.len(), 4);
             assert!(is_l0_to_lbase(&result));
             assert_eq!(
@@ -934,9 +914,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             result.add_pending_task(0, &mut levels_handler);
             assert_eq!(result.input_levels.len(), 2);
             assert!(is_l0_to_lbase(&result));
@@ -978,9 +956,7 @@ pub mod tests {
                 target_level,
             );
             // Because top sub-level is pending.
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none());
+            assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none());
 
             clean_task_state(&mut levels_handler[0]);
             clean_task_state(&mut levels_handler[1]);
@@ -992,7 +968,7 @@ pub mod tests {
         let (levels, levels_handler) = generate_test_levels();
         let input_level = 1;
         let target_level = input_level + 1;
-        let mut local_stats = LocalPickerStatistic::default();
+
         {
             let option = ManualCompactionOption {
                 sst_ids: vec![],
@@ -1010,9 +986,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none())
+            assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none())
         }
 
         {
@@ -1033,9 +1007,7 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             assert_eq!(
                 result.input_levels.len(),
                 expected_input_level_sst_ids.len()
@@ -1067,7 +1039,7 @@ pub mod tests {
             (1, vec![4], vec![vec![4], vec![2]]),
             (1, vec![3, 4], vec![vec![3, 4], vec![1, 2]]),
         ];
-        let mut local_stats = LocalPickerStatistic::default();
+
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let option = ManualCompactionOption {
                 sst_ids: sst_id_filter.clone(),
@@ -1084,9 +1056,7 @@ pub mod tests {
                 option.clone(),
                 input_level + 1,
             );
-            let result = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             assert_eq!(result.input_levels.len(), expected.len());
             for (i, e) in expected.iter().enumerate().take(result.input_levels.len()) {
                 assert_eq!(
@@ -1130,13 +1100,7 @@ pub mod tests {
                 option.clone(),
                 *input_level as _,
             );
-            let result = picker
-                .pick_compaction(
-                    &levels,
-                    &levels_handler,
-                    &mut LocalPickerStatistic::default(),
-                )
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             assert_eq!(result.input_levels.len(), expected.len());
             for (i, e) in expected.iter().enumerate().take(result.input_levels.len()) {
                 assert_eq!(

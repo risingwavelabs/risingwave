@@ -117,34 +117,46 @@ impl CompactionPicker for MinOverlappingPicker {
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
+    ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>) {
         assert!(self.level > 0);
+        let mut local_picker_stats = Vec::default();
+        let mut min_overlapping_picker_stat = LocalPickerStatistic::new(
+            self.level,
+            self.target_level,
+            format!("{} -> {} ", self.level, self.target_level),
+        );
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
             &levels.get_level(self.level).table_infos,
             &levels.get_level(self.target_level).table_infos,
             level_handlers,
         );
+
         if select_input_ssts.is_empty() {
-            stats.skip_by_pending_files += 1;
-            return None;
+            min_overlapping_picker_stat.skip_by_pending_files += 1;
+            local_picker_stats.push(min_overlapping_picker_stat);
+            return (None, local_picker_stats);
         }
-        Some(CompactionInput {
-            input_levels: vec![
-                InputLevel {
-                    level_idx: self.level as u32,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: select_input_ssts,
-                },
-                InputLevel {
-                    level_idx: self.target_level as u32,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: target_input_ssts,
-                },
-            ],
-            target_level: self.target_level,
-            target_sub_level_id: 0,
-        })
+
+        local_picker_stats.push(min_overlapping_picker_stat);
+        (
+            Some(CompactionInput {
+                input_levels: vec![
+                    InputLevel {
+                        level_idx: self.level as u32,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: select_input_ssts,
+                    },
+                    InputLevel {
+                        level_idx: self.target_level as u32,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: target_input_ssts,
+                    },
+                ],
+                target_level: self.target_level,
+                target_sub_level_id: 0,
+            }),
+            local_picker_stats,
+        )
     }
 }
 
@@ -332,6 +344,7 @@ impl NonOverlapSubLevelPicker {
         &self,
         l0: &[Level],
         level_handler: &LevelHandler,
+        stats: &mut LocalPickerStatistic,
     ) -> Vec<SubLevelSstables> {
         if l0.len() < self.min_depth {
             return vec![];
@@ -339,8 +352,11 @@ impl NonOverlapSubLevelPicker {
 
         let mut scores = vec![];
         let select_tables = &l0[0].table_infos;
+        let mut skip_by_count = false;
+        let mut skip_by_pending = false;
         for (sst_index, sst) in select_tables.iter().enumerate() {
             if level_handler.is_pending_compact(&sst.sst_id) {
+                skip_by_pending = true;
                 continue;
             }
 
@@ -348,12 +364,20 @@ impl NonOverlapSubLevelPicker {
             if ret.sstable_infos.len() < self.min_depth
                 && ret.total_file_size < self.min_compaction_bytes
             {
+                skip_by_count = true;
                 continue;
             }
             scores.push(ret);
         }
 
         if scores.is_empty() {
+            if skip_by_count {
+                stats.skip_by_count_limit += 1;
+            }
+
+            if skip_by_pending {
+                stats.skip_by_pending_files += 1;
+            }
             return vec![];
         }
 
@@ -432,10 +456,7 @@ pub mod tests {
 
         // pick a non-overlapping files. It means that this file could be trivial move to next
         // level.
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &level_handlers, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &level_handlers).0.unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -443,9 +464,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
         ret.add_pending_task(0, &mut level_handlers);
 
-        let ret = picker
-            .pick_compaction(&levels, &level_handlers, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &level_handlers).0.unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -454,9 +473,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
         ret.add_pending_task(1, &mut level_handlers);
 
-        let ret = picker
-            .pick_compaction(&levels, &level_handlers, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &level_handlers).0.unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
         assert_eq!(ret.input_levels[1].table_infos.len(), 2);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 1);
@@ -510,13 +527,7 @@ pub mod tests {
 
         // pick a non-overlapping files. It means that this file could be trivial move to next
         // level.
-        let ret = picker
-            .pick_compaction(
-                &levels,
-                &levels_handler,
-                &mut LocalPickerStatistic::default(),
-            )
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.input_levels[1].level_idx, 2);
 
@@ -601,7 +612,11 @@ pub mod tests {
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(6, ret.len());
         }
 
@@ -614,7 +629,11 @@ pub mod tests {
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(6, ret.len());
         }
 
@@ -627,7 +646,11 @@ pub mod tests {
                 5,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(6, ret.len());
         }
     }
@@ -705,7 +728,11 @@ pub mod tests {
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(6, ret.len());
         }
 
@@ -719,7 +746,11 @@ pub mod tests {
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(6, ret.len());
         }
 
@@ -733,7 +764,11 @@ pub mod tests {
                 max_file_count,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(6, ret.len());
 
             for plan in ret {
@@ -755,7 +790,11 @@ pub mod tests {
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(
+                &levels,
+                &levels_handlers[0],
+                &mut LocalPickerStatistic::default(),
+            );
             assert_eq!(3, ret.len());
 
             for plan in ret {

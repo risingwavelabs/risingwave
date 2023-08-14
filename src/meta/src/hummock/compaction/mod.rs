@@ -234,13 +234,13 @@ impl Default for ManualCompactionOption {
 
 #[derive(Default)]
 pub struct LocalSelectorStatistic {
-    skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
+    skip_picker: Vec<LocalPickerStatistic>,
 }
 
 impl LocalSelectorStatistic {
     pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
-        for (start_level, target_level, stats) in &self.skip_picker {
-            let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
+        for stats in &self.skip_picker {
+            let level_label = format!("cg{} {}", group_id, stats.task_label);
             if stats.skip_by_write_amp_limit > 0 {
                 metrics
                     .compact_skip_frequency

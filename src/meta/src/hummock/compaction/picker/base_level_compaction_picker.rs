@@ -35,25 +35,33 @@ impl CompactionPicker for LevelCompactionPicker {
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
+    ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>) {
+        let mut local_picker_stats = Vec::default();
         let l0 = levels.l0.as_ref().unwrap();
         if l0.sub_levels.is_empty() {
-            return None;
+            return (None, local_picker_stats);
         }
+
+        let mut to_base_picker_stat = LocalPickerStatistic::new(
+            0,
+            self.target_level,
+            format!("{} -> {} base", 0, self.target_level),
+        );
         if l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
             && l0.sub_levels[0].table_infos.len() > 1
         {
-            stats.skip_by_overlapping += 1;
-            return None;
+            to_base_picker_stat.skip_by_overlapping += 1;
+            local_picker_stats.push(to_base_picker_stat);
+            return (None, local_picker_stats);
         }
 
         let is_l0_pending_compact =
             level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
 
         if is_l0_pending_compact {
-            stats.skip_by_pending_files += 1;
-            return None;
+            to_base_picker_stat.skip_by_pending_files += 1;
+            local_picker_stats.push(to_base_picker_stat);
+            return (None, local_picker_stats);
         }
 
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
@@ -61,16 +69,27 @@ impl CompactionPicker for LevelCompactionPicker {
             l0,
             levels.get_level(self.target_level),
             level_handlers,
-            stats,
+            &mut to_base_picker_stat,
         ) {
-            return Some(ret);
+            local_picker_stats.push(to_base_picker_stat);
+            return (Some(ret), local_picker_stats);
         }
 
-        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], stats) {
-            return Some(ret);
+        local_picker_stats.push(to_base_picker_stat);
+        let mut l0_intra_picker_stat =
+            LocalPickerStatistic::new(0, 0, format!("{} -> {} intra", 0, 0));
+        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], &mut l0_intra_picker_stat) {
+            local_picker_stats.push(l0_intra_picker_stat);
+            return (Some(ret), local_picker_stats);
         }
 
-        self.pick_l0_trivial_move_file(l0, level_handlers)
+        let mut l0_trivial_move_picker_stat =
+            LocalPickerStatistic::new(0, 0, format!("{} -> {} trivial-move", 0, 0));
+        let ret =
+            self.pick_l0_trivial_move_file(l0, level_handlers, &mut l0_trivial_move_picker_stat);
+        local_picker_stats.push(l0_trivial_move_picker_stat);
+
+        (ret, local_picker_stats)
     }
 }
 
@@ -120,10 +139,12 @@ impl LevelCompactionPicker {
             overlap_strategy.clone(),
         );
 
-        let l0_select_tables_vec = non_overlap_sub_level_picker
-            .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
+        let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
+            &l0.sub_levels,
+            &level_handlers[0],
+            stats,
+        );
         if l0_select_tables_vec.is_empty() {
-            stats.skip_by_pending_files += 1;
             return None;
         }
 
@@ -250,7 +271,7 @@ impl LevelCompactionPicker {
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
-                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler);
+                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler, stats);
 
             if l0_select_tables_vec.is_empty() {
                 continue;
@@ -325,6 +346,7 @@ impl LevelCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handlers: &[LevelHandler],
+        _stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
@@ -451,12 +473,9 @@ pub mod tests {
             member_table_ids: vec![1],
             ..Default::default()
         };
-        let mut local_stats = LocalPickerStatistic::default();
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 4);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 1);
@@ -465,9 +484,7 @@ pub mod tests {
         {
             push_table_level0_nonoverlapping(&mut levels, generate_table(6, 1, 100, 200, 2));
             push_table_level0_nonoverlapping(&mut levels, generate_table(7, 1, 301, 333, 4));
-            let ret2 = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let ret2 = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
 
             assert_eq!(ret2.input_levels[0].table_infos.len(), 1);
             assert_eq!(ret2.input_levels[0].table_infos[0].get_sst_id(), 6);
@@ -482,9 +499,7 @@ pub mod tests {
         levels_handler[0].remove_task(0);
         levels_handler[1].remove_task(0);
 
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels.len(), 3);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
@@ -493,19 +508,16 @@ pub mod tests {
         assert_eq!(ret.input_levels[2].table_infos[1].get_sst_id(), 2);
         ret.add_pending_task(1, &mut levels_handler);
 
-        let mut local_stats = LocalPickerStatistic::default();
         // Cannot pick because no idle table in sub-level[0]. (And sub-level[0] is pending
         // actually).
         push_table_level0_overlapping(&mut levels, generate_table(8, 1, 199, 233, 3));
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
         assert!(ret.is_none());
 
         // Don't pick overlapping sub-level 8
         levels_handler[0].remove_task(1);
         levels_handler[1].remove_task(1);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels.len(), 3);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
@@ -554,10 +566,7 @@ pub mod tests {
 
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
 
         // pick
         // l0 [sst_1]
@@ -614,14 +623,9 @@ pub mod tests {
         );
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         ret.add_pending_task(0, &mut levels_handler);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         ret.add_pending_task(1, &mut levels_handler);
 
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
@@ -634,8 +638,7 @@ pub mod tests {
             .build();
         let mut picker = TierCompactionPicker::new(Arc::new(config));
 
-        let ret: Option<CompactionInput> =
-            picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret: Option<CompactionInput> = picker.pick_compaction(&levels, &levels_handler).0;
         assert!(ret.is_none());
     }
 
@@ -663,16 +666,11 @@ pub mod tests {
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         ret.add_pending_task(0, &mut levels_handler);
 
         push_table_level0_overlapping(&mut levels, generate_table(4, 1, 170, 180, 3));
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none());
     }
 
     #[test]
@@ -712,20 +710,18 @@ pub mod tests {
         );
 
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = LocalPickerStatistic::default();
         levels_handler[0].add_pending_task(
             1,
             4,
             &levels.l0.as_ref().unwrap().sub_levels[0].table_infos,
         );
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
         // Skip this compaction because the write amplification is too large.
         assert!(ret.is_none());
     }
 
     #[test]
     fn test_l0_to_l1_break_on_exceed_compaction_size() {
-        let mut local_stats = LocalPickerStatistic::default();
         let mut l0 = generate_l0_overlapping_sublevels(vec![
             vec![
                 generate_table(4, 1, 10, 90, 1),
@@ -758,9 +754,7 @@ pub mod tests {
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
         let mut picker = LevelCompactionPicker::new(1, config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
         assert_eq!(
             3,
@@ -783,9 +777,7 @@ pub mod tests {
                 .build(),
         );
         let mut picker = LevelCompactionPicker::new(1, config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(
             2,
@@ -803,7 +795,6 @@ pub mod tests {
 
     #[test]
     fn test_issue_11154() {
-        let mut local_stats = LocalPickerStatistic::default();
         let mut l0 = generate_l0_overlapping_sublevels(vec![
             vec![
                 generate_table(4, 1, 1, 200, 1),
@@ -843,9 +834,7 @@ pub mod tests {
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
         let mut picker = LevelCompactionPicker::new(1, config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         // avoid add sst_10 and cause a big task
         assert_eq!(3, ret.input_levels.len());
     }
@@ -868,7 +857,6 @@ pub mod tests {
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = LocalPickerStatistic::default();
 
         // Create a pending sub-level.
         let pending_level = levels.l0.as_ref().unwrap().sub_levels[1].clone();
@@ -897,7 +885,7 @@ pub mod tests {
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
         let mut picker = LevelCompactionPicker::new(1, config.clone());
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
 
         assert!(ret.is_none());
 
@@ -908,9 +896,7 @@ pub mod tests {
 
         // No more pending sub-level so we can get a task now.
         let mut picker = LevelCompactionPicker::new(1, config);
-        picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        picker.pick_compaction(&levels, &levels_handler).0.unwrap();
     }
 
     #[test]
@@ -930,7 +916,6 @@ pub mod tests {
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = LocalPickerStatistic::default();
 
         let config = Arc::new(
             CompactionConfigBuilder::new()
@@ -941,17 +926,13 @@ pub mod tests {
         );
 
         let mut picker = LevelCompactionPicker::new(1, config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(3, ret.input_levels.len());
         assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
 
         // trivial move do not be limited by level0_sub_level_compact_level_count
         ret.add_pending_task(0, &mut levels_handler);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert_eq!(2, ret.input_levels.len());
         assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
         assert!(ret.input_levels[1].table_infos.is_empty());
@@ -990,10 +971,7 @@ pub mod tests {
                     .build(),
             );
             let mut picker = LevelCompactionPicker::new(1, config);
-            let mut local_stats = LocalPickerStatistic::default();
-            let ret = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             ret.add_pending_task(1, &mut levels_handler);
             assert_eq!(
                 ret.input_levels
@@ -1035,10 +1013,8 @@ pub mod tests {
                     .build(),
             );
             let mut picker = LevelCompactionPicker::new(1, config);
-            let mut local_stats = LocalPickerStatistic::default();
-            let ret = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+
+            let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             ret.add_pending_task(1, &mut levels_handler);
             assert_eq!(
                 ret.input_levels
@@ -1053,9 +1029,7 @@ pub mod tests {
             assert_eq!(1, ret.input_levels[2].table_infos[0].get_sst_id());
 
             // will pick sst [2, 6, 5]
-            let ret2 = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let ret2 = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
 
             assert_eq!(
                 ret2.input_levels
@@ -1104,10 +1078,8 @@ pub mod tests {
                     .build(),
             );
             let mut picker = LevelCompactionPicker::new(1, config);
-            let mut local_stats = LocalPickerStatistic::default();
-            let ret = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+
+            let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
             ret.add_pending_task(1, &mut levels_handler);
             assert_eq!(
                 ret.input_levels
@@ -1121,9 +1093,7 @@ pub mod tests {
             assert_eq!(9, ret.input_levels[1].table_infos[0].get_sst_id());
             assert_eq!(7, ret.input_levels[2].table_infos[0].get_sst_id());
 
-            let ret2 = picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .unwrap();
+            let ret2 = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
 
             assert_eq!(
                 ret2.input_levels
@@ -1169,8 +1139,7 @@ pub mod tests {
             ..Default::default()
         };
         levels_handler[1].add_pending_task(100, 1, levels.levels[0].get_table_infos());
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
         assert!(ret.is_none());
 
         // Cannot trivial move because sub-levels are overlapping
@@ -1189,28 +1158,24 @@ pub mod tests {
             member_table_ids: vec![1],
             ..Default::default()
         };
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(picker.pick_compaction(&levels, &levels_handler).0.is_none());
 
         // Cannot trivial move because latter sub-level is overlapping
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping as i32;
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
         assert!(ret.is_none());
 
         // Cannot trivial move because former sub-level is overlapping
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
         levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping as i32;
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        let ret = picker.pick_compaction(&levels, &levels_handler).0;
         assert!(ret.is_none());
 
         // trivial move
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping as i32;
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).0.unwrap();
         assert!(is_l0_trivial_move(&ret));
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
     }

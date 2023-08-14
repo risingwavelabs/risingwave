@@ -34,9 +34,7 @@ use super::{
     TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::picker::{
-    CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
-};
+use crate::hummock::compaction::picker::{CompactionPicker, MinOverlappingPicker};
 use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
@@ -383,8 +381,9 @@ impl LevelSelector for DynamicLevelSelector {
                 target_level,
                 overlap_strategy.clone(),
             );
-            let mut stats = LocalPickerStatistic::default();
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
+            // let mut stats: LocalPickerStatistic = LocalPickerStatistic::default();
+            let (ret, local_picker_stats) = picker.pick_compaction(levels, level_handlers);
+            if let Some(ret) = ret {
                 ret.add_pending_task(task_id, level_handlers);
                 return Some(create_compaction_task(
                     dynamic_level_core.get_config(),
@@ -393,9 +392,10 @@ impl LevelSelector for DynamicLevelSelector {
                     self.task_type(),
                 ));
             }
-            selector_stats
-                .skip_picker
-                .push((select_level, target_level, stats));
+
+            for local_picker_stat in local_picker_stats {
+                selector_stats.skip_picker.push(local_picker_stat);
+            }
         }
         None
     }
@@ -449,16 +449,20 @@ impl LevelSelector for ManualCompactionSelector {
             )
         };
 
-        let compaction_input =
-            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
-        compaction_input.add_pending_task(task_id, level_handlers);
+        let (compaction_input, _local_picker_stats) =
+            picker.pick_compaction(levels, level_handlers);
+        if let Some(compaction_input) = compaction_input {
+            compaction_input.add_pending_task(task_id, level_handlers);
 
-        Some(create_compaction_task(
-            group.compaction_config.as_ref(),
-            compaction_input,
-            base_level,
-            self.task_type(),
-        ))
+            Some(create_compaction_task(
+                group.compaction_config.as_ref(),
+                compaction_input,
+                base_level,
+                self.task_type(),
+            ))
+        } else {
+            None
+        }
     }
 
     fn name(&self) -> &'static str {
