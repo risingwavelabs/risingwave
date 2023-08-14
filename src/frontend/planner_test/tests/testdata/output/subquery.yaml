@@ -730,3 +730,35 @@
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
     See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- name: test over window subquery 5
+  sql: |
+    CREATE TABLE integers(i INTEGER, correlated_col int);
+    CREATE TABLE rows(k int, v int, correlated_col int);
+    SELECT i FROM integers where i in (select  SUM(v) OVER(PARTITION BY k ORDER BY v) from rows where rows.correlated_col = integers.correlated_col);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftSemi, predicate: $expr1 = sum AND integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.i] }
+      ├─BatchExchange { order: [], dist: HashShard(integers.correlated_col, $expr1) }
+      │ └─BatchProject { exprs: [integers.i, integers.correlated_col, integers.i::Int64 as $expr1] }
+      │   └─BatchScan { table: integers, columns: [integers.i, integers.correlated_col], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(rows.correlated_col, sum) }
+        └─BatchProject { exprs: [rows.correlated_col, sum] }
+          └─BatchOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─BatchExchange { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC], dist: HashShard(rows.correlated_col, rows.k) }
+              └─BatchSort { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC] }
+                └─BatchProject { exprs: [rows.correlated_col, rows.k, rows.v] }
+                  └─BatchFilter { predicate: IsNotNull(rows.correlated_col) }
+                    └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [i, integers._row_id(hidden), $expr1(hidden), integers.correlated_col(hidden)], stream_key: [integers._row_id, $expr1, integers.correlated_col], pk_columns: [integers._row_id, $expr1, integers.correlated_col], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftSemi, predicate: $expr1 = sum AND integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.i, integers._row_id, $expr1, integers.correlated_col] }
+      ├─StreamExchange { dist: HashShard(integers.correlated_col, $expr1) }
+      │ └─StreamProject { exprs: [integers.i, integers.correlated_col, integers.i::Int64 as $expr1, integers._row_id] }
+      │   └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+      └─StreamExchange { dist: HashShard(rows.correlated_col, sum) }
+        └─StreamProject { exprs: [rows.correlated_col, sum, rows._row_id, rows.k] }
+          └─StreamOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─StreamExchange { dist: HashShard(rows.correlated_col, rows.k) }
+              └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
+                └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
+                  └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }

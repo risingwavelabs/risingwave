@@ -254,3 +254,11 @@
   expected_outputs:
     - batch_plan
     - stream_error
+- name: test over window subquery 5
+  sql: |
+    CREATE TABLE integers(i INTEGER, correlated_col int);
+    CREATE TABLE rows(k int, v int, correlated_col int);
+    SELECT i FROM integers where i in (select  SUM(v) OVER(PARTITION BY k ORDER BY v) from rows where rows.correlated_col = integers.correlated_col);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
