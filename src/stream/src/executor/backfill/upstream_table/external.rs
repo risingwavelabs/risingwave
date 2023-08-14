@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
 use risingwave_storage::table::Distribution;
 
+// pub type HummockStorageType = impl StateStore + AsHummockTrait;
 /// This struct represents an external table to be read during backfill
 pub struct ExternalStorageTable {
     /// Id for this table.
@@ -63,8 +64,10 @@ pub struct ExternalStorageTable {
 impl ExternalStorageTable {
     pub fn new(
         table_id: TableId,
-        table_name: String,
-        schema_name: String,
+        SchemaTableName {
+            table_name,
+            schema_name,
+        }: SchemaTableName,
         table_reader: ExternalTableReaderImpl,
         schema: Schema,
         order_types: Vec<OrderType>,

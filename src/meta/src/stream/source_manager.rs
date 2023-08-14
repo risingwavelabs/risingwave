@@ -440,8 +440,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::debug!("previous splits {:?}", prev_split_ids);
-    tracing::debug!("discovered splits {:?}", discovered_splits.keys());
+    tracing::trace!("previous splits {:?}", prev_split_ids);
+    tracing::trace!("discovered splits {:?}", discovered_splits.keys());
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 

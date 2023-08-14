@@ -102,9 +102,10 @@ mod tests {
     use risingwave_common::types::{DataType, Decimal, ScalarImpl};
     use tokio_stream::StreamExt;
 
-    // unit test for external table reader
+    // manual test case
+    #[ignore]
     #[tokio::test]
-    async fn test_mysql_table_reader() {
+    async fn test_convert_mysql_row_to_owned_row() {
         let pool = mysql_async::Pool::new("mysql://root:123456@localhost:8306/mydb");
 
         let t1schema = Schema::new(vec![

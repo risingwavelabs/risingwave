@@ -33,7 +33,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqDebug};
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_connector::source::external::{BinlogOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::external::{
+    BinlogOffset, ExternalTableReader, ExternalTableReaderImpl,
+};
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
@@ -215,7 +217,7 @@ fn mark_cdc_chunk_inner(
     if let Some(StreamChunkMeta { offsets }) = meta {
         let binlog_offsets = offsets
             .into_iter()
-            .map(|offset| table_reader.deserialize_binlog_offset(offset.value()))
+            .map(|offset| table_reader.parse_binlog_offset(offset.value()))
             .try_collect::<Vec<_>>()?;
 
         for v in
@@ -447,7 +449,7 @@ pub(crate) fn get_chunk_last_binlog_offset(
     if let Some(meta) = chunk.meta() {
         assert!(!meta.offsets.is_empty());
         let off = meta.offsets.last().unwrap();
-        Ok(Some(table_reader.deserialize_binlog_offset(off.value())?))
+        Ok(Some(table_reader.parse_binlog_offset(off.value())?))
     } else {
         Ok(None)
     }

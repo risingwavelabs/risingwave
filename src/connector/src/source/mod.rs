@@ -30,6 +30,7 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub mod external;
 mod manager;
+mod mock_external_table;
 
 pub use manager::SourceColumnDesc;
 

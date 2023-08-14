@@ -163,10 +163,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         async move {
             let binlog = self.inner.table_reader().current_binlog_offset();
             let binlog = binlog.await?;
-            match &binlog {
-                BinlogOffset::Undefined => Ok(None),
-                _ => Ok(Some(binlog)),
-            }
+            Ok(Some(binlog))
         }
     }
 }

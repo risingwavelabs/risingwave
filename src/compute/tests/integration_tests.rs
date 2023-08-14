@@ -15,7 +15,9 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(let_chains)]
+#![feature(impl_trait_in_assoc_type)]
 
+use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,7 +48,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::external::{
     DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MockExternalTableReader,
-    MySqlOffset,
+    MySqlOffset, SchemaTableName,
 };
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
@@ -111,7 +113,7 @@ impl SingleChunkExecutor {
     }
 }
 
-// mock upstream binlog offset
+// mock upstream binlog offset from "1.binlog, pos=0"
 pub struct MockOffsetGenExecutor {
     ctx: ActorContextRef,
 
@@ -224,7 +226,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 
-    let table_id = TableId::default();
+    let table_id = TableId::new(1002);
     let schema = Schema::new(vec![
         Field::unnamed(DataType::Int64), // primary key
         Field::unnamed(DataType::Float64),
@@ -236,6 +238,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
     let actor_ctx = ActorContext::create(0x3a3a3a);
 
+    // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor = MockOffsetGenExecutor::new(
         actor_ctx,
         Box::new(source),
@@ -245,15 +248,20 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     let binlog_file = String::from("1.binlog");
 
+    // mock binlog watermarks for backfill
+    // initial low watermark: 1.binlog, pos=2 and expected behaviors:
+    // - ignore events before (1.binlog, pos=2);
+    // - apply events in the range of (1.binlog, pos=2, 1.binlog, pos=4) to the snapshot
     let binlog_watermarks = vec![
-        MySqlOffset::new(binlog_file.clone(), 3),
-        MySqlOffset::new(binlog_file.clone(), 5),
+        MySqlOffset::new(binlog_file.clone(), 2), // binlog low watermark
+        MySqlOffset::new(binlog_file.clone(), 4),
+        MySqlOffset::new(binlog_file.clone(), 6),
     ];
 
+    let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
     let external_table = ExternalStorageTable::new(
         table_id,
-        "mock_table".to_string(),
-        "public".to_string(),
+        table_name,
         ExternalTableReaderImpl::MOCK(MockExternalTableReader::new(binlog_watermarks)),
         schema.clone(),
         vec![OrderType::ascending()],
@@ -264,6 +272,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     let cdc_backfill = CdcBackfillExecutor::new(
         memory_state_store.clone(),
+        ActorContext::create(0x1a),
         external_table,
         Box::new(mock_offset_executor),
         None,
@@ -272,7 +281,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         schema.clone(),
         vec![0],
         Arc::new(StreamingMetrics::unused()),
-        4,
+        4, // 4 rows in a snapshot chunk
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.
@@ -293,11 +302,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     // push upstream chunks
     let stream_chunk1 = StreamChunk::from_pretty(
         " I F
-            + 1 9.01
+            + 1 10.01
             + 2 2.02
-            + 3 3.03
+            + 3 3.03 // binlog pos=2
             + 4 4.04
-            + 5 5.05
+            + 5 5.05 // binlog pos=4
             + 6 6.06",
     );
     let stream_chunk2 = StreamChunk::from_pretty(
@@ -340,6 +349,36 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     tokio::time::sleep(interval).await;
     tx.push_barrier(curr_epoch + 3, true);
 
+    // scan the final result of the mv table
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
+    ];
+    let value_indices = (0..column_descs.len()).collect_vec();
+    // Since we have not polled `Materialize`, we cannot scan anything from this table
+    let table = StorageTable::for_test(
+        memory_state_store.clone(),
+        table_id,
+        column_descs.clone(),
+        vec![OrderType::ascending()],
+        vec![0],
+        value_indices,
+    );
+
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.clone(),
+        vec![ScanRange::full()],
+        true,
+        to_committed_batch_query_epoch(u64::MAX),
+        1024,
+        "RowSeqExecutor2".to_string(),
+        None,
+    ));
+    let mut stream = scan.execute();
+    while let Some(message) = stream.next().await {
+        println!("[scan] chunk: {:#?}", message.unwrap());
+    }
+
     mview_handle.await.unwrap()?;
 
     Ok(())
@@ -349,20 +388,19 @@ async fn consume_message_stream(mut stream: BoxedMessageStream) -> StreamResult<
     while let Some(message) = stream.next().await {
         let message = message?;
         match message {
-            Message::Watermark(_) => {
-                break;
-            }
-            Message::Chunk(c) => {
-                // let (d, ops) = c.into_parts();
-                println!("[output] chunk: {:#?}", c);
-            }
-            Message::Barrier(b) => {
-                if let Some(m) = b.mutation && matches!(*m, Mutation::Stop(_)) {
-                    println!("encounter stop barrier");
-                    break
+                Message::Watermark(_) => {
+                    break;
+                }
+                Message::Chunk(c) => {
+                    println!("[output] chunk: {:#?}", c);
+                }
+                Message::Barrier(b) => {
+                    if let Some(m) = b.mutation && matches!(*m, Mutation::Stop(_)) {
+                        println!("encounter stop barrier");
+                        break
+                    }
                 }
             }
-        }
     }
     Ok(())
 }
@@ -498,8 +536,6 @@ async fn test_table_materialize() -> StreamResult<()> {
          1.14
          5.14",
     );
-
-    // insert_inner是InsertExecutor的输入
     let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(
         chunk,
         get_schema(&[ColumnId::from(1)]),

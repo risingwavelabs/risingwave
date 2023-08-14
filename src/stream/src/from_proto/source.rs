@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcProperties;
 use risingwave_connector::source::external::{
-    ExternalTableReaderImpl, MySqlExternalTableReader, SchemaTableName,
+    ExternalTableReaderImpl, ExternalTableType, MySqlExternalTableReader, SchemaTableName,
 };
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::SourceNode;
@@ -146,15 +146,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     params.env.connector_params(),
                 );
 
-                let can_backfill = {
-                    if let Some((src, _)) = connector.split_once('-') {
-                        src == "mysql"
-                    } else {
-                        false
-                    }
-                };
-
-                if can_backfill && let Some(table_desc) = source_info.upstream_table.clone() {
+                let table_type = ExternalTableType::from_properties(&source.properties);
+                if table_type.can_backfill() && let Some(table_desc) = source_info.upstream_table.clone() {
                     tracing::info!("building cdc backfill source");
                     let upstream_table_name = SchemaTableName::from_properties(&source.properties);
                     let pk_indices = table_desc
@@ -169,11 +162,20 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                         .collect_vec();
 
+                    // let table_reader = match table_type {
+                    //     ExternalTableType::MySQL => {
+                    //         MySqlExternalTableReader::new(source.properties.clone(), schema.clone())?
+                    //     }
+                    //     _ => {
+                    //         unreachable!("cdc backfill source only support mysql")
+                    //     }
+                    // };
+
+                    let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
                     let external_table = ExternalStorageTable::new(
                          TableId::new(table_desc.table_id),
-                        upstream_table_name.table_name,
-                        upstream_table_name.schema_name,
-                        ExternalTableReaderImpl::MYSQL(MySqlExternalTableReader::new(source.properties.clone(), schema.clone()).await?),
+                        upstream_table_name,
+                        table_reader,
                         schema.clone(),
                         order_types.clone(),
                         pk_indices.clone(),

@@ -24,7 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::BinlogOffset;
+use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
 use risingwave_connector::source::SplitImpl;
 use risingwave_storage::StateStore;
 
@@ -46,36 +46,13 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
-/// `BackfillExecutor` is used to create a materialized view on another materialized view.
-///
-/// It can only buffer chunks between two barriers instead of unbundled memory usage of
-/// `RearrangedChainExecutor`.
-///
-/// It uses the latest epoch to read the snapshot of the upstream mv during two barriers and all the
-/// `StreamChunk` of the snapshot read will forward to the downstream.
-///
-/// It uses `current_pos` to record the progress of the backfill (the pk of the upstream mv) and
-/// `current_pos` is initiated as an empty `Row`.
-///
-/// All upstream messages during the two barriers interval will be buffered and decide to forward or
-/// ignore based on the `current_pos` at the end of the later barrier. Once `current_pos` reaches
-/// the end of the upstream mv pk, the backfill would finish.
-///
-/// Notice:
-/// The pk we are talking about here refers to the storage primary key.
-/// We rely on the scheduler to schedule the `BackfillExecutor` together with the upstream mv/table
-/// in the same worker, so that we can read uncommitted data from the upstream table without
-/// waiting.
-/// TODO(siyuan): most code can be reused, I want to implement the cdc backfill logic first then
-/// unify the two executor to one
 pub struct CdcBackfillExecutor<S: StateStore> {
     /// dumb field for binding the StateStore trait
     dumb_store: S,
 
     actor_ctx: ActorContextRef,
 
-    /// Upstream table
+    /// Upstream external table
     upstream_table: ExternalStorageTable,
 
     /// Upstream changelog with the same schema with the external table.
@@ -161,6 +138,9 @@ where
         let init_epoch = first_barrier.epoch.prev;
 
         tracing::info!("cdc backfill got first barrier: {:?}", first_barrier);
+
+        // Check whether this parallelism has been assigned splits,
+        // if not, we should bypass the backfill directly.
         let mut invalid_backfill = false;
         if let Some(mutation) = first_barrier.mutation.as_ref() {
             match mutation.as_ref() {
@@ -183,7 +163,6 @@ where
 
             // The first barrier message should be propagated.
             yield Message::Barrier(first_barrier);
-
             #[for_await]
             for msg in upstream {
                 if let Some(msg) = mapping_message(msg?, &self.output_indices) {
@@ -193,7 +172,6 @@ where
                     yield msg;
                 }
             }
-
             // exit the executor
             return Ok(());
         }
@@ -213,9 +191,6 @@ where
         current_pk_pos = backfill_offset;
 
         // If the snapshot is empty, we don't need to backfill.
-        // We cannot complete progress now, as we want to persist
-        // finished state to state store first.
-        // As such we will wait for next barrier.
         let is_snapshot_empty: bool = {
             if is_finished {
                 // It is finished, so just assign a value to avoid accessing storage table again.
@@ -235,25 +210,12 @@ where
         let to_backfill = !is_finished && !is_snapshot_empty;
 
         // Use these to persist state.
-        // They contain the backfill position,
-        // as well as the progress.
-        // However, they do not contain the vnode key at index 0.
-        // That is filled in when we flush the state table.
+        // They contain the backfill position, as well as the progress.
         let mut current_state: Vec<Datum> = vec![None; state_len];
         let mut old_state: Option<Vec<Datum>> = None;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-
-        // If no need backfill, but state was still "unfinished" we need to finish it.
-        // So we just update the state + progress to meta at the next barrier to finish progress,
-        // and forward other messages.
-        //
-        // Reason for persisting on second barrier rather than first:
-        // We can't update meta with progress as finished until state_table
-        // has been updated.
-        // We also can't update state_table in first epoch, since state_table
-        // expects to have been initialized in previous epoch.
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -262,14 +224,7 @@ where
 
         let mut consumed_binlog_offset: Option<BinlogOffset> = None;
 
-        // Backfill Algorithm:
-        //
-        //   backfill_stream
-        //  /               \
-        // upstream       snapshot
-        //
-        // We construct a backfill stream with upstream as its left input and mv snapshot read
-        // stream as its right input. When a chunk comes from upstream, we will buffer it.
+        // CDC Backfill Algorithm:
         //
         // When the first barrier comes from upstream:
         //  - read the current binlog offset as `binlog_low`
@@ -289,15 +244,16 @@ where
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
-            // init the last binlog offset
             last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
-            // drive the upstream first
+            // drive the upstream changelog first to ensure we can receive timely changelog event,
+            // otherwise the upstream changelog may be blocked by the snapshot read stream
+            // TODO: we can setup debezium connector starts at latest offset to avoid pulling old
+            // events.
             let first_chunk = Pin::new(&mut upstream).peek().await;
 
             tracing::info!(
-                "start the bacfill loop: [initial] binlog offset: {:?}, peek chunk: {:#?}",
+                "start the bacfill loop: [initial] binlog offset: {:?}",
                 last_binlog_offset,
-                first_chunk
             );
 
             'backfill_loop: loop {
@@ -325,9 +281,8 @@ where
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
-                                    // If it is a barrier, switch snapshot and consume
-                                    // upstream buffer chunk
-                                    // Consume upstream buffer chunk
+                                    // If it is a barrier, switch snapshot and consume buffered
+                                    // upstream chunk.
                                     // If no current_pos, means we did not process any snapshot yet.
                                     // In that case we can just ignore the upstream buffer chunk.
                                     if let Some(current_pos) = &current_pk_pos {
@@ -335,7 +290,7 @@ where
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
 
-                                            // record the consumed binlog offset which will be
+                                            // record the consumed binlog offset that will be
                                             // persisted later
                                             consumed_binlog_offset = get_chunk_last_binlog_offset(
                                                 upstream_table_reader.inner().table_reader(),
@@ -372,11 +327,12 @@ where
                                         .inc_by(cur_barrier_upstream_processed_rows);
 
                                     // Update last seen binlog offset
-                                    last_binlog_offset = consumed_binlog_offset.clone();
+                                    if consumed_binlog_offset.is_some() {
+                                        last_binlog_offset = consumed_binlog_offset.clone();
+                                    }
 
                                     // Persist state on barrier
-                                    // TODO(siyuan): persist the `last_binlog_offset` wihch will
-                                    // be a starting point upon recovery
+                                    // TODO(siyuan): persist the `last_binlog_offset`
                                     Self::persist_state(
                                         barrier.epoch,
                                         &mut self.state_table,
@@ -398,22 +354,21 @@ where
                                     )?;
 
                                     tracing::info!(
-                                        "recv changelog chunk: bin offset: {:?}, chunk: {:#?}",
+                                        "recv changelog chunk: bin offset: {:?}, capactiy: {}",
                                         chunk_binlog_offset,
-                                        chunk
+                                        chunk.capacity()
                                     );
 
                                     // Since we don't need changelog before the
-                                    // `last_binlog_offset`,
-                                    // just skip the chunk that only contains events before
-                                    // `last_binlog_offset`.
+                                    // `last_binlog_offset`, skip the chunk that *only* contains
+                                    // events before `last_binlog_offset`.
                                     if let Some(last_binlog_offset) = &last_binlog_offset {
                                         if let Some(chunk_binlog_offset) = chunk_binlog_offset {
                                             if chunk_binlog_offset < *last_binlog_offset {
                                                 tracing::info!(
-                                                    "skip changelog chunk: offset: {:?}, {:#?}",
+                                                    "skip changelog chunk: offset: {:?}, capacity: {}",
                                                     chunk_binlog_offset,
-                                                    chunk
+                                                    chunk.capacity()
                                                 );
                                                 continue;
                                             }
@@ -435,7 +390,6 @@ where
                                         "snapshot read stream ends: last_binlog_offset {:?}",
                                         last_binlog_offset
                                     );
-                                    // TODO(siyuan): handle the case when snapshot read stream ends.
                                     // End of the snapshot read stream.
                                     // We should not mark the chunk anymore,
                                     // otherwise, we will ignore some rows
@@ -486,41 +440,17 @@ where
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
 
-        // After progress finished + state persisted,
+        // After backfill progress finished
         // we can forward messages directly to the downstream,
         // as backfill is finished.
         #[for_await]
         for msg in upstream {
+            // upstream offsets will be removed from the message before forwarding to
+            // downstream
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
                         state_table.commit_no_data_expected(barrier.epoch);
                     }
-                if let Message::Chunk(chunk) = &msg {
-                    let chunk_binlog_offset = get_chunk_last_binlog_offset(
-                        &upstream_table_reader.inner().table_reader(),
-                        &chunk,
-                    )?;
-
-                    tracing::info!(
-                        "recv changelog chunk: bin offset: {:?}, chunk: {:#?}",
-                        chunk_binlog_offset,
-                        chunk
-                    );
-
-                    if let Some(last_binlog_offset) = &last_binlog_offset {
-                        if let Some(chunk_binlog_offset) = chunk_binlog_offset {
-                            if chunk_binlog_offset < *last_binlog_offset {
-                                tracing::info!(
-                                    "[after backfill] skip changelog chunk: offset: {:?}, {:#?}",
-                                    chunk_binlog_offset,
-                                    chunk
-                                );
-                                continue;
-                            }
-                        }
-                    }
-                }
-
                 yield msg;
             }
         }
