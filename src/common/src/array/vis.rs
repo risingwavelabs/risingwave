@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
+
 use either::Either;
 use itertools::repeat_n;
 
@@ -42,7 +44,22 @@ impl From<usize> for Vis {
     }
 }
 
+impl From<VisMut> for Vis {
+    fn from(v: VisMut) -> Self {
+        match v.state {
+            VisMutState::Bitmap(x) => Vis::Bitmap(x),
+            VisMutState::Compact(x) => Vis::Compact(x),
+            VisMutState::Builder(x) => Vis::Bitmap(x.finish()),
+            VisMutState::Undefined => unreachable!(),
+        }
+    }
+}
+
 impl Vis {
+    pub fn into_mut(self) -> VisMut {
+        VisMut::from(self)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.as_ref().is_empty()
     }
@@ -322,5 +339,78 @@ impl<'a> std::ops::Not for VisRef<'a> {
             VisRef::Bitmap(b) => Vis::Bitmap(!b),
             VisRef::Compact(c) => Vis::Bitmap(BitmapBuilder::zeroed(c).finish()),
         }
+    }
+}
+
+/// A mutable wrapper for `Vis`. can only set the visibilities and can not change the size.
+#[derive(Debug)]
+pub struct VisMut {
+    state: VisMutState,
+}
+
+#[derive(Debug)]
+enum VisMutState {
+    /// Non-compact variant.
+    /// Certain rows are hidden using this bitmap.
+    Bitmap(Bitmap),
+
+    /// Compact variant which just stores cardinality of rows.
+    /// This can be used when all rows are visible.
+    Compact(usize), // equivalent to all ones of this size
+
+    Builder(BitmapBuilder),
+
+    /// intermediate state
+    Undefined,
+}
+
+impl From<Vis> for VisMut {
+    fn from(vis: Vis) -> Self {
+        let state = match vis {
+            Vis::Bitmap(x) => VisMutState::Bitmap(x),
+            Vis::Compact(x) => VisMutState::Compact(x),
+        };
+        Self { state }
+    }
+}
+
+impl VisMut {
+    pub fn len(&self) -> usize {
+        match &self.state {
+            VisMutState::Bitmap(b) => b.len(),
+            VisMutState::Compact(c) => *c,
+            VisMutState::Builder(b) => b.len(),
+            VisMutState::Undefined => unreachable!(),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if `idx > len`.
+    pub fn is_set(&self, idx: usize) -> bool {
+        match &self.state {
+            VisMutState::Bitmap(b) => b.is_set(idx),
+            VisMutState::Compact(c) => {
+                assert!(idx <= *c);
+                true
+            }
+            VisMutState::Builder(b) => b.is_set(idx),
+            VisMutState::Undefined => unreachable!(),
+        }
+    }
+
+    pub fn set(&mut self, n: usize, val: bool) {
+        if let VisMutState::Builder(b) = &mut self.state {
+            b.set(n, val);
+        }
+
+        let state = mem::replace(&mut self.state, VisMutState::Undefined);
+        let mut builder = match state {
+            VisMutState::Bitmap(b) => b.into(),
+            VisMutState::Compact(c) => BitmapBuilder::filled(c),
+            VisMutState::Builder(_) | VisMutState::Undefined => unreachable!(),
+        };
+        builder.set(n, val);
+        self.state = VisMutState::Builder(builder);
     }
 }
