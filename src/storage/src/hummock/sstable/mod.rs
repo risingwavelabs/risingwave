@@ -19,6 +19,7 @@ mod block;
 
 use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
+use std::mem;
 use std::ops::{BitXor, Bound};
 
 pub use block::*;
@@ -71,7 +72,7 @@ use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
@@ -308,10 +309,10 @@ impl Sstable {
                 right: self.meta.largest_key.clone(),
                 right_exclusive: false,
             }),
-            file_size: self.meta.estimated_size as u64,
+            file_size: self.meta.estimated_size,
             meta_offset: self.meta.meta_offset,
-            total_key_count: self.meta.key_count as u64,
-            uncompressed_file_size: self.meta.estimated_size as u64,
+            total_key_count: self.meta.key_count,
+            uncompressed_file_size: self.meta.estimated_size,
             ..Default::default()
         }
     }
@@ -320,7 +321,7 @@ impl Sstable {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
-    pub offset: u32,
+    pub offset: u64,
     pub len: u32,
     pub uncompressed_size: u32,
 }
@@ -329,17 +330,22 @@ impl BlockMeta {
     /// Format:
     ///
     /// ```plain
-    /// | offset (4B) | len (4B) | smallest key len (4B) | smallest key |
+    /// | offset (8B) | len (4B) | uncompressed_size (4B) | smallest key len (4B) | smallest key |
     /// ```
     pub fn encode(&self, buf: &mut Vec<u8>) {
-        buf.put_u32_le(self.offset);
+        buf.put_u64_le(self.offset);
         buf.put_u32_le(self.len);
         buf.put_u32_le(self.uncompressed_size);
         put_length_prefixed_slice(buf, &self.smallest_key);
     }
 
-    pub fn decode(buf: &mut &[u8]) -> Self {
-        let offset = buf.get_u32_le();
+    pub fn decode(buf: &mut &[u8], version: u32) -> Self {
+        let offset = if version > 1 {
+            buf.get_u64_le()
+        } else {
+            // backward compatibility
+            buf.get_u32_le() as u64
+        };
         let len = buf.get_u32_le();
         let uncompressed_size = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -353,7 +359,7 @@ impl BlockMeta {
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
+        20 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
     }
 
     pub fn table_id(&self) -> TableId {
@@ -365,8 +371,8 @@ impl BlockMeta {
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
-    pub estimated_size: u32,
-    pub key_count: u32,
+    pub estimated_size: u64,
+    pub key_count: u64,
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
     pub meta_offset: u64,
@@ -411,16 +417,16 @@ impl SstableMeta {
 
     pub fn encode_to(&self, buf: &mut Vec<u8>) {
         let start_offset = buf.len();
-        buf.put_u32_le(self.block_metas.len() as u32);
+        buf.put_u32_le(u32::try_from(self.block_metas.len()).unwrap());
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
         }
         put_length_prefixed_slice(buf, &self.bloom_filter);
-        buf.put_u32_le(self.estimated_size);
-        buf.put_u32_le(self.key_count);
+        buf.put_u64_le(self.estimated_size);
+        buf.put_u64_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(self.monotonic_tombstone_events.len() as u32);
+        buf.put_u32_le(u32::try_from(self.monotonic_tombstone_events.len()).unwrap());
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
             monotonic_tombstone_event.encode(buf);
         }
@@ -442,9 +448,6 @@ impl SstableMeta {
 
         cursor -= 4;
         let version = (&buf[cursor..cursor + 4]).get_u32_le();
-        if version != VERSION {
-            return Err(HummockError::invalid_format_version(version));
-        }
 
         cursor -= 8;
         let checksum = (&buf[cursor..cursor + 8]).get_u64_le();
@@ -454,11 +457,15 @@ impl SstableMeta {
         let block_meta_count = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_meta_count);
         for _ in 0..block_meta_count {
-            block_metas.push(BlockMeta::decode(buf));
+            block_metas.push(BlockMeta::decode(buf, version));
         }
         let bloom_filter = get_length_prefixed_slice(buf);
-        let estimated_size = buf.get_u32_le();
-        let key_count = buf.get_u32_le();
+        let (estimated_size, key_count) = if version > 1 {
+            (buf.get_u64_le(), buf.get_u64_le())
+        } else {
+            // backward compatibility
+            (buf.get_u32_le() as u64, buf.get_u32_le() as u64)
+        };
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
         let tomb_event_count = buf.get_u32_le() as usize;
@@ -498,8 +505,8 @@ impl SstableMeta {
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
-            + 4 // estimated size
-            + 4 // key count
+            + mem::size_of_val(&self.estimated_size) // estimated size
+            + mem::size_of_val(&self.key_count) // key count
             + 4 // key len
             + self.smallest_key.len()
             + 4 // key len

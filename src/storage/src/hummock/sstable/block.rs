@@ -485,7 +485,7 @@ impl BlockBuilder {
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
-            let offset = self.buf.len() as u32;
+            let offset = u32::try_from(self.buf.len()).unwrap();
 
             self.restart_points.push(offset);
 

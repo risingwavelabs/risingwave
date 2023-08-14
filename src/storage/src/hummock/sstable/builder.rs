@@ -293,7 +293,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
-                offset: self.writer.data_len() as u32,
+                offset: u64::try_from(self.writer.data_len()).unwrap(),
                 len: 0,
                 smallest_key: full_key.encode(),
                 uncompressed_size: 0,
@@ -409,7 +409,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             block_metas: self.block_metas,
             bloom_filter,
             estimated_size: 0,
-            key_count: self.total_key_count as u32,
+            key_count: self.total_key_count,
             smallest_key,
             largest_key,
             version: VERSION,
@@ -417,10 +417,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             monotonic_tombstone_events: self.monotonic_deletes,
         };
 
-        // FIXME: just workaround
-        let encoded_size_u32 = u32::try_from(meta.encoded_size()).unwrap();
-        let meta_offset_u32 = u32::try_from(meta_offset).unwrap();
-        meta.estimated_size = encoded_size_u32.checked_add(meta_offset_u32).unwrap();
+        let meta_encoded_size = u64::try_from(meta.encoded_size()).unwrap();
+        meta.estimated_size = meta_encoded_size.checked_add(meta_offset).unwrap();
 
         // Expand the epoch of the whole sst by tombstone epoch
         let (tombstone_min_epoch, tombstone_max_epoch) = {
@@ -487,7 +485,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 right: meta.largest_key.clone(),
                 right_exclusive,
             }),
-            file_size: meta.estimated_size as u64,
+            file_size: meta.estimated_size,
             table_ids: self.table_ids.into_iter().collect(),
             meta_offset: meta.meta_offset,
             stale_key_count: self.stale_key_count,
@@ -535,12 +533,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let block_meta = self.block_metas.last_mut().unwrap();
-        block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
+        block_meta.uncompressed_size =
+            u32::try_from(self.block_builder.uncompressed_block_size()).unwrap();
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
-        block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
+        block_meta.len =
+            u32::try_from(u64::try_from(self.writer.data_len()).unwrap() - block_meta.offset)
+                .unwrap();
         self.block_builder.clear();
         Ok(())
     }
@@ -659,7 +660,7 @@ pub(super) mod tests {
             info.key_range.as_ref().unwrap().right
         );
         let (data, meta) = output.writer_output;
-        assert_eq!(info.file_size, meta.estimated_size as u64);
+        assert_eq!(info.file_size, meta.estimated_size);
         let offset = info.meta_offset as usize;
         let meta2 = SstableMeta::decode(&mut &data[offset..]).unwrap();
         assert_eq!(meta2, meta);

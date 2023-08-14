@@ -330,10 +330,7 @@ pub(crate) mod tests {
             .unwrap();
 
         // we have removed these 31 keys before watermark 32.
-        assert_eq!(
-            table.value().meta.key_count,
-            (SST_COUNT - TEST_WATERMARK + 1) as u32
-        );
+        assert_eq!(table.value().meta.key_count, SST_COUNT - TEST_WATERMARK + 1);
         let read_epoch = (TEST_WATERMARK * 1000) << 16;
 
         let get_ret = storage
@@ -462,7 +459,7 @@ pub(crate) mod tests {
             .sstable(output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
+        let target_table_size = storage.storage_opts().sstable_size_mb as u64 * (1 << 20);
 
         assert!(
             table.value().meta.estimated_size > target_table_size,
@@ -781,7 +778,7 @@ pub(crate) mod tests {
                 .meta
                 .key_count;
         }
-        assert_eq!((kv_count / 2) as u32, key_count);
+        assert_eq!((kv_count / 2) as u64, key_count);
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
@@ -954,7 +951,7 @@ pub(crate) mod tests {
                 .meta
                 .key_count;
         }
-        let expect_count = kv_count as u32 - retention_seconds_expire_second + 1;
+        let expect_count = kv_count as u64 - retention_seconds_expire_second as u64 + 1;
         assert_eq!(expect_count, key_count); // retention_seconds will clean the key (which epoch < epoch - retention_seconds)
 
         // 5. get compact task and there should be none
@@ -1128,7 +1125,7 @@ pub(crate) mod tests {
                 .meta
                 .key_count;
         }
-        let expect_count = kv_count as u32;
+        let expect_count = kv_count as u64;
         assert_eq!(expect_count, key_count); // ttl will clean the key (which epoch < epoch - ttl)
 
         // 5. get compact task and there should be none

@@ -186,9 +186,9 @@ pub async fn put_sst(
             right: meta.largest_key.clone(),
             right_exclusive: false,
         }),
-        file_size: meta.estimated_size as u64,
+        file_size: meta.estimated_size,
         meta_offset: meta.meta_offset,
-        uncompressed_file_size: meta.estimated_size as u64,
+        uncompressed_file_size: meta.estimated_size,
         ..Default::default()
     };
     let writer_output = writer.finish(meta).await?;
