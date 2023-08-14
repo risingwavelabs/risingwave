@@ -1,0 +1,4 @@
+grpcio==1.48.0
+numpy==1.21.4
+protobuf==4.21.5
+psycopg==3.0.16

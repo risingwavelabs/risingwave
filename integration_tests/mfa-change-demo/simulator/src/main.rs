@@ -1,6 +1,9 @@
+use std::path::Path;
+
 mod entities;
-mod server;
+mod server_pb;
 mod simulation;
+mod entities_taxi;
 
 #[tokio::main]
 async fn main() {

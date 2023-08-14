@@ -1,9 +1,12 @@
 syntax = "proto3";
-package server;
+package server_pb;
 
 service Server {
     rpc GetFeature(GetFeatureRequest) returns (GetFeatureResponse) {}
     rpc ReportAction(ReportActionRequest) returns (ReportActionResponse) {}
+    rpc ReportTaxiAction(ReportTaxiActionRequest) returns (ReportTaxiActionResponse) {}
+    rpc GetTaxiAmount(GetTaxiAmountRequest) returns (GetTaxiAmountResponse) {}
+    rpc StartTraining(StartTrainingRequest) returns (StartTrainingResponse) {}
 }
 
 message ReportActionRequest {
@@ -29,4 +32,46 @@ enum ActionType {
     OTHER = 0;
     MFACHANGEADD = 1;
     MFACHANGEREDUCE = 2;
+}
+
+message ReportTaxiActionRequest {
+    int32 VendorID = 1;
+    string lpep_pickup_datetime = 2;
+    string lpep_dropoff_datetime = 3;
+    bool store_and_fwd_flag = 4;
+    double RatecodeID = 5;
+    int64 PULocationID = 6;
+    int64 DOLocationID = 7;
+    double passenger_count = 8;
+    double trip_distance = 9;
+    double fare_amount = 10;
+    double extra = 11;
+    double mta_tax = 12;
+    double tip_amount = 13;
+    double tolls_amount = 14;
+    double ehail_fee = 15;
+    double improvement_surcharge = 16;
+    double total_amount = 17;
+    double payment_type = 18;
+    double trip_type = 19;
+    double congestion_surcharge = 20;
+}
+
+message ReportTaxiActionResponse {
+}
+
+message GetTaxiAmountRequest {
+    int64 DOLocationID = 1;
+}
+
+message GetTaxiAmountResponse {
+    double fare_amount = 1;
+}
+
+message StartTrainingRequest{
+
+}
+
+message StartTrainingResponse{
+    
 }

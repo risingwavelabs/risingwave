@@ -7,8 +7,8 @@ use rand::Rng;
 use serde_derive::{Deserialize, Serialize};
 use tonic::transport::Channel;
 
-use crate::server::server_client::ServerClient;
-use crate::server::{ActionType, GetFeatureRequest, ReportActionRequest};
+use crate::server_pb::server_client::ServerClient;
+use crate::server_pb::{ActionType, GetFeatureRequest, ReportActionRequest};
 
 #[derive(Serialize, Deserialize)]
 pub struct User {

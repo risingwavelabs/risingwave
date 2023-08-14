@@ -4,12 +4,12 @@ use clap::{App, Arg, ArgMatches};
 
 use crate::kafka::KafkaSink;
 use crate::recwave::Recwave;
-use crate::server::server_server::ServerServer;
+use crate::server_pb::server_server::ServerServer;
 
 mod kafka;
 mod model;
 mod recwave;
-mod server;
+mod server_pb;
 mod serving;
 
 #[tokio::main]
@@ -57,7 +57,7 @@ fn get_args<'a>() -> ArgMatches<'a> {
             Arg::with_name("output-topic")
                 .long("output-topics")
                 .help("Output topics names")
-                .default_value("recwave")
+                .default_value("taxi")
                 .takes_value(true),
         )
         .get_matches()

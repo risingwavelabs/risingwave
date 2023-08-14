@@ -25,15 +25,14 @@ lsof -i:9092 > /dev/null || {
 }
 sleep 3
 
-pip install risingwave 
-python3 server/udf.py > /dev/null 2>&1 &
-lsof -i:8815  > /dev/null || {
-  echo "failed to start udf"
-  exit 1
-}
-sleep 5
+# pip install risingwave 
+# python3 server/udf.py > /dev/null 2>&1 &
+# lsof -i:8815  > /dev/null || {
+#   echo "failed to start udf"
+#   exit 1
+# }
+# sleep 5
 
-sleep 1
 
 psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f recwave-start.sql || {
   echo "failed to initialize db for recwave"
@@ -41,9 +40,10 @@ psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f recwave-start.sql || {
 }
 sleep 2
 
-export GENERATOR_PATH=generator
+# export GENERATOR_PATH=generator
 
-python3 generator --num-users=15 \
-  --dump-users="$GENERATOR_PATH/users.json" 
+# python3 generator --num-users=15 \
+#   --dump-users="$GENERATOR_PATH/users.json" 
 
+pip3 install -r server/model/requirements.txt
 
