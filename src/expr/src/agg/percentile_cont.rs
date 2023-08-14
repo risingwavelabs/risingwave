@@ -19,7 +19,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::{AggregateFunction, AggregateState};
+use super::{AggStateDyn, AggregateFunction, AggregateState};
 use crate::agg::AggCall;
 use crate::Result;
 
@@ -75,6 +75,8 @@ pub struct PercentileCont {
 }
 
 type State = Vec<f64>;
+
+impl AggStateDyn for State {}
 
 impl PercentileCont {
     fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {

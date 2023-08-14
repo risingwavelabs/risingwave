@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
+use std::fmt::Debug;
 use std::ops::Range;
 
+use downcast_rs::{impl_downcast, Downcast};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, DataTypeName, Datum};
 
 use crate::sig::FuncSigDebug;
@@ -63,36 +65,50 @@ pub trait AggregateFunction: Send + Sync + 'static {
 }
 
 /// Intermediate state of an aggregate function.
+#[derive(Debug)]
 pub enum AggregateState {
     /// A scalar value.
     Datum(Datum),
     /// A state of any type.
-    Any(Box<dyn Any + Send + Sync>),
+    Any(Box<dyn AggStateDyn>),
 }
 
+impl EstimateSize for AggregateState {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            Self::Datum(d) => d.estimated_heap_size(),
+            Self::Any(a) => std::mem::size_of_val(&*a) + a.estimated_heap_size(),
+        }
+    }
+}
+
+pub trait AggStateDyn: Send + Sync + Debug + EstimateSize + Downcast {}
+
+impl_downcast!(AggStateDyn);
+
 impl AggregateState {
-    fn as_datum(&self) -> &Datum {
+    pub fn as_datum(&self) -> &Datum {
         match self {
             Self::Datum(d) => d,
             Self::Any(_) => panic!("not datum"),
         }
     }
 
-    fn as_datum_mut(&mut self) -> &mut Datum {
+    pub fn as_datum_mut(&mut self) -> &mut Datum {
         match self {
             Self::Datum(d) => d,
             Self::Any(_) => panic!("not datum"),
         }
     }
 
-    fn downcast_ref<T: Any>(&self) -> &T {
+    pub fn downcast_ref<T: AggStateDyn>(&self) -> &T {
         match self {
             Self::Datum(_) => panic!("cannot downcast scalar"),
             Self::Any(a) => a.downcast_ref::<T>().expect("cannot downcast"),
         }
     }
 
-    fn downcast_mut<T: Any>(&mut self) -> &mut T {
+    pub fn downcast_mut<T: AggStateDyn>(&mut self) -> &mut T {
         match self {
             Self::Datum(_) => panic!("cannot downcast scalar"),
             Self::Any(a) => a.downcast_mut::<T>().expect("cannot downcast"),

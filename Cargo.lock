@@ -6576,7 +6576,7 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "ctor",
- "dyn-clone",
+ "downcast-rs",
  "easy-ext",
  "either",
  "expect-test",

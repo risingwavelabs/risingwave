@@ -25,7 +25,7 @@ await-tree = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 ctor = "0.2"
-dyn-clone = "1"
+downcast-rs = "1.2"
 easy-ext = "1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

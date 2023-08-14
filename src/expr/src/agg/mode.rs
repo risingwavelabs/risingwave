@@ -20,7 +20,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::{AggregateFunction, AggregateState, BoxedAggregateFunction};
+use super::{AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction};
 use crate::agg::AggCall;
 use crate::Result;
 
@@ -70,13 +70,15 @@ struct Mode {
     return_type: DataType,
 }
 
-#[derive(Clone, EstimateSize, Default)]
+#[derive(Debug, Clone, EstimateSize, Default)]
 struct State {
     cur_mode: Datum,
     cur_mode_freq: usize,
     cur_item: Datum,
     cur_item_freq: usize,
 }
+
+impl AggStateDyn for State {}
 
 impl Mode {
     fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {

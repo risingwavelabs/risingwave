@@ -15,11 +15,12 @@
 use std::ops::Range;
 
 use risingwave_common::array::*;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::{AggregateFunction, AggregateState, BoxedAggregateFunction};
+use super::{AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction};
 use crate::agg::AggCall;
 use crate::Result;
 
@@ -84,7 +85,16 @@ pub struct PercentileDisc {
     return_type: DataType,
 }
 
-type State = Vec<ScalarImpl>;
+#[derive(Debug, Default)]
+struct State(Vec<ScalarImpl>);
+
+impl EstimateSize for State {
+    fn estimated_heap_size(&self) -> usize {
+        std::mem::size_of_val(self.0.as_slice())
+    }
+}
+
+impl AggStateDyn for State {}
 
 impl PercentileDisc {
     pub fn new(fractions: Option<f64>, return_type: DataType) -> Self {
@@ -96,7 +106,7 @@ impl PercentileDisc {
 
     fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {
         if let Some(datum) = datum_ref.to_owned_datum() {
-            state.push(datum);
+            state.0.push(datum);
         }
     }
 }
@@ -133,7 +143,7 @@ impl AggregateFunction for PercentileDisc {
     }
 
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-        let state = state.downcast_ref::<State>();
+        let state = &state.downcast_ref::<State>().0;
         Ok(if let Some(fractions) = self.fractions && !state.is_empty() {
             let idx = if fractions == 0.0 {
                 0
