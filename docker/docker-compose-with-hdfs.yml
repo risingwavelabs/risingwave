@@ -27,7 +27,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
       - "<$HADOOP_HOME>:/opt/hadoop/"
     environment:
-      - HADOOP_HOME=/path/to/hadoop
+      - HADOOP_HOME=/opt/hadoop/
     entrypoint: ["sh", "-c", "export CLASSPATH=$(find $HADOOP_HOME -iname \"*.jar\" | xargs echo | tr ' ' ':'):${CLASSPATH} && exec \"$@\"", "--"]
     container_name: compactor-0
     healthcheck:
@@ -65,7 +65,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
       - "<$HADOOP_HOME>:/opt/hadoop/"
     environment:
-      - HADOOP_HOME=/path/to/hadoop
+      - HADOOP_HOME=/opt/hadoop/
     entrypoint: ["sh", "-c", "export CLASSPATH=$(find $HADOOP_HOME -iname \"*.jar\" | xargs echo | tr ' ' ':'):${CLASSPATH} && exec \"$@\"", "--"]
     container_name: compute-node-0
     healthcheck:
@@ -219,7 +219,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
       - "<$HADOOP_HOME>:/opt/hadoop/"
     environment:
-      - HADOOP_HOME=/path/to/hadoop
+      - HADOOP_HOME=/opt/hadoop/
     entrypoint: ["sh", "-c", "export CLASSPATH=$(find $HADOOP_HOME -iname \"*.jar\" | xargs echo | tr ' ' ':'):${CLASSPATH} && exec \"$@\"", "--"]
     container_name: meta-node-0
     healthcheck:
