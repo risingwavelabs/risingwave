@@ -118,14 +118,21 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, 
 // init
 impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
-    /// set of `column_ids`. The output will only contains columns with the given ids in the same
-    /// order.
+    /// set of `output_column_ids`.
+    /// When reading from the storage table,
+    /// the chunks or rows will only contain columns with the given ids (`output_column_ids`).
+    /// They will in the same order as the given `output_column_ids`.
+    ///
+    /// NOTE(kwannoel): The `output_column_ids` here may be slightly different
+    /// from those supplied to associated executors.
+    /// These `output_column_ids` may have `pk` appended, since they will be needed to scan from storage.
+    /// The associated executors may not have these `pk` fields.
     #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
         table_id: TableId,
         table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
+        output_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         distribution: Distribution,
@@ -138,7 +145,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             store,
             table_id,
             table_columns,
-            column_ids,
+            output_column_ids,
             order_types,
             pk_indices,
             distribution,
@@ -157,12 +164,12 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         pk_indices: Vec<usize>,
         value_indices: Vec<usize>,
     ) -> Self {
-        let column_ids = columns.iter().map(|c| c.column_id).collect();
+        let output_column_ids = columns.iter().map(|c| c.column_id).collect();
         Self::new_inner(
             store,
             table_id,
             columns,
-            column_ids,
+            output_column_ids,
             order_types,
             pk_indices,
             Distribution::fallback(),
@@ -178,7 +185,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         store: S,
         table_id: TableId,
         table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
+        output_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
@@ -192,7 +199,8 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
-        let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
+        let (output_columns, output_indices) =
+            find_columns_by_ids(&table_columns, &output_column_ids);
         let mut value_output_indices = vec![];
         let mut key_output_indices = vec![];
 

@@ -113,14 +113,12 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
-        let pk_in_output_indices = self
+        println!("pk: {:?}", self.upstream_table.pk_indices());
+        println!("output: {:?}", self.output_indices);
+        let pk_indices = self
             .upstream_table
-            .pk_indices()
-            .iter()
-            .map(|&i| self.output_indices.iter().position(|&j| i == j))
-            .collect::<Option<Vec<_>>>()
-            .unwrap();
-        let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
+            .pk_indices().to_vec();
+        let state_len = pk_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
@@ -147,6 +145,7 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
+        println!("{:?}", schema.data_types());
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
@@ -314,7 +313,7 @@ where
                                         update_pos_by_vnode(
                                             vnode,
                                             &chunk,
-                                            &pk_in_output_indices,
+                                            &pk_indices,
                                             &mut backfill_state,
                                         );
 
@@ -358,7 +357,7 @@ where
                     // Raise the current position.
                     // As snapshot read streams are ordered by pk, so we can
                     // just use the last row to update `current_pos`.
-                    update_pos_by_vnode(vnode, &chunk, &pk_in_output_indices, &mut backfill_state);
+                    update_pos_by_vnode(vnode, &chunk, &pk_indices, &mut backfill_state);
 
                     let chunk_cardinality = chunk.cardinality() as u64;
                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -379,7 +378,7 @@ where
                             mark_chunk_ref_by_vnode(
                                 &chunk,
                                 &backfill_state,
-                                &pk_in_output_indices,
+                                &pk_indices,
                                 &pk_order,
                             )?,
                             &self.output_indices,
@@ -455,7 +454,7 @@ where
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
                     if is_snapshot_empty {
-                        let finished_state = construct_initial_finished_state(pk_in_output_indices.len());
+                        let finished_state = construct_initial_finished_state(pk_indices.len());
                         for vnode in upstream_table.vnodes().iter_vnodes() {
                             backfill_state.update_progress(vnode, BackfillProgressPerVnode::InProgress(finished_state.clone()));
                         }

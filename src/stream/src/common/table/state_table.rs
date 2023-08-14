@@ -513,7 +513,8 @@ where
         compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
-    // TODO: remove, should not be exposed to user
+    /// NOTE(kwannoel): This is used by backfill.
+    /// We want to check pk indices of upstream table.
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
