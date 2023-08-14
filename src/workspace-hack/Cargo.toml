@@ -20,9 +20,8 @@ publish = false
 [dependencies]
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
-aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
-aws-smithy-client = { version = "0.56", default-features = false, features = ["native-tls", "rustls"] }
+aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
@@ -44,7 +43,7 @@ hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
-itertools = { version = "0.11" }
+itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -58,7 +57,6 @@ madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
-multimap = { version = "0.9" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -108,9 +106,8 @@ uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 auto_enums = { version = "0.8", features = ["futures03"] }
-aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
-aws-smithy-client = { version = "0.56", default-features = false, features = ["native-tls", "rustls"] }
+aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
@@ -133,7 +130,7 @@ hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
-itertools = { version = "0.11" }
+itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -147,7 +144,6 @@ madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
-multimap = { version = "0.9" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
