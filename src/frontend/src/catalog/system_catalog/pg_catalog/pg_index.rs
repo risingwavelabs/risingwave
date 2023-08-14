@@ -31,6 +31,8 @@ pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         (DataType::Varchar, "indexprs"),
         // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
         (DataType::Varchar, "indpred"),
+        // TODO: we return false as the default value.
+        (DataType::Boolean, "indisprimary"),
     ]
 });
 
@@ -45,7 +47,8 @@ pub static PG_INDEX: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                 ARRAY_LENGTH(original_column_ids)::smallint AS indnatts, \
                 original_column_ids AS indkey, \
                 NULL AS indexprs, \
-                NULL AS indpred \
+                NULL AS indpred, \
+                FALSE AS indisprimary \
             FROM rw_catalog.rw_indexes"
         .into(),
 });

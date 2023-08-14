@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use await_tree::InstrumentAwait;
 pub use compaction_executor::CompactionExecutor;
@@ -293,11 +293,13 @@ impl Compactor {
         ) * compact_task.splits.len() as u64;
 
         tracing::info!(
-            "Ready to handle compaction task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                compact_task.compaction_group_id,
                 compact_task.task_id,
                 compact_task_statistics,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
+                compact_task.existing_table_ids,
                 parallelism,
                 task_memory_capacity_with_parallelism
             );
@@ -481,6 +483,7 @@ impl Compactor {
         let pid = sysinfo::get_current_pid().unwrap();
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
+        const MAX_CONSUMED_LATENCY_MS: u64 = 500;
 
         assert_ge!(
             compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -532,7 +535,17 @@ impl Compactor {
                 let mut last_workload = CompactorWorkload::default();
 
                 // This inner loop is to consume stream or report task progress.
+                let mut event_loop_iteration_now = Instant::now();
                 'consume_stream: loop {
+                    {
+                        // report
+                        compactor_context
+                            .compactor_metrics
+                            .compaction_event_loop_iteration_latency
+                            .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                        event_loop_iteration_now = Instant::now();
+                    }
+
                     let running_task_count = running_task_count.clone();
                     let pull_task_ack = pull_task_ack.clone();
                     let request_sender = request_sender.clone();
@@ -556,11 +569,16 @@ impl Compactor {
                                         progress: progress_list
                                     }
                                 )),
+                                create_at: SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .expect("Clock may have gone backwards")
+                                    .as_millis() as u64,
                             }) {
                                 tracing::warn!("Failed to report task progress. {e:?}");
                                 // re subscribe stream
                                 continue 'start_stream;
                             }
+
 
                             let mut pending_pull_task_count = 0;
                             if pull_task_ack.load(Ordering::SeqCst) {
@@ -577,8 +595,12 @@ impl Compactor {
                                                 pull_task_count: pending_pull_task_count,
                                             }
                                         )),
+                                        create_at: SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .expect("Clock may have gone backwards")
+                                            .as_millis() as u64,
                                     }) {
-                                        tracing::warn!("Failed to report task progress. {e:?}");
+                                        tracing::warn!("Failed to pull task {e:?}");
 
                                         // re subscribe stream
                                         continue 'start_stream;
@@ -629,14 +651,33 @@ impl Compactor {
                     };
 
                     match event {
-                        Some(Ok(SubscribeCompactionEventResponse { event })) => {
+                        Some(Ok(SubscribeCompactionEventResponse { event, create_at })) => {
                             let event = match event {
                                 Some(event) => event,
                                 None => continue 'consume_stream,
                             };
-
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
+                            let consumed_latency_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                                - create_at;
+                            context
+                                .compactor_metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_latency_ms as _);
+
+                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
+                                tracing::warn!(
+                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
+                                    event,
+                                    create_at,
+                                    consumed_latency_ms
+                                );
+                            }
+
                             let meta_client = hummock_meta_client.clone();
                             executor.spawn(async move {
                                 let running_task_count = running_task_count.clone();
@@ -657,6 +698,10 @@ impl Compactor {
                                                     table_stats_change:to_prost_table_stats_map(table_stats),
                                                 }
                                             )),
+                                            create_at: SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .expect("Clock may have gone backwards")
+                                                .as_millis() as u64,
                                         }) {
                                             tracing::warn!("Failed to report task {task_id:?} . {e:?}");
                                         }

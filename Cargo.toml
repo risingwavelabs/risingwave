@@ -48,6 +48,7 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+resolver = "2"
 
 [workspace.package]
 version = "1.1.0-alpha"

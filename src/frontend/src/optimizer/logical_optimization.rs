@@ -365,6 +365,14 @@ static GROUPING_SETS: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Common Sub Expression Extract",
+        vec![CommonSubExprExtractRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -553,6 +561,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -622,6 +632,8 @@ impl LogicalOptimizer {
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
 

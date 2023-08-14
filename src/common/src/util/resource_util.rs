@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+#[derive(Debug, Clone, Copy)]
 pub enum CgroupVersion {
     V1,
     V2,
@@ -30,41 +32,107 @@ const DEFAULT_CGROUP_MAX_INDICATOR: &str = "max";
 mod runtime {
     use std::env;
     use std::path::Path;
+
+    use super::util::parse_controller_enable_file_for_cgroup_v2;
+    use super::CgroupVersion;
     const DEFAULT_DOCKER_ENV_PATH: &str = "/.dockerenv";
     const DEFAULT_LINUX_IDENTIFIER: &str = "linux";
     const DEFAULT_IN_CONTAINER_ENV_VARIABLE: &str = "IN_CONTAINER";
     const DEFAULT_KUBERNETES_SECRETS_PATH: &str = "/var/run/secrets/kubernetes.io";
 
-    pub fn is_linux_machine() -> bool {
+    fn is_linux_machine() -> bool {
         env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER)
     }
 
     // checks if is running in a docker container by checking for docker env file, or if it is
     // running in a kubernetes pod.
-    pub fn is_running_in_container() -> bool {
-        env_var_check_if_running_in_container()
+    fn is_running_in_container() -> bool {
+        return env_var_check_if_running_in_container()
             || docker_env_exists()
-            || is_running_in_kubernetes_pod()
+            || is_running_in_kubernetes_pod();
+
+        // checks for existence of docker env file
+        fn docker_env_exists() -> bool {
+            Path::new(DEFAULT_DOCKER_ENV_PATH).exists()
+        }
+
+        // checks for environment
+        fn env_var_check_if_running_in_container() -> bool {
+            env::var(DEFAULT_IN_CONTAINER_ENV_VARIABLE).is_ok()
+        }
+
+        // checks if it is running in a kubernetes pod
+        fn is_running_in_kubernetes_pod() -> bool {
+            Path::new(DEFAULT_KUBERNETES_SECRETS_PATH).exists()
+        }
     }
 
-    // checks for existence of docker env file
-    pub fn docker_env_exists() -> bool {
-        Path::new(DEFAULT_DOCKER_ENV_PATH).exists()
+    // Given a certain controller, checks if it is enabled.
+    // For cgroup_v1, existence of directory with controller name is checked in cgroup default root
+    // hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
+    // For cgroup_v2, check the controller list path for the controller name.
+    pub fn is_controller_activated(
+        controller_type: super::Controller,
+        cgroup_version: CgroupVersion,
+    ) -> bool {
+        let controller_name: &str = match controller_type {
+            super::Controller::Cpu => "cpu",
+            super::Controller::Memory => "memory",
+        };
+        match cgroup_version {
+            super::CgroupVersion::V1 => Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY)
+                .join(controller_name)
+                .is_dir(),
+            super::CgroupVersion::V2 => parse_controller_enable_file_for_cgroup_v2(
+                super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH,
+                controller_name,
+            ),
+        }
     }
 
-    // checks for environment
-    pub fn env_var_check_if_running_in_container() -> bool {
-        env::var(DEFAULT_IN_CONTAINER_ENV_VARIABLE).is_ok()
+    // If cgroup exists or is enabled in kernel, returnb true, else false.
+    fn cgroup_exists() -> bool {
+        Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir()
     }
 
-    // checks if it is running in a kubernetes pod
-    pub fn is_running_in_kubernetes_pod() -> bool {
-        Path::new(DEFAULT_KUBERNETES_SECRETS_PATH).exists()
+    pub fn get_resource<T>(
+        desc: &str,
+        controller_type: super::Controller,
+        get_system: fn() -> T,
+        get_container: fn(CgroupVersion) -> Result<T, std::io::Error>,
+    ) -> T {
+        if !is_linux_machine() || !is_running_in_container() || !cgroup_exists() {
+            return get_system();
+        };
+
+        // if cgroup.controllers exist, v2 is used.
+        let cgroup_version = if Path::new(super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH).exists() {
+            super::CgroupVersion::V2
+        } else {
+            super::CgroupVersion::V1
+        };
+        if !is_controller_activated(controller_type, cgroup_version) {
+            return get_system();
+        }
+
+        match get_container(cgroup_version) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(
+                    err = err.to_string(),
+                    cgroup_version = ?cgroup_version,
+                    "failed to get {desc} in container, use system value instead"
+                );
+                get_system()
+            }
+        }
     }
 }
 
 pub mod memory {
     use sysinfo::{System, SystemExt};
+
+    use super::runtime::get_resource;
 
     // Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
     const V1_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
@@ -100,23 +168,12 @@ pub mod memory {
     /// let mem_used = memory::total_memory_used_bytes();
     /// ```
     pub fn total_memory_used_bytes() -> usize {
-        if !super::runtime::is_linux_machine()
-            || !super::runtime::is_running_in_container()
-            || !super::util::is_controller_activated(super::Controller::Memory)
-            || !super::util::cgroup_exists()
-        {
-            return get_system_memory_used();
-        };
-        match get_memory_used_in_container(super::util::get_cgroup_version()) {
-            Ok(mem_used) => std::cmp::min(mem_used, get_system_memory_used()),
-            Err(err) => {
-                tracing::warn!(
-                    err = err.to_string(),
-                    "failed to get memory used in container, use system value instead"
-                );
-                get_system_memory_used()
-            }
-        }
+        get_resource(
+            "memory used",
+            super::Controller::Memory,
+            get_system_memory_used,
+            get_container_memory_used,
+        )
     }
 
     /// Returns the total memory available by the system in bytes.
@@ -133,23 +190,12 @@ pub mod memory {
     /// let mem_available = memory::total_memory_available_bytes();
     /// ```
     pub fn total_memory_available_bytes() -> usize {
-        if !super::runtime::is_linux_machine()
-            || !super::runtime::is_running_in_container()
-            || !super::util::is_controller_activated(super::Controller::Memory)
-            || !super::util::cgroup_exists()
-        {
-            return get_system_memory();
-        };
-        match get_container_memory_limit(super::util::get_cgroup_version()) {
-            Ok(mem_limit) => std::cmp::min(mem_limit, get_system_memory()),
-            Err(err) => {
-                tracing::warn!(
-                    err = err.to_string(),
-                    "failed to get memory available in container, use system value instead"
-                );
-                get_system_memory()
-            }
-        }
+        get_resource(
+            "memory available",
+            super::Controller::Memory,
+            get_system_memory,
+            get_container_memory_limit,
+        )
     }
 
     // Returns the memory limit of a container if running in a container else returns the system
@@ -163,24 +209,31 @@ pub mod memory {
             super::CgroupVersion::V1 => V1_MEMORY_LIMIT_PATH,
             super::CgroupVersion::V2 => V2_MEMORY_LIMIT_PATH,
         };
-        super::util::get_value_from_file(limit_path, get_system_memory())
+        let system = get_system_memory();
+        let value = super::util::read_usize_or_max(limit_path, system)?;
+        Ok(std::cmp::min(value, system))
     }
 
     // Returns the memory used in a container if running in a container else returns the system
     // memory used.
-    fn get_memory_used_in_container(
+    fn get_container_memory_used(
         cgroup_version: super::CgroupVersion,
     ) -> Result<usize, std::io::Error> {
         let usage_path = match cgroup_version {
             super::CgroupVersion::V1 => V1_MEMORY_CURRENT_PATH,
             super::CgroupVersion::V2 => V2_MEMORY_CURRENT_PATH,
         };
-        super::util::get_value_from_file(usage_path, get_system_memory_used())
+        let system = get_system_memory_used();
+        let value = super::util::read_usize_or_max(usage_path, system)?;
+        Ok(std::cmp::min(value, system))
     }
 }
 
 pub mod cpu {
     use std::thread;
+
+    use super::runtime::get_resource;
+    use super::util::parse_error;
 
     // Default constant Cgroup paths and hierarchy.
     const V1_CPU_QUOTA_PATH: &str = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us";
@@ -203,36 +256,24 @@ pub mod cpu {
     /// let cpu_available = cpu::total_cpu_available();
     /// ```
     pub fn total_cpu_available() -> f32 {
-        if !super::runtime::is_linux_machine()
-            || !super::runtime::is_running_in_container()
-            || !super::util::is_controller_activated(super::Controller::Cpu)
-            || !super::util::cgroup_exists()
-        {
-            return get_system_cpu();
-        }
-
-        match get_container_cpu_limit(super::util::get_cgroup_version()) {
-            Ok(cpu_limit) => cpu_limit,
-            Err(err) => {
-                tracing::warn!(
-                    err = err.to_string(),
-                    "failed to get cpu quota in container, use system value instead"
-                );
-                get_system_cpu()
-            }
-        }
+        get_resource(
+            "cpu quota",
+            super::Controller::Cpu,
+            get_system_cpu,
+            get_container_cpu_limit,
+        )
     }
 
     // Returns the CPU limit of the container.
     fn get_container_cpu_limit(
         cgroup_version: super::CgroupVersion,
     ) -> Result<f32, std::io::Error> {
-        let max_cpu = thread::available_parallelism()?;
+        let max_cpu = get_system_cpu();
         match cgroup_version {
             super::CgroupVersion::V1 => {
-                get_cpu_limit_v1(V1_CPU_QUOTA_PATH, V1_CPU_PERIOD_PATH, max_cpu.get() as f32)
+                get_cpu_limit_v1(V1_CPU_QUOTA_PATH, V1_CPU_PERIOD_PATH, max_cpu)
             }
-            super::CgroupVersion::V2 => get_cpu_limit_v2(V2_CPU_LIMIT_PATH, max_cpu.get() as f32),
+            super::CgroupVersion::V2 => get_cpu_limit_v2(V2_CPU_LIMIT_PATH, max_cpu),
         }
     }
 
@@ -240,7 +281,7 @@ pub mod cpu {
     pub fn get_system_cpu() -> f32 {
         match thread::available_parallelism() {
             Ok(available_parallelism) => available_parallelism.get() as f32,
-            Err(e) => panic!("Platform is not supported, error: {}", e),
+            Err(e) => panic!("Failed to get available parallelism, error: {}", e),
         }
     }
 
@@ -250,61 +291,54 @@ pub mod cpu {
         period_path: &str,
         max_value: f32,
     ) -> Result<f32, std::io::Error> {
-        let value_in_path = std::fs::read_to_string(quota_path)?;
-        if value_in_path.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
+        let content = std::fs::read_to_string(quota_path)?;
+        if content.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
             return Ok(max_value);
         }
-        let cpu_quota = value_in_path
+        let cpu_quota = content
             .trim()
             .parse::<usize>()
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
-        let cpu_period = super::util::read_integer_from_file_path(period_path)?;
+        let cpu_period = super::util::read_usize(period_path)?;
+
         Ok((cpu_quota as f32) / (cpu_period as f32))
     }
 
     // Returns the CPU limit when cgroup_V2 is utilised.
     pub fn get_cpu_limit_v2(limit_path: &str, max_value: f32) -> Result<f32, std::io::Error> {
-        std::fs::read_to_string(limit_path).and_then(|cpu_limit_string| {
-            super::util::parse_cgroup_v2_cpu_limit_string(&cpu_limit_string, max_value)
-        })
+        let cpu_limit_string = fs_err::read_to_string(limit_path)?;
+
+        let cpu_data: Vec<&str> = cpu_limit_string.split_whitespace().collect();
+        match cpu_data.get(0..2) {
+            Some(cpu_data_values) => {
+                if cpu_data_values[0] == super::DEFAULT_CGROUP_MAX_INDICATOR {
+                    return Ok(max_value);
+                }
+                let cpu_quota = cpu_data_values[0]
+                    .parse::<usize>()
+                    .map_err(|e| parse_error(limit_path, &cpu_limit_string, e))?;
+                let cpu_period = cpu_data_values[1]
+                    .parse::<usize>()
+                    .map_err(|e| parse_error(limit_path, &cpu_limit_string, e))?;
+                Ok((cpu_quota as f32) / (cpu_period as f32))
+            }
+            None => Err(
+                std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid format in Cgroup CPU interface file, path: {limit_path}, content: {cpu_limit_string}")
+                )
+            ),
+        }
     }
 }
 
 mod util {
-    use std::fs;
-    use std::path::Path;
-
-    // If cgroup exists or is enabled in kernel, returnb true, else false.
-    pub fn cgroup_exists() -> bool {
-        Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir()
-    }
-
-    // Returns a cgroup version
-    pub fn get_cgroup_version() -> super::CgroupVersion {
-        // if cgroup.controllers exist, v2 is used.
-        if Path::new(super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH).exists() {
-            super::CgroupVersion::V2
-        } else {
-            super::CgroupVersion::V1
-        }
-    }
-
-    // Reads an integer value from a file path.
-    pub fn read_integer_from_file_path(file_path: &str) -> Result<usize, std::io::Error> {
-        let limit_str = std::fs::read_to_string(file_path)?;
-        let limit_val = limit_str
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
-        Ok(limit_val)
-    }
-
     // Parses the filepath and checks for the existence of controller_name in the file.
     pub fn parse_controller_enable_file_for_cgroup_v2(
         file_path: &str,
         controller_name: &str,
     ) -> bool {
-        match fs::read_to_string(file_path) {
+        match fs_err::read_to_string(file_path) {
             Ok(controller_string) => {
                 for controller in controller_string.split_whitespace() {
                     if controller.eq(controller_name) {
@@ -317,66 +351,38 @@ mod util {
         }
     }
 
-    // Given a certain controller, checks if it is enabled.
-    // For cgroup_v1, existence of directory with controller name is checked in cgroup default root
-    // hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
-    // For cgroup_v2, check the controller list path for the controller name.
-    pub fn is_controller_activated(controller_type: super::Controller) -> bool {
-        let controller_name: &str = match controller_type {
-            super::Controller::Cpu => "cpu",
-            super::Controller::Memory => "memory",
-        };
-        match get_cgroup_version() {
-            super::CgroupVersion::V1 => Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY)
-                .join(controller_name)
-                .is_dir(),
-            super::CgroupVersion::V2 => parse_controller_enable_file_for_cgroup_v2(
-                super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH,
-                controller_name,
-            ),
-        }
+    pub fn parse_error(
+        file_path: &str,
+        content: &str,
+        e: impl std::fmt::Display,
+    ) -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("failed to parse, path: {file_path}, content: {content}, error: {e}"),
+        )
     }
 
-    // Helper function to parse the string inside the cgroup cpu limit file.
-    pub fn parse_cgroup_v2_cpu_limit_string(
-        cpu_limit_string: &str,
-        max_value: f32,
-    ) -> Result<f32, std::io::Error> {
-        let cpu_data: Vec<&str> = cpu_limit_string.split_whitespace().collect();
-        match cpu_data.get(0..2) {
-            Some(cpu_data_values) => {
-                if cpu_data_values[0] == super::DEFAULT_CGROUP_MAX_INDICATOR {
-                    return Ok(max_value);
-                }
-                let cpu_quota = cpu_data_values[0].parse::<usize>().map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")
-                })?;
-                let cpu_period = cpu_data_values[1].parse::<usize>().map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")
-                })?;
-                Ok((cpu_quota as f32) / (cpu_period as f32))
-            }
-            None => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid format in Cgroup CPU interface file",
-            )),
-        }
+    // Reads an integer value from a file path.
+    pub fn read_usize(file_path: &str) -> Result<usize, std::io::Error> {
+        let content = fs_err::read_to_string(file_path)?;
+        let limit_val = content
+            .trim()
+            .parse::<usize>()
+            .map_err(|e| parse_error(file_path, &content, e))?;
+        Ok(limit_val)
     }
 
     // Helper function that helps to retrieve value in file, if value is "max", max_value will be
     // returned instead.
-    pub(super) fn get_value_from_file(
-        file_path: &str,
-        max_value: usize,
-    ) -> Result<usize, std::io::Error> {
-        let value_in_path = std::fs::read_to_string(file_path)?;
-        if value_in_path.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
+    pub fn read_usize_or_max(file_path: &str, max_value: usize) -> Result<usize, std::io::Error> {
+        let content = fs_err::read_to_string(file_path)?;
+        if content.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
             return Ok(max_value);
         }
-        let limit_val = value_in_path
+        let limit_val = content
             .trim()
             .parse::<usize>()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
+            .map_err(|e| parse_error(file_path, &content, e))?;
         Ok(limit_val)
     }
 
@@ -474,7 +480,7 @@ mod util {
                         .expect("Error while writing to file");
                     test_file_path = String::from(file.path().to_str().unwrap())
                 }
-                match read_integer_from_file_path(&test_file_path) {
+                match read_usize(&test_file_path) {
                     Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
                     Err(e) => assert_eq!(
                         e.kind(),
@@ -561,7 +567,7 @@ mod util {
                         .expect("Error while writing to file");
                     test_file_path = String::from(file.path().to_str().unwrap())
                 }
-                match get_value_from_file(&test_file_path, get_system_memory()) {
+                match read_usize_or_max(&test_file_path, get_system_memory()) {
                     Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
                     Err(e) => assert_eq!(
                         e.kind(),
@@ -573,6 +579,7 @@ mod util {
 
         #[test]
         fn test_get_cpu_limit_v1() {
+            #[derive(Debug)]
             struct TestCase {
                 file_exists: bool,
                 value_in_quota_file: String,
@@ -664,7 +671,12 @@ mod util {
                     &test_period_file_path,
                     get_system_cpu(),
                 ) {
-                    Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
+                    Ok(int_val) => assert_eq!(
+                        &int_val,
+                        curr_test_case.expected.as_ref().unwrap(),
+                        "{:?}",
+                        tc
+                    ),
                     Err(e) => assert_eq!(
                         e.kind(),
                         curr_test_case.expected.as_ref().unwrap_err().kind()
