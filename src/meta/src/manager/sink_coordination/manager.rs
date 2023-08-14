@@ -420,7 +420,7 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
         };
 
@@ -591,7 +591,7 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
         };
 
@@ -627,7 +627,7 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
         };
 
@@ -707,7 +707,7 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
         };
 

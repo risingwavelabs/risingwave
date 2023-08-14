@@ -142,16 +142,8 @@ impl StreamNode for StreamProject {
                 .iter()
                 .map(|x| x.to_expr_proto())
                 .collect(),
-            watermark_input_key: self
-                .watermark_derivations
-                .iter()
-                .map(|(x, _)| *x as u32)
-                .collect(),
-            watermark_output_key: self
-                .watermark_derivations
-                .iter()
-                .map(|(_, y)| *y as u32)
-                .collect(),
+            watermark_input_cols,
+            watermark_output_cols,
             merge_chunk: self.merge_chunk,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
         })

@@ -75,7 +75,6 @@ impl BitmapBuilder {
             BitmapBuilder {
                 len: bitmap.len(),
                 data: Vec::from(bits.clone()),
-                count_ones: bitmap.count_ones(),
             }
         } else if bitmap.count_ones == 0 {
             Self::zeroed(bitmap.len())
@@ -84,7 +83,6 @@ impl BitmapBuilder {
             BitmapBuilder {
                 len: bitmap.len(),
                 data: vec![1; Bitmap::vec_len(bitmap.len())],
-                count_ones: bitmap.count_ones(),
             }
         }
     }

@@ -19,6 +19,7 @@ use std::hash::BuildHasherDefault;
 use itertools::Itertools;
 use prehash::{new_prehashed_map, Passthru, Prehashed};
 
+use super::DataChunk;
 use crate::array::{Op, RowRef, StreamChunk};
 use crate::buffer::BitmapBuilder;
 use crate::row::Project;
@@ -103,7 +104,7 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
         }
         (None, Some(ops)) => {
             let (_, columns, vis) = stream_chunk.into_inner();
-            StreamChunk::new(ops, columns, vis)
+            StreamChunk::from_parts(ops, DataChunk::new(columns, vis))
         }
         (None, None) => stream_chunk,
     }
@@ -272,7 +273,7 @@ pub fn gen_update_from_pk(pk_indices: &[usize], chunk: StreamChunk) -> StreamChu
         debug_assert_eq!(returned_chunk, None);
     }
 
-    StreamChunk::from_data_chunk(ops, chunk_builder.consume_all().unwrap())
+    StreamChunk::from_parts(ops, chunk_builder.consume_all().unwrap())
 }
 
 #[cfg(test)]
