@@ -1,0 +1,55 @@
+name: PR Documentation Checker
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  check_pr_description:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if PR is merged
+        id: check_merged
+        run: echo "::set-output name=merged::$(echo ${{ github.event.pull_request.merged }} | tr '[:upper:]' '[:lower:]')"
+
+      - name: Retrieve PR description
+        id: pr_description
+        run: |
+          echo "::set-output name=description::$(curl -s -H \"Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}\" ${{ github.event.pull_request.url }} | jq -r '.body')"
+
+      - name: Retrieve PR description
+        uses: 8BitJonny/gh-get-current-pr@2.2.0
+        id: PR
+
+      - name: Check if documentation update is needed
+        id: check_documentation_update
+        if: steps.PR.outputs.pr_found == 'true'
+        run: |
+          if [[ "${prBody}" == *"- [x] My PR needs documentation updates."* ]]; then
+            echo "::set-output name=documentation_update::true"
+          else
+            echo "::set-output name=documentation_update::false"
+          fi
+        env:
+          prBody: ${{ steps.PR.outputs.pr_body }}
+
+      - name: Create PR in other repository
+        if: steps.check_merged.outputs.merged == 'true' && steps.check_documentation_update.outputs.documentation_update == 'true'
+        run: |
+          PR_CONTENT="This PR updates documentation for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT"
+
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ACCESS_TOKEN }}" \
+            -d "{\"title\": \"Documentation Update for PR $PR_ID\",\"head\": \"main\",\"base\": \"main\",\"body\": \"$PR_CONTENT\",\"maintainer_can_modify\": true}" \
+            "https://api.github.com/repos/risingwavelabs/risingwave-docs/pulls"
+        env:
+          PR_ID: ${{ steps.PR.outputs.number }}
+          PR_URL: ${{ steps.PR.outputs.pr_url }}
+          PR_TITLE: ${{ steps.PR.outputs.pr_title }}
+          PR_BODY: ${{ steps.PR.outputs.pr_body }}
+          PR_CREATED_AT: ${{ steps.PR.outputs.pr_created_at }}
+          PR_MERGED_AT: ${{ steps.PR.outputs.pr_merged_at }}
+          PR_CLOSED_AT: ${{ steps.PR.outputs.pr_closed_at }}
+          PR_LABEL: ${{ steps.PR.outputs.pr_labels }}
