@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -121,39 +122,37 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
-        "online-docker-playground" | "docker-playground" => {
-            vec![
-                RisingWaveService::Meta(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:5690",
-                    "--advertise-addr",
-                    "127.0.0.1:5690",
-                    "--dashboard-host",
-                    "0.0.0.0:5691",
-                    "--state-store",
-                    "hummock+memory",
-                    "--data-directory",
-                    "hummock_001",
-                    "--connector-rpc-endpoint",
-                    "127.0.0.1:50051",
-                ])),
-                RisingWaveService::Compute(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:5688",
-                    "--advertise-addr",
-                    "127.0.0.1:5688",
-                    "--connector-rpc-endpoint",
-                    "127.0.0.1:50051",
-                ])),
-                RisingWaveService::Frontend(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:4566",
-                    "--advertise-addr",
-                    "127.0.0.1:4566",
-                ])),
-                RisingWaveService::ConnectorNode(osstrs([])),
-            ]
-        }
+        "online-docker-playground" | "docker-playground" => vec![
+            RisingWaveService::Meta(osstrs([
+                "--listen-addr",
+                "0.0.0.0:5690",
+                "--advertise-addr",
+                "127.0.0.1:5690",
+                "--dashboard-host",
+                "0.0.0.0:5691",
+                "--state-store",
+                "hummock+memory",
+                "--data-directory",
+                "hummock_001",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
+            ])),
+            RisingWaveService::Compute(osstrs([
+                "--listen-addr",
+                "0.0.0.0:5688",
+                "--advertise-addr",
+                "127.0.0.1:5688",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
+            ])),
+            RisingWaveService::Frontend(osstrs([
+                "--listen-addr",
+                "0.0.0.0:4566",
+                "--advertise-addr",
+                "127.0.0.1:4566",
+            ])),
+            RisingWaveService::ConnectorNode(osstrs([])),
+        ],
         _ => {
             tracing::warn!("Unknown playground profile. All components will be started using the default command line options.");
             return get_services("playground");
@@ -290,15 +289,32 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
     } else {
         eprintln!();
     }
-    eprintln!(
-        "* Use {} instead if you want to start a full cluster.",
-        console::style("./risedev d").blue().bold()
-    );
+    let psql_cmd = if let Ok("1") = env::var("RISEDEV").as_deref() {
+        // Started with `./risedev playground`.
+        eprintln!(
+            "* Use {} instead if you want to start a full cluster.",
+            console::style("./risedev d").blue().bold()
+        );
+
+        // This is a specialization of `generate_risedev_env` in
+        // `src/risedevtool/src/risedev_env.rs`.
+        let risedev_env = r#"
+            RW_META_ADDR="http://0.0.0.0:5690"
+            RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
+            RW_FRONTEND_PORT="4566"
+        "#;
+        std::fs::write(
+            Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-env"),
+            risedev_env,
+        )?;
+
+        "./risedev psql"
+    } else {
+        "psql -h localhost -p 4566 -d dev -U root"
+    };
     eprintln!(
         "* Run {} in a different terminal to start Postgres interactive shell.",
-        console::style(format_args!("psql -h localhost -p 4566 -d dev -U root"))
-            .blue()
-            .bold()
+        console::style(psql_cmd).blue().bold()
     );
     eprintln!("-------------------------------");
 
