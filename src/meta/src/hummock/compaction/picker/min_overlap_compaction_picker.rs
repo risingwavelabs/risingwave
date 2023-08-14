@@ -63,8 +63,6 @@ impl MinOverlappingPicker {
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
             let mut select_file_size = 0;
-            // overlap_info.update(&select_tables[left]);
-            // let max_overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.sst_id) {
                     break;
@@ -78,9 +76,6 @@ impl MinOverlappingPicker {
                 select_file_size += table.file_size;
                 overlap_info.update(table);
                 let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
-                // if overlap_files_range.end > max_overlap_files_range.end {
-                //     break;
-                // }
                 let mut total_file_size = 0;
                 let mut pending_compact = false;
                 if !overlap_files_range.is_empty() {
