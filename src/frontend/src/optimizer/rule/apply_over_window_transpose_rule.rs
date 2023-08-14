@@ -85,7 +85,7 @@ impl Rule for ApplyOverWindowTransposeRule {
                 // Add the domain columns to the partition by clauses.
                 func.partition_by = (0..apply_left_len)
                     .map(|i| InputRef::new(i, apply_left_schema.fields[i].data_type()))
-                    .chain(func.partition_by.clone().into_iter())
+                    .chain(func.partition_by.drain(..))
                     .collect();
             });
 

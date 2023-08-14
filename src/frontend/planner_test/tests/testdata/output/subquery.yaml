@@ -730,7 +730,7 @@
   sql: |
     CREATE TABLE integers(i INTEGER, correlated_col int);
     CREATE TABLE rows(k int, v int, correlated_col int);
-    SELECT i FROM integers where i in (select  SUM(v) OVER(PARTITION BY k ORDER BY v) from rows where rows.correlated_col = integers.correlated_col);
+    SELECT i FROM integers where i in (select SUM(v) OVER(PARTITION BY k ORDER BY v) from rows where rows.correlated_col = integers.correlated_col);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftSemi, predicate: $expr1 = sum AND integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.i] }
