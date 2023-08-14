@@ -63,6 +63,8 @@ impl MinOverlappingPicker {
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
             let mut select_file_size = 0;
+            // overlap_info.update(&select_tables[left]);
+            // let max_overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.sst_id) {
                     break;
@@ -76,6 +78,9 @@ impl MinOverlappingPicker {
                 select_file_size += table.file_size;
                 overlap_info.update(table);
                 let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
+                // if overlap_files_range.end > max_overlap_files_range.end {
+                //     break;
+                // }
                 let mut total_file_size = 0;
                 let mut pending_compact = false;
                 if !overlap_files_range.is_empty() {
@@ -101,7 +106,7 @@ impl MinOverlappingPicker {
             .min_by(|(score1, x), (score2, y)| {
                 score1
                     .cmp(score2)
-                    .then_with(|| (y.1 - y.0).cmp(&(x.1 - x.0)))
+                    .then_with(|| (x.1 - x.0).cmp(&(y.1 - y.0)))
             })
             .unwrap();
         let select_input_ssts = select_tables[*left..(right + 1)].to_vec();
@@ -761,5 +766,65 @@ pub mod tests {
                 assert!(plan.sstable_infos.len() >= min_depth);
             }
         }
+    }
+
+    #[test]
+    fn test_trivial_move_bug() {
+        let levels = vec![
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![generate_table(0, 1, 400, 500, 2)],
+                total_file_size: 100,
+                sub_level_id: 0,
+                uncompressed_file_size: 0,
+            },
+            Level {
+                level_idx: 2,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 200, 1),
+                    generate_table(2, 1, 600, 700, 1),
+                ],
+                total_file_size: 200,
+                sub_level_id: 0,
+                uncompressed_file_size: 0,
+            },
+            Level {
+                level_idx: 3,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(3, 1, 100, 300, 2),
+                    generate_table(2, 1, 600, 800, 1),
+                ],
+                total_file_size: 400,
+                sub_level_id: 0,
+                uncompressed_file_size: 0,
+            },
+        ];
+
+        let levels_handlers = vec![
+            LevelHandler::new(0),
+            LevelHandler::new(1),
+            LevelHandler::new(2),
+            LevelHandler::new(3),
+        ];
+        // no limit
+        let picker =
+            MinOverlappingPicker::new(2, 3, 1000, false, Arc::new(RangeOverlapStrategy::default()));
+        let (select_files, target_files) = picker.pick_tables(
+            &levels[1].table_infos,
+            &levels[2].table_infos,
+            &levels_handlers,
+        );
+        let overlap_strategy = Arc::new(RangeOverlapStrategy::default());
+        let mut overlap_info = overlap_strategy.create_overlap_info();
+        for sst in &select_files {
+            overlap_info.update(sst);
+        }
+        let range = overlap_info.check_multiple_overlap(&levels[0].table_infos);
+        assert!(range.is_empty());
+        assert_eq!(select_files.len(), 1);
+        assert_eq!(target_files.len(), 1);
     }
 }
