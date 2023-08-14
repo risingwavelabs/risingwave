@@ -231,6 +231,8 @@ message AggCallState {
     ValueState value_state = 1;
     MaterializedInputState materialized_input_state = 3;
   }
+  reserved 2;
+  reserved "table_state";
 }
 
 message SimpleAggNode {
