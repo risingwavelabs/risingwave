@@ -638,6 +638,9 @@ impl Binder {
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
                 ("sign", raw_call(ExprType::Sign)),
+                ("scale", raw_call(ExprType::Scale)),
+                ("min_scale", raw_call(ExprType::MinScale)),
+                ("trim_scale", raw_call(ExprType::TrimScale)),
 
                 (
                     "to_timestamp",
@@ -952,6 +955,7 @@ impl Binder {
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
