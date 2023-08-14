@@ -20,9 +20,9 @@ publish = false
 [dependencies]
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
-aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+aws-smithy-client = { version = "0.56", default-features = false, features = ["native-tls", "rustls"] }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
@@ -108,9 +108,9 @@ uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 auto_enums = { version = "0.8", features = ["futures03"] }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
-aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+aws-smithy-client = { version = "0.56", default-features = false, features = ["native-tls", "rustls"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
