@@ -690,7 +690,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
-        .add_service(HummockManagerServiceServer::new(hummock_srv))
+        .add_service(
+            HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(NotificationServiceServer::new(notification_srv))
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
