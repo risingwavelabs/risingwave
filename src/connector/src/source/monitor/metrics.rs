@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use prometheus::core::{AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
 
+use crate::source::kafka::stats::RdKafkaStats;
+
 #[derive(Debug)]
 pub struct EnumeratorMetrics {
     pub registry: Registry,
     pub high_watermark: GenericGaugeVec<AtomicI64>,
+    pub kafka_native_metrics: Arc<RdKafkaStats>,
 }
 
 impl EnumeratorMetrics {
@@ -32,9 +37,11 @@ impl EnumeratorMetrics {
             registry,
         )
         .unwrap();
+        let kafka_native_metrics = Arc::new(RdKafkaStats::new(registry.clone()));
         EnumeratorMetrics {
             registry,
             high_watermark,
+            kafka_native_metrics,
         }
     }
 

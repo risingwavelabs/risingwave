@@ -91,23 +91,33 @@ impl BrokerAddrRewriter {
 
 pub struct PrivateLinkConsumerContext {
     inner: BrokerAddrRewriter,
+
+    // identifier is required when reporting metrics as a label, usually it is compose by connector
+    // format (source or sink) and corresponding id (source_id or sink_id)
+    // identifier and metrics should be set at the same time
+    identifier: Option<String>,
     metrics: Option<Arc<RdKafkaStats>>,
 }
 
 impl PrivateLinkConsumerContext {
     pub fn new(
         broker_rewrite_map: Option<HashMap<String, String>>,
+        identifier: Option<String>,
         metrics: Option<Arc<RdKafkaStats>>,
     ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self { inner, metrics })
+        Ok(Self {
+            inner,
+            metrics,
+            identifier,
+        })
     }
 }
 
 impl ClientContext for PrivateLinkConsumerContext {
+    /// this func serves as a callback when `poll` is completed.
     fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics {
-            let id: String = "".to_string(); // todo: use source id or sink id
+        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
             metrics.report(id.as_str(), &statistics);
         }
     }
@@ -122,23 +132,32 @@ impl ConsumerContext for PrivateLinkConsumerContext {}
 
 pub struct PrivateLinkProducerContext {
     inner: BrokerAddrRewriter,
+
+    // identifier is required when reporting metrics as a label, usually it is compose by connector
+    // format (source or sink) and corresponding id (source_id or sink_id)
+    // identifier and metrics should be set at the same time
+    identifier: Option<String>,
     metrics: Option<Arc<RdKafkaStats>>,
 }
 
 impl PrivateLinkProducerContext {
     pub fn new(
         broker_rewrite_map: Option<HashMap<String, String>>,
+        identifier: Option<String>,
         metrics: Option<Arc<RdKafkaStats>>,
     ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
-        Ok(Self { inner, metrics })
+        Ok(Self {
+            inner,
+            metrics,
+            identifier,
+        })
     }
 }
 
 impl ClientContext for PrivateLinkProducerContext {
     fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics {
-            let id: String = "".to_string(); // todo: use source id or sink id
+        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
             metrics.report(id.as_str(), &statistics);
         }
     }

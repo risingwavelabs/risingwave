@@ -41,6 +41,7 @@ macro_rules! register_uint_gauge_vec_with_registry {
     }};
 }
 
+#[derive(Debug, Clone)]
 pub struct RdKafkaStats {
     pub registry: Registry,
 
@@ -68,6 +69,7 @@ pub struct RdKafkaStats {
     pub cgrp: ConsumerGroupStats,
 }
 
+#[derive(Debug, Clone)]
 pub struct BrokerStats {
     pub registry: Registry,
 
@@ -100,6 +102,7 @@ pub struct BrokerStats {
     pub throttle: StatsWindow,
 }
 
+#[derive(Debug, Clone)]
 pub struct TopicStats {
     pub registry: Registry,
 
@@ -109,6 +112,7 @@ pub struct TopicStats {
     pub partitions: PartitionStats,
 }
 
+#[derive(Debug, Clone)]
 pub struct StatsWindow {
     pub registry: Registry,
 
@@ -128,6 +132,7 @@ pub struct StatsWindow {
     pub out_of_range: IntGaugeVec,
 }
 
+#[derive(Debug, Clone)]
 pub struct ConsumerGroupStats {
     pub registry: Registry,
 
@@ -142,28 +147,28 @@ pub struct ConsumerGroupStats {
 impl ConsumerGroupStats {
     pub fn new(registry: Registry) -> Self {
         let state_age = register_int_gauge_vec_with_registry!(
-            "rdkafka.consumer.group.state.age",
+            "rdkafka_consumer_group_state_age",
             "Age of the consumer group state in seconds",
             &["id", "client_id", "state"],
             registry
         )
         .unwrap();
         let rebalance_age = register_int_gauge_vec_with_registry!(
-            "rdkafka.consumer.group.rebalance.age",
+            "rdkafka_consumer_group_rebalance_age",
             "Age of the last rebalance in seconds",
             &["id", "client_id", "state"],
             registry
         )
         .unwrap();
         let rebalance_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.consumer.group.rebalance.cnt",
+            "rdkafka_consumer_group_rebalance_cnt",
             "Number of rebalances",
             &["id", "client_id", "state"],
             registry
         )
         .unwrap();
         let assignment_size = register_int_gauge_vec_with_registry!(
-            "rdkafka.consumer.group.assignment.size",
+            "rdkafka_consumer_group_assignment_size",
             "Number of assigned partitions",
             &["id", "client_id", "state"],
             registry
@@ -198,7 +203,7 @@ impl ConsumerGroupStats {
 
 impl StatsWindow {
     pub fn new(registry: Registry, path: &str) -> Self {
-        let get_metric_name = |name: &str| format!("rdkafka.{}.{}", path, name);
+        let get_metric_name = |name: &str| format!("rdkafka_{}_{}", path, name);
         let min = register_int_gauge_vec_with_registry!(
             get_metric_name("min"),
             "Minimum value",
@@ -242,7 +247,7 @@ impl StatsWindow {
         )
         .unwrap();
         let hdr_size = register_int_gauge_vec_with_registry!(
-            get_metric_name("hdr.size"),
+            get_metric_name("hdrsize"),
             "Size of the histogram header",
             &["id", "client_id", "broker", "topic"],
             registry
@@ -284,14 +289,14 @@ impl StatsWindow {
         )
         .unwrap();
         let p99_99 = register_int_gauge_vec_with_registry!(
-            get_metric_name("p99.99"),
+            get_metric_name("p99_99"),
             "99.99th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
         let out_of_range = register_int_gauge_vec_with_registry!(
-            get_metric_name("out.of.range"),
+            get_metric_name("out_of_range"),
             "Out of range values",
             &["id", "client_id", "broker", "topic"],
             registry
@@ -336,16 +341,22 @@ impl StatsWindow {
 impl TopicStats {
     pub fn new(registry: Registry) -> Self {
         let metadata_age = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.metadata.age",
+            "rdkafka_topic_metadata_age",
             "Age of the topic metadata in milliseconds",
             &["id", "client_id", "topic"],
             registry
         )
         .unwrap();
-        let batch_size = StatsWindow::new(registry.clone(), "topic.batchsize");
-        let batch_cnt = StatsWindow::new(registry.clone(), "topic.batchcnt");
+        let batch_size = StatsWindow::new(registry.clone(), "topic_batchsize");
+        let batch_cnt = StatsWindow::new(registry.clone(), "topic_batchcnt");
         let partitions = PartitionStats::new(registry.clone());
-        Self { registry, metadata_age, batch_size, batch_cnt, partitions }
+        Self {
+            registry,
+            metadata_age,
+            batch_size,
+            batch_cnt,
+            partitions,
+        }
     }
 
     pub fn report(
@@ -379,6 +390,7 @@ impl TopicStats {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PartitionStats {
     pub registry: Registry,
 
@@ -413,182 +425,182 @@ pub struct PartitionStats {
 impl PartitionStats {
     pub fn new(registry: Registry) -> Self {
         let msgq_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.msgq.cnt",
+            "rdkafka_topic_partition_msgq_cnt",
             "Number of messages in the producer queue",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let msgq_bytes = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.msgq.bytes",
+            "rdkafka_topic_partition_msgq_bytes",
             "Size of messages in the producer queue",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let xmit_msgq_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.xmit.msgq.cnt",
+            "rdkafka_topic_partition_xmit_msgq_cnt",
             "Number of messages in the transmit queue",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let xmit_msgq_bytes = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.xmit.msgq.bytes",
+            "rdkafka_topic_partition_xmit_msgq_bytes",
             "Size of messages in the transmit queue",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let fetchq_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.fetchq.cnt",
+            "rdkafka_topic_partition_fetchq_cnt",
             "Number of messages in the fetch queue",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let fetchq_size = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.fetchq.size",
+            "rdkafka_topic_partition_fetchq_size",
             "Size of messages in the fetch queue",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let query_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.query.offset",
+            "rdkafka_topic_partition_query_offset",
             "Current query offset",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let next_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.next.offset",
+            "rdkafka_topic_partition_next_offset",
             "Next offset to query",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let app_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.app.offset",
+            "rdkafka_topic_partition_app_offset",
             "Last acknowledged offset",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let stored_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.stored.offset",
+            "rdkafka_topic_partition_stored_offset",
             "Last stored offset",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let committed_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.committed.offset",
+            "rdkafka_topic_partition_committed_offset",
             "Last committed offset",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let eof_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.eof.offset",
+            "rdkafka_topic_partition_eof_offset",
             "Last offset in broker log",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let lo_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.lo.offset",
+            "rdkafka_topic_partition_lo_offset",
             "Low offset",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let hi_offset = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.hi.offset",
+            "rdkafka_topic_partition_hi_offset",
             "High offset",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let consumer_lag = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.consumer.lag",
+            "rdkafka_topic_partition_consumer_lag",
             "Consumer lag",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let consumer_lag_store = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.consumer.lag.store",
+            "rdkafka_topic_partition_consumer_lag_store",
             "Consumer lag stored",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let txmsgs = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.txmsgs",
+            "rdkafka_topic_partition_txmsgs",
             "Number of transmitted messages",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let txbytes = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.txbytes",
+            "rdkafka_topic_partition_txbytes",
             "Number of transmitted bytes",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let rxmsgs = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.rxmsgs",
+            "rdkafka_topic_partition_rxmsgs",
             "Number of received messages",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let rxbytes = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.rxbytes",
+            "rdkafka_topic_partition_rxbytes",
             "Number of received bytes",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let msgs = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.msgs",
+            "rdkafka_topic_partition_msgs",
             "Number of messages in partition",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let rx_ver_drops = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.rx.ver.drops",
+            "rdkafka_topic_partition_rx_ver_drops",
             "Number of received messages dropped due to version mismatch",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let msgs_inflight = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.msgs.inflight",
+            "rdkafka_topic_partition_msgs_inflight",
             "Number of messages in-flight",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let next_ack_seq = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.next.ack.seq",
+            "rdkafka_topic_partition_next_ack_seq",
             "Next ack sequence number",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let next_err_seq = register_int_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.next.err.seq",
+            "rdkafka_topic_partition_next_err_seq",
             "Next error sequence number",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
         )
         .unwrap();
         let acked_msgid = register_uint_gauge_vec_with_registry!(
-            "rdkafka.topic.partition.acked.msgid",
+            "rdkafka_topic_partition_acked_msgid",
             "Acknowledged message ID",
             &["id", "client_id", "broker", "topic", "partition"],
             registry
@@ -740,7 +752,7 @@ impl PartitionStats {
 impl RdKafkaStats {
     pub fn new(registry: Registry) -> Self {
         let ts = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.ts",
+            "rdkafka_top_ts",
             "librdkafka's internal monotonic clock (microseconds)",
             // we cannot tell whether it is for consumer or producer,
             // it may refer to source_id or sink_id
@@ -749,119 +761,119 @@ impl RdKafkaStats {
         )
         .unwrap();
         let time = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.time",
+            "rdkafka_top_time",
             "Wall clock time in seconds since the epoch",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let age = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.age",
+            "rdkafka_top_age",
             "Age of the topic metadata in milliseconds",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let replyq = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.replyq",
+            "rdkafka_top_replyq",
             "Number of replies waiting to be served",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let msg_cnt = register_uint_gauge_vec_with_registry!(
-            "rdkafka.top.msg.cnt",
+            "rdkafka_top_msg_cnt",
             "Number of messages in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let msg_size = register_uint_gauge_vec_with_registry!(
-            "rdkafka.top.msg.size",
+            "rdkafka_top_msg_size",
             "Size of messages in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let msg_max = register_uint_gauge_vec_with_registry!(
-            "rdkafka.top.msg.max",
+            "rdkafka_top_msg_max",
             "Maximum message size in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let msg_size_max = register_uint_gauge_vec_with_registry!(
-            "rdkafka.top.msg.size.max",
+            "rdkafka_top_msg_size_max",
             "Maximum message size in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let tx = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.tx",
+            "rdkafka_top_tx",
             "Number of transmitted messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let tx_bytes = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.tx.bytes",
+            "rdkafka_top_tx_bytes",
             "Number of transmitted bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let rx = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.rx",
+            "rdkafka_top_rx",
             "Number of received messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let rx_bytes = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.rx.bytes",
+            "rdkafka_top_rx_bytes",
             "Number of received bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let tx_msgs = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.tx.msgs",
+            "rdkafka_top_tx_msgs",
             "Number of transmitted messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let tx_msgs_bytes = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.tx.msgs.bytes",
+            "rdkafka_top_tx_msgs_bytes",
             "Number of transmitted bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let rx_msgs = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.rx.msgs",
+            "rdkafka_top_rx_msgs",
             "Number of received messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let rx_msgs_bytes = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.rx.msgs.bytes",
+            "rdkafka_top_rx_msgs_bytes",
             "Number of received bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let simple_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.simple.cnt",
+            "rdkafka_top_simple_cnt",
             "Number of simple consumer queues",
             &["id", "client_id"],
             registry
         )
         .unwrap();
         let metadata_cache_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.top.metadata.cache.cnt",
+            "rdkafka_top_metadata_cache_cnt",
             "Number of entries in the metadata cache",
             &["id", "client_id"],
             registry
@@ -960,7 +972,9 @@ impl RdKafkaStats {
 #[inline]
 fn get_topic_partition_to_broker_mapping(stats: &Statistics) -> HashMap<(String, i32), String> {
     let topic_partition_to_broker_mapping = stats
-        .brokers.values().flat_map(|broker| {
+        .brokers
+        .values()
+        .flat_map(|broker| {
             let broker_name = &broker.name;
             broker
                 .toppars
@@ -978,170 +992,170 @@ fn get_topic_partition_to_broker_mapping(stats: &Statistics) -> HashMap<(String,
 impl BrokerStats {
     pub fn new(registry: Registry) -> Self {
         let state_age = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.state.age",
+            "rdkafka_broker_state_age",
             "Age of the broker state in seconds",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let outbuf_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.outbuf.cnt",
+            "rdkafka_broker_outbuf_cnt",
             "Number of messages waiting to be sent to broker",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let outbuf_msg_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.outbuf.msg.cnt",
+            "rdkafka_broker_outbuf_msg_cnt",
             "Number of messages waiting to be sent to broker",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let waitresp_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.waitresp.cnt",
+            "rdkafka_broker_waitresp_cnt",
             "Number of requests waiting for response",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let waitresp_msg_cnt = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.waitresp.msg.cnt",
+            "rdkafka_broker_waitresp_msg_cnt",
             "Number of messages waiting for response",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let tx = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.tx",
+            "rdkafka_broker_tx",
             "Number of transmitted messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let tx_bytes = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.tx.bytes",
+            "rdkafka_broker_tx_bytes",
             "Number of transmitted bytes",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let tx_errs = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.tx.errs",
+            "rdkafka_broker_tx_errs",
             "Number of failed transmitted messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let tx_retries = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.tx.retries",
+            "rdkafka_broker_tx_retries",
             "Number of message retries",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let tx_idle = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.tx.idle",
+            "rdkafka_broker_tx_idle",
             "Number of idle transmit connections",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let req_timeouts = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.req.timeouts",
+            "rdkafka_broker_req_timeouts",
             "Number of request timeouts",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let rx = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.rx",
+            "rdkafka_broker_rx",
             "Number of received messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let rx_bytes = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.rx.bytes",
+            "rdkafka_broker_rx_bytes",
             "Number of received bytes",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let rx_errs = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.rx.errs",
+            "rdkafka_broker_rx_errs",
             "Number of failed received messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let rx_corriderrs = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.rx.corriderrs",
+            "rdkafka_broker_rx_corriderrs",
             "Number of received messages with invalid correlation id",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let rx_partial = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.rx.partial",
+            "rdkafka_broker_rx_partial",
             "Number of partial messages received",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let rx_idle = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.rx.idle",
+            "rdkafka_broker_rx_idle",
             "Number of idle receive connections",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let req = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.req",
+            "rdkafka_broker_req",
             "Number of requests in flight",
             &["id", "client_id", "broker", "state", "type"],
             registry
         )
         .unwrap();
         let zbuf_grow = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.zbuf.grow",
+            "rdkafka_broker_zbuf_grow",
             "Number of times the broker's output buffer has been reallocated",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let buf_grow = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.buf.grow",
+            "rdkafka_broker_buf_grow",
             "Number of times the broker's input buffer has been reallocated",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let wakeups = register_uint_gauge_vec_with_registry!(
-            "rdkafka.broker.wakeups",
+            "rdkafka_broker_wakeups",
             "Number of wakeups",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let connects = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.connects",
+            "rdkafka_broker_connects",
             "Number of connection attempts",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
         let disconnects = register_int_gauge_vec_with_registry!(
-            "rdkafka.broker.disconnects",
+            "rdkafka_broker_disconnects",
             "Number of disconnects",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let int_latency = StatsWindow::new(registry.clone(), "broker.intlatency");
-        let outbuf_latency = StatsWindow::new(registry.clone(), "broker.outbuflatency");
-        let rtt = StatsWindow::new(registry.clone(), "broker.rtt");
-        let throttle = StatsWindow::new(registry.clone(), "broker.throttle");
+        let int_latency = StatsWindow::new(registry.clone(), "broker_intlatency");
+        let outbuf_latency = StatsWindow::new(registry.clone(), "broker_outbuflatency");
+        let rtt = StatsWindow::new(registry.clone(), "broker_rtt");
+        let throttle = StatsWindow::new(registry.clone(), "broker_throttle");
 
         BrokerStats {
             registry,

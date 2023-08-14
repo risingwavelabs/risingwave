@@ -557,8 +557,12 @@ impl KafkaTransactionConductor {
             if config.use_transaction {
                 c.set("transactional.id", identifier); // required by kafka transaction
             }
-            let client_ctx =
-                PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone(), None)?;
+            // todo: allow collect metric here
+            let client_ctx = PrivateLinkProducerContext::new(
+                config.common.broker_rewrite_map.clone(),
+                None,
+                None,
+            )?;
             c.create_with_context(client_ctx).await?
         };
 

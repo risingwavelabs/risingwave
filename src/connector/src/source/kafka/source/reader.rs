@@ -90,7 +90,8 @@ impl SplitReader for KafkaSplitReader {
             );
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None)?;
+        // kafka metrics from source is centerolize to enumerator part to reducer overhead
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None, None)?;
         let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
