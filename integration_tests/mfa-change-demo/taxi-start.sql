@@ -32,20 +32,20 @@ create materialized view mv1 as select lpep_pickup_datetime ,lpep_dropoff_dateti
     congestion_surcharge from taxiallfeature where payment_type in (1,2,4);
 
 create materialized view mv2 as select 
- do_location_id,
- avg(fare_amount) as avg_amount, 
- window_start,
- avg(EXTRACT(EPOCH FROM lpep_dropoff_datetime - lpep_pickup_datetime)::INT) / 10 as latency, 
- avg(passenger_count) as passenger_count,
- avg(trip_distance) as trip_distance,
- avg(extra) as extra,
- avg(mta_tax) as mta_tax,
- avg(tip_amount) as tip_amount,
- avg(tolls_amount) as tolls_amount,
- avg(improvement_surcharge) as improvement_surcharge,
- avg(total_amount) as total_amount,
- avg(congestion_surcharge) as congestion_surcharge,
- avg(trip_distance) > 30 as long_distance
-  from (
+    do_location_id,
+    avg(fare_amount) as avg_amount, 
+    window_start,
+    avg(EXTRACT(EPOCH FROM lpep_dropoff_datetime - lpep_pickup_datetime)::INT) / 10 as latency, 
+    avg(passenger_count) as passenger_count,
+    avg(trip_distance) as trip_distance,
+    avg(extra) as extra,
+    avg(mta_tax) as mta_tax,
+    avg(tip_amount) as tip_amount,
+    avg(tolls_amount) as tolls_amount,
+    avg(improvement_surcharge) as improvement_surcharge,
+    avg(total_amount) as total_amount,
+    avg(congestion_surcharge) as congestion_surcharge,
+    avg(trip_distance) > 30 as long_distance
+from (
     select * from tumble(mv1,lpep_pickup_datetime,INTERVAL '5' hour)
-  ) group by do_location_id,window_start;
+) group by do_location_id,window_start;

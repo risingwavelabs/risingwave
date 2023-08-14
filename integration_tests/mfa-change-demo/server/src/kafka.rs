@@ -59,7 +59,7 @@ impl KafkaSink {
     pub async fn mock_consume() {
         let consumer: LoggingConsumer = ClientConfig::new()
             .set("group.id", "recwave-recommender")
-            .set("bootstrap.servers", "localhost:9092")
+            .set("bootstrap.servers", "localhost:29092")
             .create_with_context(CustomContext)
             .expect("Failed to create consumer");
         consumer

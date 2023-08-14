@@ -66,6 +66,7 @@ impl User {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn mock_get_feature(&self, client: &mut ServerClient<Channel>) -> (u64, i64) {
         let response = client
             .get_feature(GetFeatureRequest {
@@ -79,6 +80,7 @@ impl User {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn read_users_json(path: PathBuf) -> Result<Vec<User>, Box<dyn Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);

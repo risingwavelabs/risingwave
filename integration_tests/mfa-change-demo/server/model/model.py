@@ -37,8 +37,8 @@ class TrainingModelService(ModelServicer):
                 df = pd.DataFrame(list(results))
                 train_y = df.loc[:, 1]
                 train_x = df.drop(columns=[2,1])
-                print(train_x)
-                print(train_y)
+                # print(train_x)
+                # print(train_y)
                 self.model.fit(train_x, train_y)
                 return TrainingResponse()
         except Exception as e:
@@ -55,9 +55,8 @@ class TrainingModelService(ModelServicer):
                 cur.execute(sql.GET_FEATURE % do_location_id)
                 results = cur.fetchall()
                 df = pd.DataFrame(list(results))
-                print(df)
                 train_x = df.drop(columns=[2,1])
-                print(train_x)
+                # print(train_x)
                 result = self.model.predict(train_x)
                 return GetAmountResponse(amount = result)
         except Exception as e:

@@ -17,5 +17,4 @@ fn main() {
         .compile(&[model_proto], &["."])
         .unwrap_or_else(|e| panic!("protobuf compile error: {}", e));
     println!("cargo:rerun-if-changed={}", actor_proto);
-
 }

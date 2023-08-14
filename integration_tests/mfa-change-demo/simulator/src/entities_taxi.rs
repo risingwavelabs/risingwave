@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use rand::Rng;
 use serde_derive::{Deserialize, Serialize};
 use tonic::transport::Channel;
 
@@ -12,13 +11,17 @@ use crate::server_pb::{ReportTaxiActionRequest, GetTaxiAmountRequest};
 
 #[derive(Serialize, Deserialize,Debug)]
 pub struct TaxiFeature {
-    pub(crate) VendorID: i32,
+    #[serde(rename = "VendorID")]
+    pub(crate) vendor_id: i32,
     pub(crate) lpep_pickup_datetime: String,
     pub(crate) lpep_dropoff_datetime: String,
     pub(crate) store_and_fwd_flag: String,
-    pub(crate) RatecodeID: f64,
-    pub(crate) PULocationID: i64,
-    pub(crate) DOLocationID: i64,
+    #[serde(rename = "RatecodeID")]
+    pub(crate) ratecode_id: f64,
+    #[serde(rename = "PULocationID")]
+    pub(crate) pulocation_id: i64,
+    #[serde(rename = "DOLocationID")]
+    pub(crate) dolocation_id: i64,
     pub(crate) passenger_count: f64,
     pub(crate) trip_distance: f64,
     pub(crate) fare_amount: f64,
@@ -63,15 +66,15 @@ impl TaxiFeature {
         &'a self,
         client: &'a mut ServerClient<Channel>,
     ) -> Result<(), &str> {
-        let response = client
+        let _ = client
             .report_taxi_action(tonic::Request::new(ReportTaxiActionRequest {
-                vendor_id: self.VendorID,
+                vendor_id: self.vendor_id,
                 lpep_pickup_datetime: self.lpep_pickup_datetime.clone(),
                 lpep_dropoff_datetime: self.lpep_dropoff_datetime.clone(),
                 store_and_fwd_flag: self.store_and_fwd_flag.eq("N"),
-                ratecode_id: self.RatecodeID,
-                pu_location_id: self.PULocationID,
-                do_location_id: self.DOLocationID,
+                ratecode_id: self.ratecode_id,
+                pu_location_id: self.pulocation_id,
+                do_location_id: self.dolocation_id,
                 passenger_count: self.passenger_count,
                 trip_distance: self.trip_distance,
                 fare_amount: self.fare_amount,
@@ -94,7 +97,7 @@ impl TaxiFeature {
     pub async fn mock_get_amount(&self, client: &mut ServerClient<Channel>) -> f64 {
         let response = client
             .get_taxi_amount(GetTaxiAmountRequest {
-                do_location_id: self.DOLocationID,
+                do_location_id: self.dolocation_id,
             })
             .await
             .unwrap();

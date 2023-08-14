@@ -22,7 +22,8 @@ we can change recwave-start.sql and server/src/serving to add new demands or mod
 
 2. Start feature store serve demo. It can accept data writing to Kafka and provide feature query services
 
-```cd server```
+```python3 server/model ```
+```cd server ```
 ```cargo run ```
 
 We can change the configuration to use py to execute sql (It might be easier if we need to use deep learning) 

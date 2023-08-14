@@ -1,5 +1,3 @@
-use std::path::Path;
-
 mod entities;
 mod server_pb;
 mod simulation;

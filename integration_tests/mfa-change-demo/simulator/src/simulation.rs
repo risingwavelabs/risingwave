@@ -60,10 +60,10 @@ async fn mock_taxi(client : Arc<Mutex<ServerClient<Channel>>>) -> (){
                 .mock_act(client_mutex.lock().await.deref_mut())
                 .await
                 .unwrap();
-            println!("write online feature, DOLocationID is {:?}",fea.DOLocationID);
+            println!("write online feature, DOLocationID is {:?}",fea.dolocation_id);
             sleep(Duration::from_millis(1000));
             let fare_amount = fea.mock_get_amount(client_mutex.lock().await.deref_mut()).await;
-            println!("DOLocationID is {:?} fare amount: predicted results {:?} , real results {:?}",fea.DOLocationID,fare_amount,fea.fare_amount);
+            println!("DOLocationID is {:?} fare amount: predicted results {:?} , real results {:?}",fea.dolocation_id,fare_amount,fea.fare_amount);
         });
         threads.push(handle);
     }
@@ -71,6 +71,7 @@ async fn mock_taxi(client : Arc<Mutex<ServerClient<Channel>>>) -> (){
 
 }
 
+#[allow(dead_code)]
 async fn mock_user_mfa(client : Arc<Mutex<ServerClient<Channel>>>) -> (){
     let users = entities::parse_user_metadata().unwrap();
     let mut threads = vec![];
