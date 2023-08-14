@@ -69,6 +69,7 @@ impl CompactionPicker for LevelCompactionPicker {
             &l0.sub_levels[0].table_infos,
             &target_level.table_infos,
             level_handlers,
+            true, // pick trivial-move
         );
         // only pick tables for trivial move
         if !select_tables.is_empty() && target_tables.is_empty() {
@@ -383,6 +384,7 @@ impl LevelCompactionPicker {
                 &l0.sub_levels[idx + 1].table_infos,
                 &level.table_infos,
                 level_handlers,
+                true, // pick trivial-move
             );
 
             // only pick tables for trivial move

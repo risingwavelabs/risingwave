@@ -404,7 +404,7 @@ impl Compactor {
         }
 
         // After a compaction is done, mutate the compaction task.
-        let (compact_task, table_stats) =
+        let (mut compact_task, table_stats) =
             Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
@@ -418,6 +418,7 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.get_object_id());
             }
         }
+        compact_task.splits.clear();
         (compact_task, table_stats)
     }
 
@@ -462,6 +463,7 @@ impl Compactor {
             .with_label_values(&[&group_label, level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
+        compact_task.splits.clear();
         (compact_task, table_stats_map)
     }
 

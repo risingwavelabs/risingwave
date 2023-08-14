@@ -55,6 +55,7 @@ impl MinOverlappingPicker {
         select_tables: &[SstableInfo],
         target_tables: &[SstableInfo],
         level_handlers: &[LevelHandler],
+        pick_trivial_move: bool,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut scores = vec![];
         for left in 0..select_tables.len() {
@@ -91,6 +92,10 @@ impl MinOverlappingPicker {
                     break;
                 }
                 scores.push((total_file_size * 100 / select_file_size, (left, right)));
+
+                if total_file_size == 0 && pick_trivial_move {
+                    break;
+                }
             }
         }
         if scores.is_empty() {
@@ -124,6 +129,7 @@ impl CompactionPicker for MinOverlappingPicker {
             &levels.get_level(self.level).table_infos,
             &levels.get_level(self.target_level).table_infos,
             level_handlers,
+            false,
         );
         if select_input_ssts.is_empty() {
             stats.skip_by_pending_files += 1;
@@ -816,6 +822,7 @@ pub mod tests {
             &levels[1].table_infos,
             &levels[2].table_infos,
             &levels_handlers,
+            true, // pick trivial-move
         );
         let overlap_strategy = Arc::new(RangeOverlapStrategy::default());
         let mut overlap_info = overlap_strategy.create_overlap_info();
