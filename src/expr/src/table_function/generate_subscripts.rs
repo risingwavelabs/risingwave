@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use auto_enums::auto_enum;
 use risingwave_common::array::ListRef;
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr_macro::function;
@@ -63,23 +64,7 @@ fn generate_subscripts_reverse(
     dim: i32,
     reverse: bool,
 ) -> Result<impl Iterator<Item = i32>> {
-    let (mut cur, end) = generate_subscripts_inner(array, dim, reverse);
-
-    // if we don't branch reverse inside, then we have to box it outside to have the same type
-    // different closures different anonymous types, or range and reverse range.
-    let next = move || {
-        if reverse {
-            if cur <= end {
-                return None;
-            }
-        } else if cur >= end {
-            return None;
-        }
-        let ret = cur;
-        cur += if reverse { -1 } else { 1 };
-        Some(ret)
-    };
-    Ok(std::iter::from_fn(next))
+    Ok(generate_subscripts_iterator(array, dim, reverse))
 }
 
 /// ```slt
@@ -123,25 +108,32 @@ fn generate_subscripts_reverse(
 /// ```
 #[function("generate_subscripts(list, int32) -> setof int32")]
 fn generate_subscripts(array: ListRef<'_>, dim: i32) -> Result<impl Iterator<Item = i32>> {
-    generate_subscripts_reverse(array, dim, false)
+    Ok(generate_subscripts_iterator(array, dim, false))
 }
 
-fn generate_subscripts_inner(array: ListRef<'_>, dim: i32, reverse: bool) -> (i32, i32) {
+#[auto_enum(Iterator)]
+fn generate_subscripts_iterator(
+    array: ListRef<'_>,
+    dim: i32,
+    reverse: bool,
+) -> impl Iterator<Item = i32> {
+    let (cur, end) = generate_subscripts_inner(array, dim);
+
+    if reverse {
+        return (cur..end).rev();
+    } else {
+        return cur..end;
+    }
+}
+
+fn generate_subscripts_inner(array: ListRef<'_>, dim: i32) -> (i32, i32) {
     let nothing = (0, 0);
     match dim {
         ..=0 => nothing,
-        1 => {
-            if reverse {
-                (array.len() as i32, 0)
-            } else {
-                (1, array.len() as i32 + 1)
-            }
-        }
+        1 => (1, array.len() as i32 + 1),
         // Although RW's array can be zig-zag, we just look at the first element.
         2.. => match array.elem_at(0) {
-            Some(Some(ScalarRefImpl::List(list))) => {
-                generate_subscripts_inner(list, dim - 1, reverse)
-            }
+            Some(Some(ScalarRefImpl::List(list))) => generate_subscripts_inner(list, dim - 1),
             _ => nothing,
         },
     }
