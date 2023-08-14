@@ -132,7 +132,7 @@ impl CompactionPicker for MinOverlappingPicker {
         );
 
         if select_input_ssts.is_empty() {
-            min_overlapping_picker_stat.skip_by_pending_files += 1;
+            min_overlapping_picker_stat.set_skip_by_pending_files();
             local_picker_stats.push(min_overlapping_picker_stat);
             return (None, local_picker_stats);
         }
@@ -372,11 +372,11 @@ impl NonOverlapSubLevelPicker {
 
         if scores.is_empty() {
             if skip_by_count {
-                stats.skip_by_count_limit += 1;
+                stats.set_skip_by_count_limit();
             }
 
             if skip_by_pending {
-                stats.skip_by_pending_files += 1;
+                stats.set_skip_by_pending_files();
             }
             return vec![];
         }

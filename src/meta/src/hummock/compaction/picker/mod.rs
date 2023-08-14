@@ -32,10 +32,10 @@ use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default)]
 pub struct LocalPickerStatistic {
-    pub skip_by_write_amp_limit: u64,
-    pub skip_by_count_limit: u64,
-    pub skip_by_pending_files: u64,
-    pub skip_by_overlapping: u64,
+    pub skip_by_write_amp_limit: bool,
+    pub skip_by_count_limit: bool,
+    pub skip_by_pending_files: bool,
+    pub skip_by_overlapping: bool,
 
     pub select_level: usize,
     pub target_level: usize,
@@ -45,14 +45,30 @@ pub struct LocalPickerStatistic {
 impl LocalPickerStatistic {
     fn new(select_level: usize, target_level: usize, task_label: String) -> Self {
         Self {
-            skip_by_write_amp_limit: 0,
-            skip_by_count_limit: 0,
-            skip_by_pending_files: 0,
-            skip_by_overlapping: 0,
+            skip_by_write_amp_limit: false,
+            skip_by_count_limit: false,
+            skip_by_pending_files: false,
+            skip_by_overlapping: false,
             select_level,
             target_level,
             task_label,
         }
+    }
+
+    fn set_skip_by_write_amp_limit(&mut self) {
+        self.skip_by_count_limit = true;
+    }
+
+    fn set_skip_by_count_limit(&mut self) {
+        self.skip_by_count_limit = true;
+    }
+
+    fn set_skip_by_pending_files(&mut self) {
+        self.skip_by_pending_files = true;
+    }
+
+    fn set_skip_by_overlapping(&mut self) {
+        self.skip_by_overlapping = true;
     }
 }
 

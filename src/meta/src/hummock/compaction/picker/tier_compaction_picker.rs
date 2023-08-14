@@ -133,7 +133,7 @@ impl TierCompactionPicker {
             if select_level_inputs.len() < tier_sub_level_compact_level_count
                 && waiting_enough_files
             {
-                stats.skip_by_count_limit += 1;
+                stats.set_skip_by_count_limit();
                 continue;
             }
 

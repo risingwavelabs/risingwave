@@ -50,7 +50,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
             && l0.sub_levels[0].table_infos.len() > 1
         {
-            to_base_picker_stat.skip_by_overlapping += 1;
+            to_base_picker_stat.set_skip_by_overlapping();
             local_picker_stats.push(to_base_picker_stat);
             return (None, local_picker_stats);
         }
@@ -59,7 +59,7 @@ impl CompactionPicker for LevelCompactionPicker {
             level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
 
         if is_l0_pending_compact {
-            to_base_picker_stat.skip_by_pending_files += 1;
+            to_base_picker_stat.set_skip_by_pending_files();
             local_picker_stats.push(to_base_picker_stat);
             return (None, local_picker_stats);
         }
@@ -113,7 +113,7 @@ impl LevelCompactionPicker {
             - level_handlers[target_level.level_idx as usize].get_pending_file_size();
 
         if l0_size < base_level_size {
-            stats.skip_by_write_amp_limit += 1;
+            stats.set_skip_by_write_amp_limit();
             return None;
         }
 
@@ -192,7 +192,7 @@ impl LevelCompactionPicker {
 
         if input_levels.is_empty() {
             if skip_by_pending {
-                stats.skip_by_pending_files += 1;
+                stats.set_skip_by_pending_files();
             }
             return None;
         }
@@ -232,7 +232,8 @@ impl LevelCompactionPicker {
                 target_sub_level_id: 0,
             });
         }
-        stats.skip_by_write_amp_limit += 1;
+
+        stats.set_skip_by_write_amp_limit();
         None
     }
 
@@ -244,14 +245,21 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
+        let mut skip_by_count = false;
+        let mut skip_by_pending = false;
+        let mut skip_by_write_amp = false;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
-            {
+            if level.level_type() != LevelType::Nonoverlapping {
+                continue;
+            }
+
+            if level.total_file_size > self.config.sub_level_max_compaction_bytes {
+                skip_by_count = true;
                 continue;
             }
 
             if level_handler.is_level_all_pending_compact(level) {
+                skip_by_pending = true;
                 continue;
             }
 
@@ -277,7 +285,6 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            let mut skip_by_write_amp = false;
             // Limit the number of selection levels for the non-overlapping
             // sub_level at least level0_sub_level_compact_level_count
             for (plan_index, input) in l0_select_tables_vec.into_iter().enumerate() {
@@ -333,9 +340,20 @@ impl LevelCompactionPicker {
                     target_sub_level_id: level.sub_level_id,
                 });
             }
+        }
 
+        {
+            // report
             if skip_by_write_amp {
-                stats.skip_by_write_amp_limit += 1;
+                stats.set_skip_by_write_amp_limit();
+            }
+
+            if skip_by_count {
+                stats.set_skip_by_count_limit();
+            }
+
+            if skip_by_pending {
+                stats.set_skip_by_pending_files();
             }
         }
 

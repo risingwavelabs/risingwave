@@ -241,29 +241,29 @@ impl LocalSelectorStatistic {
     pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
         for stats in &self.skip_picker {
             let level_label = format!("cg{} {}", group_id, stats.task_label);
-            if stats.skip_by_write_amp_limit > 0 {
+            if stats.skip_by_write_amp_limit {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "write-amp"])
-                    .inc_by(stats.skip_by_write_amp_limit);
+                    .inc();
             }
-            if stats.skip_by_count_limit > 0 {
+            if stats.skip_by_count_limit {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "count"])
-                    .inc_by(stats.skip_by_count_limit);
+                    .inc();
             }
-            if stats.skip_by_pending_files > 0 {
+            if stats.skip_by_pending_files {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "pending-files"])
-                    .inc_by(stats.skip_by_pending_files);
+                    .inc();
             }
-            if stats.skip_by_overlapping > 0 {
+            if stats.skip_by_overlapping {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "overlapping"])
-                    .inc_by(stats.skip_by_overlapping);
+                    .inc();
             }
             metrics
                 .compact_skip_frequency
