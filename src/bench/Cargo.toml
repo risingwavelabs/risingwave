@@ -46,7 +46,7 @@ tracing-subscriber = "0.3.17"
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.25", features = ["fs", "mman"] }
+nix = { version = "0.26", features = ["fs", "mman"] }
 
 [[bin]]
 name = "s3-bench"
