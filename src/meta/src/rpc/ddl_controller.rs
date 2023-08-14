@@ -246,12 +246,6 @@ where
                     ctrl.drop_view(view_id, drop_mode).await
                 }
                 DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
-                    let _permit = ctrl
-                        .creating_streaming_job_permits
-                        .semaphore
-                        .acquire()
-                        .await
-                        .unwrap();
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
                 DdlCommand::DropStreamingJob(job_id, drop_mode) => {
@@ -415,6 +409,12 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
+        let _permit = self
+            .creating_streaming_job_permits
+            .semaphore
+            .acquire()
+            .await
+            .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
