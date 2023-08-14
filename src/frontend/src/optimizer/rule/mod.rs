@@ -85,6 +85,8 @@ mod apply_share_eliminate_rule;
 pub use apply_share_eliminate_rule::*;
 mod top_n_on_index_rule;
 pub use top_n_on_index_rule::*;
+mod batch;
+pub use batch::batch_project_merge_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
@@ -134,6 +136,8 @@ mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
 mod apply_limit_transpose_rule;
 pub use apply_limit_transpose_rule::*;
+mod common_sub_expr_extract_rule;
+pub use common_sub_expr_extract_rule::*;
 mod apply_over_window_transpose_rule;
 pub use apply_over_window_transpose_rule::*;
 
@@ -193,6 +197,8 @@ macro_rules! for_all_rules {
             , { ApplyTopNTransposeRule }
             , { TableFunctionToProjectSetRule }
             , { ApplyLimitTransposeRule }
+            , { CommonSubExprExtractRule }
+            , { BatchProjectMergeRule }
             , { ApplyOverWindowTransposeRule }
         }
     };
