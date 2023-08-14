@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let mut agg = crate::agg::build(&AggCall::from_pretty(
+        let approx_count_distinct = crate::agg::build(&AggCall::from_pretty(
             "(approx_count_distinct:int8 $0:int4)",
         ))
         .unwrap();
@@ -259,12 +259,26 @@ mod tests {
         for range in [0..20000, 20000..30000, 30000..35000] {
             let col = I32Array::from_iter(range.clone()).into_ref();
             let input = StreamChunk::from(DataChunk::new(vec![col], range.len()));
-            agg.update(&input).now_or_never().unwrap().unwrap();
-            let count = agg.output().unwrap().unwrap().into_int64() as usize;
+            let mut state = approx_count_distinct.init_state();
+            approx_count_distinct
+                .update(&mut state, &input)
+                .now_or_never()
+                .unwrap()
+                .unwrap();
+            let count = approx_count_distinct
+                .get_result(&state)
+                .now_or_never()
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .into_int64() as usize;
             let actual = range.len();
             // FIXME: the error is too large?
             // assert!((actual as f32 * 0.9..actual as f32 * 1.1).contains(&(count as f32)));
-            assert!((actual as f32 * 0.5..actual as f32 * 1.5).contains(&(count as f32)));
+            let expected_range = actual as f32 * 0.5..actual as f32 * 1.5;
+            if !expected_range.contains(&(count as f32)) {
+                panic!("approximate count {} not in {:?}", count, expected_range);
+            }
         }
     }
 }

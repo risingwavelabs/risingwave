@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use risingwave_common::types::DataTypeName;
 
 use super::FuncSigDebug;
-use crate::agg::{AggCall, AggKind, BoxedAggState};
+use crate::agg::{AggCall, AggKind, BoxedAggregateFunction};
 use crate::Result;
 
 pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {
@@ -37,7 +37,7 @@ pub struct AggFuncSig {
     pub func: AggKind,
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
-    pub build: fn(agg: &AggCall) -> Result<BoxedAggState>,
+    pub build: fn(agg: &AggCall) -> Result<BoxedAggregateFunction>,
 }
 
 impl fmt::Debug for AggFuncSig {
