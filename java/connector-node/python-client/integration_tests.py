@@ -183,18 +183,22 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
 
         if is_coordinated:
             request_list = [
-                connector_service_pb2.SinkCoordinatorStreamRequest.StartCoordinator(
-                    param=sink_param
+                connector_service_pb2.SinkCoordinatorStreamRequest(
+                    start=connector_service_pb2.SinkCoordinatorStreamRequest.StartCoordinator(
+                        param=sink_param
+                    )
                 )
             ]
             request_list += [
-                connector_service_pb2.SinkCoordinatorStreamRequest.CommitMetadata(
-                    epoch=epoch, metadata=[metadata]
+                connector_service_pb2.SinkCoordinatorStreamRequest(
+                    commit=connector_service_pb2.SinkCoordinatorStreamRequest.CommitMetadata(
+                        epoch=epoch, metadata=[metadata]
+                    )
                 )
                 for (epoch, metadata) in metadata_list
             ]
 
-            response_iter = stub.SinkCoordinatorStream(request_list)
+            response_iter = stub.SinkCoordinatorStream(iter(request_list))
             try:
                 response = next(response_iter)
                 assert response.HasField("start")
