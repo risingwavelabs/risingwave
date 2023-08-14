@@ -448,14 +448,19 @@ pub mod tests {
             .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
-        assert_eq!(ret.input_levels[0].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 3);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
         ret.add_pending_task(1, &mut level_handlers);
 
-        let ret = picker.pick_compaction(&levels, &level_handlers, &mut local_stats);
-        assert!(ret.is_none());
+        let ret = picker
+            .pick_compaction(&levels, &level_handlers, &mut local_stats)
+            .unwrap();
+        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 1);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
     }
 
     #[test]
@@ -790,7 +795,7 @@ pub mod tests {
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
                     generate_table(3, 1, 100, 300, 2),
-                    generate_table(2, 1, 600, 800, 1),
+                    generate_table(4, 1, 600, 800, 1),
                 ],
                 total_file_size: 400,
                 sub_level_id: 0,
