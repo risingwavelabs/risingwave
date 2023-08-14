@@ -32,10 +32,11 @@ use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default)]
 pub struct LocalPickerStatistic {
-    pub skip_by_write_amp_limit: bool,
-    pub skip_by_count_limit: bool,
-    pub skip_by_pending_files: bool,
-    pub skip_by_overlapping: bool,
+    skip_by_write_amp_limit: bool,
+    skip_by_count_limit: bool,
+    skip_by_pending_files: bool,
+    skip_by_overlapping: bool,
+    skip_by_trivial_move: bool,
 
     pub select_level: usize,
     pub target_level: usize,
@@ -49,6 +50,7 @@ impl LocalPickerStatistic {
             skip_by_count_limit: false,
             skip_by_pending_files: false,
             skip_by_overlapping: false,
+            skip_by_trivial_move: false,
             select_level,
             target_level,
             task_label,
@@ -56,7 +58,7 @@ impl LocalPickerStatistic {
     }
 
     fn set_skip_by_write_amp_limit(&mut self) {
-        self.skip_by_count_limit = true;
+        self.skip_by_write_amp_limit = true;
     }
 
     fn set_skip_by_count_limit(&mut self) {
@@ -69,6 +71,30 @@ impl LocalPickerStatistic {
 
     fn set_skip_by_overlapping(&mut self) {
         self.skip_by_overlapping = true;
+    }
+
+    fn set_skip_by_trivial_move(&mut self) {
+        self.skip_by_trivial_move = true;
+    }
+
+    pub fn skip_by_write_amp_limit(&self) -> bool {
+        self.skip_by_write_amp_limit
+    }
+
+    pub fn skip_by_count_limit(&self) -> bool {
+        self.skip_by_count_limit
+    }
+
+    pub fn skip_by_pending_files(&self) -> bool {
+        self.skip_by_pending_files
+    }
+
+    pub fn skip_by_overlapping(&self) -> bool {
+        self.skip_by_overlapping
+    }
+
+    pub fn skip_by_trivial_move(&self) -> bool {
+        self.skip_by_trivial_move
     }
 }
 

@@ -78,6 +78,12 @@ impl CompactionPicker for LevelCompactionPicker {
             &target_level.table_infos,
             level_handlers,
         );
+
+        let mut to_base_trivial_picker_stat = LocalPickerStatistic::new(
+            0,
+            self.target_level,
+            format!("{} -> {} base trivial", 0, self.target_level),
+        );
         // only pick tables for trivial move
         if !select_tables.is_empty() && target_tables.is_empty() {
             return (
@@ -99,7 +105,10 @@ impl CompactionPicker for LevelCompactionPicker {
                 }),
                 local_picker_stats,
             );
+        } else {
+            to_base_trivial_picker_stat.set_skip_by_trivial_move();
         }
+        local_picker_stats.push(to_base_trivial_picker_stat);
 
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
         if let Some(ret) = self.pick_multi_level_to_base(
@@ -401,7 +410,7 @@ impl LevelCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handlers: &[LevelHandler],
-        _stats: &mut LocalPickerStatistic,
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
@@ -473,6 +482,8 @@ impl LevelCompactionPicker {
                 target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
             });
         }
+
+        stats.set_skip_by_trivial_move();
         None
     }
 }
