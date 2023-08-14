@@ -638,6 +638,9 @@ impl Binder {
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
                 ("sign", raw_call(ExprType::Sign)),
+                ("scale", raw_call(ExprType::Scale)),
+                ("min_scale", raw_call(ExprType::MinScale)),
+                ("trim_scale", raw_call(ExprType::TrimScale)),
 
                 (
                     "to_timestamp",

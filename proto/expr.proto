@@ -142,6 +142,9 @@ message ExprNode {
     LOG10 = 273;
     CBRT = 274;
     SIGN = 275;
+    SCALE = 276;
+    MIN_SCALE = 277;
+    TRIM_SCALE = 278;
 
     // Boolean comparison
     IS_TRUE = 301;

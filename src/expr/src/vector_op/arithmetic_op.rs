@@ -424,6 +424,25 @@ pub fn sign_dec(input: Decimal) -> Decimal {
     input.sign()
 }
 
+#[function("scale(decimal) -> int32")]
+pub fn decimal_scale(d: Decimal) -> Option<i32> {
+    let Decimal::Normalized(d) = d else { return None };
+    Some(d.scale() as _)
+}
+
+#[function("min_scale(decimal) -> int32")]
+pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
+    let Decimal::Normalized(d) = d else { return None };
+    let d_shortest = d.normalize();
+    Some(d_shortest.scale() as _)
+}
+
+#[function("trim_scale(decimal) -> decimal")]
+pub fn decimal_trim_scale(d: Decimal) -> Decimal {
+    let Decimal::Normalized(d) = d else { return d };
+    d.normalize().into()
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
