@@ -265,11 +265,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.source_id
-                ))
+                )
             })?;
 
         let source_desc_builder: SourceDescBuilder =
