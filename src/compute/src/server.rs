@@ -228,8 +228,7 @@ pub async fn compute_node_serve(
                 running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
-            let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+            let (handle, shutdown_sender) = Compactor::start_compactor(compactor_context);
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -352,6 +351,7 @@ pub async fn compute_node_serve(
         dml_mgr,
         system_params_manager.clone(),
         source_metrics,
+        meta_client.clone(),
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
@@ -401,7 +401,9 @@ pub async fn compute_node_serve(
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
-            .add_service(ExchangeServiceServer::new(exchange_srv))
+            .add_service(
+                ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
+            )
             .add_service(StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX))
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))

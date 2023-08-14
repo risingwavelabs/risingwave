@@ -176,6 +176,7 @@ impl TableCatalogBuilder {
             cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
             created_at_epoch: None,
             initialized_at_epoch: None,
+            cleaned_by_watermark: false,
         }
     }
 

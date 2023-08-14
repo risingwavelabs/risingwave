@@ -28,9 +28,9 @@ use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStor
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, FileCache, HummockResult,
-    MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder, DEFAULT_MAX_KEY_COUNT,
+    BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
+    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -89,8 +89,7 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
         block_capacity: 1024 * 1024,
         restart_interval: 16,
         bloom_false_positive: 0.001,
-        compression_algorithm: CompressionAlgorithm::None,
-        max_key_count: DEFAULT_MAX_KEY_COUNT,
+        ..Default::default()
     }
 }
 

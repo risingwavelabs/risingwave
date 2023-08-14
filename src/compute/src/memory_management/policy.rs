@@ -123,7 +123,7 @@ impl JemallocMemoryControl {
                 .jemalloc_dump_mib
                 .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
             {
-                tracing::warn!("Jemalloc dump heap file failed! {:?}", e);
+                tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
             }
             unsafe { Box::from_raw(file_path_ptr) };
         }

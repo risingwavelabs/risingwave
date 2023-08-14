@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 33] = [
+const CONFIG_KEYS: [&str; 34] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -68,6 +68,7 @@ const CONFIG_KEYS: [&str; 33] = [
     "STATEMENT_TIMEOUT",
     "LOCK_TIMEOUT",
     "ROW_SECURITY",
+    "STANDARD_CONFORMING_STRINGS",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -105,6 +106,7 @@ const SYNCHRONIZE_SEQSCANS: usize = 29;
 const STATEMENT_TIMEOUT: usize = 30;
 const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
+const STANDARD_CONFORMING_STRINGS: usize = 33;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -326,6 +328,7 @@ type SynchronizeSeqscans = ConfigBool<SYNCHRONIZE_SEQSCANS, false>;
 type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
+type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -459,6 +462,12 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
     /// Unused in RisingWave, support for compatibility.
     row_security: RowSecurity,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
+    #[educe(Default(
+        expression = "ConfigString::<STANDARD_CONFORMING_STRINGS>(String::from(\"on\"))"
+    ))]
+    standard_conforming_strings: StandardConformingStrings,
 }
 
 impl ConfigMap {
@@ -568,6 +577,8 @@ impl ConfigMap {
             self.lock_timeout = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(RowSecurity::entry_name()) {
             self.row_security = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
+            self.standard_conforming_strings = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -647,6 +658,8 @@ impl ConfigMap {
             Ok(self.lock_timeout.to_string())
         } else if key.eq_ignore_ascii_case(RowSecurity::entry_name()) {
             Ok(self.row_security.to_string())
+        } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
+            Ok(self.standard_conforming_strings.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -819,6 +832,11 @@ impl ConfigMap {
                 setting: self.row_security.to_string(),
                 description: String::from("Unused in RisingWave"),
             },
+            VariableInfo{
+                name: StandardConformingStrings::entry_name().to_lowercase(),
+                setting: self.standard_conforming_strings.to_string(),
+                description: String::from("Unused in RisingWave"),
+            }
         ]
     }
 
@@ -937,5 +955,9 @@ impl ConfigMap {
 
     pub fn get_sink_decouple(&self) -> bool {
         self.sink_decouple.0
+    }
+
+    pub fn get_standard_conforming_strings(&self) -> &str {
+        &self.standard_conforming_strings
     }
 }

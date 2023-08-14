@@ -346,11 +346,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id
-                ))
+                )
             })?;
 
         let mut core = self.stream_source_core.unwrap();
@@ -580,10 +580,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
                     self.actor_ctx.id
-                ))
+                )
             })?;
         yield Message::Barrier(barrier);
 
