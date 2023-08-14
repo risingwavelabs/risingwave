@@ -246,7 +246,7 @@ where
                     ctrl.drop_view(view_id, drop_mode).await
                 }
                 DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
-                    let _x = ctrl
+                    let _permit = ctrl
                         .creating_streaming_job_permits
                         .semaphore
                         .acquire()
