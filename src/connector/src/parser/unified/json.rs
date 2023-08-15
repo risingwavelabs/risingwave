@@ -446,6 +446,14 @@ impl JsonParseOptions {
                     .collect::<Result<_, _>>()?,
             )
             .into(),
+
+            (Some(DataType::Struct(_)), ValueType::String) => {
+                let mut value = value.as_str().unwrap().as_bytes().to_vec();
+                let value =
+                    simd_json::to_borrowed_value(&mut value[..]).map_err(|_| create_error())?;
+                return self.parse(&value, type_expected);
+            }
+
             // ---- List -----
             (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new(
                 value
