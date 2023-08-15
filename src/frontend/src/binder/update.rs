@@ -94,19 +94,12 @@ impl Binder {
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
 
-        // TODO(yuhao): update a table with generated columns
-        if table_catalog.has_generated_column() {
-            return Err(ErrorCode::BindError(
-                "Update a table with generated columns is not supported.".to_string(),
-            )
-            .into());
-        }
-
         let pk_indices = table_catalog
             .pk()
             .iter()
             .map(|column_order| column_order.column_index)
             .collect_vec();
+        let generated_columns = table_catalog.generated_col_idxes().collect_vec();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
@@ -151,13 +144,17 @@ impl Binder {
                 let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
                 let id_index = if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
                     let id_index = id_input_ref.index;
-                    for &pk in &pk_indices {
-                        if id_index == pk {
-                            return Err(ErrorCode::BindError(
-                                "update modifying the PK column is banned".to_owned(),
-                            )
-                            .into());
-                        }
+                    if pk_indices.contains(&id_index) {
+                        return Err(ErrorCode::BindError(
+                            "update modifying the PK column is unsupported".to_owned(),
+                        )
+                        .into());
+                    }
+                    if generated_columns.contains(&id_index) {
+                        return Err(ErrorCode::BindError(
+                            "update modifying the generated column is unsupported".to_owned(),
+                        )
+                        .into());
                     }
                     id_index
                 } else {
