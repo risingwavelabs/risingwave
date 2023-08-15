@@ -42,6 +42,16 @@ use crate::executor::StreamExecutorResult;
 pub(super) type CacheKey = KeyWithSentinel<StateKey>;
 
 /// Range cache for one over window partition.
+/// The cache entries can be:
+///
+/// - `(Normal)*`
+/// - `Smallest, (Normal)*, Largest`
+/// - `(Normal)+, Largest`
+/// - `Smallest, (Normal)+`
+///
+/// This means it's impossible to only have one sentinel in the cache without any normal entry,
+/// and, each of the two types of sentinel can only appear once. Also, since sentinels are either
+/// smallest or largest, they always appear at the beginning or the end of the cache.
 pub(super) type PartitionCache = EstimatedBTreeMap<CacheKey, OwnedRow>;
 
 /// Changes happened in one over window partition.
@@ -65,7 +75,7 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-const MAGIC_BATCH_SIZE: usize = 1024;
+const MAGIC_BATCH_SIZE: usize = 512;
 
 impl<'a, S: StateStore> OverPartition<'a, S> {
     pub fn new(
@@ -98,6 +108,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         // len >= 2
         let cache_inner = self.range_cache.inner();
         let sentinels = [
+            // sentinels only appear at the beginning and/or the end
             cache_inner.first_key_value().unwrap().0.is_sentinel(),
             cache_inner.last_key_value().unwrap().0.is_sentinel(),
         ];
@@ -105,14 +116,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     }
 
     /// Write a change record to state table and cache.
-    ///
-    /// # Safety
-    ///
-    /// - Insert/Update is not safe if the key exceeds the range cache and there's a sentinel key.
-    ///   The caller must ensure that there's no key in the table that is between the key to insert
-    ///   and the side-most cached key besides the sentinel.
-    /// - Update must not cross different partitions.
-    pub unsafe fn write_record_unchecked(
+    /// This function must be called after finding affected ranges, which means the change records
+    /// should never exceed the cached range.
+    pub fn write_record(
         &mut self,
         table: &mut StateTable<S>,
         key: StateKey,
@@ -129,6 +135,10 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
     }
 
+    /// Find all ranges in the partition that are affected by the given delta.
+    /// The returned ranges are guaranteed to be sorted and non-overlapping.
+    /// When this function returns, the cache is guaranteed to cover the affected ranges, so that
+    /// the caller can simple write any changes built to the cache later.
     pub async fn find_affected_ranges<'l>(
         &'l mut self,
         table: &'_ StateTable<S>,

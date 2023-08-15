@@ -376,19 +376,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
 
                 // Apply the change record.
-                //
-                // # Safety
-                //
-                // - For sentinel keys: We already extended the cache to cover the delta range, so
-                //   there's no key in the table that is between `key` and the side-most
-                //   non-sentinel key in the cache.
-                // - For `Update`: The update is guaranteed not to be a partition-change update.
-                //
-                // TODO(rc): we can remove the `unsafe` here once we moved the `affected_ranges`
-                // block below to `OverPartition`
-                unsafe {
-                    partition.write_record_unchecked(&mut this.state_table, key, record);
-                }
+                partition.write_record(&mut this.state_table, key, record);
             }
         }
 
