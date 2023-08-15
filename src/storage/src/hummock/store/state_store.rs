@@ -125,7 +125,9 @@ impl LocalHummockStorage {
         let wait_epoch = epoch;
         let mut receiver = self.version_update_notifier_tx.subscribe();
         let max_committed_epoch = *receiver.borrow_and_update();
-        if max_committed_epoch <= wait_epoch {
+        println!("wait epoch: {:?}", wait_epoch);
+        println!("max committed epoch: {:?}", max_committed_epoch);
+        if max_committed_epoch >= wait_epoch {
             return Ok(());
         }
         loop {
@@ -151,6 +153,7 @@ impl LocalHummockStorage {
                     return Err(HummockError::wait_epoch("tx dropped").into());
                 }
                 Ok(Ok(_)) => {
+                    println!("wait for epoch OK");
                     let max_committed_epoch = *receiver.borrow();
                     if max_committed_epoch >= wait_epoch {
                         return Ok(());
