@@ -197,7 +197,7 @@ where
         let mut temporary_state: Vec<Datum> = vec![None; state_len];
 
         // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier.clone());
+        yield Message::Barrier(first_barrier);
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
@@ -210,7 +210,7 @@ where
         // expects to have been initialized in previous epoch.
 
         // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch= first_barrier.epoch.curr;
+        let mut snapshot_read_epoch;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -322,7 +322,7 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
-                                        println!("Backfill: Chunk from snapshot read, {:?}, {:?}", chunk, snapshot_read_epoch);
+                                        println!("Backfill: Chunk from snapshot read, {:?}", chunk);
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -373,12 +373,13 @@ where
                     // Raise the current position.
                     // As snapshot read streams are ordered by pk, so we can
                     // just use the last row to update `current_pos`.
-                    update_pos_by_vnode(vnode, &chunk, &pk_indices, &mut backfill_state);
-
                     let chunk_cardinality = chunk.cardinality() as u64;
-                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                    total_snapshot_processed_rows += chunk_cardinality;
-                    yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                    if chunk_cardinality > 0 {
+                        update_pos_by_vnode(vnode, &chunk, &pk_indices, &mut backfill_state);
+                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                        total_snapshot_processed_rows += chunk_cardinality;
+                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                    }
                 }
 
                 // consume upstream buffer chunk
