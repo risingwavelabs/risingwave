@@ -1,94 +1,49 @@
-FROM ubuntu:22.04 AS base
+#!/usr/bin/env bash
 
-ENV LANG en_US.utf8
+# Exits as soon as any line fails.
+set -euo pipefail
 
-RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
+ghcraddr="ghcr.io/risingwavelabs/risingwave"
+dockerhubaddr="risingwavelabs/risingwave"
+arch="$(uname -m)"
+BUILDKITE_COMMIT="HDFS_$(echo $RANDOM | md5sum | head -c 20;)"
 
-FROM base AS builder
+java_home_path=$(uname -m)
+if [ "$arch" = "arm64" ] || [ "$arch" = "aarch64" ]; then
+    java_home_path="/usr/lib/jvm/java-11-openjdk-arm64"
+else
+# x86_64
+    java_home_path="/usr/lib/jvm/java-11-openjdk-amd64"
+fi
+echo $java_home_path
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld maven unzip
+# Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
+echo "--- docker build and tag"
+docker build -f docker/Dockerfile.hdfs --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" --build-arg "JAVA_HOME_PATH=${java_home_path}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
 
-SHELL ["/bin/bash", "-c"]
+echo "--- check the image can start correctly"
+container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
+sleep 10
+container_status=$(docker inspect --format='{{.State.Status}}' "$container_id")
+if [ "$container_status" != "running" ]; then
+  echo "docker run failed with status $container_status"
+  docker inspect "$container_id"
+  docker logs "$container_id"
+  exit 1
+fi
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+echo "--- docker images"
+docker images
 
-RUN mkdir -p /risingwave
+echo "--- ghcr login"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-WORKDIR /risingwave
+echo "--- dockerhub login"
+echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
-COPY ./ /risingwave
-COPY ./docker/hdfs_env.sh /risingwave/hdfs_env.sh 
+echo "--- docker push to ghcr"
+docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
-
-ENV PATH /root/.cargo/bin/:$PATH
-
-ENV IN_CONTAINER=1
-
-ARG GIT_SHA
-ENV GIT_SHA=$GIT_SHA
-
-RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
-RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
-
-# We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
-RUN rustup self update \
-  && rustup set profile minimal \
-  && rustup show \
-  && rustup component add rustfmt
-
-RUN cargo fetch
-
-# java home for hdrs
-ARG JAVA_HOME_PATH
-ENV JAVA_HOME ${JAVA_HOME_PATH}
-ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
-
-RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
-  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
-  cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
-  chmod +x /risingwave/bin/jeprof && \
-  mkdir -p /risingwave/lib && cargo clean
-
-RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
-    mkdir -p /risingwave/bin/connector-node && \
-    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
-
-FROM ubuntu:22.04 as image-base
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk wget libsasl2-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
-
-FROM image-base as risingwave
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
-COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=builder /risingwave/ui /risingwave/ui
-COPY --from=builder /risingwave/hdfs_env.sh /risingwave/hdfs_env.sh
-RUN chmod +x /risingwave/hdfs_env.sh
-
-# hadoop
-RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop-2.7.3.tar.gz -P /root/
-RUN tar -zxvf /root/hadoop-2.7.3.tar.gz -C /opt/
-RUN mv /opt/hadoop-2.7.3 /opt/hadoop
-RUN echo export HADOOP_HOME=/opt/hadoop/ >> ~/.bashrc
-RUN echo export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin >> ~/.bashrc
-RUN echo export JAVA_HOME=$(readlink -f $(which java)) >> /opt/hadoop/etc/hadoop/yarn-env.sh
-RUN echo export JAVA_HOME=$(readlink -f $(which java)) >> /opt/hadoop/etc/hadoop/hadoop-env.sh
-RUN rm -rf ~/hadoop-2.7.3.tar.gz
-# java
-ENV HADOOP_HOME /opt/hadoop/
-ENV PATH $PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
-ARG JAVA_HOME_PATH
-ENV JAVA_HOME ${JAVA_HOME_PATH}
-ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
-ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
-ENV CLASSPAT ${CLASSPATH}
-ENV CLASSPAT ${HADOOP_CONF_DIR}:${CLASSPATH}
-# Set default playground mode to docker-playground profile
-ENV PLAYGROUND_PROFILE docker-playground
-# Set default dashboard UI to local path instead of github proxy
-ENV RW_DASHBOARD_UI_PATH /risingwave/ui
-
-ENTRYPOINT [ "/risingwave/hdfs_env.sh" ]
-CMD [ "playground" ]
+echo "--- docker push to dockerhub"
+docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
