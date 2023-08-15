@@ -33,7 +33,7 @@ pub enum ConnectorError {
     Connection(anyhow::Error),
 
     #[error("MySQL error: {0}")]
-    MySQL(#[from] mysql_async::Error),
+    MySql(#[from] mysql_async::Error),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),

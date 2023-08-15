@@ -67,9 +67,9 @@ use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, Barrier,
-    BoxedExecutor as StreamBoxedExecutor, BoxedMessageStream, CdcBackfillExecutor, Executor,
-    MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
+    expect_first_barrier, ActorContext, Barrier, BoxedExecutor as StreamBoxedExecutor,
+    BoxedMessageStream, CdcBackfillExecutor, Executor, MaterializeExecutor, Message, Mutation,
+    PkIndices, PkIndicesRef, StreamExecutorError,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -110,7 +110,7 @@ impl SingleChunkExecutor {
     }
 }
 
-// mock upstream binlog offset from "1.binlog, pos=0"
+// mock upstream binlog offset starting from "1.binlog, pos=0"
 pub struct MockOffsetGenExecutor {
     upstream: Option<StreamBoxedExecutor>,
 
@@ -129,7 +129,7 @@ impl MockOffsetGenExecutor {
             upstream: Some(upstream),
             schema,
             pk_indices,
-            identity: format!("MockOffsetGenExecutor"),
+            identity: "MockOffsetGenExecutor".to_string(),
             start_offset: 0,
         }
     }
@@ -225,7 +225,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let pk_indices = vec![0];
 
     let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-    let actor_ctx = ActorContext::create(0x3a3a3a);
+    let _actor_ctx = ActorContext::create(0x3a3a3a);
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor =
@@ -247,7 +247,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let external_table = ExternalStorageTable::new(
         table_id,
         table_name,
-        ExternalTableReaderImpl::MOCK(MockExternalTableReader::new(binlog_watermarks)),
+        ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
         schema.clone(),
         vec![OrderType::ascending()],
         pk_indices,

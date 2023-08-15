@@ -312,7 +312,7 @@ impl StreamChunk {
         let meta = prost
             .meta
             .as_ref()
-            .map(|meta| StreamChunkMeta::from_protobuf(meta))
+            .map(StreamChunkMeta::from_protobuf)
             .transpose()?;
         Ok(StreamChunk::new_with_meta(ops, columns, None, meta))
     }

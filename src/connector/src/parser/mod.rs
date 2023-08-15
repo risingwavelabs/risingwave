@@ -174,10 +174,9 @@ impl OpAction for OpActionInsert {
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Insert);
-        writer
+        if let Some(offset) = writer
             .row_offset
-            .clone()
-            .map(|offset| writer.offset_builder.push(offset));
+            .clone() { writer.offset_builder.push(offset) }
     }
 }
 
@@ -201,10 +200,9 @@ impl OpAction for OpActionDelete {
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Delete);
-        writer
+        if let Some(offset) = writer
             .row_offset
-            .clone()
-            .map(|offset| writer.offset_builder.push(offset));
+            .clone() { writer.offset_builder.push(offset) }
     }
 }
 

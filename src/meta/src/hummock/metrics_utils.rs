@@ -153,7 +153,7 @@ pub fn trigger_sst_stat(
         }
     }
 
-    tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
+    // tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
     for ((select, target), compacting_task_count) in &compacting_task_stat {
         let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
         metrics

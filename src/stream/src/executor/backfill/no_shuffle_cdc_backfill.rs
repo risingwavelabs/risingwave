@@ -303,7 +303,7 @@ impl CdcBackfillExecutor {
                                 }
                                 Message::Chunk(chunk) => {
                                     let chunk_binlog_offset = get_chunk_last_binlog_offset(
-                                        &upstream_table_reader.inner().table_reader(),
+                                        upstream_table_reader.inner().table_reader(),
                                         &chunk,
                                     )?;
 
@@ -368,6 +368,10 @@ impl CdcBackfillExecutor {
                                     current_pk_pos =
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
 
+                                    tracing::debug!(
+                                        "current backfill progress: {:?}",
+                                        current_pk_pos
+                                    );
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                     total_snapshot_processed_rows += chunk_cardinality;

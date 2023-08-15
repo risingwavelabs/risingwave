@@ -21,9 +21,13 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
+use mysql_common::params::Params;
+use mysql_common::value::Value;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::error::ConnectorError;
@@ -53,10 +57,7 @@ impl ExternalTableType {
     }
 
     pub fn can_backfill(&self) -> bool {
-        match self {
-            Self::MySQL => true,
-            _ => false,
-        }
+        matches!(self, Self::MySQL)
     }
 
     pub fn create_table_reader(
@@ -65,7 +66,7 @@ impl ExternalTableType {
         schema: Schema,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
-            Self::MySQL => Ok(ExternalTableReaderImpl::MYSQL(
+            Self::MySQL => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(properties, schema)?,
             )),
             _ => bail!(ConnectorError::Config(anyhow!(
@@ -186,8 +187,8 @@ pub struct DebeziumSourceOffset {
 }
 
 impl MySqlOffset {
-    pub fn from_str(offset: &str) -> ConnectorResult<Self> {
-        let dbz_offset: DebeziumOffset = serde_json::from_str(&offset).map_err(|e| {
+    pub fn parse_str(offset: &str) -> ConnectorResult<Self> {
+        let dbz_offset: DebeziumOffset = serde_json::from_str(offset).map_err(|e| {
             ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
         })?;
 
@@ -218,14 +219,15 @@ pub trait ExternalTableReader {
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
+        start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 }
 
 #[derive(Debug)]
 pub enum ExternalTableReaderImpl {
-    MYSQL(MySqlExternalTableReader),
-    MOCK(MockExternalTableReader),
+    MySql(MySqlExternalTableReader),
+    Mock(MockExternalTableReader),
 }
 
 #[derive(Debug)]
@@ -280,15 +282,16 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
-        Ok(BinlogOffset::MySQL(MySqlOffset::from_str(offset)?))
+        Ok(BinlogOffset::MySQL(MySqlOffset::parse_str(offset)?))
     }
 
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
+        start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys)
     }
 }
 
@@ -319,21 +322,94 @@ impl MySqlExternalTableReader {
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
-    async fn snapshot_read_inner(&self, table_name: SchemaTableName, primary_keys: Vec<String>) {
-        let order_key = primary_keys.into_iter().join(",");
-        let sql = format!(
-            "SELECT * FROM {} ORDER BY {}",
-            self.get_normalized_table_name(&table_name),
-            order_key
-        );
+    async fn snapshot_read_inner(
+        &self,
+        table_name: SchemaTableName,
+        start_pk: Option<OwnedRow>,
+        primary_keys: Vec<String>,
+    ) {
+        let order_key = primary_keys.iter().join(",");
+        let sql = if start_pk.is_none() {
+            format!(
+                "SELECT * FROM {} ORDER BY {}",
+                self.get_normalized_table_name(&table_name),
+                order_key
+            )
+        } else {
+            let order_condition = primary_keys
+                .iter()
+                .map(|pk| format!("{} >= :{}", pk, pk))
+                .join(" AND ");
+            format!(
+                "SELECT * FROM {} WHERE {} ORDER BY {}",
+                self.get_normalized_table_name(&table_name),
+                order_condition,
+                order_key
+            )
+        };
+
         let mut conn = self
             .pool
             .get_conn()
             .await
             .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
-        let mut result_set = conn.query_iter(sql).await?;
-        let rs_stream = result_set.stream::<mysql_async::Row>().await?;
-        if let Some(rs_stream) = rs_stream {
+        if start_pk.is_none() {
+            let mut result_set = conn.query_iter(sql).await?;
+            let rs_stream = result_set.stream::<mysql_async::Row>().await?;
+            if let Some(rs_stream) = rs_stream {
+                let row_stream = rs_stream.map(|row| {
+                    // convert mysql row into OwnedRow
+                    let mut row = row?;
+                    let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
+                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                });
+
+                pin_mut!(row_stream);
+                #[for_await]
+                for row in row_stream {
+                    let row = row?;
+                    yield row;
+                }
+            }
+        } else {
+            let field_map = self
+                .rw_schema
+                .fields
+                .iter()
+                .map(|f| (f.name.as_str(), f.data_type.clone()))
+                .collect::<HashMap<_, _>>();
+
+            // fill in start primary key params
+            let params = primary_keys
+                .iter()
+                .zip_eq_fast(start_pk.unwrap().into_iter())
+                .map(|(pk, datum)| {
+                    if let Some(value) = datum {
+                        let ty = field_map.get(pk.as_str()).unwrap();
+                        let val = match ty {
+                            DataType::Boolean => Value::from(value.into_bool()),
+                            DataType::Int16 => Value::from(value.into_int16()),
+                            DataType::Int32 => Value::from(value.into_int32()),
+                            DataType::Int64 => Value::from(value.into_int64()),
+                            DataType::Float32 => Value::from(value.into_float32().into_inner()),
+                            DataType::Float64 => Value::from(value.into_float64().into_inner()),
+                            DataType::Date => Value::from(value.into_date().0),
+                            DataType::Varchar => Value::from(String::from(value.into_utf8())),
+                            DataType::Time => Value::from(value.into_time().0),
+                            _ => unimplemented!("unsupported data type: {:?}", ty),
+                        };
+                        (pk.clone(), val)
+                    } else {
+                        (pk.clone(), Value::NULL)
+                    }
+                })
+                .collect_vec();
+
+            let rs_stream = sql
+                .with(Params::from(params))
+                .stream::<mysql_async::Row, _>(&mut conn)
+                .await?;
+
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
@@ -347,7 +423,7 @@ impl MySqlExternalTableReader {
                 let row = row?;
                 yield row;
             }
-        }
+        };
     }
 }
 
@@ -356,42 +432,52 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         match self {
-            ExternalTableReaderImpl::MYSQL(mysql) => mysql.get_normalized_table_name(table_name),
-            ExternalTableReaderImpl::MOCK(mock) => mock.get_normalized_table_name(table_name),
+            ExternalTableReaderImpl::MySql(mysql) => mysql.get_normalized_table_name(table_name),
+            ExternalTableReaderImpl::Mock(mock) => mock.get_normalized_table_name(table_name),
         }
     }
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
         async move {
             match self {
-                ExternalTableReaderImpl::MYSQL(mysql) => mysql.current_binlog_offset().await,
-                ExternalTableReaderImpl::MOCK(mock) => mock.current_binlog_offset().await,
+                ExternalTableReaderImpl::MySql(mysql) => mysql.current_binlog_offset().await,
+                ExternalTableReaderImpl::Mock(mock) => mock.current_binlog_offset().await,
             }
         }
     }
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
         match self {
-            ExternalTableReaderImpl::MYSQL(mysql) => mysql.parse_binlog_offset(offset),
-            ExternalTableReaderImpl::MOCK(mock) => mock.parse_binlog_offset(offset),
+            ExternalTableReaderImpl::MySql(mysql) => mysql.parse_binlog_offset(offset),
+            ExternalTableReaderImpl::Mock(mock) => mock.parse_binlog_offset(offset),
         }
     }
 
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
+        start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys)
     }
 }
 
 impl ExternalTableReaderImpl {
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
-    async fn snapshot_read_inner(&self, table_name: SchemaTableName, primary_keys: Vec<String>) {
+    async fn snapshot_read_inner(
+        &self,
+        table_name: SchemaTableName,
+        start_pk: Option<OwnedRow>,
+        primary_keys: Vec<String>,
+    ) {
         let stream = match self {
-            ExternalTableReaderImpl::MYSQL(mysql) => mysql.snapshot_read(table_name, primary_keys),
-            ExternalTableReaderImpl::MOCK(mock) => mock.snapshot_read(table_name, primary_keys),
+            ExternalTableReaderImpl::MySql(mysql) => {
+                mysql.snapshot_read(table_name, start_pk, primary_keys)
+            }
+            ExternalTableReaderImpl::Mock(mock) => {
+                mock.snapshot_read(table_name, start_pk, primary_keys)
+            }
         };
 
         pin_mut!(stream);
@@ -414,7 +500,29 @@ mod tests {
 
     use crate::sink::catalog::SinkType;
     use crate::sink::SinkParam;
-    use crate::source::external::{ExternalTableReader, MySqlExternalTableReader, SchemaTableName};
+    use crate::source::external::{
+        BinlogOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
+    };
+
+    #[test]
+    fn test_mysql_binlog_offset() {
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true } }"#;
+        let off1_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 1062363217, "snapshot": true } }"#;
+        let off2_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 659687560, "snapshot": true } }"#;
+        let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
+        let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
+
+        let off0 = BinlogOffset::MySQL(MySqlOffset::parse_str(off0_str).unwrap());
+        let off1 = BinlogOffset::MySQL(MySqlOffset::parse_str(off1_str).unwrap());
+        let off2 = BinlogOffset::MySQL(MySqlOffset::parse_str(off2_str).unwrap());
+        let off3 = BinlogOffset::MySQL(MySqlOffset::parse_str(off3_str).unwrap());
+        let off4 = BinlogOffset::MySQL(MySqlOffset::parse_str(off4_str).unwrap());
+
+        assert!(off0 <= off1);
+        assert!(off1 > off2);
+        assert!(off2 < off3);
+        assert_eq!(off3, off4);
+    }
 
     // manual test case
     #[ignore]
@@ -451,7 +559,7 @@ mod tests {
             table_name: "t1".to_string(),
         };
 
-        let stream = reader.snapshot_read(table_name, vec!["v1".to_string()]);
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()]);
         pin_mut!(stream);
         #[for_await]
         for row in stream {

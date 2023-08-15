@@ -20,7 +20,6 @@ use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
-
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
@@ -164,7 +163,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         upstream_table_name,
                         table_reader,
                         schema.clone(),
-                        order_types.clone(),
+                        order_types,
                         pk_indices.clone(),
                          (0..table_desc.columns.len()).collect_vec(),
                     );

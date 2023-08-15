@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
-
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
-
 
 // pub type HummockStorageType = impl StateStore + AsHummockTrait;
 /// This struct represents an external table to be read during backfill

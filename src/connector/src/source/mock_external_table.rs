@@ -84,7 +84,7 @@ impl ExternalTableReader for MockExternalTableReader {
     type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
 
     fn get_normalized_table_name(&self, _table_name: &SchemaTableName) -> String {
-        format!("`mock_table`")
+        "`mock_table`".to_string()
     }
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
@@ -97,12 +97,13 @@ impl ExternalTableReader for MockExternalTableReader {
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
         // same as mysql offset
-        Ok(BinlogOffset::MySQL(MySqlOffset::from_str(offset)?))
+        Ok(BinlogOffset::MySQL(MySqlOffset::parse_str(offset)?))
     }
 
     fn snapshot_read(
         &self,
         _table_name: SchemaTableName,
+        _start_pk: Option<OwnedRow>,
         _primary_keys: Vec<String>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner()

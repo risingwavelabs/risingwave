@@ -80,7 +80,7 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                     let v = mysql_row.take::<NaiveDate, _>(i);
                     v.map(|v| ScalarImpl::from(Date::from(v)))
                 }
-                _ => None,
+                _ => unimplemented!("unsupported data type: {:?}", rw_field.data_type),
             }
         };
         datums.push(datum);
@@ -90,13 +90,10 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
 
 #[cfg(test)]
 mod tests {
-    
 
-    use futures::{pin_mut};
-    
+    use futures::pin_mut;
     use mysql_async::prelude::*;
     use mysql_async::Row;
-    
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -127,7 +124,7 @@ mod tests {
                 let datum = match rw_field.data_type {
                     DataType::Int32 => {
                         let value = mysql_row.take::<i32, _>(i);
-                        value.map(|v| ScalarImpl::from(v))
+                        value.map(ScalarImpl::from)
                     }
                     _ => None,
                 };

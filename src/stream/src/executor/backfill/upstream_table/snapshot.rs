@@ -145,10 +145,13 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 })
                 .collect_vec();
 
-            let row_stream = self
-                .inner
-                .table_reader()
-                .snapshot_read(self.inner.schema_table_name(), primary_keys);
+            tracing::debug!("snapshot_read primary keys: {:?}", primary_keys);
+
+            let row_stream = self.inner.table_reader().snapshot_read(
+                self.inner.schema_table_name(),
+                args.current_pos,
+                primary_keys,
+            );
 
             pin_mut!(row_stream);
             let chunk_stream = iter_chunks(row_stream, self.inner.schema(), args.chunk_size);

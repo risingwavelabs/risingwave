@@ -107,11 +107,6 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
 /// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
 /// non-versioned tables with the same type.
-/// TODO: we can make the storage table as an abstract layer to represent a table that support
-/// snapshot read options:
-///     - enum StorageTableImpl
-///     - trait StorageTable<S> { Inner: StorageTableInner
-///     }
 pub type StorageTable<S> = StorageTableInner<S, EitherSerde>;
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {
