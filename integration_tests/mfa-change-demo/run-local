@@ -25,6 +25,7 @@ lsof -i:9092 > /dev/null || {
 }
 sleep 3
 
+# use it in mfa
 # pip install risingwave 
 # python3 server/udf.py > /dev/null 2>&1 &
 # lsof -i:8815  > /dev/null || {
@@ -40,8 +41,9 @@ psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f recwave-start.sql || {
 }
 sleep 2
 
-# export GENERATOR_PATH=generator
 
+# use it in mfa
+# export GENERATOR_PATH=generator
 # python3 generator --num-users=15 \
 #   --dump-users="$GENERATOR_PATH/users.json" 
 

@@ -1,10 +1,31 @@
+use clap::{App, Arg, ArgMatches};
+
 mod entities;
+mod entities_taxi;
 mod server_pb;
 mod simulation;
-mod entities_taxi;
 
 #[tokio::main]
 async fn main() {
-    println!("This is the recwave actor!");
-    simulation::main_loop().await;
+    let args = get_args();
+    simulation::main_loop(
+        args.value_of("types")
+            .expect("failed to decode brokers")
+            .to_string(),
+    )
+    .await;
+}
+
+fn get_args<'a>() -> ArgMatches<'a> {
+    App::new("recwave-recommender")
+        .about("The recommender of recwave")
+        .arg(
+            Arg::with_name("types")
+                .short("t")
+                .long("types")
+                .help("mfa or taxi")
+                .takes_value(true)
+                .default_value("taxi"),
+        )
+        .get_matches()
 }

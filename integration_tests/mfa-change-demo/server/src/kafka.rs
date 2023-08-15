@@ -1,27 +1,14 @@
 use std::time::Duration;
 
-use rdkafka::consumer::{Consumer, ConsumerContext, Rebalance, StreamConsumer};
-use rdkafka::error::KafkaResult;
+use rdkafka::consumer::{Consumer, ConsumerContext, StreamConsumer};
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::{ClientConfig, ClientContext, Message, TopicPartitionList};
+use rdkafka::{ClientConfig, ClientContext, Message};
 
 struct CustomContext;
 
 impl ClientContext for CustomContext {}
 
-impl ConsumerContext for CustomContext {
-    fn pre_rebalance(&self, _rebalance: &Rebalance<'_>) {
-        // println!("Pre rebalance {:?}", rebalance);
-    }
-
-    fn post_rebalance(&self, _rebalance: &Rebalance<'_>) {
-        // println!("Post rebalance {:?}", rebalance);
-    }
-
-    fn commit_callback(&self, _result: KafkaResult<()>, _offsets: &TopicPartitionList) {
-        // println!("Committing offsets: {:?}", result);
-    }
-}
+impl ConsumerContext for CustomContext {}
 
 // A type alias with your custom consumer can be created for convenience.
 type LoggingConsumer = StreamConsumer<CustomContext>;

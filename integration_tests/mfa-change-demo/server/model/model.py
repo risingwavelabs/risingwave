@@ -37,8 +37,6 @@ class TrainingModelService(ModelServicer):
                 df = pd.DataFrame(list(results))
                 train_y = df.loc[:, 1]
                 train_x = df.drop(columns=[2,1])
-                # print(train_x)
-                # print(train_y)
                 self.model.fit(train_x, train_y)
                 return TrainingResponse()
         except Exception as e:
@@ -56,7 +54,6 @@ class TrainingModelService(ModelServicer):
                 results = cur.fetchall()
                 df = pd.DataFrame(list(results))
                 train_x = df.drop(columns=[2,1])
-                # print(train_x)
                 result = self.model.predict(train_x)
                 return GetAmountResponse(amount = result)
         except Exception as e:
@@ -90,7 +87,6 @@ if __name__ == '__main__':
             # because placeholder is completely not supported
             # even varchar parsed to TypeOid 0, which isn't even defined
             cur.execute("select (2, %s);", ("2333333",))
-            # cur.execute("select (2, $1);")
             results = cur.fetchall()
         print(results)
 

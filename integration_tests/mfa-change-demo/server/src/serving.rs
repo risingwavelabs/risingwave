@@ -15,7 +15,6 @@ select udf_sum from user_mfa_change_sum where userid = $1 order by window_start 
 
 impl Recwave {
     pub async fn recall(&self, userid: String) -> Result<(u64, i64), Status> {
-        //"dbname=dev user=root host=127.0.0.1 port=4566"
         let con = format!("dbname=dev user=root host=127.0.0.1 port=4566");
         let (client, connection) = tokio_postgres::connect(&con, NoTls).await.unwrap();
         tokio::spawn(async move {

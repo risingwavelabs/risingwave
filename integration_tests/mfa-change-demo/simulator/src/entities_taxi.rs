@@ -7,9 +7,9 @@ use serde_derive::{Deserialize, Serialize};
 use tonic::transport::Channel;
 
 use crate::server_pb::server_client::ServerClient;
-use crate::server_pb::{ReportTaxiActionRequest, GetTaxiAmountRequest};
+use crate::server_pb::{GetTaxiAmountRequest, ReportTaxiActionRequest};
 
-#[derive(Serialize, Deserialize,Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TaxiFeature {
     #[serde(rename = "VendorID")]
     pub(crate) vendor_id: i32,
@@ -37,28 +37,24 @@ pub struct TaxiFeature {
     pub(crate) congestion_surcharge: f64,
 }
 
-pub fn read_feature_for_csv(path: PathBuf) -> Result<Vec<TaxiFeature>, Box<dyn Error>>{
+pub fn read_feature_for_csv(path: PathBuf) -> Result<Vec<TaxiFeature>, Box<dyn Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut reader = csv::Reader::from_reader(reader);
     let mut records = vec![];
     for record in reader.deserialize() {
-        let record:TaxiFeature = record.unwrap();
-        // println!(
-        //     "{:?}",record
-        // );
+        let record: TaxiFeature = record.unwrap();
         records.push(record);
     }
     Ok(records)
 }
 
-pub fn parse_taxi_metadata() -> (Vec<TaxiFeature>,Vec<TaxiFeature>){
-
+pub fn parse_taxi_metadata() -> (Vec<TaxiFeature>, Vec<TaxiFeature>) {
     let mut offlines = read_feature_for_csv(Path::new("../").join("parquet_data.csv")).unwrap();
 
     let onlines = offlines.split_off(offlines.len() / 10 * 9);
-    
-    (offlines,onlines)
+
+    (offlines, onlines)
 }
 
 impl TaxiFeature {
@@ -82,7 +78,7 @@ impl TaxiFeature {
                 mta_tax: self.mta_tax,
                 tip_amount: self.tip_amount,
                 tolls_amount: self.tolls_amount,
-                ehail_fee: self.ehail_fee.unwrap_or_else(||{0.0}),
+                ehail_fee: self.ehail_fee.unwrap_or_else(|| 0.0),
                 improvement_surcharge: self.improvement_surcharge,
                 total_amount: self.total_amount,
                 payment_type: self.payment_type,
@@ -90,7 +86,7 @@ impl TaxiFeature {
                 congestion_surcharge: self.congestion_surcharge,
             }))
             .await
-        .unwrap();
+            .unwrap();
         Ok(())
     }
 

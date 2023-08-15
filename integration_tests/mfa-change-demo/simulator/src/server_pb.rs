@@ -1,91 +1,88 @@
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportActionRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub userid: ::prost::alloc::string::String,
-    #[prost(enumeration="ActionType", tag="2")]
+    #[prost(enumeration = "ActionType", tag = "2")]
     pub eventtype: i32,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub changenum: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportActionResponse {
-    #[prost(uint64, tag="1")]
+    #[prost(uint64, tag = "1")]
     pub timestamp: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetFeatureRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub userid: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetFeatureResponse {
-    #[prost(uint64, tag="1")]
+    #[prost(uint64, tag = "1")]
     pub count: u64,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub sum: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportTaxiActionRequest {
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub vendor_id: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub lpep_pickup_datetime: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub lpep_dropoff_datetime: ::prost::alloc::string::String,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub store_and_fwd_flag: bool,
-    #[prost(double, tag="5")]
+    #[prost(double, tag = "5")]
     pub ratecode_id: f64,
-    #[prost(int64, tag="6")]
+    #[prost(int64, tag = "6")]
     pub pu_location_id: i64,
-    #[prost(int64, tag="7")]
+    #[prost(int64, tag = "7")]
     pub do_location_id: i64,
-    #[prost(double, tag="8")]
+    #[prost(double, tag = "8")]
     pub passenger_count: f64,
-    #[prost(double, tag="9")]
+    #[prost(double, tag = "9")]
     pub trip_distance: f64,
-    #[prost(double, tag="10")]
+    #[prost(double, tag = "10")]
     pub fare_amount: f64,
-    #[prost(double, tag="11")]
+    #[prost(double, tag = "11")]
     pub extra: f64,
-    #[prost(double, tag="12")]
+    #[prost(double, tag = "12")]
     pub mta_tax: f64,
-    #[prost(double, tag="13")]
+    #[prost(double, tag = "13")]
     pub tip_amount: f64,
-    #[prost(double, tag="14")]
+    #[prost(double, tag = "14")]
     pub tolls_amount: f64,
-    #[prost(double, tag="15")]
+    #[prost(double, tag = "15")]
     pub ehail_fee: f64,
-    #[prost(double, tag="16")]
+    #[prost(double, tag = "16")]
     pub improvement_surcharge: f64,
-    #[prost(double, tag="17")]
+    #[prost(double, tag = "17")]
     pub total_amount: f64,
-    #[prost(double, tag="18")]
+    #[prost(double, tag = "18")]
     pub payment_type: f64,
-    #[prost(double, tag="19")]
+    #[prost(double, tag = "19")]
     pub trip_type: f64,
-    #[prost(double, tag="20")]
+    #[prost(double, tag = "20")]
     pub congestion_surcharge: f64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReportTaxiActionResponse {
-}
+pub struct ReportTaxiActionResponse {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetTaxiAmountRequest {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub do_location_id: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetTaxiAmountResponse {
-    #[prost(double, tag="1")]
+    #[prost(double, tag = "1")]
     pub fare_amount: f64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StartTrainingRequest {
-}
+pub struct StartTrainingRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StartTrainingResponse {
-}
+pub struct StartTrainingResponse {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ActionType {
@@ -123,6 +120,7 @@ pub mod server_client {
             let inner = tonic::client::Grpc::new(inner);
             Self { inner }
         }
+
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
@@ -136,12 +134,12 @@ pub mod server_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + Send + Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + Send + Sync,
         {
             ServerClient::new(InterceptedService::new(inner, interceptor))
         }
+
         /// Compress requests with `gzip`.
         ///
         /// This requires the server to support it otherwise it might respond with an
@@ -151,105 +149,86 @@ pub mod server_client {
             self.inner = self.inner.send_gzip();
             self
         }
+
         /// Enable decompressing responses with `gzip`.
         #[must_use]
         pub fn accept_gzip(mut self) -> Self {
             self.inner = self.inner.accept_gzip();
             self
         }
+
         pub async fn get_feature(
             &mut self,
             request: impl tonic::IntoRequest<super::GetFeatureRequest>,
         ) -> Result<tonic::Response<super::GetFeatureResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/server_pb.Server/GetFeature",
-            );
+            let path = http::uri::PathAndQuery::from_static("/server_pb.Server/GetFeature");
             self.inner.unary(request.into_request(), path, codec).await
         }
+
         pub async fn report_action(
             &mut self,
             request: impl tonic::IntoRequest<super::ReportActionRequest>,
         ) -> Result<tonic::Response<super::ReportActionResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/server_pb.Server/ReportAction",
-            );
+            let path = http::uri::PathAndQuery::from_static("/server_pb.Server/ReportAction");
             self.inner.unary(request.into_request(), path, codec).await
         }
+
         pub async fn report_taxi_action(
             &mut self,
             request: impl tonic::IntoRequest<super::ReportTaxiActionRequest>,
         ) -> Result<tonic::Response<super::ReportTaxiActionResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/server_pb.Server/ReportTaxiAction",
-            );
+            let path = http::uri::PathAndQuery::from_static("/server_pb.Server/ReportTaxiAction");
             self.inner.unary(request.into_request(), path, codec).await
         }
+
         pub async fn get_taxi_amount(
             &mut self,
             request: impl tonic::IntoRequest<super::GetTaxiAmountRequest>,
         ) -> Result<tonic::Response<super::GetTaxiAmountResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/server_pb.Server/GetTaxiAmount",
-            );
+            let path = http::uri::PathAndQuery::from_static("/server_pb.Server/GetTaxiAmount");
             self.inner.unary(request.into_request(), path, codec).await
         }
+
         pub async fn start_training(
             &mut self,
             request: impl tonic::IntoRequest<super::StartTrainingRequest>,
         ) -> Result<tonic::Response<super::StartTrainingResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/server_pb.Server/StartTraining",
-            );
+            let path = http::uri::PathAndQuery::from_static("/server_pb.Server/StartTraining");
             self.inner.unary(request.into_request(), path, codec).await
         }
     }
@@ -258,7 +237,8 @@ pub mod server_client {
 pub mod server_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    ///Generated trait containing gRPC methods that should be implemented for use with ServerServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with
+    /// ServerServer.
     #[async_trait]
     pub trait Server: Send + Sync + 'static {
         async fn get_feature(
@@ -293,6 +273,7 @@ pub mod server_server {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
+
         pub fn from_arc(inner: Arc<T>) -> Self {
             let inner = _Inner(inner);
             Self {
@@ -301,10 +282,8 @@ pub mod server_server {
                 send_compression_encodings: Default::default(),
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -317,28 +296,24 @@ pub mod server_server {
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
-        type Response = http::Response<tonic::body::BoxBody>;
         type Error = std::convert::Infallible;
         type Future = BoxFuture<Self::Response, Self::Error>;
-        fn poll_ready(
-            &mut self,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Self::Error>> {
+        type Response = http::Response<tonic::body::BoxBody>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
+
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/server_pb.Server/GetFeature" => {
                     #[allow(non_camel_case_types)]
                     struct GetFeatureSvc<T: Server>(pub Arc<T>);
-                    impl<T: Server> tonic::server::UnaryService<super::GetFeatureRequest>
-                    for GetFeatureSvc<T> {
+                    impl<T: Server> tonic::server::UnaryService<super::GetFeatureRequest> for GetFeatureSvc<T> {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         type Response = super::GetFeatureResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetFeatureRequest>,
@@ -355,11 +330,10 @@ pub mod server_server {
                         let inner = inner.0;
                         let method = GetFeatureSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            );
+                        let mut grpc = tonic::server::Grpc::new(codec).apply_compression_config(
+                            accept_compression_encodings,
+                            send_compression_encodings,
+                        );
                         let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
@@ -368,23 +342,16 @@ pub mod server_server {
                 "/server_pb.Server/ReportAction" => {
                     #[allow(non_camel_case_types)]
                     struct ReportActionSvc<T: Server>(pub Arc<T>);
-                    impl<
-                        T: Server,
-                    > tonic::server::UnaryService<super::ReportActionRequest>
-                    for ReportActionSvc<T> {
+                    impl<T: Server> tonic::server::UnaryService<super::ReportActionRequest> for ReportActionSvc<T> {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         type Response = super::ReportActionResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ReportActionRequest>,
                         ) -> Self::Future {
                             let inner = self.0.clone();
-                            let fut = async move {
-                                (*inner).report_action(request).await
-                            };
+                            let fut = async move { (*inner).report_action(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -395,11 +362,10 @@ pub mod server_server {
                         let inner = inner.0;
                         let method = ReportActionSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            );
+                        let mut grpc = tonic::server::Grpc::new(codec).apply_compression_config(
+                            accept_compression_encodings,
+                            send_compression_encodings,
+                        );
                         let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
@@ -408,23 +374,18 @@ pub mod server_server {
                 "/server_pb.Server/ReportTaxiAction" => {
                     #[allow(non_camel_case_types)]
                     struct ReportTaxiActionSvc<T: Server>(pub Arc<T>);
-                    impl<
-                        T: Server,
-                    > tonic::server::UnaryService<super::ReportTaxiActionRequest>
-                    for ReportTaxiActionSvc<T> {
+                    impl<T: Server> tonic::server::UnaryService<super::ReportTaxiActionRequest>
+                        for ReportTaxiActionSvc<T>
+                    {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         type Response = super::ReportTaxiActionResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ReportTaxiActionRequest>,
                         ) -> Self::Future {
                             let inner = self.0.clone();
-                            let fut = async move {
-                                (*inner).report_taxi_action(request).await
-                            };
+                            let fut = async move { (*inner).report_taxi_action(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -435,11 +396,10 @@ pub mod server_server {
                         let inner = inner.0;
                         let method = ReportTaxiActionSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            );
+                        let mut grpc = tonic::server::Grpc::new(codec).apply_compression_config(
+                            accept_compression_encodings,
+                            send_compression_encodings,
+                        );
                         let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
@@ -448,23 +408,16 @@ pub mod server_server {
                 "/server_pb.Server/GetTaxiAmount" => {
                     #[allow(non_camel_case_types)]
                     struct GetTaxiAmountSvc<T: Server>(pub Arc<T>);
-                    impl<
-                        T: Server,
-                    > tonic::server::UnaryService<super::GetTaxiAmountRequest>
-                    for GetTaxiAmountSvc<T> {
+                    impl<T: Server> tonic::server::UnaryService<super::GetTaxiAmountRequest> for GetTaxiAmountSvc<T> {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         type Response = super::GetTaxiAmountResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetTaxiAmountRequest>,
                         ) -> Self::Future {
                             let inner = self.0.clone();
-                            let fut = async move {
-                                (*inner).get_taxi_amount(request).await
-                            };
+                            let fut = async move { (*inner).get_taxi_amount(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -475,11 +428,10 @@ pub mod server_server {
                         let inner = inner.0;
                         let method = GetTaxiAmountSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            );
+                        let mut grpc = tonic::server::Grpc::new(codec).apply_compression_config(
+                            accept_compression_encodings,
+                            send_compression_encodings,
+                        );
                         let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
@@ -488,23 +440,16 @@ pub mod server_server {
                 "/server_pb.Server/StartTraining" => {
                     #[allow(non_camel_case_types)]
                     struct StartTrainingSvc<T: Server>(pub Arc<T>);
-                    impl<
-                        T: Server,
-                    > tonic::server::UnaryService<super::StartTrainingRequest>
-                    for StartTrainingSvc<T> {
+                    impl<T: Server> tonic::server::UnaryService<super::StartTrainingRequest> for StartTrainingSvc<T> {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         type Response = super::StartTrainingResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+
                         fn call(
                             &mut self,
                             request: tonic::Request<super::StartTrainingRequest>,
                         ) -> Self::Future {
                             let inner = self.0.clone();
-                            let fut = async move {
-                                (*inner).start_training(request).await
-                            };
+                            let fut = async move { (*inner).start_training(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -515,28 +460,23 @@ pub mod server_server {
                         let inner = inner.0;
                         let method = StartTrainingSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            );
+                        let mut grpc = tonic::server::Grpc::new(codec).apply_compression_config(
+                            accept_compression_encodings,
+                            send_compression_encodings,
+                        );
                         let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        Ok(
-                            http::Response::builder()
-                                .status(200)
-                                .header("grpc-status", "12")
-                                .header("content-type", "application/grpc")
-                                .body(empty_body())
-                                .unwrap(),
-                        )
-                    })
-                }
+                _ => Box::pin(async move {
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .header("grpc-status", "12")
+                        .header("content-type", "application/grpc")
+                        .body(empty_body())
+                        .unwrap())
+                }),
             }
         }
     }
