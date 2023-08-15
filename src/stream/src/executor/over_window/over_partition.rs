@@ -136,67 +136,67 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     }
 
     /// Find all ranges in the partition that are affected by the given delta.
-    /// The returned ranges are guaranteed to be sorted and non-overlapping.
-    /// When this function returns, the cache is guaranteed to cover the affected ranges, so that
-    /// the caller can simple write any changes built to the cache later.
-    pub async fn find_affected_ranges<'l>(
-        &'l mut self,
+    /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
+    /// are guaranteed to be cached.
+    pub async fn find_affected_ranges<'s, 'cache>(
+        &'s mut self,
         table: &'_ StateTable<S>,
         calls: &'_ [WindowFuncCall],
-        delta: &'l PartitionDelta,
+        delta: &'cache PartitionDelta,
     ) -> StreamExecutorResult<(
-        DeltaBTreeMap<'l, CacheKey, OwnedRow>,
-        Vec<(CacheKey, CacheKey, CacheKey, CacheKey)>,
-    )> {
+        DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+        Vec<(
+            &'cache CacheKey,
+            &'cache CacheKey,
+            &'cache CacheKey,
+            &'cache CacheKey,
+        )>,
+    )>
+    where
+        's: 'cache,
+    {
         // ensure the cache covers all delta (if possible)
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
         self.extend_cache_by_range(table, delta_first..=delta_last)
             .await?;
 
-        let mut ranges = vec![];
-        while {
-            let tmp_ranges = self::find_affected_ranges(
-                calls,
-                DeltaBTreeMap::new(self.range_cache.inner(), &delta),
-            );
+        loop {
+            let (left_reached_sentinel, right_reached_sentinel) = {
+                // SAFETY: Here we shortly borrow the range cache and turn the reference into a
+                // `'cache` one to bypass the borrow checker. This is safe because we only return
+                // the reference once we don't need to do any further mutation.
+                let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
+                let ranges =
+                    self::find_affected_ranges(calls, DeltaBTreeMap::new(cache_inner, delta));
 
-            let need_retry = if tmp_ranges.is_empty() {
-                false
-            } else {
-                // if any range touches the sentinel, we need to extend the cache and retry
-
-                let left_reached_sentinel = tmp_ranges.first().unwrap().0.is_sentinel();
-                let right_reached_sentinel = tmp_ranges.last().unwrap().3.is_sentinel();
-
-                if left_reached_sentinel || right_reached_sentinel {
-                    if left_reached_sentinel {
-                        // TODO(rc): should count cache miss for this, and also the below
-                        tracing::info!("partition cache left extension triggered");
-                        self.extend_cache_leftward_by_n(table).await?;
-                    }
-                    if right_reached_sentinel {
-                        tracing::info!("partition cache right extension triggered");
-                        self.extend_cache_rightward_by_n(table).await?;
-                    }
-                    true
-                } else {
-                    ranges.extend(
-                        tmp_ranges
-                            .into_iter()
-                            .map(|(a, b, c, d)| (a.clone(), b.clone(), c.clone(), d.clone())),
-                    );
-                    false
+                if ranges.is_empty() {
+                    // no ranges affected, we're done
+                    return Ok((DeltaBTreeMap::new(cache_inner, delta), ranges));
                 }
+
+                let left_reached_sentinel = ranges.first().unwrap().0.is_sentinel();
+                let right_reached_sentinel = ranges.last().unwrap().3.is_sentinel();
+
+                if !left_reached_sentinel && !right_reached_sentinel {
+                    // all affected ranges are already cached, we're done
+                    return Ok((DeltaBTreeMap::new(cache_inner, delta), ranges));
+                }
+
+                (left_reached_sentinel, right_reached_sentinel)
             };
 
-            need_retry
-        } {
+            if left_reached_sentinel {
+                // TODO(rc): should count cache miss for this, and also the below
+                tracing::info!("partition cache left extension triggered");
+                self.extend_cache_leftward_by_n(table).await?;
+            }
+            if right_reached_sentinel {
+                tracing::info!("partition cache right extension triggered");
+                self.extend_cache_rightward_by_n(table).await?;
+            }
             tracing::info!("partition cache extended");
         }
-
-        ranges.shrink_to_fit();
-        Ok((DeltaBTreeMap::new(self.range_cache.inner(), delta), ranges))
     }
 
     async fn extend_cache_by_range(

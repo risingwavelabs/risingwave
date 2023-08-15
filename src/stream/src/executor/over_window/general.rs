@@ -451,7 +451,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     }
                     cursor.move_next();
 
-                    key != &last_frame_end
+                    key != last_frame_end
                 } {}
             }
 
@@ -503,7 +503,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 states.just_slide_forward();
                 curr_key_cursor.move_next();
 
-                key != &last_curr_key
+                key != last_curr_key
             } {}
         }
 
