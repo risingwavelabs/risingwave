@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
@@ -93,6 +93,11 @@ impl Binder {
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
+        if !returning_items.is_empty() && table_catalog.has_generated_column() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+            )));
+        }
 
         let pk_indices = table_catalog
             .pk()

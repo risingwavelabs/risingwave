@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -73,6 +73,11 @@ impl Binder {
         let schema_name = schema_name.as_deref();
 
         let table_catalog = self.resolve_dml_table(schema_name, &table_name, false)?;
+        if !returning_items.is_empty() && table_catalog.has_generated_column() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+            )));
+        }
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
