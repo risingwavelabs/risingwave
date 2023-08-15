@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64
+    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64
     command:
       - compactor-node
       - "--listen-addr"
@@ -25,7 +25,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop/"
+      - "<HADOOP_HOME>:/opt/hadoop/"
     environment:
       - HADOOP_HOME=/opt/hadoop/
     container_name: compactor-0
@@ -37,7 +37,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
       - compute-node
       - "--listen-addr"
@@ -62,7 +62,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop/"
+      - "<HADOOP_HOME>:/opt/hadoop/"
     environment:
       - HADOOP_HOME=/opt/hadoop/
     container_name: compute-node-0
@@ -109,7 +109,7 @@ services:
     depends_on: []
     volumes:
       - "etcd-0:/etcd-data"
-      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop/"
+      - "<HADOOP_HOME>:/opt/hadoop/"
     environment:
       - HADOOP_HOME=/opt/hadoop/
     container_name: etcd-0
@@ -124,7 +124,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
       - frontend-node
       - "--listen-addr"
@@ -181,7 +181,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
       - meta-node
       - "--listen-addr"
@@ -199,7 +199,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+hdfs://sh@001"
+      - "hummock+hdfs://<cluster_name>@<data_path>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -215,7 +215,7 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop"
+      - "<HADOOP_HOME>:/opt/hadoop"
     environment:
       - HADOOP_HOME=/opt/hadoop/
     container_name: meta-node-0
@@ -253,7 +253,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64
+    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051
