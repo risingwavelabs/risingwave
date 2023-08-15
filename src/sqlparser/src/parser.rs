@@ -584,6 +584,13 @@ impl Parser {
                 Keyword::LEFT | Keyword::RIGHT => {
                     self.parse_function(ObjectName(vec![w.to_ident()?]))
                 }
+                Keyword::OPERATOR if self.peek_token().token == Token::LParen => {
+                    let op = UnaryOperator::PGQualified(Box::new(self.parse_qualified_operator()?));
+                    Ok(Expr::UnaryOp {
+                        op,
+                        expr: Box::new(self.parse_subexpr(Precedence::Other)?),
+                    })
+                }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
                 }
@@ -736,6 +743,69 @@ impl Parser {
             }
         }
         Ok(idents)
+    }
+
+    pub fn parse_qualified_operator(&mut self) -> Result<QualifiedOperator, ParserError> {
+        self.expect_token(&Token::LParen)?;
+
+        let schema = match self.parse_identifier_non_reserved() {
+            Ok(ident) => {
+                self.expect_token(&Token::Period)?;
+                Some(ident)
+            }
+            Err(_) => {
+                self.prev_token();
+                None
+            }
+        };
+
+        // https://www.postgresql.org/docs/15/sql-syntax-lexical.html#SQL-SYNTAX-OPERATORS
+        let name = match self.peek_token().token {
+            t @ (Token::Plus
+            | Token::Minus
+            | Token::Arrow
+            | Token::LongArrow
+            | Token::Mul
+            | Token::Div
+            | Token::Lt
+            | Token::ShiftLeft
+            | Token::Neq
+            | Token::LtEq
+            | Token::Spaceship
+            | Token::Gt
+            | Token::ShiftRight
+            | Token::GtEq
+            | Token::Eq
+            | Token::RArrow
+            | Token::Tilde
+            | Token::TildeAsterisk
+            | Token::ExclamationMark
+            | Token::ExclamationMarkTilde
+            | Token::ExclamationMarkTildeAsterisk
+            | Token::DoubleExclamationMark
+            | Token::AtSign
+            | Token::Sharp
+            | Token::HashArrow
+            | Token::HashLongArrow
+            | Token::Mod
+            | Token::Caret
+            | Token::Prefix
+            | Token::Ampersand
+            | Token::Pipe
+            | Token::PGSquareRoot
+            | Token::Concat
+            | Token::PGCubeRoot
+            | Token::Char('`')
+            | Token::Char('?')) => t.to_string(),
+            _ => self.expected(
+                "one of + - * / < > = ~ ! @ # % ^ & | ` ?",
+                self.peek_token(),
+            )?,
+        };
+        self.next_token();
+
+        self.expect_token(&Token::RParen)?;
+        Ok(QualifiedOperator { schema, name })
     }
 
     pub fn parse_function(&mut self, name: ObjectName) -> Result<Expr, ParserError> {
@@ -1352,6 +1422,9 @@ impl Parser {
                     }
                 }
                 Keyword::XOR => Some(BinaryOperator::Xor),
+                Keyword::OPERATOR if self.peek_token() == Token::LParen => Some(
+                    BinaryOperator::PGQualified(Box::new(self.parse_qualified_operator()?)),
+                ),
                 _ => None,
             },
             _ => None,
@@ -1631,6 +1704,11 @@ impl Parser {
             | Token::LongArrow
             | Token::HashArrow
             | Token::HashLongArrow => Ok(P::Other),
+            Token::Word(w)
+                if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
+            {
+                Ok(P::Other)
+            }
             Token::Word(w) if w.keyword == Keyword::AT => {
                 match (self.peek_nth_token(1).token, self.peek_nth_token(2).token) {
                     (Token::Word(w), Token::Word(w2))
