@@ -761,6 +761,9 @@ pub async fn expect_first_barrier(
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
+    // TODO: Is this check correct?
+    // assert!(matches!(barrier.kind, BarrierKind::Checkpoint | BarrierKind::Initial));
+    assert!(matches!(barrier.kind, BarrierKind::Checkpoint));
     Ok(barrier)
 }
 

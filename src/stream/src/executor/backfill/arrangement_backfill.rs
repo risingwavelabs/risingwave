@@ -15,6 +15,8 @@
 use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 
 use either::Either;
 use futures::stream::select_with_strategy;
@@ -116,6 +118,7 @@ where
         println!("pk: {:?}", self.upstream_table.pk_indices());
         println!("output: {:?}", self.output_indices);
         let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
+        println!("pk_in_output_indices: {:?}", pk_indices);
         let state_len = pk_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
@@ -126,6 +129,8 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        println!("backfill_first_barrier: {:?}", first_barrier);
+        sleep(Duration::from_secs(10));
         self.state_table.init_epoch(first_barrier.epoch);
         upstream_table.init_epoch(first_barrier.epoch);
 
@@ -160,14 +165,20 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read_per_vnode(
-                    &upstream_table,
-                    backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
-                    self.chunk_size,
-                    &mut builders,
-                );
-                pin_mut!(snapshot);
-                snapshot.try_next().await?.unwrap().is_none()
+                println!("Verifying if snapshot is empty via: snapshot read per vnode");
+                let snapshot_is_empty = {
+                     let snapshot = Self::snapshot_read_per_vnode(
+                        &upstream_table,
+                        backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
+                        self.chunk_size,
+                        &mut builders,
+                    );
+                    pin_mut!(snapshot);
+                    snapshot.try_next().await?.unwrap().is_none()
+                };
+                let builder_is_empty = builders.iter().all(|b| b.is_empty());
+                println!("Snapshot is empty: {}", snapshot_is_empty && builder_is_empty);
+                snapshot_is_empty && builder_is_empty
             }
         };
 
@@ -177,6 +188,7 @@ where
         // | f                    | t              | -> | f                |
         // | f                    | f              | -> | t                |
         let to_backfill = !is_completely_finished && !is_snapshot_empty;
+        // let to_backfill = true;
 
         // Use these to persist state.
         // They contain the backfill position, and the progress.
@@ -185,7 +197,7 @@ where
         let mut temporary_state: Vec<Datum> = vec![None; state_len];
 
         // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
+        yield Message::Barrier(first_barrier.clone());
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
@@ -198,7 +210,7 @@ where
         // expects to have been initialized in previous epoch.
 
         // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch;
+        let mut snapshot_read_epoch= first_barrier.epoch.curr;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -264,6 +276,7 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
+                                        println!("Backfill: Barrier from upstream");
                                         // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
@@ -274,6 +287,7 @@ where
                                         break;
                                     }
                                     Message::Chunk(chunk) => {
+                                        println!("Backfill: Chunk from upstream {:?}", chunk);
                                         // Buffer the upstream chunk.
                                         upstream_chunk_buffer.push(chunk.compact());
                                     }
@@ -286,6 +300,7 @@ where
                             Either::Right(msg) => {
                                 match msg? {
                                     None => {
+                                        println!("Backfill: Snapshot read stream is empty");
                                         // End of the snapshot read stream.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows
@@ -307,6 +322,7 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
+                                        println!("Backfill: Chunk from snapshot read, {:?}, {:?}", chunk, snapshot_read_epoch);
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -438,13 +454,14 @@ where
 
         tracing::trace!(
             actor = self.actor_id,
-            "Backfill has already finished and forward messages directly to the downstream"
+            "Arrangement Backfill has already finished and forward messages directly to the downstream"
         );
 
         // Wait for first barrier to come after backfill is finished.
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                println!("mapping message: {:?}", msg);
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg && !is_completely_finished {
                     // If snapshot was empty, we do not need to backfill,
@@ -483,6 +500,7 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                println!("mapping message after barrier: {:?}", msg);
                 if let Message::Barrier(barrier) = &msg {
                     self.state_table.commit_no_data_expected(barrier.epoch);
                 }
@@ -523,6 +541,7 @@ where
             .zip_eq_debug(builders.iter_mut())
         {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
+            println!("backfill_progress: {:?}", backfill_progress);
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::Completed => {
                     continue;
@@ -536,6 +555,7 @@ where
                 continue;
             }
             let range_bounds = range_bounds.unwrap();
+            println!("range_bounds: {:?}", range_bounds);
 
             let vnode_row_iter = upstream_table
                 .iter_with_pk_range_and_output_indices(&range_bounds, vnode, Default::default())

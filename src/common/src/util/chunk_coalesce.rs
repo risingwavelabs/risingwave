@@ -236,6 +236,10 @@ impl DataChunkBuilder {
     pub fn data_types(&self) -> Vec<DataType> {
         self.data_types.clone()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffered_count == 0
+    }
 }
 
 impl Drop for DataChunkBuilder {
