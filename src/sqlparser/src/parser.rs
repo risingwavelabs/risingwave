@@ -760,49 +760,24 @@ impl Parser {
         };
 
         // https://www.postgresql.org/docs/15/sql-syntax-lexical.html#SQL-SYNTAX-OPERATORS
-        let name = match self.peek_token().token {
-            t @ (Token::Plus
-            | Token::Minus
-            | Token::Arrow
-            | Token::LongArrow
-            | Token::Mul
-            | Token::Div
-            | Token::Lt
-            | Token::ShiftLeft
-            | Token::Neq
-            | Token::LtEq
-            | Token::Spaceship
-            | Token::Gt
-            | Token::ShiftRight
-            | Token::GtEq
-            | Token::Eq
-            | Token::RArrow
-            | Token::Tilde
-            | Token::TildeAsterisk
-            | Token::ExclamationMark
-            | Token::ExclamationMarkTilde
-            | Token::ExclamationMarkTildeAsterisk
-            | Token::DoubleExclamationMark
-            | Token::AtSign
-            | Token::Sharp
-            | Token::HashArrow
-            | Token::HashLongArrow
-            | Token::Mod
-            | Token::Caret
-            | Token::Prefix
-            | Token::Ampersand
-            | Token::Pipe
-            | Token::PGSquareRoot
-            | Token::Concat
-            | Token::PGCubeRoot
-            | Token::Char('`')
-            | Token::Char('?')) => t.to_string(),
-            _ => self.expected(
-                "one of + - * / < > = ~ ! @ # % ^ & | ` ?",
-                self.peek_token(),
-            )?,
+        const OP_CHARS: &[char] = &[
+            '+', '-', '*', '/', '<', '>', '=', '~', '!', '@', '#', '%', '^', '&', '|', '`', '?',
+        ];
+        let name = {
+            // Unlike PostgreSQL, we only take 1 token here rather than any sequence of `OP_CHARS`.
+            // This is enough because we do not support custom operators like `x *@ y` anyways,
+            // and all builtin sequences are already single tokens.
+            //
+            // To support custom operators and be fully compatible with PostgreSQL later, the
+            // tokenizer should also be updated.
+            let token = self.next_token();
+            let name = token.token.to_string();
+            if !name.trim_matches(OP_CHARS).is_empty() {
+                self.prev_token();
+                return self.expected(&format!("one of {}", OP_CHARS.iter().join(" ")), token);
+            }
+            name
         };
-        self.next_token();
 
         self.expect_token(&Token::RParen)?;
         Ok(QualifiedOperator { schema, name })
