@@ -295,7 +295,11 @@ where
             StateTableWatermarkCache::new(0)
         };
 
-        let output_indices = table_catalog.output_indices.iter().map(|i| *i as usize).collect_vec();
+        let output_indices = table_catalog
+            .output_indices
+            .iter()
+            .map(|i| *i as usize)
+            .collect_vec();
 
         Self {
             table_id,
@@ -500,7 +504,10 @@ where
     /// FIXME(kwannoel): Should this constructed in plan phase?
     pub fn get_output_data_types(&self) -> Vec<DataType> {
         println!("output_indices: {:?}", self.output_indices);
-        self.output_indices.iter().map(|i| self.data_types[*i].clone()).collect_vec()
+        self.output_indices
+            .iter()
+            .map(|i| self.data_types[*i].clone())
+            .collect_vec()
     }
 
     pub fn table_id(&self) -> u32 {

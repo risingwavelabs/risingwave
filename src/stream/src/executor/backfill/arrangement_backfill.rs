@@ -130,7 +130,6 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         println!("backfill_first_barrier: {:?}", first_barrier);
-        sleep(Duration::from_secs(10));
         self.state_table.init_epoch(first_barrier.epoch);
         upstream_table.init_epoch(first_barrier.epoch);
 
@@ -147,13 +146,11 @@ where
         let mut committed_progress = HashMap::new();
 
         let output_data_types = upstream_table.get_output_data_types();
-        println!("output_data_types: {:?}", output_data_types);
+        // println!("output_data_types: {:?}", output_data_types);
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
-            .map(|_| {
-                DataChunkBuilder::new(output_data_types.clone(), self.chunk_size)
-            })
+            .map(|_| DataChunkBuilder::new(output_data_types.clone(), self.chunk_size))
             .collect_vec();
 
         // If the snapshot is empty, we don't need to backfill.
@@ -165,9 +162,9 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                println!("Verifying if snapshot is empty via: snapshot read per vnode");
+                // println!("Verifying if snapshot is empty via: snapshot read per vnode");
                 let snapshot_is_empty = {
-                     let snapshot = Self::snapshot_read_per_vnode(
+                    let snapshot = Self::snapshot_read_per_vnode(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                         self.chunk_size,
@@ -177,7 +174,7 @@ where
                     snapshot.try_next().await?.unwrap().is_none()
                 };
                 let builder_is_empty = builders.iter().all(|b| b.is_empty());
-                println!("Snapshot is empty: {}", snapshot_is_empty && builder_is_empty);
+                // println!("Snapshot is empty: {}", snapshot_is_empty && builder_is_empty);
                 snapshot_is_empty && builder_is_empty
             }
         };
@@ -276,7 +273,7 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
-                                        println!("Backfill: Barrier from upstream");
+                                        println!("Backfill: Barrier from upstream {:?}", barrier);
                                         // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
@@ -435,6 +432,8 @@ where
                     snapshot_read_epoch,
                     total_snapshot_processed_rows,
                 );
+
+                println!("persisted epoch: {:?}", barrier.epoch);
 
                 // Persist state on barrier
                 persist_state_per_vnode(

@@ -416,6 +416,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     // No progress -> No need to commit anything.
     if backfill_state.has_no_progress() {
         table.commit_no_data_expected(epoch);
+        return Ok(());
     }
 
     let mut has_progress = false;
