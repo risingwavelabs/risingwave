@@ -832,7 +832,7 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            4 * 1024 * 1024 * 1024 // 4GB
+            8 * 1024 * 1024 * 1024 // 10GB
         }
 
         pub fn split_group_size_limit() -> u64 {

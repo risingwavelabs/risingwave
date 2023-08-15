@@ -98,7 +98,7 @@ mod worker;
 use compaction::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 16;
+const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 32;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -2339,21 +2339,26 @@ where
             for (table_id, table_size) in &group.table_statistic {
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
+                let mut do_not_split = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
                         let window_total_size = history.iter().sum::<u64>();
                         is_high_write_throughput = history.iter().all(|throughput| {
                             *throughput > self.env.opts.table_write_throughput_threshold
                         });
-                        is_low_write_throughput = window_total_size
-                            < (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
-                                * self.env.opts.min_table_split_write_throughput;
+                        is_low_write_throughput = history.iter().any(|throughput| {
+                            *throughput < self.env.opts.min_table_split_write_throughput
+                        });
+                        do_not_split = history.iter().all(|throughput| {
+                            *throughput < self.env.opts.min_table_split_write_throughput / 2
+                        });
                     }
                 }
                 let state_table_size = *table_size;
 
-                if state_table_size < self.env.opts.min_table_split_size
-                    && !is_high_write_throughput
+                if (state_table_size < self.env.opts.min_table_split_size
+                    && !is_high_write_throughput)
+                    || do_not_split
                 {
                     continue;
                 }
