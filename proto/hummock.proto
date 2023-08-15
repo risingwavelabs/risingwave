@@ -445,16 +445,20 @@ message DispatchCompactionTaskRequest {
     CancelCompactTask cancel_compact_task = 5;
   }
 	uint32 block_size_kb = 6;
-	fint64 compactor_max_task_multiplier = 7;
-  fint64 compactor_max_task_multiplier = 8;
+	uint64 compactor_max_task_multiplier = 7;
   // The following two should be cached in RPC proxy.
 	// Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress write op.
-	uint64 start_sst_id = 9;
+	uint64 start_sst_id = 8;
 	// Used to build filter_key_extract.
-	repeated catalog.Table tables = 10;
+	repeated catalog.Table tables = 9;
 }
 
 message DispatchCompactionTaskResponse {
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+  }
   oneof event {
     CompactTaskProgress progress = 1;
     ReportTask report_task = 2;
