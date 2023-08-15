@@ -82,8 +82,8 @@ ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
-ENV CLASSPAT ${CLASSPATH}
-ENV CLASSPAT ${HADOOP_CONF_DIR}:${CLASSPATH}
+ENV CLASSPATH ${CLASSPATH}
+ENV CLASSPATH ${HADOOP_CONF_DIR}:${CLASSPATH}
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
