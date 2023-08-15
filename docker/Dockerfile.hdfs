@@ -20,7 +20,6 @@ WORKDIR /risingwave
 COPY ./ /risingwave
 COPY ./docker/hdfs_env.sh /risingwave/hdfs_env.sh 
 
-
 ENV PATH /root/.cargo/bin/:$PATH
 
 ENV IN_CONTAINER=1
