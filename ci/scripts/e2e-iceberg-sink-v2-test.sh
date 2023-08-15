@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
-set -euox pipefail
+set -euo pipefail
 
 source ci/scripts/common.sh
 
