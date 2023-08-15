@@ -1,7 +1,4 @@
 statement ok
-set streaming_parallelism = 1;
-
-statement ok
 CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar);
 
 statement ok
