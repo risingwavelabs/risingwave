@@ -646,7 +646,7 @@ impl PartitionStats {
         broker_mapping: &HashMap<(String, i32), String>,
         stats: &Topic,
     ) {
-        for (_partition, partition_stats) in &stats.partitions {
+        for partition_stats in stats.partitions.values() {
             self.report_inner(id, client_id, topic, broker_mapping, partition_stats);
         }
     }

@@ -108,8 +108,8 @@ impl PrivateLinkConsumerContext {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
         Ok(Self {
             inner,
-            metrics,
             identifier,
+            metrics,
         })
     }
 }
@@ -149,8 +149,8 @@ impl PrivateLinkProducerContext {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
         Ok(Self {
             inner,
-            metrics,
             identifier,
+            metrics,
         })
     }
 }
