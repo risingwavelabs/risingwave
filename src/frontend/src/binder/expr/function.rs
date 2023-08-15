@@ -889,11 +889,12 @@ impl Binder {
                                                 SubqueryKind::Scalar,
                                             ))))
                                         },
-                                        // Thess options are invalid in RW so we return 0 value as the result
+                                        // These options are invalid in RW so we return 0 value as the result
                                         "fsm"|"vm"|"init" => {
                                             Ok(ExprImpl::literal_int(0))
                                         },
-                                        _ => Err(ErrorCode::ExprError("invalid fork name".into()).into())
+                                        _ => Err(ErrorCode::InvalidInputSyntax(
+                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
                                     }
                             },
                             _ => Err(ErrorCode::ExprError(
