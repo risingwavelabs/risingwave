@@ -5,7 +5,7 @@ description = "E2e test with iceberg"
 authors = ["risingwavelabs"]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.10"
 pyspark = { version = "3.4.1", extras = ["sql", "connect"] }
 
 
