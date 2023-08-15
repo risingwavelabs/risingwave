@@ -447,7 +447,10 @@ impl JsonParseOptions {
             )
             .into(),
 
+            // String containing json object, e.g. "{\"a\": 1, \"b\": 2}"
+            // Try to parse it as json object.
             (Some(DataType::Struct(_)), ValueType::String) => {
+                // TODO: avoid copy by accepting `&mut BorrowedValue` in `parse` method.
                 let mut value = value.as_str().unwrap().as_bytes().to_vec();
                 let value =
                     simd_json::to_borrowed_value(&mut value[..]).map_err(|_| create_error())?;
