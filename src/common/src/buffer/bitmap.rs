@@ -91,7 +91,7 @@ impl BitmapBuilder {
         let vec_len = Bitmap::vec_len(len);
         let mut data = vec![usize::MAX; vec_len];
         if vec_len >= 1 && len % BITS != 0 {
-            data[vec_len - 1] = 1 << (len % BITS) - 1;
+            data[vec_len - 1] = (1 << (len % BITS)) - 1;
         }
         BitmapBuilder { len, data }
     }
