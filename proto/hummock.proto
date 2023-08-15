@@ -458,7 +458,7 @@ message DispatchCompactionTaskResponse {
   oneof event {
     CompactTaskProgress progress = 1;
     ReportTask report_task = 2;
-    // Maybe heartbeat is no need in the response, beacuse rpc proxy can get the compaction pod status.
+    // Maybe heartbeat is no need in the response, because rpc proxy can get the compaction pod status.
     // HeartBeat heart_beat = 3;
   }
 }
