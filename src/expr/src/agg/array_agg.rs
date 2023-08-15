@@ -32,11 +32,9 @@ impl From<State> for ListValue {
     }
 }
 
-impl TryFrom<ScalarImpl> for State {
-    type Error = ();
-
-    fn try_from(state: ScalarImpl) -> Result<Self, Self::Error> {
-        state.try_into().map_err(|_| ())
+impl From<ScalarImpl> for State {
+    fn from(state: ScalarImpl) -> Self {
+        State(state.into_list().into())
     }
 }
 
