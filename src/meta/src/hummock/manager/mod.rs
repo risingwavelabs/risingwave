@@ -2356,9 +2356,18 @@ where
                 }
                 let state_table_size = *table_size;
 
-                if (state_table_size < self.env.opts.min_table_split_size
-                    && !is_high_write_throughput)
-                    || do_not_split
+                if do_not_split {
+                    continue;
+                }
+
+                if state_table_size < self.env.opts.min_table_split_size
+                    && !is_high_write_throughput
+                {
+                    continue;
+                }
+
+                if state_table_size < self.env.opts.split_group_size_limit
+                    && is_low_write_throughput
                 {
                     continue;
                 }
@@ -2366,36 +2375,35 @@ where
                 let parent_group_id = group.group_id;
                 let mut target_compact_group_id = None;
                 let mut allow_split_by_table = false;
-                if state_table_size < self.env.opts.split_group_size_limit
-                    && is_low_write_throughput
-                {
-                    // do not split a large table and a small table because it would increase IOPS
-                    // of small table.
-                    if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-                        let rest_group_size = group.group_size - state_table_size;
-                        if rest_group_size < state_table_size
-                            && rest_group_size < self.env.opts.min_table_split_size
+
+                // do not split a large table and a small table because it would increase IOPS
+                // of small table.
+                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                    let rest_group_size = group.group_size - state_table_size;
+                    if rest_group_size < state_table_size
+                        && rest_group_size < self.env.opts.min_table_split_size
+                    {
+                        continue;
+                    }
+                }
+
+                if is_low_write_throughput {
+                    for group in &group_infos {
+                        // do not move to mv group or state group
+                        if !group.split_by_table || group.group_id == mv_group_id
+                            || group.group_id == default_group_id
+                            || group.group_id == parent_group_id
+                            // do not move state-table to a large group.
+                            || group.group_size + state_table_size > group_size_limit
+                            // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
+                            || group.group_size + state_table_size > group.group_size - state_table_size
                         {
                             continue;
                         }
-                    } else {
-                        for group in &group_infos {
-                            // do not move to mv group or state group
-                            if !group.split_by_table || group.group_id == mv_group_id
-                                || group.group_id == default_group_id
-                                || group.group_id == parent_group_id
-                                // do not move state-table to a large group.
-                                || group.group_size + state_table_size > group_size_limit
-                                // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
-                                || group.group_size + state_table_size > group.group_size - state_table_size
-                            {
-                                continue;
-                            }
-                            target_compact_group_id = Some(group.group_id);
-                        }
-                        allow_split_by_table = true;
-                        partition_vnode_count = 1;
+                        target_compact_group_id = Some(group.group_id);
                     }
+                    allow_split_by_table = true;
+                    partition_vnode_count = 1;
                 }
 
                 let ret = self
