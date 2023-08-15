@@ -21,7 +21,6 @@ use risingwave_expr::agg::{build, AggCall, BoxedAggState};
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::table::TableState;
 use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -29,12 +28,8 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
-    /// The state is stored in the result table. No standalone state table is needed.
-    ResultValue,
-
-    /// The state is stored in a single state table whose schema is deduced by frontend and backend
-    /// with implicit consensus.
-    Table { table: StateTable<S> },
+    /// The state is stored as a value in the intermediate state table.
+    Value,
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
     /// `mapping` describes the mapping between the columns in the state table and the input
@@ -48,13 +43,9 @@ pub enum AggStateStorage<S: StateStore> {
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
 pub enum AggState {
-    /// State as single scalar value and is same as output.
+    /// State as single scalar value.
     /// e.g. `count`, `sum`, append-only `min`/`max`.
     Value(BoxedAggState),
-
-    /// State as single scalar value but is different from output.
-    /// e.g. append-only `single_phase_approx_count_distinct`.
-    Table(TableState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
     MaterializedInput(Box<MaterializedInputState>),
@@ -64,7 +55,6 @@ impl EstimateSize for AggState {
     fn estimated_heap_size(&self) -> usize {
         match self {
             Self::Value(state) => state.estimated_heap_size(),
-            Self::Table(state) => state.estimated_heap_size(),
             Self::MaterializedInput(state) => state.estimated_size(),
         }
     }
@@ -73,25 +63,21 @@ impl EstimateSize for AggState {
 impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
-    pub async fn create(
+    pub fn create(
         agg_call: &AggCall,
         storage: &AggStateStorage<impl StateStore>,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
-        group_key: Option<&GroupKey>,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
-            AggStateStorage::ResultValue => {
+            AggStateStorage::Value => {
                 let mut state = build(agg_call)?;
                 if let Some(prev) = prev_output {
                     state.set_state(prev.clone());
                 }
                 Self::Value(state)
-            }
-            AggStateStorage::Table { table } => {
-                Self::Table(TableState::new(agg_call, table, group_key).await?)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
                 Self::MaterializedInput(Box::new(MaterializedInputState::new(
@@ -118,10 +104,6 @@ impl AggState {
                 state.update(&chunk).await?;
                 Ok(())
             }
-            Self::Table(state) => {
-                let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
-                state.apply_chunk(&chunk).await
-            }
             Self::MaterializedInput(state) => {
                 // the input chunk for minput is unprojected
                 let chunk = chunk.with_visibility(visibility);
@@ -138,12 +120,8 @@ impl AggState {
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                debug_assert!(matches!(storage, AggStateStorage::Value));
                 Ok(state.get_output()?)
-            }
-            Self::Table(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.get_output()
             }
             Self::MaterializedInput(state) => {
                 let state_table = must_match!(
