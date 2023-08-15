@@ -560,11 +560,7 @@ impl<S: MetaStore> HummockManager<S> {
                     .await
                     .default_compaction_config();
                 config.split_by_state_table = allow_split_by_table;
-                if !allow_split_by_table {
-                    // TODO: remove it after we increase `max_bytes_for_level_base` for all group.
-                    config.max_bytes_for_level_base *= 4;
-                    config.split_weight_by_vnode = weight_split_by_vnode;
-                }
+                config.split_weight_by_vnode = weight_split_by_vnode;
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
