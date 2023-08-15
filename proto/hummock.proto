@@ -435,6 +435,33 @@ message SubscribeCompactionEventResponse {
   uint64 create_at = 7;
 }
 
+message DispatchCompactionTaskRequest {
+  // DispatchCompactionTaskRequest is used to pass compaction task level parameters.
+	oneof task {
+    CompactTask compact_task = 1;
+    VacuumTask vacuum_task = 2;
+    FullScanTask full_scan_task = 3;
+    ValidationTask validation_task = 4;
+    CancelCompactTask cancel_compact_task = 5;
+  }
+	uint32 block_size_kb = 6;
+	fint64 compactor_max_task_multiplier = 7;
+  fint64 compactor_max_task_multiplier = 8;
+  // The following two should be cached in RPC proxy.
+	// Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress write op.
+	uint64 start_sst_id = 9;
+	// Used to build filter_key_extract.
+	repeated catalog.Table tables = 10;
+}
+
+message DispatchCompactionTaskResponse {
+  oneof event {
+    CompactTaskProgress progress = 1;
+    ReportTask report_task = 2;
+    HeartBeat heart_beat = 3;
+  }
+}
+
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
