@@ -10,21 +10,21 @@ use crate::server_pb::{
     StartTrainingRequest, StartTrainingResponse,
 };
 
-pub struct Recwave {
+pub struct FeatureStoreServer {
     pub(crate) kafka: KafkaSink,
 }
 
 #[tonic::async_trait]
-impl Server for Recwave {
+impl Server for FeatureStoreServer {
     async fn get_feature(
         &self,
         request: Request<GetFeatureRequest>,
     ) -> Result<Response<GetFeatureResponse>, Status> {
         let userid = request.into_inner().userid;
-        println!("Recwave::get_feature: userid={}", userid);
-        let (recall_count, sum) = self.recall(userid.clone()).await.unwrap();
+        println!("MFA: get_feature: userid={}", userid);
+        let (count, sum) = self.get_mfa_feature_from_rw(userid.clone()).await.unwrap();
         Ok(Response::new(GetFeatureResponse {
-            count: recall_count,
+            count: count,
             sum: sum,
         }))
     }
@@ -65,7 +65,7 @@ impl Server for Recwave {
     }
 }
 
-impl Recwave {
+impl FeatureStoreServer {
     async fn mock_report_action(
         &self,
         message: &ReportActionRequest,

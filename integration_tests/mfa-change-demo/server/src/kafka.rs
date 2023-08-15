@@ -22,7 +22,7 @@ impl KafkaSink {
     pub(crate) fn new(brokers: String, output_topic: String) -> KafkaSink {
         KafkaSink {
             client_config: ClientConfig::new()
-                .set("group.id", "recwave-recommender")
+                .set("group.id", "feature-store")
                 .set("bootstrap.servers", brokers.clone())
                 .set("queue.buffering.max.ms", "0") // Do not buffer
                 .create()
@@ -45,12 +45,12 @@ impl KafkaSink {
 
     pub async fn mock_consume() {
         let consumer: LoggingConsumer = ClientConfig::new()
-            .set("group.id", "recwave-recommender")
+            .set("group.id", "feature-store")
             .set("bootstrap.servers", "localhost:29092")
             .create_with_context(CustomContext)
             .expect("Failed to create consumer");
         consumer
-            .subscribe(&vec!["recwave"])
+            .subscribe(&vec!["mfa"])
             .expect("Failed to subscribe");
         println!("Ready to consume");
 

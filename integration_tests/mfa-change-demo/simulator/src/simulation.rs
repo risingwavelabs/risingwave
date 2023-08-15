@@ -23,7 +23,7 @@ pub async fn main_loop(simulator_type: String) {
     let client = Arc::new(Mutex::new(
         ServerClient::connect("https://127.0.0.1:2666")
             .await
-            .expect("failed to connect to recommender server"),
+            .expect("failed to connect to feature store server"),
     ));
     println!("Connected to server");
     match simulator_type.as_str() {

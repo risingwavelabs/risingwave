@@ -2,13 +2,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use clap::{App, Arg, ArgMatches};
 
+use crate::feature_store::FeatureStoreServer;
 use crate::kafka::KafkaSink;
-use crate::recwave::Recwave;
 use crate::server_pb::server_server::ServerServer;
 
+mod feature_store;
 mod kafka;
 mod model;
-mod recwave;
 mod server_pb;
 mod serving;
 
@@ -30,7 +30,7 @@ async fn main() {
     kafka_sink
         .send("0".to_string(), "{init: true}".to_string())
         .await;
-    let server = ServerServer::new(Recwave { kafka: kafka_sink });
+    let server = ServerServer::new(FeatureStoreServer { kafka: kafka_sink });
 
     tonic::transport::Server::builder()
         .add_service(server)
@@ -43,8 +43,8 @@ async fn main() {
 }
 
 fn get_args<'a>() -> ArgMatches<'a> {
-    App::new("recwave-recommender")
-        .about("The recommender of recwave")
+    App::new("feature-store")
+        .about("Feature store")
         .arg(
             Arg::with_name("brokers")
                 .short("b")

@@ -2,13 +2,13 @@
 
 Feature store demo.
 
-We simulate functionality of feature store demo by using a simple business scenario. We use 'simulator' to simulate a constant stream of user modifying mfa. 
+We use 'simulators' to simulate data input.
 
-Then all message will be send to 'server', and write in kafka -> risingwave. Risingwave will compute the data based on pre-defined operations. (In this demo, we will calculate the 30-minute mfa change count and the sum of accumulated user changes in 30-minute).
+Then all messages will be sent to the 'server' and written in Kafka -> RisingWave. RisingWave will process the data based on pre-defined operations.
 
-We also use 'simulator' to simulate user query our 'feature'. The 'server' will accept requests -> query data -> return results.
+We also utilize the 'simulator' to simulate user queries to our 'feature'. The 'server' will receive requests -> query data -> and return results.
 
-If we want to modify our business logic, we only need to modify the materialized view in our risingwave (use sql statement).
+If we intend to modify our business logic, we simply need to update the materialized view within our RisingWave by using SQL statements.
 
 ## Installation
 
@@ -18,24 +18,26 @@ Run it in local.
 
 ```./run_local.sh```
 
-we can change recwave-start.sql and server/src/serving to add new demands or modift it.
+We have the option to modify the mfa-start.sql file and the server/src/serving directory to accommodate new requirements or make modifications.
 
 2. Start feature store serve demo. It can accept data writing to Kafka and provide feature query services
 
 ```python3 server/model ```
 ```cd server ```
-```cargo run ```
+```cargo run -- --brokers localhost:9092 --output-topics taxi```
 
-We can change the configuration to use py to execute sql (It might be easier if we need to use deep learning) 
+We can adjust the configuration to utilize Python for executing SQL queries (which might be more convenient, especially if deep learning needs to be incorporated).
 
-3. Run data simulator. It can generate simulated data and simulate user queries.
+3. Run data simulator.
 
 ```cd simulator```
-```cargo run```
+```cargo run -- --types taxi```
 
-* Recommender Pipeline
-    * Build Dependencies: librdkafka, pkg-config , openssl
+4. We also can run mfa demo.
 
+```cd server ```
+```cargo run -- --brokers localhost:9092 --output-topics mfa```
+```cd simulator```
+```cargo run -- --types mfa```
 
-
-
+* Build Dependencies: librdkafka, pkg-config , openssl

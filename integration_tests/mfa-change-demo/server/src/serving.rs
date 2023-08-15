@@ -4,7 +4,7 @@ use tonic::{Response, Status};
 use crate::model::model_client::ModelClient;
 use crate::model::{GetAmountRequest, TrainingRequest};
 use crate::server_pb::StartTrainingResponse;
-use crate::Recwave;
+use crate::FeatureStoreServer;
 
 pub const GET_COUNT_SQL: &str = "
 select count from user_mfa_change_count where userid = $1 order by window_start desc limit 1;
@@ -13,8 +13,8 @@ pub const GET_SUM_SQL: &str = "
 select udf_sum from user_mfa_change_sum where userid = $1 order by window_start desc limit 1;
 ";
 
-impl Recwave {
-    pub async fn recall(&self, userid: String) -> Result<(u64, i64), Status> {
+impl FeatureStoreServer {
+    pub async fn get_mfa_feature_from_rw(&self, userid: String) -> Result<(u64, i64), Status> {
         let con = format!("dbname=dev user=root host=127.0.0.1 port=4566");
         let (client, connection) = tokio_postgres::connect(&con, NoTls).await.unwrap();
         tokio::spawn(async move {

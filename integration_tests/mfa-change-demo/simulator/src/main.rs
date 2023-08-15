@@ -17,8 +17,8 @@ async fn main() {
 }
 
 fn get_args<'a>() -> ArgMatches<'a> {
-    App::new("recwave-recommender")
-        .about("The recommender of recwave")
+    App::new("simulator")
+        .about("The simulator")
         .arg(
             Arg::with_name("types")
                 .short("t")

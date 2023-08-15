@@ -9,7 +9,6 @@ def new_user():
     id = str(np.random.randint(1, 1000_000_000))
 
     activeness = np.exp(np.random.lognormal(mean=1))
-    # routines = generate_routine_dict(activeness)
     distrib = dict(userid=id, activeness=activeness)
 
     for tag, gen in UserProperties.generators.items():

@@ -21,13 +21,11 @@ python3 -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. model.proto
 ```
 
 """
-
 class TrainingModelService(ModelServicer):
     def __init__(self):
         super(TrainingModelService, self).__init__()
         self.model = GradientBoostingRegressor()
         self.conn = psycopg.connect("dbname=dev user=root host=127.0.0.1 port=4566")
-        
     def Training(self, request, context):
         print(f"training!")
         try:
@@ -44,7 +42,7 @@ class TrainingModelService(ModelServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(e)
             return TrainingResponse()
-        
+
     def GetAmount(self, request, context):
         print(f"get amount!")
         do_location_id = request.do_location_id
@@ -75,7 +73,6 @@ class TrainingModelService(ModelServicer):
         server.add_insecure_port('[::]:8080')
         server.start()
         server.wait_for_termination()
-
 
 if __name__ == '__main__':
     for i in range(1):

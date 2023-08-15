@@ -31,11 +31,11 @@ create materialized view mv1 as select lpep_pickup_datetime ,lpep_dropoff_dateti
     tip_amount,tolls_amount ,improvement_surcharge ,total_amount,
     congestion_surcharge from taxiallfeature where payment_type in (1,2,4);
 
-create materialized view mv2 as select 
+create materialized view mv2 as select
     do_location_id,
-    avg(fare_amount) as avg_amount, 
+    avg(fare_amount) as avg_amount,
     window_start,
-    avg(EXTRACT(EPOCH FROM lpep_dropoff_datetime - lpep_pickup_datetime)::INT) / 10 as latency, 
+    avg(EXTRACT(EPOCH FROM lpep_dropoff_datetime - lpep_pickup_datetime)::INT) / 10 as latency,
     avg(passenger_count) as passenger_count,
     avg(trip_distance) as trip_distance,
     avg(extra) as extra,

@@ -1,15 +1,16 @@
 #!/bin/bash
 set -ex
 
-docker compose exec kafka kafka-topics --create --topic recwave --partitions 1 --replication-factor 1 --bootstrap-server=127.0.0.1:29092
+docker compose exec kafka kafka-topics --create --topic mfa --partitions 1 --replication-factor 1 --bootstrap-server=127.0.0.1:29092
 sleep 5
 
-docker compose exec meta-node-0 pip install risingwave 
-docker compose exec meta-node-0 python3 udf.py > /dev/null 2>&1 & lsof -i:8815  > /dev/null 
+docker compose exec meta-node-0 pip install risingwave
+
+docker compose exec meta-node-0 python3 udf.py > /dev/null 2>&1 & lsof -i:8815  > /dev/null
 sleep 5
 
-psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f recwave-start.sql || {
-  echo "failed to initialize db for recwave"
+psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f mfa-start.sql || {
+  echo "failed to initialize db for mfa"
   exit 1
 }
 sleep 2
@@ -18,4 +19,4 @@ pip3 install -r generator/requirements.txt
 
 export GENERATOR_PATH=generator
 python3 generator --num-users=15 \
-  --dump-users="$GENERATOR_PATH/users.json" 
+  --dump-users="$GENERATOR_PATH/users.json"

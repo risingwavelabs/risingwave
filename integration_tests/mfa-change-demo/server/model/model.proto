@@ -1,15 +1,6 @@
 syntax = "proto3";
 package model;
 
-//get_recommendation:
-//    request: userid String
-//    response: list[itemid String] (MVP: mock response)
-//
-//
-//interact:
-//    request: userid String, itemid String, action ActionType
-//    response: timestamp (MVP: log output --> Step I: Kafka to RW)
-
 service Model {
   rpc GetAmount(GetAmountRequest) returns (GetAmountResponse) {}
   rpc Training(TrainingRequest) returns (TrainingResponse) {}

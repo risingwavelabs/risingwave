@@ -57,8 +57,7 @@ message ReportTaxiActionRequest {
     double congestion_surcharge = 20;
 }
 
-message ReportTaxiActionResponse {
-}
+message ReportTaxiActionResponse {}
 
 message GetTaxiAmountRequest {
     int64 DOLocationID = 1;
@@ -68,10 +67,6 @@ message GetTaxiAmountResponse {
     double fare_amount = 1;
 }
 
-message StartTrainingRequest{
+message StartTrainingRequest{}
 
-}
-
-message StartTrainingResponse{
-    
-}
+message StartTrainingResponse{}

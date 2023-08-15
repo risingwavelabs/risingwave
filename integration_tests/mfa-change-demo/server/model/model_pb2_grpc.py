@@ -6,16 +6,7 @@ import model_pb2 as model__pb2
 
 
 class ModelStub(object):
-    """get_recommendation:
-    request: userid String
-    response: list[itemid String] (MVP: mock response)
-
-
-    interact:
-    request: userid String, itemid String, action ActionType
-    response: timestamp (MVP: log output --> Step I: Kafka to RW)
-
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
         """Constructor.
@@ -36,16 +27,7 @@ class ModelStub(object):
 
 
 class ModelServicer(object):
-    """get_recommendation:
-    request: userid String
-    response: list[itemid String] (MVP: mock response)
-
-
-    interact:
-    request: userid String, itemid String, action ActionType
-    response: timestamp (MVP: log output --> Step I: Kafka to RW)
-
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def GetAmount(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -80,16 +62,7 @@ def add_ModelServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Model(object):
-    """get_recommendation:
-    request: userid String
-    response: list[itemid String] (MVP: mock response)
-
-
-    interact:
-    request: userid String, itemid String, action ActionType
-    response: timestamp (MVP: log output --> Step I: Kafka to RW)
-
-    """
+    """Missing associated documentation comment in .proto file."""
 
     @staticmethod
     def GetAmount(request,

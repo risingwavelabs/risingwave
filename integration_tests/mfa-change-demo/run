@@ -1,6 +1,4 @@
 #!/bin/bash
-
-
 set -ex
 
 docker compose exec kafka kafka-topics --create --topic taxi --partitions 1 --replication-factor 1 --bootstrap-server=127.0.0.1:29092

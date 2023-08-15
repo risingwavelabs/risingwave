@@ -40,8 +40,8 @@ services:
       service: compute-node-0
     volumes:
       - "./server/udf.py:/udf.py"
-      - "./recwave-start.sql:/recwave-start.sql"
-      - "./recwave.sql:/recwave.sql"
+      - "./mfa-start.sql:/mfa-start.sql"
+      - "./mfa-mock.sql:/mfa-mock.sql"
   etcd-0:
     extends:
       file: ../../docker/docker-compose-nightly.yml
@@ -55,14 +55,14 @@ services:
       file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
-    build: 
+    build:
     extends:
       file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
     volumes:
       - "./server/udf.py:/udf.py"
-      - "./recwave-start.sql:/recwave-start.sql"
-      - "./recwave.sql:/recwave.sql"
+      - "./mfa-start.sql:/mfa-start.sql"
+      - "./mfa-mock.sql:/mfa-mock.sql"
     ports:
       - "8815:8815"
   minio-0:
@@ -87,4 +87,3 @@ volumes:
   prometheus-0:
     external: false
 name: risingwave-compose
-
