@@ -414,3 +414,87 @@ impl VisMut {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vis_mut_from_compact() {
+        let n: usize = 128;
+        let vis = Vis::Compact(n);
+        let mut vis = vis.into_mut();
+        assert_eq!(vis.len(), n);
+
+        for i in 0..n {
+            assert!(vis.is_set(i), "{}", i);
+        }
+        vis.set(0, true);
+        for i in 0..n {
+            assert!(vis.is_set(i), "{}", i);
+        }
+        assert_eq!(vis.len(), n);
+
+        let to_false = vec![1usize, 2, 14, 25, 17, 77, 62, 96];
+        for i in &to_false {
+            vis.set(*i, false);
+        }
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), !to_false.contains(&i), "{}", i);
+        }
+
+        let vis: Vis = vis.into();
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), !to_false.contains(&i), "{}", i);
+        }
+    }
+    #[test]
+    fn test_vis_mut_from_bitmap() {
+        let zeros = 61usize;
+        let ones = 62usize;
+        let n: usize = ones + zeros;
+
+        let mut builder = BitmapBuilder::default();
+        builder.append_bitmap(&Bitmap::zeros(zeros));
+        builder.append_bitmap(&Bitmap::ones(ones));
+
+        let vis = Vis::Bitmap(builder.finish());
+        assert_eq!(vis.len(), n);
+
+        let mut vis = vis.into_mut();
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), i >= zeros, "{}", i);
+        }
+
+        vis.set(0, false);
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), i >= zeros, "{}", i);
+        }
+
+        let toggles = vec![1usize, 2, 14, 25, 17, 77, 62, 96];
+        for i in &toggles {
+            let i = *i;
+            vis.set(i, i < zeros);
+        }
+        assert_eq!(vis.len(), n);
+        for i in 0..zeros {
+            assert_eq!(vis.is_set(i), toggles.contains(&i), "{}", i);
+        }
+        for i in zeros..n {
+            assert_eq!(vis.is_set(i), !toggles.contains(&i), "{}", i);
+        }
+
+        let vis: Vis = vis.into();
+        assert_eq!(vis.len(), n);
+        for i in 0..zeros {
+            assert_eq!(vis.is_set(i), toggles.contains(&i), "{}", i);
+        }
+        for i in zeros..n {
+            assert_eq!(vis.is_set(i), !toggles.contains(&i), "{}", i);
+        }
+    }
+}
