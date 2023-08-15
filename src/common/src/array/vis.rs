@@ -386,7 +386,7 @@ impl VisMut {
 
     /// # Panics
     ///
-    /// Panics if `idx > len`.
+    /// Panics if `idx >= len`.
     pub fn is_set(&self, idx: usize) -> bool {
         match &self.state {
             VisMutState::Bitmap(b) => b.is_set(idx),
