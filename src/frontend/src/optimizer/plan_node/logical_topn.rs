@@ -101,6 +101,11 @@ impl LogicalTopN {
         &self.core.group_key
     }
 
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
+    pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
+        self.core.decompose()
+    }
+
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution().clone();
 
@@ -170,7 +175,9 @@ impl LogicalTopN {
             self.offset(),
             self.topn_order().clone(),
         );
-        let global_top_n = StreamTopN::new(global_top_n);
+
+        // TODO(st1page): solve it
+        let global_top_n = StreamTopN::with_stream_key(global_top_n, self.logical_pk().to_vec());
 
         // use another projection to remove the column we added before.
         exprs.pop();

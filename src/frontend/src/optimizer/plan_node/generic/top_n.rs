@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
@@ -85,6 +85,22 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             read_prefix_len_hint,
         )
     }
+
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
+    pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
+        let (limit, with_ties) = match self.limit_attr {
+            TopNLimit::Simple(limit) => (limit, false),
+            TopNLimit::WithTies(limit) => (limit, true),
+        };
+        (
+            self.input,
+            limit,
+            self.offset,
+            with_ties,
+            self.order,
+            self.group_key,
+        )
+    }
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
@@ -138,7 +154,11 @@ impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
             vec.push(("with_ties", Pretty::debug(&true)));
         }
         if !self.group_key.is_empty() {
-            vec.push(("group_key", Pretty::debug(&self.group_key)));
+            let f = |i| Pretty::display(&FieldDisplay(&self.input.schema()[i]));
+            vec.push((
+                "group_key",
+                Pretty::Array(self.group_key.iter().copied().map(f).collect()),
+            ));
         }
         childless_record(name, vec)
     }
@@ -155,7 +175,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         if self.limit_attr.max_one_row() {
             Some(self.group_key.clone())
         } else {
-            Some(self.input.logical_pk().to_vec())
+            let mut pk = self.input.logical_pk().to_vec();
+            for i in &self.group_key {
+                if !pk.contains(i) {
+                    pk.push(*i);
+                }
+            }
+            Some(pk)
         }
     }
 

@@ -42,7 +42,9 @@ pub use self::query::{
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use self::value::{
+    CstyleEscapedString, DateTimeField, DollarQuotedString, TrimWhereField, Value,
+};
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
@@ -1416,16 +1418,17 @@ impl fmt::Display for Statement {
                     if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
-                if let Some(emit_mode) = emit_mode {
-                    write!(f, " EMIT {}", emit_mode)?;
-                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if !columns.is_empty() {
                     write!(f, " ({})", display_comma_separated(columns))?;
                 }
-                write!(f, " AS {}", query)
+                write!(f, " AS {}", query)?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
+                Ok(())
             }
             Statement::CreateTable {
                 name,
@@ -1954,10 +1957,11 @@ pub enum FunctionArgExpr {
     /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, Vec<Ident>),
-    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
-    QualifiedWildcard(ObjectName),
-    /// An unqualified `*` or `* with (columns)`
-    WildcardOrWithExcept(Option<Vec<Expr>>),
+    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`, followed by optional
+    /// except syntax
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
+    /// An unqualified `*` or `* except (columns)`
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -1974,11 +1978,25 @@ impl fmt::Display for FunctionArgExpr {
                         .format_with("", |i, f| f(&format_args!(".{i}")))
                 )
             }
-            FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            FunctionArgExpr::WildcardOrWithExcept(w) => match w {
+            FunctionArgExpr::QualifiedWildcard(prefix, except) => match except {
                 Some(exprs) => write!(
                     f,
-                    "EXCEPT ({})",
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+
+            FunctionArgExpr::Wildcard(except) => match except {
+                Some(exprs) => write!(
+                    f,
+                    "* EXCEPT ({})",
                     exprs
                         .iter()
                         .map(|v| v.to_string())

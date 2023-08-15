@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::BuiltinView;
 
 /// The catalog `pg_attribute` stores information about table columns. There will be exactly one
 /// `pg_attribute` row for every column in every table in the database. (There will also be
@@ -23,14 +26,34 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 ///
 /// In RisingWave, we simply make it contain the columns of the view and all the columns of the
 /// tables that are not internal tables.
-pub const PG_ATTRIBUTE_TABLE_NAME: &str = "pg_attribute";
-pub const PG_ATTRIBUTE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "attrelid"),
-    (DataType::Varchar, "attname"),
-    (DataType::Int32, "atttypid"),
-    (DataType::Int16, "attlen"),
-    (DataType::Int16, "attnum"),
-    (DataType::Boolean, "attnotnull"),
-    (DataType::Boolean, "attisdropped"),
-    (DataType::Int32, "atttypmod"),
-];
+pub static PG_ATTRIBUTE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_attribute",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "attrelid"),
+        (DataType::Varchar, "attname"),
+        (DataType::Int32, "atttypid"),
+        (DataType::Int16, "attlen"),
+        (DataType::Int16, "attnum"),
+        (DataType::Boolean, "attnotnull"),
+        (DataType::Boolean, "atthasdef"),
+        (DataType::Boolean, "attisdropped"),
+        (DataType::Varchar, "attidentity"),
+        (DataType::Varchar, "attgenerated"),
+        (DataType::Int32, "atttypmod"),
+    ],
+    sql: "SELECT c.relation_id AS attrelid, \
+                 c.name AS attname, \
+                 c.type_oid AS atttypid, \
+                 c.type_len AS attlen, \
+                 c.position::smallint AS attnum, \
+                 false AS attnotnull, \
+                 false AS atthasdef, \
+                 false AS attisdropped, \
+                 ''::varchar AS attidentity, \
+                 ''::varchar AS attgenerated, \
+                 -1 AS atttypmod \
+           FROM rw_catalog.rw_columns c\
+    "
+    .to_string(),
+});

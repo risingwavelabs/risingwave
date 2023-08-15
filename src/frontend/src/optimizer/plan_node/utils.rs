@@ -25,6 +25,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
+use crate::optimizer::property::Cardinality;
 use crate::utils::WithOptions;
 
 #[derive(Default)]
@@ -172,6 +173,10 @@ impl TableCatalogBuilder {
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
             dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
+            cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            cleaned_by_watermark: false,
         }
     }
 

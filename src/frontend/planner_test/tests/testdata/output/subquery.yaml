@@ -177,7 +177,9 @@
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalAgg { aggs: [] }
-        │ └─LogicalScan { table: t1, columns: [] }
+        │ └─LogicalAgg { group_key: [1:Int32], aggs: [] }
+        │   └─LogicalProject { exprs: [1:Int32] }
+        │     └─LogicalScan { table: t1, columns: [] }
         └─LogicalScan { table: t2, columns: [] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [count(1:Int32)] }
@@ -185,35 +187,40 @@
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
         ├─BatchSimpleAgg { aggs: [] }
         │ └─BatchExchange { order: [], dist: Single }
-        │   └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        │   └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+        │     └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+        │       └─BatchProject { exprs: [1:Int32] }
+        │         └─BatchScan { table: t1, columns: [], distribution: SomeShard }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
     SELECT (SELECT pg_catalog.pg_get_userbyid(1))
   logical_plan: |-
-    LogicalProject { exprs: [pg_user.name] }
+    LogicalProject { exprs: [rw_users.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalProject { exprs: [pg_user.name] }
+      └─LogicalProject { exprs: [rw_users.name] }
         └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
           ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-          └─LogicalProject { exprs: [pg_user.name] }
-            └─LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
-              └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+          └─LogicalProject { exprs: [rw_users.name] }
+            └─LogicalFilter { predicate: (1:Int32 = rw_users.id) }
+              └─LogicalShare { id: 2 }
+                └─LogicalProject { exprs: [rw_users.id, rw_users.name, rw_users.create_db, rw_users.is_super, '********':Varchar] }
+                  └─LogicalScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalScan { table: pg_user, output_columns: [pg_user.name], required_columns: [pg_user.name, pg_user.usesysid], predicate: (1:Int32 = pg_user.usesysid) }
+      └─LogicalScan { table: rw_users, output_columns: [rw_users.name], required_columns: [rw_users.name, rw_users.id], predicate: (1:Int32 = rw_users.id) }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
     ├─BatchValues { rows: [[]] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
-      └─BatchProject { exprs: [pg_user.name] }
-        └─BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
-          └─BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }
+      └─BatchProject { exprs: [rw_users.name] }
+        └─BatchFilter { predicate: (1:Int32 = rw_users.id) }
+          └─BatchScan { table: rw_users, columns: [rw_users.name, rw_users.id], distribution: Single }
 - sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
@@ -228,31 +235,78 @@
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
   logical_plan: |-
-    LogicalProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, pg_user.name] }
+    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, rw_users.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
-      │ └─LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
-      │   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind, pg_class.relam, pg_class.reltablespace] }
-      │   └─LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
-      └─LogicalProject { exprs: [pg_user.name] }
-        └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
-          └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+      ├─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
+      │ └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = rw_tables.schema_id), output: all }
+      │   ├─LogicalShare { id: 16 }
+      │   │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2] }
+      │   │   └─LogicalShare { id: 14 }
+      │   │     └─LogicalUnion { all: true }
+      │   │       ├─LogicalUnion { all: true }
+      │   │       │ ├─LogicalUnion { all: true }
+      │   │       │ │ ├─LogicalUnion { all: true }
+      │   │       │ │ │ ├─LogicalUnion { all: true }
+      │   │       │ │ │ │ ├─LogicalUnion { all: true }
+      │   │       │ │ │ │ │ ├─LogicalProject { exprs: [rw_tables.id, rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.acl] }
+      │   │       │ │ │ │ │ │ └─LogicalScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.acl, rw_tables.initialized_at, rw_tables.created_at] }
+      │   │       │ │ │ │ │ └─LogicalProject { exprs: [rw_system_tables.id, rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
+      │   │       │ │ │ │ │   └─LogicalScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
+      │   │       │ │ │ │ └─LogicalProject { exprs: [rw_sources.id, rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner, rw_sources.definition, rw_sources.acl] }
+      │   │       │ │ │ │   └─LogicalScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.format, rw_sources.row_encode, rw_sources.append_only, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at] }
+      │   │       │ │ │ └─LogicalProject { exprs: [rw_indexes.id, rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl] }
+      │   │       │ │ │   └─LogicalScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.primary_table_id, rw_indexes.original_column_ids, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl, rw_indexes.initialized_at, rw_indexes.created_at] }
+      │   │       │ │ └─LogicalProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.definition, rw_sinks.acl] }
+      │   │       │ │   └─LogicalScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.connector, rw_sinks.sink_type, rw_sinks.connection_id, rw_sinks.definition, rw_sinks.acl, rw_sinks.initialized_at, rw_sinks.created_at] }
+      │   │       │ └─LogicalProject { exprs: [rw_materialized_views.id, rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.acl] }
+      │   │       │   └─LogicalScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.acl, rw_materialized_views.initialized_at, rw_materialized_views.created_at] }
+      │   │       └─LogicalProject { exprs: [rw_views.id, rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
+      │   │         └─LogicalScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
+      │   └─LogicalShare { id: 18 }
+      │     └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+      │       └─LogicalScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+      └─LogicalProject { exprs: [rw_users.name] }
+        └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = rw_users.id) }
+          └─LogicalShare { id: 22 }
+            └─LogicalProject { exprs: [rw_users.id, rw_users.name, rw_users.create_db, rw_users.is_super, '********':Varchar] }
+              └─LogicalScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
   batch_plan: |-
-    BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
-    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, pg_user.name] }
-      └─BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
-        └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
-          ├─BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
-          │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = pg_namespace.oid, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, pg_namespace.nspname] }
-          │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
-          │   │ └─BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) }
-          │   │   └─BatchScan { table: pg_class, columns: [pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind], distribution: Single }
-          │   └─BatchExchange { order: [], dist: HashShard(pg_namespace.oid) }
-          │     └─BatchFilter { predicate: (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
-          │       └─BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname], distribution: Single }
-          └─BatchExchange { order: [], dist: HashShard(pg_user.usesysid) }
-            └─BatchProject { exprs: [pg_user.name, pg_user.usesysid] }
-              └─BatchScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name], distribution: Single }
+    BatchExchange { order: [rw_schemas.name ASC, rw_tables.name ASC], dist: Single }
+    └─BatchProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr2, rw_users.name] }
+      └─BatchProject { exprs: [rw_tables.name, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, rw_schemas.name, rw_users.name] }
+        └─BatchSort { order: [rw_schemas.name ASC, rw_tables.name ASC] }
+          └─BatchHashJoin { type: LeftOuter, predicate: rw_tables.owner = rw_users.id, output: all }
+            ├─BatchExchange { order: [], dist: HashShard(rw_tables.owner) }
+            │ └─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id, output: all }
+            │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
+            │   │ └─BatchUnion { all: true }
+            │   │   ├─BatchProject { exprs: [rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner] }
+            │   │   │ └─BatchFilter { predicate: true }
+            │   │   │   └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner] }
+            │   │   │ └─BatchFilter { predicate: true }
+            │   │   │   └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner] }
+            │   │   │ └─BatchFilter { predicate: null:Boolean }
+            │   │   │   └─BatchScan { table: rw_sources, columns: [rw_sources.name, rw_sources.schema_id, rw_sources.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner] }
+            │   │   │ └─BatchFilter { predicate: false:Boolean }
+            │   │   │   └─BatchScan { table: rw_indexes, columns: [rw_indexes.name, rw_indexes.schema_id, rw_indexes.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner] }
+            │   │   │ └─BatchFilter { predicate: null:Boolean }
+            │   │   │   └─BatchScan { table: rw_sinks, columns: [rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner] }
+            │   │   │ └─BatchFilter { predicate: true }
+            │   │   │   └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
+            │   │   └─BatchProject { exprs: [rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner] }
+            │   │     └─BatchFilter { predicate: true }
+            │   │       └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
+            │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+            │     └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
+            │       └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+            └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
+              └─BatchProject { exprs: [rw_users.name, rw_users.id] }
+                └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
 - sql: |
     create table auction (date_time date);
     select * from hop( auction, auction.date_time, INTERVAL '1', INTERVAL '3600' ) AS hop_1
@@ -273,11 +327,9 @@
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
         ├─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
         └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-            │ └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-            │   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
-            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+          └─LogicalAgg { group_key: [auction.date_time], aggs: [] }
+            └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+              └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
   batch_plan: |-
     BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
     └─BatchExchange { order: [], dist: Single }
@@ -287,19 +339,28 @@
           │ └─BatchFilter { predicate: IsNotNull(auction.date_time) }
           │   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
           └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-            └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-              └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-                ├─BatchExchange { order: [], dist: Single }
-                │ └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-                │   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-                │     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-                │       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
-                │         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
-                └─BatchValues { rows: [[]] }
-  stream_error: |-
-    Not supported: streaming nested-loop join
-    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+            └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
+              └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+                └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                  └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                    └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [date_time, window_start, window_end, auction._row_id(hidden)], stream_key: [auction._row_id, window_start, window_end, date_time], pk_columns: [auction._row_id, window_start, window_end, date_time], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
+      ├─StreamExchange { dist: HashShard(auction.date_time) }
+      │ └─StreamShare { id: 3 }
+      │   └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
+      │     └─StreamFilter { predicate: IsNotNull(auction.date_time) }
+      │       └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], pk: [auction._row_id], dist: UpstreamHashShard(auction._row_id) }
+      └─StreamProject { exprs: [auction.date_time] }
+        └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
+          └─StreamProject { exprs: [auction.date_time] }
+            └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
+              └─StreamExchange { dist: HashShard(auction.date_time) }
+                └─StreamShare { id: 3 }
+                  └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
+                    └─StreamFilter { predicate: IsNotNull(auction.date_time) }
+                      └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], pk: [auction._row_id], dist: UpstreamHashShard(auction._row_id) }
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
@@ -316,8 +377,7 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
       ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
-      └─LogicalAgg { aggs: [] }
-        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
@@ -454,3 +514,247 @@
           │   └─LogicalProject { exprs: [a1] }
           │     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: (Unbounded, Unbounded) }
           └─LogicalSource { source: c, columns: [c1, c2, _row_id], time_range: (Unbounded, Unbounded) }
+- name: test subquery in table function
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from unnest(x) i) as sum_x from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.y, t.k, sum(Unnest($0))] }
+      ├─BatchExchange { order: [], dist: HashShard(t.x) }
+      │ └─BatchScan { table: t, columns: [t.x, t.y, t.k], distribution: UpstreamHashShard(t.k) }
+      └─BatchHashAgg { group_key: [t.x], aggs: [sum(Unnest($0))] }
+        └─BatchHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0)] }
+          ├─BatchHashAgg { group_key: [t.x], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(t.x) }
+          │   └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+          └─BatchProject { exprs: [t.x, Unnest($0)] }
+            └─BatchProjectSet { select_list: [$0, Unnest($0)] }
+              └─BatchHashAgg { group_key: [t.x], aggs: [] }
+                └─BatchExchange { order: [], dist: HashShard(t.x) }
+                  └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, k, sum_x, t.x(hidden)], stream_key: [k, t.x, x], pk_columns: [k, t.x, x], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.y, t.k, sum(Unnest($0)), t.x] }
+      ├─StreamExchange { dist: HashShard(t.x) }
+      │ └─StreamTableScan { table: t, columns: [t.x, t.y, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
+      └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
+        └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
+          └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
+            ├─StreamProject { exprs: [t.x] }
+            │ └─StreamHashAgg { group_key: [t.x], aggs: [count] }
+            │   └─StreamExchange { dist: HashShard(t.x) }
+            │     └─StreamTableScan { table: t, columns: [t.x, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
+            └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
+              └─StreamProjectSet { select_list: [$0, Unnest($0)] }
+                └─StreamProject { exprs: [t.x] }
+                  └─StreamHashAgg { group_key: [t.x], aggs: [count] }
+                    └─StreamExchange { dist: HashShard(t.x) }
+                      └─StreamTableScan { table: t, columns: [t.x, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
+- name: CorrelatedInputRef in ProjectSet and apply on condition is true.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q ) as sum_x from t;
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x] }
+        └─LogicalProject { exprs: [t.x, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, Unnest($0)] }
+            └─LogicalAgg { group_key: [t.x], aggs: [] }
+              └─LogicalScan { table: t, columns: [t.x] }
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x), output: [t.x, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x] }
+        └─LogicalProject { exprs: [t.x, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, Unnest($0)] }
+            └─LogicalAgg { group_key: [t.x], aggs: [] }
+              └─LogicalScan { table: t, columns: [t.x] }
+- name: CorrelatedInputRef in ProjectSet and apply on condition refers to no table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i, 1 c) Q where k = c ) as sum_x from t;
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x, t.k] }
+        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+              │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
+    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+        │ └─LogicalScan { table: t, columns: [t.x, t.k] }
+        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+          └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+              │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
+              └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: CorrelatedInputRef in ProjectSet and apply on condition refers to table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q where k = i ) as sum_x from t;
+  optimizer_error: 'internal error: Subquery can not be unnested.'
+- name: test over window subquery 1
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT row_number() OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1 ORDER BY i;
+  batch_plan: |-
+    BatchExchange { order: [integers.i ASC], dist: Single }
+    └─BatchSort { order: [integers.i ASC] }
+      └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
+        ├─BatchExchange { order: [], dist: HashShard(integers.i) }
+        │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─BatchProject { exprs: [integers.i, row_number] }
+            └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
+                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                  └─BatchProject { exprs: [integers.i, integers.i] }
+                    └─BatchFilter { predicate: IsNotNull(integers.i) }
+                      └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, integers.i, i], pk_columns: [i, integers._row_id, integers.i], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number, integers._row_id, integers.i] }
+      ├─StreamExchange { dist: HashShard(integers.i) }
+      │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+      └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+        └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
+          └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─StreamExchange { dist: HashShard(integers.i) }
+              └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                └─StreamFilter { predicate: IsNotNull(integers.i) }
+                  └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+- name: test over window subquery 2 (with nested loop join so cannot be transformed into a stream plan)
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i1.i, (SELECT row_number() OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1, integers i2 ORDER BY i1.i;
+  batch_plan: |-
+    BatchProject { exprs: [integers.i, row_number] }
+    └─BatchExchange { order: [integers.i ASC], dist: Single }
+      └─BatchProject { exprs: [integers.i, row_number, integers.i] }
+        └─BatchSort { order: [integers.i ASC] }
+          └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
+            ├─BatchExchange { order: [], dist: HashShard(integers.i) }
+            │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+            │   ├─BatchExchange { order: [], dist: Single }
+            │   │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+            │   └─BatchExchange { order: [], dist: Single }
+            │     └─BatchScan { table: integers, columns: [], distribution: SomeShard }
+            └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+              └─BatchProject { exprs: [integers.i, row_number] }
+                └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                  └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
+                    └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                      └─BatchProject { exprs: [integers.i, integers.i] }
+                        └─BatchFilter { predicate: IsNotNull(integers.i) }
+                          └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+  stream_error: |-
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- name: test over window subquery 3
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT SUM(i) OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1 ORDER BY i;
+  batch_plan: |-
+    BatchExchange { order: [integers.i ASC], dist: Single }
+    └─BatchSort { order: [integers.i ASC] }
+      └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum] }
+        ├─BatchExchange { order: [], dist: HashShard(integers.i) }
+        │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─BatchProject { exprs: [integers.i, sum] }
+            └─BatchOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
+                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                  └─BatchProject { exprs: [integers.i, integers.i] }
+                    └─BatchFilter { predicate: IsNotNull(integers.i) }
+                      └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, integers.i, i], pk_columns: [i, integers._row_id, integers.i], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum, integers._row_id, integers.i] }
+      ├─StreamExchange { dist: HashShard(integers.i) }
+      │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+      └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+        └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
+          └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─StreamExchange { dist: HashShard(integers.i) }
+              └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                └─StreamFilter { predicate: IsNotNull(integers.i) }
+                  └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+- name: test over window subquery 4  (with nested loop join so cannot be transformed into a stream plan)
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT SUM(s1.i) OVER (ORDER BY s1.i) FROM integers s1, integers s2 WHERE i1.i=s1.i LIMIT 1) col FROM integers i1 ORDER BY i;
+  batch_plan: |-
+    BatchExchange { order: [integers.i ASC], dist: Single }
+    └─BatchSort { order: [integers.i ASC] }
+      └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum] }
+        ├─BatchExchange { order: [], dist: HashShard(integers.i) }
+        │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─BatchProject { exprs: [integers.i, sum] }
+            └─BatchOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
+                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                  └─BatchProject { exprs: [integers.i, integers.i] }
+                    └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                      ├─BatchExchange { order: [], dist: Single }
+                      │ └─BatchFilter { predicate: IsNotNull(integers.i) }
+                      │   └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+                      └─BatchExchange { order: [], dist: Single }
+                        └─BatchScan { table: integers, columns: [], distribution: SomeShard }
+  stream_error: |-
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- name: test over window subquery 5
+  sql: |
+    CREATE TABLE integers(i INTEGER, correlated_col int);
+    CREATE TABLE rows(k int, v int, correlated_col int);
+    SELECT i FROM integers where i in (select SUM(v) OVER(PARTITION BY k ORDER BY v) from rows where rows.correlated_col = integers.correlated_col);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftSemi, predicate: $expr1 = sum AND integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.i] }
+      ├─BatchExchange { order: [], dist: HashShard(integers.correlated_col, $expr1) }
+      │ └─BatchProject { exprs: [integers.i, integers.correlated_col, integers.i::Int64 as $expr1] }
+      │   └─BatchScan { table: integers, columns: [integers.i, integers.correlated_col], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(rows.correlated_col, sum) }
+        └─BatchProject { exprs: [rows.correlated_col, sum] }
+          └─BatchOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─BatchExchange { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC], dist: HashShard(rows.correlated_col, rows.k) }
+              └─BatchSort { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC] }
+                └─BatchProject { exprs: [rows.correlated_col, rows.k, rows.v] }
+                  └─BatchFilter { predicate: IsNotNull(rows.correlated_col) }
+                    └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [i, integers._row_id(hidden), $expr1(hidden), integers.correlated_col(hidden)], stream_key: [integers._row_id, $expr1, integers.correlated_col], pk_columns: [integers._row_id, $expr1, integers.correlated_col], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftSemi, predicate: $expr1 = sum AND integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.i, integers._row_id, $expr1, integers.correlated_col] }
+      ├─StreamExchange { dist: HashShard(integers.correlated_col, $expr1) }
+      │ └─StreamProject { exprs: [integers.i, integers.correlated_col, integers.i::Int64 as $expr1, integers._row_id] }
+      │   └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
+      └─StreamExchange { dist: HashShard(rows.correlated_col, sum) }
+        └─StreamProject { exprs: [rows.correlated_col, sum, rows._row_id, rows.k] }
+          └─StreamOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─StreamExchange { dist: HashShard(rows.correlated_col, rows.k) }
+              └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
+                └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
+                  └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }

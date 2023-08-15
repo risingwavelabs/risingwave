@@ -21,8 +21,8 @@ mod tests {
 
     use crate::parser::maxwell::MaxwellParser;
     use crate::parser::{
-        EncodingProperties, JsonProperties, ParserProperties, ProtocolProperties, SourceColumnDesc,
-        SourceStreamChunkBuilder,
+        EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
     #[tokio::test]
     async fn test_json_parser() {
@@ -33,7 +33,7 @@ mod tests {
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
 
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Maxwell,

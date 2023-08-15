@@ -17,25 +17,26 @@ normal = ["workspace-hack"]
 anyhow = "1"
 assert_matches = "1"
 async-recursion = "1"
-async-stream = "0.3.4"
+async-stream = "0.3.5"
 async-trait = "0.1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
-itertools = "0.10"
+itertools = "0.11"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-risingwave_common = { path = "../common" }
-risingwave_connector = { path = "../connector" }
-risingwave_expr = { path = "../expr" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_source = { path = "../source" }
-risingwave_storage = { path = "../storage" }
+risingwave_common = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_source = { workspace = true }
+risingwave_storage = { workspace = true }
 scopeguard = "1"
 serde_json = "1"
 thiserror = "1"
@@ -48,9 +49,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-metrics = "0.1.0"
+tokio-metrics = "0.2.2"
 tokio-stream = "0.1"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tracing = "0.1"
 uuid = "1"
 
@@ -66,7 +67,7 @@ rand = "0.8"
 tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]
-tikv-jemallocator = "0.5"
+tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
 
 [[bench]]
 name = "filter"

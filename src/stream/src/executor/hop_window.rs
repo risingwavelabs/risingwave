@@ -110,7 +110,8 @@ impl HopWindowExecutor {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
 
@@ -195,7 +196,7 @@ impl HopWindowExecutor {
                     let mut chunk_builder = DataChunkBuilder::new(data_types, chunk_size);
                     let mut op_builder = Vec::with_capacity(chunk_size);
 
-                    for &op in &ops {
+                    for &op in ops.iter() {
                         // Since there could be multiple rows for the same input row, we need to
                         // transform the `U-`/`U+` into `-`/`+` and then duplicate it.
                         let op = match op {
@@ -208,7 +209,7 @@ impl HopWindowExecutor {
                                 chunk_builder.append_one_row(row_iter.next().unwrap())
                             {
                                 let ops = op_builder.drain(..).collect_vec();
-                                let chunk = StreamChunk::from_data_chunk(ops, chunk);
+                                let chunk = StreamChunk::from_parts(ops, chunk);
                                 yield Message::Chunk(chunk);
                             }
                         }
@@ -216,7 +217,7 @@ impl HopWindowExecutor {
 
                     if let Some(chunk) = chunk_builder.consume_all() {
                         let ops = op_builder.drain(..).collect_vec();
-                        let chunk = StreamChunk::from_data_chunk(ops, chunk);
+                        let chunk = StreamChunk::from_parts(ops, chunk);
                         yield Message::Chunk(chunk);
                     }
 

@@ -55,9 +55,7 @@ impl CompactorService {
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
-            .arg("1")
-            .arg("--max-concurrent-task-number")
-            .arg(format!("{}", config.max_concurrent_task_number));
+            .arg("1");
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {

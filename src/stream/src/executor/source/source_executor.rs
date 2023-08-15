@@ -23,6 +23,7 @@ use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
 };
+use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -38,7 +39,7 @@ use crate::executor::*;
 const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
-    ctx: ActorContextRef,
+    actor_ctx: ActorContextRef,
 
     identity: String,
 
@@ -60,12 +61,15 @@ pub struct SourceExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
+
+    // config for the connector node
+    connector_params: ConnectorParams,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        ctx: ActorContextRef,
+        actor_ctx: ActorContextRef,
         schema: Schema,
         pk_indices: PkIndices,
         stream_source_core: Option<StreamSourceCore<S>>,
@@ -74,9 +78,10 @@ impl<S: StateStore> SourceExecutor<S> {
         system_params: SystemParamsReaderRef,
         executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
+        connector_params: ConnectorParams,
     ) -> Self {
         Self {
-            ctx,
+            actor_ctx,
             identity: format!("SourceExecutor {:X}", executor_id),
             schema,
             pk_indices,
@@ -85,6 +90,7 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
+            connector_params,
         }
     }
 
@@ -98,14 +104,15 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let mut source_ctx = SourceContext::new(
-            self.ctx.id,
+        let source_ctx = SourceContext::new_with_suppressor(
+            self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
-            self.ctx.fragment_id,
+            self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
+            self.connector_params.connector_client.clone(),
+            self.actor_ctx.error_suppressor.clone(),
         );
-        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
             .source
             .stream_reader(state, column_ids, Arc::new(source_ctx))
@@ -113,25 +120,31 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
-    fn check_split_is_migration(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
+    fn check_split_assignment_is_migration(
+        &self,
+        actor_splits: &HashMap<ActorId, Vec<SplitImpl>>,
+    ) -> bool {
         let core = self.stream_source_core.as_ref().unwrap();
 
-        let mut revert_index = HashMap::new();
+        let mut split_to_actors_index = HashMap::new();
 
         for (actor_id, splits) in actor_splits {
             for split in splits {
-                assert!(revert_index.insert(split.id(), actor_id).is_none());
+                split_to_actors_index
+                    .entry(split.id())
+                    .or_insert(vec![])
+                    .push(*actor_id);
             }
         }
 
         for split_id in core.state_cache.keys() {
-            if let Some(actor_id) = revert_index.remove(split_id) {
-                if self.ctx.id != *actor_id {
+            if let Some(actor_ids) = split_to_actors_index.remove(split_id) {
+                if !actor_ids.contains(&self.actor_ctx.id) {
                     tracing::warn!(
-                        "split {} migration detected, from {} to {}",
+                        "split {} migration from {} detected, target might be {:?}",
                         split_id,
-                        self.ctx.id,
-                        actor_id
+                        self.actor_ctx.id,
+                        actor_ids
                     );
                     return true;
                 }
@@ -154,7 +167,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .unwrap()
                 .source_name
                 .clone(),
-            self.ctx.id.to_string(),
+            self.actor_ctx.id.to_string(),
         ]
     }
 
@@ -174,10 +187,10 @@ impl<S: StateStore> SourceExecutor<S> {
                     .collect::<Vec<&str>>(),
             )
             .inc();
-        if let Some(target_splits) = split_assignment.get(&self.ctx.id).cloned() {
+        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
                 tracing::info!(
-                    actor_id = self.ctx.id,
+                    actor_id = self.actor_ctx.id,
                     state = ?target_state,
                     "apply split change"
                 );
@@ -258,7 +271,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
-            self.ctx.id,
+            self.actor_ctx.id,
             target_state
         );
 
@@ -310,7 +323,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         if !cache.is_empty() {
-            tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
+            tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
             core.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
@@ -333,11 +346,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
-                    self.ctx.id,
+                    self.actor_ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id
-                ))
+                )
             })?;
 
         let mut core = self.stream_source_core.unwrap();
@@ -346,7 +359,6 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
         let source_desc = source_desc_builder
             .build()
-            .await
             .map_err(StreamExecutorError::connector_error)?;
 
         let mut boot_state = Vec::default();
@@ -357,7 +369,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     actor_splits: splits,
                     ..
                 } => {
-                    if let Some(splits) = splits.get(&self.ctx.id) {
+                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
                         boot_state = splits.clone();
                     }
                 }
@@ -366,12 +378,6 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         core.split_state_store.init_epoch(barrier.epoch);
-
-        core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
 
         for ele in &mut boot_state {
             if let Some(recover_state) = core
@@ -383,12 +389,14 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        // init in-memory split states with persisted state if any
+        core.init_split_state(boot_state.clone());
+
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
-
+        tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
@@ -439,11 +447,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
                                 Mutation::SourceChangeSplit(actor_splits) => {
+                                    tracing::info!(
+                                        actor_id = self.actor_ctx.id,
+                                        actor_splits = ?actor_splits,
+                                        "source change split received"
+                                    );
+
                                     // In the context of split changes, we do not allow split
                                     // migration because it can lead to inconsistent states.
                                     // Therefore, all split migration must be done via update
                                     // mutation and pause/resume
-                                    assert!(!self.check_split_is_migration(actor_splits));
+                                    assert!(!self.check_split_assignment_is_migration(actor_splits));
 
                                     target_state = self
                                         .apply_split_change(&source_desc, &mut stream, actor_splits)
@@ -466,7 +480,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         self.metrics
                             .source_row_per_barrier
                             .with_label_values(&[
-                                self.ctx.id.to_string().as_str(),
+                                self.actor_ctx.id.to_string().as_str(),
                                 self.stream_source_core
                                     .as_ref()
                                     .unwrap()
@@ -514,16 +528,17 @@ impl<S: StateStore> SourceExecutor<S> {
                             .flat_map(|(split_id, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_core
-                                    .as_ref()
+                                    .as_mut()
                                     .unwrap()
                                     .stream_source_splits
-                                    .get(split_id);
+                                    .get_mut(split_id);
 
                                 origin_split_impl.map(|split_impl| {
-                                    (split_id.clone(), split_impl.update(offset.clone()))
+                                    split_impl.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((split_id.clone(), split_impl.clone()))
                                 })
                             })
-                            .collect();
+                            .try_collect()?;
 
                         self.stream_source_core
                             .as_mut()
@@ -550,7 +565,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // The source executor should only be stopped by the actor when finding a `Stop` mutation.
         tracing::error!(
-            actor_id = self.ctx.id,
+            actor_id = self.actor_ctx.id,
             "source executor exited unexpectedly"
         )
     }
@@ -565,10 +580,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
-                    self.ctx.id
-                ))
+                    self.actor_ctx.id
+                )
             })?;
         yield Message::Barrier(barrier);
 
@@ -690,6 +705,7 @@ mod tests {
             system_params_manager.get_params(),
             1,
             SourceCtrlOpts::default(),
+            ConnectorParams::default(),
         );
         let mut executor = Box::new(executor).execute();
 
@@ -780,6 +796,7 @@ mod tests {
             system_params_manager.get_params(),
             1,
             SourceCtrlOpts::default(),
+            ConnectorParams::default(),
         );
         let mut handler = Box::new(executor).execute();
 

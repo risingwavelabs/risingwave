@@ -36,7 +36,7 @@ use risingwave_expr::ExprError;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
-use risingwave_pb::stream_plan::barrier::PbMutation;
+use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
@@ -216,7 +216,7 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 
 /// See [`PbMutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq, EnumAsInner)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     Update {
@@ -241,7 +241,7 @@ pub enum Mutation {
 pub struct Barrier {
     pub epoch: EpochPair,
     pub mutation: Option<Arc<Mutation>>,
-    pub checkpoint: bool,
+    pub kind: BarrierKind,
 
     /// Tracing context for the **current** epoch of this barrier.
     tracing_context: TracingContext,
@@ -255,7 +255,7 @@ impl Barrier {
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
-            checkpoint: true,
+            kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
@@ -265,7 +265,7 @@ impl Barrier {
     pub fn with_prev_epoch_for_test(epoch: u64, prev_epoch: u64) -> Self {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
-            checkpoint: true,
+            kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
@@ -550,7 +550,7 @@ impl Barrier {
         let Barrier {
             epoch,
             mutation,
-            checkpoint,
+            kind,
             passed_actors,
             tracing_context,
             ..
@@ -563,7 +563,7 @@ impl Barrier {
             }),
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             tracing_context: tracing_context.to_protobuf(),
-            checkpoint,
+            kind: kind as _,
             passed_actors,
         }
     }
@@ -578,7 +578,7 @@ impl Barrier {
         let epoch = prost.get_epoch()?;
 
         Ok(Barrier {
-            checkpoint: prost.checkpoint,
+            kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation,
             passed_actors: prost.get_passed_actors().clone(),

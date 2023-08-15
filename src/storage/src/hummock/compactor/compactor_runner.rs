@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
-use super::compaction_utils::estimate_task_memory_capacity;
+use super::compaction_utils::estimate_task_output_capacity;
 use super::task_progress::TaskProgress;
 use super::TaskConfig;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -31,8 +31,8 @@ use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Comp
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
-    SstableBuilderOptions, SstableStoreRef,
+    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
+    HummockResult, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -52,7 +52,16 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
-        options.capacity = estimate_task_memory_capacity(context.clone(), &task);
+
+        options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        let kv_count = task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.total_key_count)
+            .sum::<u64>() as usize;
+        let use_block_based_filter =
+            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
 
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
@@ -74,6 +83,7 @@ impl CompactorRunner {
                     || task.target_level == task.base_level,
                 split_by_table: task.split_by_state_table,
                 split_weight_by_vnode: task.split_weight_by_vnode,
+                use_block_based_filter,
             },
         );
 
@@ -111,7 +121,6 @@ impl CompactorRunner {
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
-        gc_delete_keys: bool,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<CompactionDeleteRanges>> {
@@ -132,7 +141,7 @@ impl CompactorRunner {
             builder.add_delete_events(range_tombstone_list);
         }
 
-        let aggregator = builder.build_for_compaction(gc_delete_keys);
+        let aggregator = builder.build_for_compaction();
         Ok(aggregator)
     }
 
@@ -142,6 +151,11 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
+        let compact_io_retry_time = self
+            .compactor
+            .context
+            .storage_opts
+            .compact_iter_recreate_timeout_ms;
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -171,6 +185,7 @@ impl CompactorRunner {
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                     task_progress.clone(),
+                    compact_io_retry_time,
                 ));
             } else {
                 for table_info in &level.table_infos {
@@ -189,6 +204,7 @@ impl CompactorRunner {
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
+                        compact_io_retry_time,
                     ));
                 }
             }
@@ -280,7 +296,6 @@ mod tests {
 
         let collector = CompactorRunner::build_delete_range_iter(
             &sstable_infos,
-            compact_task.gc_delete_keys,
             &sstable_store,
             &mut state_clean_up_filter,
         )

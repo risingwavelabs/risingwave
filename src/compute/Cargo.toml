@@ -17,27 +17,29 @@ normal = ["workspace-hack"]
 anyhow = "1"
 async-trait = "0.1"
 await-tree = { workspace = true }
+chrono = { version = "0.4" }
 clap = { version = "4", features = ["derive"] }
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hyper = "0.14"
-itertools = "0.10"
+itertools = "0.11"
 maplit = "1.0.2"
-pprof = { version = "0.11", features = ["flamegraph"] }
+pprof = { version = "0.12", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
-risingwave_batch = { path = "../batch" }
-risingwave_common = { path = "../common" }
-risingwave_common_service = { path = "../common/common_service" }
-risingwave_connector = { path = "../connector" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_source = { path = "../source" }
-risingwave_storage = { path = "../storage" }
-risingwave_stream = { path = "../stream" }
+risingwave_batch = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_source = { workspace = true }
+risingwave_storage = { workspace = true }
+risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -48,13 +50,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tikv-jemalloc-ctl = "0.5"
-
+tikv-jemalloc-ctl = { git = "https://github.com/yuhao-su/jemallocator.git", rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 

@@ -20,7 +20,7 @@
       └─StreamHashAgg [append_only] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
         └─StreamExchange { dist: HashShard(v1) }
           └─StreamRowIdGen { row_id_index: 3 }
-            └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - 10:Int32) }] }
+            └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - 10:Int32) }], output_watermarks: [v1] }
               └─StreamSource { source: t, columns: [v1, v2, v3, _row_id] }
   eowc_stream_plan: |-
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck, watermark_columns: [v1] }
@@ -28,7 +28,7 @@
       └─StreamHashAgg [append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
         └─StreamExchange { dist: HashShard(v1) }
           └─StreamRowIdGen { row_id_index: 3 }
-            └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - 10:Int32) }] }
+            └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - 10:Int32) }], output_watermarks: [v1] }
               └─StreamSource { source: t, columns: [v1, v2, v3, _row_id] }
   eowc_stream_dist_plan: |+
     Fragment 0
@@ -43,7 +43,8 @@
 
     Fragment 1
     StreamRowIdGen { row_id_index: 3 }
-    └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - 10:Int32) }] } { state tables: [ 2 ] }
+    └── StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - 10:Int32) }], output_watermarks: [v1] }
+        ├── state tables: [ 2 ]
         └── StreamSource { source: t, columns: [v1, v2, v3, _row_id] } { source state table: 3 }
 
     Table 0
@@ -138,11 +139,11 @@
     StreamMaterialize { columns: [lag, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [first_value, _row_id, b] }
       └─StreamEowcOverWindow { window_functions: [first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING)] }
-        └─StreamSort { sort_column_index: 2 }
+        └─StreamEowcSort { sort_column: tm }
           └─StreamExchange { dist: HashShard(b) }
             └─StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
               └─StreamRowIdGen { row_id_index: 3 }
-                └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 2, expr: (tm - '00:05:00':Interval) }] }
+                └─StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [tm] }
                   └─StreamSource { source: t, columns: [a, b, tm, _row_id] }
   eowc_stream_dist_plan: |+
     Fragment 0
@@ -151,13 +152,14 @@
     └── StreamProject { exprs: [first_value, _row_id, b] }
         └── StreamEowcOverWindow { window_functions: [first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING)] }
             ├── state table: 0
-            └── StreamSort { sort_column_index: 2 } { state table: 1 }
+            └── StreamEowcSort { sort_column: tm } { state table: 1 }
                 └── StreamExchange Hash([1]) from 1
 
     Fragment 1
     StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
     └── StreamRowIdGen { row_id_index: 3 }
-        └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 2, expr: (tm - '00:05:00':Interval) }] } { state tables: [ 2 ] }
+        └── StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [tm] }
+            ├── state tables: [ 2 ]
             └── StreamSource { source: t, columns: [a, b, tm, _row_id] } { source state table: 3 }
 
     Table 0
@@ -198,15 +200,18 @@
 
 - sql: |
     create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
-    explain create sink s1 emit on window close as select
+    explain create sink s1 as
+    select
       tm, foo, bar,
       lag(foo, 2) over (partition by bar order by tm),
       max(foo) over (partition by bar order by tm rows between 1 preceding and 1 following),
       sum(foo) over (partition by bar order by tm rows 2 preceding exclude current row)
-      from t WITH (connector = 'blackhole');
+    from t
+    emit on window close
+    WITH (connector = 'blackhole');
   explain_output: |
     StreamSink { type: upsert, columns: [tm, foo, bar, t._row_id(hidden), lag, max, sum], pk: [t._row_id, t.bar] }
     └─StreamEowcOverWindow { window_functions: [first_value(t.foo) OVER(PARTITION BY t.bar ORDER BY t.tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING), max(t.foo) OVER(PARTITION BY t.bar ORDER BY t.tm ASC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING), sum(t.foo) OVER(PARTITION BY t.bar ORDER BY t.tm ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW EXCLUDE CURRENT ROW)] }
-      └─StreamSort { sort_column_index: 0 }
+      └─StreamEowcSort { sort_column: t.tm }
         └─StreamExchange { dist: HashShard(t.bar) }
           └─StreamTableScan { table: t, columns: [tm, foo, bar, _row_id] }

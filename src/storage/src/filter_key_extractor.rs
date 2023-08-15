@@ -493,6 +493,7 @@ mod tests {
             )]),
             fragment_id: 0,
             dml_fragment_id: None,
+            initialized_at_epoch: None,
             vnode_col_index: None,
             row_id_index: Some(0),
             value_indices: vec![0],
@@ -502,6 +503,9 @@ mod tests {
             version: None,
             watermark_indices: vec![],
             dist_key_in_pk: vec![],
+            cardinality: None,
+            created_at_epoch: None,
+            cleaned_by_watermark: false,
         }
     }
 

@@ -13,14 +13,16 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use risingwave_common::types::Timestamp;
+use risingwave_common::types::{Date, Timestamp, Timestamptz};
 
 // use risingwave_expr_macro::function;
+use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::Result;
 
+/// Parse the input string with the given chrono pattern.
 #[inline(always)]
-pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
+fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_dependent().iter())?;
 
@@ -61,13 +63,83 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestam
 
     // Seconds and nanoseconds can be omitted, so we don't need to assign default value for them.
 
-    // FIXME: We should return `TimestampTz` here.
-    parsed.offset.get_or_insert(0);
-    Ok(Timestamp(parsed.to_datetime()?.naive_utc()))
+    Ok(parsed)
 }
 
-// #[function("to_timestamp(varchar, varchar) -> timestamp")]
-pub fn to_timestamp(s: &str, tmpl: &str) -> Result<Timestamp> {
+#[inline(always)]
+pub fn to_timestamp_const_tmpl_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
+    let parsed = parse(s, tmpl)?;
+    match parsed.offset {
+        None => Ok(parsed.to_naive_datetime_with_offset(0)?.into()),
+        // If the parsed result is a physical instant, return its reading in UTC.
+        // This decision was arbitrary and we are just being backward compatible here.
+        Some(_) => timestamptz_at_time_zone(parsed.to_datetime()?.into(), "UTC"),
+    }
+}
+
+#[inline(always)]
+pub fn to_timestamp_const_tmpl(
+    s: &str,
+    tmpl: &ChronoPattern,
+    timezone: &str,
+) -> Result<Timestamptz> {
+    let parsed = parse(s, tmpl)?;
+    Ok(match parsed.offset {
+        Some(_) => parsed.to_datetime()?.into(),
+        // If the parsed result lacks offset info, interpret it in the implicit session time zone.
+        None => timestamp_at_time_zone(parsed.to_naive_datetime_with_offset(0)?.into(), timezone)?,
+    })
+}
+
+#[inline(always)]
+pub fn to_date_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
+    let mut parsed = parse(s, tmpl)?;
+    if let Some(year) = &mut parsed.year && *year < 0 {
+        *year += 1;
+    }
+    Ok(parsed.to_naive_date()?.into())
+}
+
+// #[function("to_timestamp1(varchar, varchar) -> timestamp")]
+pub fn to_timestamp_legacy(s: &str, tmpl: &str) -> Result<Timestamp> {
     let pattern = compile_pattern_to_chrono(tmpl);
-    to_timestamp_const_tmpl(s, &pattern)
+    to_timestamp_const_tmpl_legacy(s, &pattern)
+}
+
+// #[function("to_timestamp1(varchar, varchar, varchar) -> timestamptz")]
+pub fn to_timestamp(s: &str, tmpl: &str, timezone: &str) -> Result<Timestamptz> {
+    let pattern = compile_pattern_to_chrono(tmpl);
+    to_timestamp_const_tmpl(s, &pattern, timezone)
+}
+
+// #[function("to_date(varchar, varchar) -> date")]
+pub fn to_date(s: &str, tmpl: &str) -> Result<Date> {
+    let pattern = compile_pattern_to_chrono(tmpl);
+    to_date_const_tmpl(s, &pattern)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_to_timestamp_legacy() {
+        // This legacy expr can no longer be build by frontend, so we test its backward compatible
+        // behavior in unit tests rather than e2e slt.
+        for (input, format, expected) in [
+            (
+                "2020-02-03 12:34:56",
+                "yyyy-mm-dd hh24:mi:ss",
+                "2020-02-03 12:34:56",
+            ),
+            (
+                "2020-02-03 12:34:56+03:00",
+                "yyyy-mm-dd hh24:mi:ss tzh:tzm",
+                "2020-02-03 09:34:56",
+            ),
+        ] {
+            let actual = to_timestamp_legacy(input, format).unwrap();
+            assert_eq!(actual.to_string(), expected);
+        }
+    }
 }

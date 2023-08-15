@@ -1,0 +1,9 @@
+query T
+SELECT format('Hello %s', 'World');
+----
+Hello World
+
+query T
+SELECT format('Testing %s, %s, %s, %%', 'one', 'two', 'three');
+----
+Testing one, two, three, %

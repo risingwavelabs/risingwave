@@ -2,36 +2,222 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |-
-    LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
-    └─LogicalScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
-  batch_plan: 'BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive], distribution: Single }'
+    LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+    └─LogicalShare { id: 3 }
+      └─LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+        └─LogicalJoin { type: Inner, on: (rw_schemas.name = 'pg_catalog':Varchar), output: all }
+          ├─LogicalScan { table: rw_types, columns: [rw_types.id, rw_types.name] }
+          └─LogicalScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+  batch_plan: |-
+    BatchProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+    └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+      ├─BatchScan { table: rw_types, columns: [rw_types.id, rw_types.name], distribution: Single }
+      └─BatchProject { exprs: [rw_schemas.id] }
+        └─BatchFilter { predicate: (rw_schemas.name = 'pg_catalog':Varchar) }
+          └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |-
-    LogicalProject { exprs: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
-    └─LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
-  batch_plan: 'BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl], distribution: Single }'
+    LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+    └─LogicalShare { id: 2 }
+      └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+        └─LogicalScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+  batch_plan: 'BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_cast
   logical_plan: |-
-    LogicalProject { exprs: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
-    └─LogicalScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
-  batch_plan: 'BatchScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext], distribution: Single }'
+    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_2, *VALUES*_0.column_3] }
+    └─LogicalShare { id: 2 }
+      └─LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_2, *VALUES*_0.column_3] }
+        └─LogicalValues
+          ├─rows:
+          │ ┌─[0:Int32, 16:Int32, 23:Int32, 'e':Varchar]
+          │ ├─[1:Int32, 16:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[2:Int32, 21:Int32, 23:Int32, 'i':Varchar]
+          │ ├─[3:Int32, 21:Int32, 20:Int32, 'i':Varchar]
+          │ ├─[4:Int32, 21:Int32, 700:Int32, 'i':Varchar]
+          │ ├─[5:Int32, 21:Int32, 701:Int32, 'i':Varchar]
+          │ ├─[6:Int32, 21:Int32, 1700:Int32, 'i':Varchar]
+          │ ├─[7:Int32, 21:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[8:Int32, 21:Int32, 1301:Int32, 'i':Varchar]
+          │ ├─[9:Int32, 23:Int32, 16:Int32, 'e':Varchar]
+          │ ├─[10:Int32, 23:Int32, 21:Int32, 'a':Varchar]
+          │ ├─[11:Int32, 23:Int32, 20:Int32, 'i':Varchar]
+          │ ├─[12:Int32, 23:Int32, 700:Int32, 'i':Varchar]
+          │ ├─[13:Int32, 23:Int32, 701:Int32, 'i':Varchar]
+          │ ├─[14:Int32, 23:Int32, 1700:Int32, 'i':Varchar]
+          │ ├─[15:Int32, 23:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[16:Int32, 23:Int32, 1301:Int32, 'i':Varchar]
+          │ ├─[17:Int32, 20:Int32, 21:Int32, 'a':Varchar]
+          │ ├─[18:Int32, 20:Int32, 23:Int32, 'a':Varchar]
+          │ ├─[19:Int32, 20:Int32, 700:Int32, 'i':Varchar]
+          │ ├─[20:Int32, 20:Int32, 701:Int32, 'i':Varchar]
+          │ ├─[21:Int32, 20:Int32, 1700:Int32, 'i':Varchar]
+          │ ├─[22:Int32, 20:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[23:Int32, 20:Int32, 1301:Int32, 'i':Varchar]
+          │ ├─[24:Int32, 700:Int32, 21:Int32, 'a':Varchar]
+          │ ├─[25:Int32, 700:Int32, 23:Int32, 'a':Varchar]
+          │ ├─[26:Int32, 700:Int32, 20:Int32, 'a':Varchar]
+          │ ├─[27:Int32, 700:Int32, 701:Int32, 'i':Varchar]
+          │ ├─[28:Int32, 700:Int32, 1700:Int32, 'a':Varchar]
+          │ ├─[29:Int32, 700:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[30:Int32, 701:Int32, 21:Int32, 'a':Varchar]
+          │ ├─[31:Int32, 701:Int32, 23:Int32, 'a':Varchar]
+          │ ├─[32:Int32, 701:Int32, 20:Int32, 'a':Varchar]
+          │ ├─[33:Int32, 701:Int32, 700:Int32, 'a':Varchar]
+          │ ├─[34:Int32, 701:Int32, 1700:Int32, 'a':Varchar]
+          │ ├─[35:Int32, 701:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[36:Int32, 1700:Int32, 21:Int32, 'a':Varchar]
+          │ ├─[37:Int32, 1700:Int32, 23:Int32, 'a':Varchar]
+          │ ├─[38:Int32, 1700:Int32, 20:Int32, 'a':Varchar]
+          │ ├─[39:Int32, 1700:Int32, 700:Int32, 'i':Varchar]
+          │ ├─[40:Int32, 1700:Int32, 701:Int32, 'i':Varchar]
+          │ ├─[41:Int32, 1700:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[42:Int32, 1082:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[43:Int32, 1082:Int32, 1114:Int32, 'i':Varchar]
+          │ ├─[44:Int32, 1082:Int32, 1184:Int32, 'i':Varchar]
+          │ ├─[45:Int32, 1043:Int32, 16:Int32, 'e':Varchar]
+          │ ├─[46:Int32, 1043:Int32, 21:Int32, 'e':Varchar]
+          │ ├─[47:Int32, 1043:Int32, 23:Int32, 'e':Varchar]
+          │ ├─[48:Int32, 1043:Int32, 20:Int32, 'e':Varchar]
+          │ ├─[49:Int32, 1043:Int32, 700:Int32, 'e':Varchar]
+          │ ├─[50:Int32, 1043:Int32, 701:Int32, 'e':Varchar]
+          │ ├─[51:Int32, 1043:Int32, 1700:Int32, 'e':Varchar]
+          │ ├─[52:Int32, 1043:Int32, 1082:Int32, 'e':Varchar]
+          │ ├─[53:Int32, 1043:Int32, 1083:Int32, 'e':Varchar]
+          │ ├─[54:Int32, 1043:Int32, 1114:Int32, 'e':Varchar]
+          │ ├─[55:Int32, 1043:Int32, 1184:Int32, 'e':Varchar]
+          │ ├─[56:Int32, 1043:Int32, 1186:Int32, 'e':Varchar]
+          │ ├─[57:Int32, 1043:Int32, 17:Int32, 'e':Varchar]
+          │ ├─[58:Int32, 1043:Int32, 3802:Int32, 'e':Varchar]
+          │ ├─[59:Int32, 1043:Int32, 1301:Int32, 'e':Varchar]
+          │ ├─[60:Int32, 1083:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[61:Int32, 1083:Int32, 1186:Int32, 'i':Varchar]
+          │ ├─[62:Int32, 1114:Int32, 1082:Int32, 'a':Varchar]
+          │ ├─[63:Int32, 1114:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[64:Int32, 1114:Int32, 1083:Int32, 'a':Varchar]
+          │ ├─[65:Int32, 1114:Int32, 1184:Int32, 'i':Varchar]
+          │ ├─[66:Int32, 1184:Int32, 1082:Int32, 'a':Varchar]
+          │ ├─[67:Int32, 1184:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[68:Int32, 1184:Int32, 1083:Int32, 'a':Varchar]
+          │ ├─[69:Int32, 1184:Int32, 1114:Int32, 'a':Varchar]
+          │ ├─[70:Int32, 1186:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[71:Int32, 1186:Int32, 1083:Int32, 'a':Varchar]
+          │ ├─[72:Int32, 17:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[73:Int32, 3802:Int32, 16:Int32, 'e':Varchar]
+          │ ├─[74:Int32, 3802:Int32, 21:Int32, 'e':Varchar]
+          │ ├─[75:Int32, 3802:Int32, 23:Int32, 'e':Varchar]
+          │ ├─[76:Int32, 3802:Int32, 20:Int32, 'e':Varchar]
+          │ ├─[77:Int32, 3802:Int32, 700:Int32, 'e':Varchar]
+          │ ├─[78:Int32, 3802:Int32, 701:Int32, 'e':Varchar]
+          │ ├─[79:Int32, 3802:Int32, 1700:Int32, 'e':Varchar]
+          │ ├─[80:Int32, 3802:Int32, 1043:Int32, 'a':Varchar]
+          │ ├─[81:Int32, 1301:Int32, 701:Int32, 'e':Varchar]
+          │ └─[82:Int32, 1301:Int32, 1043:Int32, 'a':Varchar]
+          └─schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32, *VALUES*_0.column_3:Varchar] }
+  batch_plan: |-
+    BatchValues
+    └─rows:
+      ┌─[0:Int32, 16:Int32, 23:Int32, 'e':Varchar]
+      ├─[1:Int32, 16:Int32, 1043:Int32, 'a':Varchar]
+      ├─[2:Int32, 21:Int32, 23:Int32, 'i':Varchar]
+      ├─[3:Int32, 21:Int32, 20:Int32, 'i':Varchar]
+      ├─[4:Int32, 21:Int32, 700:Int32, 'i':Varchar]
+      ├─[5:Int32, 21:Int32, 701:Int32, 'i':Varchar]
+      ├─[6:Int32, 21:Int32, 1700:Int32, 'i':Varchar]
+      ├─[7:Int32, 21:Int32, 1043:Int32, 'a':Varchar]
+      ├─[8:Int32, 21:Int32, 1301:Int32, 'i':Varchar]
+      ├─[9:Int32, 23:Int32, 16:Int32, 'e':Varchar]
+      ├─[10:Int32, 23:Int32, 21:Int32, 'a':Varchar]
+      ├─[11:Int32, 23:Int32, 20:Int32, 'i':Varchar]
+      ├─[12:Int32, 23:Int32, 700:Int32, 'i':Varchar]
+      ├─[13:Int32, 23:Int32, 701:Int32, 'i':Varchar]
+      ├─[14:Int32, 23:Int32, 1700:Int32, 'i':Varchar]
+      ├─[15:Int32, 23:Int32, 1043:Int32, 'a':Varchar]
+      ├─[16:Int32, 23:Int32, 1301:Int32, 'i':Varchar]
+      ├─[17:Int32, 20:Int32, 21:Int32, 'a':Varchar]
+      ├─[18:Int32, 20:Int32, 23:Int32, 'a':Varchar]
+      ├─[19:Int32, 20:Int32, 700:Int32, 'i':Varchar]
+      ├─[20:Int32, 20:Int32, 701:Int32, 'i':Varchar]
+      ├─[21:Int32, 20:Int32, 1700:Int32, 'i':Varchar]
+      ├─[22:Int32, 20:Int32, 1043:Int32, 'a':Varchar]
+      ├─[23:Int32, 20:Int32, 1301:Int32, 'i':Varchar]
+      ├─[24:Int32, 700:Int32, 21:Int32, 'a':Varchar]
+      ├─[25:Int32, 700:Int32, 23:Int32, 'a':Varchar]
+      ├─[26:Int32, 700:Int32, 20:Int32, 'a':Varchar]
+      ├─[27:Int32, 700:Int32, 701:Int32, 'i':Varchar]
+      ├─[28:Int32, 700:Int32, 1700:Int32, 'a':Varchar]
+      ├─[29:Int32, 700:Int32, 1043:Int32, 'a':Varchar]
+      ├─[30:Int32, 701:Int32, 21:Int32, 'a':Varchar]
+      ├─[31:Int32, 701:Int32, 23:Int32, 'a':Varchar]
+      ├─[32:Int32, 701:Int32, 20:Int32, 'a':Varchar]
+      ├─[33:Int32, 701:Int32, 700:Int32, 'a':Varchar]
+      ├─[34:Int32, 701:Int32, 1700:Int32, 'a':Varchar]
+      ├─[35:Int32, 701:Int32, 1043:Int32, 'a':Varchar]
+      ├─[36:Int32, 1700:Int32, 21:Int32, 'a':Varchar]
+      ├─[37:Int32, 1700:Int32, 23:Int32, 'a':Varchar]
+      ├─[38:Int32, 1700:Int32, 20:Int32, 'a':Varchar]
+      ├─[39:Int32, 1700:Int32, 700:Int32, 'i':Varchar]
+      ├─[40:Int32, 1700:Int32, 701:Int32, 'i':Varchar]
+      ├─[41:Int32, 1700:Int32, 1043:Int32, 'a':Varchar]
+      ├─[42:Int32, 1082:Int32, 1043:Int32, 'a':Varchar]
+      ├─[43:Int32, 1082:Int32, 1114:Int32, 'i':Varchar]
+      ├─[44:Int32, 1082:Int32, 1184:Int32, 'i':Varchar]
+      ├─[45:Int32, 1043:Int32, 16:Int32, 'e':Varchar]
+      ├─[46:Int32, 1043:Int32, 21:Int32, 'e':Varchar]
+      ├─[47:Int32, 1043:Int32, 23:Int32, 'e':Varchar]
+      ├─[48:Int32, 1043:Int32, 20:Int32, 'e':Varchar]
+      ├─[49:Int32, 1043:Int32, 700:Int32, 'e':Varchar]
+      ├─[50:Int32, 1043:Int32, 701:Int32, 'e':Varchar]
+      ├─[51:Int32, 1043:Int32, 1700:Int32, 'e':Varchar]
+      ├─[52:Int32, 1043:Int32, 1082:Int32, 'e':Varchar]
+      ├─[53:Int32, 1043:Int32, 1083:Int32, 'e':Varchar]
+      ├─[54:Int32, 1043:Int32, 1114:Int32, 'e':Varchar]
+      ├─[55:Int32, 1043:Int32, 1184:Int32, 'e':Varchar]
+      ├─[56:Int32, 1043:Int32, 1186:Int32, 'e':Varchar]
+      ├─[57:Int32, 1043:Int32, 17:Int32, 'e':Varchar]
+      ├─[58:Int32, 1043:Int32, 3802:Int32, 'e':Varchar]
+      ├─[59:Int32, 1043:Int32, 1301:Int32, 'e':Varchar]
+      ├─[60:Int32, 1083:Int32, 1043:Int32, 'a':Varchar]
+      ├─[61:Int32, 1083:Int32, 1186:Int32, 'i':Varchar]
+      ├─[62:Int32, 1114:Int32, 1082:Int32, 'a':Varchar]
+      ├─[63:Int32, 1114:Int32, 1043:Int32, 'a':Varchar]
+      ├─[64:Int32, 1114:Int32, 1083:Int32, 'a':Varchar]
+      ├─[65:Int32, 1114:Int32, 1184:Int32, 'i':Varchar]
+      ├─[66:Int32, 1184:Int32, 1082:Int32, 'a':Varchar]
+      ├─[67:Int32, 1184:Int32, 1043:Int32, 'a':Varchar]
+      ├─[68:Int32, 1184:Int32, 1083:Int32, 'a':Varchar]
+      ├─[69:Int32, 1184:Int32, 1114:Int32, 'a':Varchar]
+      ├─[70:Int32, 1186:Int32, 1043:Int32, 'a':Varchar]
+      ├─[71:Int32, 1186:Int32, 1083:Int32, 'a':Varchar]
+      ├─[72:Int32, 17:Int32, 1043:Int32, 'a':Varchar]
+      ├─[73:Int32, 3802:Int32, 16:Int32, 'e':Varchar]
+      ├─[74:Int32, 3802:Int32, 21:Int32, 'e':Varchar]
+      ├─[75:Int32, 3802:Int32, 23:Int32, 'e':Varchar]
+      ├─[76:Int32, 3802:Int32, 20:Int32, 'e':Varchar]
+      ├─[77:Int32, 3802:Int32, 700:Int32, 'e':Varchar]
+      ├─[78:Int32, 3802:Int32, 701:Int32, 'e':Varchar]
+      ├─[79:Int32, 3802:Int32, 1700:Int32, 'e':Varchar]
+      ├─[80:Int32, 3802:Int32, 1043:Int32, 'a':Varchar]
+      ├─[81:Int32, 1301:Int32, 701:Int32, 'e':Varchar]
+      └─[82:Int32, 1301:Int32, 1043:Int32, 'a':Varchar]
 - sql: |
     select pg_catalog.pg_get_userbyid(1)
   logical_plan: |-
-    LogicalProject { exprs: [pg_user.name] }
+    LogicalProject { exprs: [rw_users.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalProject { exprs: [pg_user.name] }
-        └─LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
-          └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
+      └─LogicalProject { exprs: [rw_users.name] }
+        └─LogicalFilter { predicate: (1:Int32 = rw_users.id) }
+          └─LogicalShare { id: 2 }
+            └─LogicalProject { exprs: [rw_users.id, rw_users.name, rw_users.create_db, rw_users.is_super, '********':Varchar] }
+              └─LogicalScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
     ├─BatchValues { rows: [[]] }
-    └─BatchProject { exprs: [pg_user.name] }
-      └─BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
-        └─BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }
+    └─BatchProject { exprs: [rw_users.name] }
+      └─BatchFilter { predicate: (1:Int32 = rw_users.id) }
+        └─BatchScan { table: rw_users, columns: [rw_users.name, rw_users.id], distribution: Single }
 - sql: |
     select 'pg_namespace'::regclass
   logical_plan: |-

@@ -41,7 +41,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::{StreamError, StreamResult};
+use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -239,16 +239,14 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Clear all senders and collect rx in barrier manager.
-    pub fn clear_all_senders_and_collect_rx(&self) {
-        let mut barrier_manager = self.context.lock_barrier_manager();
-        barrier_manager.clear_senders();
-        barrier_manager.clear_collect_rx();
+    /// Reset the state of the barrier manager.
+    pub fn reset_barrier_manager(&self) {
+        self.context.lock_barrier_manager().reset();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
         let complete_receiver = {
             let mut barrier_manager = self.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)?
@@ -263,7 +261,7 @@ impl LocalStreamManager {
             .barrier_inflight_timer
             .expect("no timer for test")
             .observe_duration();
-        Ok((result, complete_receiver.checkpoint))
+        Ok(result)
     }
 
     pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
@@ -325,9 +323,9 @@ impl LocalStreamManager {
     /// Force stop all actors on this worker, and then drop their resources.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         self.core.lock().await.stop_all_actors().await;
+        self.reset_barrier_manager();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_senders_and_collect_rx();
 
         Ok(())
     }
@@ -607,9 +605,10 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
     ) -> StreamResult<()> {
         for &actor_id in actors {
-            let actor = self.actors.remove(&actor_id).ok_or_else(|| {
-                StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
-            })?;
+            let actor = self
+                .actors
+                .remove(&actor_id)
+                .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))?;
             let mview_definition = &actor.mview_definition;
             let actor_context = ActorContext::create_with_metrics(
                 actor_id,

@@ -1,3 +1,9 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "build (dev mode)"
     command: "ci/scripts/build.sh -p ci-dev"
@@ -8,6 +14,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "build (release mode)"
     command: "ci/scripts/build.sh -p ci-release"
@@ -20,6 +27,7 @@ steps:
           env:
             - BUILDKITE_COMMIT
     timeout_in_minutes: 20
+    retry: *auto-retry
 
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
@@ -35,6 +43,7 @@ steps:
           environment:
             - GITHUB_TOKEN
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
@@ -45,6 +54,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
@@ -55,6 +65,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test (dev mode)"
     command: "ci/scripts/e2e-test.sh -p ci-dev"
@@ -75,6 +86,7 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "end-to-end test (release mode)"
     command: "ci/scripts/e2e-test.sh -p ci-release"
@@ -95,6 +107,7 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test (parallel) (dev mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
@@ -114,6 +127,7 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "end-to-end test (parallel) (release mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
@@ -133,6 +147,7 @@ steps:
           format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release mode)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
@@ -146,6 +161,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end source test (release mode)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
@@ -159,6 +175,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "unit test"
     command: "ci/scripts/pr-unit-test.sh"
@@ -172,7 +189,8 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 13
+    timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
@@ -182,6 +200,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh scale::"
@@ -192,6 +211,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
+    retry: *auto-retry
 
   - label: "recovery integration test (deterministic simulation)"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh recovery::"
@@ -202,6 +222,18 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
+    retry: *auto-retry
+
+  - label: "backfill integration test (deterministic simulation)"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh backfill_tests::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
@@ -218,6 +250,7 @@ steps:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
+    retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
@@ -235,6 +268,7 @@ steps:
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
+    retry: *auto-retry
 
   - label: "end-to-end sink test (release mode)"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
@@ -248,7 +282,8 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
-  
+    retry: *auto-retry
+
   - label: "connector node integration test Java {{matrix.java_version}}"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
     depends_on:
@@ -266,6 +301,7 @@ steps:
           - "11"
           - "17"
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
@@ -279,6 +315,21 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end iceberg sink v2 test (release mode)"
+    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
 
   - label: "e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
@@ -294,6 +345,7 @@ steps:
     # Extra 2 minutes to account for docker-compose latency.
     # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "release"
     command: "ci/scripts/release.sh"
@@ -311,6 +363,7 @@ steps:
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
     timeout_in_minutes: 60
+    retry: *auto-retry
 
   - label: "release docker image: amd64"
     command: "ci/scripts/docker.sh"
@@ -326,6 +379,7 @@ steps:
             DOCKER_TOKEN: docker-token
             GITHUB_TOKEN: github-token
     timeout_in_minutes: 60
+    retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
@@ -343,6 +397,7 @@ steps:
     timeout_in_minutes: 60
     agents:
       queue: "linux-arm64"
+    retry: *auto-retry
 
   - label: "multi arch image create push"
     command: "ci/scripts/multi-arch-docker.sh"
@@ -357,3 +412,4 @@ steps:
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
     timeout_in_minutes: 10
+    retry: *auto-retry

@@ -27,15 +27,16 @@ use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{ConnectionId, SchemaId, SinkId, SourceId, ViewId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
     name: String,
+    database_id: DatabaseId,
     table_by_name: HashMap<String, Arc<TableCatalog>>,
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     source_by_name: HashMap<String, Arc<SourceCatalog>>,
@@ -57,7 +58,7 @@ pub struct SchemaCatalog {
     // This field is currently used only for `show connections`
     connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
-    system_table_by_name: HashMap<String, SystemCatalog>,
+    system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
     owner: u32,
 }
 
@@ -75,9 +76,18 @@ impl SchemaCatalog {
         table_ref
     }
 
-    pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
+    pub fn create_sys_table(&mut self, sys_table: Arc<SystemTableCatalog>) {
         self.system_table_by_name
             .try_insert(sys_table.name.clone(), sys_table)
+            .unwrap();
+    }
+
+    pub fn create_sys_view(&mut self, sys_view: Arc<ViewCatalog>) {
+        self.view_by_name
+            .try_insert(sys_view.name().to_string(), sys_view.clone())
+            .unwrap();
+        self.view_by_id
+            .try_insert(sys_view.id, sys_view.clone())
             .unwrap();
     }
 
@@ -418,7 +428,7 @@ impl SchemaCatalog {
         self.connection_by_name.values()
     }
 
-    pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
+    pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
         self.system_table_by_name.values()
     }
 
@@ -461,7 +471,7 @@ impl SchemaCatalog {
             .unwrap_or_default()
     }
 
-    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
+    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {
         self.system_table_by_name.get(table_name)
     }
 
@@ -516,6 +526,10 @@ impl SchemaCatalog {
         self.id
     }
 
+    pub fn database_id(&self) -> DatabaseId {
+        self.database_id
+    }
+
     pub fn name(&self) -> String {
         self.name.clone()
     }
@@ -531,6 +545,7 @@ impl From<&PbSchema> for SchemaCatalog {
             id: schema.id,
             owner: schema.owner,
             name: schema.name.clone(),
+            database_id: schema.database_id,
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
             source_by_name: HashMap::new(),

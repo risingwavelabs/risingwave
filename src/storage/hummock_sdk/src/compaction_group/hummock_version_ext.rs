@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -109,6 +109,13 @@ pub struct TableGroupInfo {
     pub split_by_table: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SstDeltaInfo {
+    pub insert_sst_level: u32,
+    pub insert_sst_infos: Vec<SstableInfo>,
+    pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
+}
+
 pub trait HummockVersionExt {
     type CombinedLevelsIter<'a>: Iterator<Item = &'a Level> + 'a
     where
@@ -147,10 +154,12 @@ pub trait HummockVersionUpdateExt {
         new_sst_start_id: u64,
         allow_trivial_split: bool,
     ) -> Vec<SstSplitInfo>;
+
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo>;
+    fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -370,6 +379,87 @@ impl HummockVersionUpdateExt for HummockVersion {
                 });
         }
         split_id_vers
+    }
+
+    fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
+        let mut infos = vec![];
+
+        for (group_id, group_deltas) in &version_delta.group_deltas {
+            let mut info = SstDeltaInfo::default();
+
+            let mut removed_l0_ssts: BTreeSet<u64> = BTreeSet::new();
+            let mut removed_ssts: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
+
+            // Build only if all deltas are intra level deltas.
+            if !group_deltas
+                .group_deltas
+                .iter()
+                .all(|delta| matches!(delta.get_delta_type().unwrap(), DeltaType::IntraLevel(..)))
+            {
+                continue;
+            }
+
+            // TODO(MrCroxx): At most one insert delta is allowed here. It's okay for now with the
+            // current `hummock::manager::gen_version_delta` implementation. Better refactor the
+            // struct to reduce conventions.
+            for group_delta in &group_deltas.group_deltas {
+                if let DeltaType::IntraLevel(delta) = group_delta.get_delta_type().unwrap() {
+                    if !delta.inserted_table_infos.is_empty() {
+                        info.insert_sst_level = delta.level_idx;
+                        info.insert_sst_infos
+                            .extend(delta.inserted_table_infos.iter().cloned());
+                    }
+                    if !delta.removed_table_ids.is_empty() {
+                        for id in &delta.removed_table_ids {
+                            if delta.level_idx == 0 {
+                                removed_l0_ssts.insert(*id);
+                            } else {
+                                removed_ssts.entry(delta.level_idx).or_default().insert(*id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let group = self.levels.get(group_id).unwrap();
+            for l0_sub_level in &group.get_level0().sub_levels {
+                for sst_info in &l0_sub_level.table_infos {
+                    if removed_l0_ssts.remove(&sst_info.sst_id) {
+                        info.delete_sst_object_ids.push(sst_info.object_id);
+                    }
+                }
+            }
+            for level in group.get_levels() {
+                if let Some(mut removed_level_ssts) = removed_ssts.remove(&level.level_idx) {
+                    for sst_info in &level.table_infos {
+                        if removed_level_ssts.remove(&sst_info.sst_id) {
+                            info.delete_sst_object_ids.push(sst_info.object_id);
+                        }
+                    }
+                    if !removed_level_ssts.is_empty() {
+                        tracing::error!(
+                            "removed_level_ssts is not empty: {:?}",
+                            removed_level_ssts,
+                        );
+                    }
+                    debug_assert!(removed_level_ssts.is_empty());
+                }
+            }
+
+            if !removed_l0_ssts.is_empty() || !removed_ssts.is_empty() {
+                tracing::error!(
+                    "not empty removed_l0_ssts: {:?}, removed_ssts: {:?}",
+                    removed_l0_ssts,
+                    removed_ssts
+                );
+            }
+            debug_assert!(removed_l0_ssts.is_empty());
+            debug_assert!(removed_ssts.is_empty());
+
+            infos.push(info);
+        }
+
+        infos
     }
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
@@ -928,7 +1018,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
-    debug_assert!(can_concat(&operand.table_infos));
+    assert!(can_concat(&operand.table_infos));
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {

@@ -24,8 +24,8 @@ use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuil
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
-    StreamOverWindow, StreamSort, ToBatch, ToStream,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
+    StreamOverWindow, ToBatch, ToStream,
 };
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
@@ -34,7 +34,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 struct LogicalOverWindowBuilder<'a> {
     /// the builder of the input Project
@@ -361,7 +361,7 @@ pub struct LogicalOverWindow {
 }
 
 impl LogicalOverWindow {
-    fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
+    pub fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
         let core = OverWindow::new(calls, input);
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
@@ -486,17 +486,26 @@ impl LogicalOverWindow {
                         )
                         .into());
                     }
-                    const_offset
-                        .unwrap()?
-                        .map(|v| *v.as_int64() as usize)
-                        .unwrap_or(1usize)
+                    const_offset.unwrap()?.map(|v| *v.as_int64()).unwrap_or(1)
                 } else {
-                    1usize
+                    1
                 };
-                let frame = if window_function.kind == WindowFuncKind::Lag {
-                    Frame::rows(FrameBound::Preceding(offset), FrameBound::Preceding(offset))
+                let sign = if window_function.kind == WindowFuncKind::Lag {
+                    -1
                 } else {
-                    Frame::rows(FrameBound::Following(offset), FrameBound::Following(offset))
+                    1
+                };
+                let abs_offset = offset.unsigned_abs() as usize;
+                let frame = if sign * offset <= 0 {
+                    Frame::rows(
+                        FrameBound::Preceding(abs_offset),
+                        FrameBound::Preceding(abs_offset),
+                    )
+                } else {
+                    Frame::rows(
+                        FrameBound::Following(abs_offset),
+                        FrameBound::Following(abs_offset),
+                    )
                 };
 
                 (WindowFuncKind::Aggregate(AggKind::FirstValue), frame)
@@ -597,6 +606,10 @@ impl LogicalOverWindow {
             LogicalProject::with_out_col_idx(cur_node.into(), out_fields.into_iter()).into()
         }
     }
+
+    pub fn decompose(self) -> (PlanRef, Vec<PlanWindowFunction>) {
+        self.core.decompose()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalOverWindow {
@@ -636,41 +649,37 @@ impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input_cnt = self.input().schema().len();
-        let raw_required_cols = {
-            let mut tmp = FixedBitSet::with_capacity(input_cnt);
-            required_cols
-                .iter()
-                .filter(|&&index| index < input_cnt)
-                .for_each(|&index| tmp.set(index, true));
-            tmp
+        let input_len = self.input().schema().len();
+
+        let (req_cols_input_part, req_cols_win_func_part) = {
+            let mut in_input = required_cols.to_vec();
+            let in_win_funcs: IndexSet = in_input.drain_filter(|i| *i >= input_len).collect();
+            (IndexSet::from(in_input), in_win_funcs)
         };
 
-        let (window_function_required_cols, window_functions) = {
-            let mut tmp = FixedBitSet::with_capacity(input_cnt);
-            let new_window_functions = required_cols
-                .iter()
-                .filter(|&&index| index >= input_cnt)
-                .map(|&index| {
-                    let index = index - input_cnt;
-                    let window_function = self.window_functions()[index].clone();
-                    tmp.extend(window_function.args.iter().map(|x| x.index()));
-                    tmp.extend(window_function.partition_by.iter().map(|x| x.index()));
-                    tmp.extend(window_function.order_by.iter().map(|x| x.column_index));
-                    window_function
+        if req_cols_win_func_part.is_empty() {
+            // no window function is needed
+            return self.input().prune_col(&req_cols_input_part.to_vec(), ctx);
+        }
+
+        let (input_cols_required_by_this, window_functions) = {
+            let mut tmp = IndexSet::empty();
+            let new_window_functions = req_cols_win_func_part
+                .indices()
+                .map(|idx| self.window_functions()[idx - input_len].clone())
+                .map(|func| {
+                    tmp.extend(func.args.iter().map(|x| x.index()));
+                    tmp.extend(func.partition_by.iter().map(|x| x.index()));
+                    tmp.extend(func.order_by.iter().map(|x| x.column_index));
+                    func
                 })
                 .collect_vec();
             (tmp, new_window_functions)
         };
 
-        let input_required_cols = {
-            let mut tmp = FixedBitSet::with_capacity(input_cnt);
-            tmp.union_with(&raw_required_cols);
-            tmp.union_with(&window_function_required_cols);
-            tmp.ones().collect_vec()
-        };
+        let input_required_cols = (req_cols_input_part | input_cols_required_by_this).to_vec();
         let input_col_change =
-            ColIndexMapping::with_remaining_columns(&input_required_cols, input_cnt);
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_len);
         let new_self = {
             let input = self.input().prune_col(&input_required_cols, ctx);
             self.rewrite_with_input_and_window(input, &window_functions, input_col_change)
@@ -681,7 +690,7 @@ impl ColPrunable for LogicalOverWindow {
         } else {
             // some columns are not needed so we did a projection to remove the columns.
             let mut new_output_cols = input_required_cols.clone();
-            new_output_cols.extend(required_cols.iter().filter(|&&x| x >= input_cnt));
+            new_output_cols.extend(required_cols.iter().filter(|&&x| x >= input_len));
             let mapping =
                 &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
             let output_required_cols = required_cols
@@ -821,7 +830,7 @@ impl ToStream for LogicalOverWindow {
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let sort = StreamSort::new(sort_input, order_key_index);
+            let sort = StreamEowcSort::new(sort_input, order_key_index);
 
             let mut logical = self.core.clone();
             logical.input = sort.into();

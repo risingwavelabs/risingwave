@@ -200,19 +200,6 @@ impl CompactStatus {
         }
     }
 
-    pub fn cancel_compaction_tasks_if<F: Fn(u64) -> bool>(&mut self, should_cancel: F) -> u32 {
-        let mut count: u32 = 0;
-        for level in &mut self.level_handlers {
-            for pending_task_id in level.pending_tasks_ids() {
-                if should_cancel(pending_task_id) {
-                    level.remove_task(pending_task_id);
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
     }
@@ -254,13 +241,13 @@ impl LocalSelectorStatistic {
     pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
         for (start_level, target_level, stats) in &self.skip_picker {
             let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
-            if stats.skip_by_count_limit > 0 {
+            if stats.skip_by_write_amp_limit > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "write-amp"])
                     .inc_by(stats.skip_by_write_amp_limit);
             }
-            if stats.skip_by_write_amp_limit > 0 {
+            if stats.skip_by_count_limit > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "count"])

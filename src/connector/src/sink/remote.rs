@@ -21,15 +21,16 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     JsonPayload, Payload, StreamChunkPayload,
 };
-use risingwave_pb::connector_service::SinkPayloadFormat;
+use risingwave_pb::connector_service::{SinkMetadata, SinkPayloadFormat};
 #[cfg(test)]
 use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
-use risingwave_rpc_client::{ConnectorClient, SinkWriterStreamHandle};
+use risingwave_rpc_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 #[cfg(test)]
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 #[cfg(test)]
@@ -38,7 +39,8 @@ use tracing::error;
 
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
+    DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriter, SinkWriterParam,
 };
 use crate::ConnectorParams;
 
@@ -124,7 +126,7 @@ impl Sink for RemoteSink {
             ) {
                 Ok(())
             } else {
-                Err(SinkError::Remote(format!(
+                Err(SinkError::Remote(anyhow_error!(
                     "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
                     col.name,
                     col.data_type,
@@ -132,10 +134,11 @@ impl Sink for RemoteSink {
             }
         }).try_collect()?;
 
-        let client = client.ok_or(SinkError::Remote(
-            "connector node endpoint not specified or unable to connect to connector node"
-                .to_string(),
-        ))?;
+        let client = client.ok_or_else(|| {
+            SinkError::Remote(anyhow_error!(
+                "connector node endpoint not specified or unable to connect to connector node"
+            ))
+        })?;
 
         // We validate a remote sink's accessibility as well as the pk.
         client
@@ -162,10 +165,11 @@ impl RemoteSinkWriter {
         param: SinkParam,
         connector_params: ConnectorParams,
     ) -> Result<Self> {
-        let client = connector_params.connector_client.ok_or(SinkError::Remote(
-            "connector node endpoint not specified or unable to connect to connector node"
-                .to_string(),
-        ))?;
+        let client = connector_params.connector_client.ok_or_else(|| {
+            SinkError::Remote(anyhow_error!(
+                "connector node endpoint not specified or unable to connect to connector node"
+            ))
+        })?;
         let stream_handle = client
             .start_sink_writer_stream(param.to_proto(), connector_params.sink_payload_format)
             .await
@@ -218,7 +222,7 @@ impl RemoteSinkWriter {
         use futures::StreamExt;
         use tokio_stream::wrappers::UnboundedReceiverStream;
 
-        let stream_handle = SinkWriterStreamHandle::new(
+        let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
             UnboundedReceiverStream::new(response_receiver).boxed(),
         );
@@ -250,7 +254,7 @@ impl SinkWriter for RemoteSinkWriter {
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)
-                            .map_err(|e| SinkError::Remote(format!("{:?}", e)))?,
+                            .map_err(|e| SinkError::Remote(anyhow_error!("{:?}", e)))?,
                     };
 
                     row_ops.push(row_op);
@@ -268,7 +272,9 @@ impl SinkWriter for RemoteSinkWriter {
         };
 
         let epoch = self.epoch.ok_or_else(|| {
-            SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
+            SinkError::Remote(anyhow_error!(
+                "epoch has not been initialize, call `begin_epoch`"
+            ))
         })?;
         let batch_id = self.batch_id;
         self.stream_handle
@@ -286,7 +292,9 @@ impl SinkWriter for RemoteSinkWriter {
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         let epoch = self.epoch.ok_or_else(|| {
-            SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
+            SinkError::Remote(anyhow_error!(
+                "epoch has not been initialize, call `begin_epoch`"
+            ))
         })?;
         if is_checkpoint {
             let _rsp = self.stream_handle.commit(epoch).await?;
@@ -303,6 +311,30 @@ impl SinkWriter for RemoteSinkWriter {
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
+    }
+}
+
+pub struct RemoteCoordinator {
+    stream_handle: SinkCoordinatorStreamHandle,
+}
+
+impl RemoteCoordinator {
+    pub async fn new(client: ConnectorClient, param: SinkParam) -> Result<Self> {
+        let stream_handle = client
+            .start_sink_coordinator_stream(param.to_proto())
+            .await?;
+        Ok(RemoteCoordinator { stream_handle })
+    }
+}
+
+#[async_trait]
+impl SinkCommitCoordinator for RemoteCoordinator {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        Ok(self.stream_handle.commit(epoch, metadata).await?)
     }
 }
 
@@ -420,7 +452,10 @@ mod test {
         // test commit
         response_sender
             .send(Ok(SinkWriterStreamResponse {
-                response: Some(Response::Commit(CommitResponse { epoch: 2022 })),
+                response: Some(Response::Commit(CommitResponse {
+                    epoch: 2022,
+                    metadata: None,
+                })),
             }))
             .expect("test failed: failed to sync epoch");
         sink.barrier(true).await.unwrap();

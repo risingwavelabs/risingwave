@@ -143,9 +143,9 @@
     where EXISTS (select hop_1.date_time group by hop_1.date_time);
   expected_outputs:
   - optimized_logical_plan_for_batch
-  - stream_error
   - logical_plan
   - batch_plan
+  - stream_plan
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
@@ -199,3 +199,66 @@
     select 1 from a where exists ( select 1 from b having exists ( select a1 from c ));
   expected_outputs:
   - optimized_logical_plan_for_stream
+- name: test subquery in table function
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from unnest(x) i) as sum_x from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: CorrelatedInputRef in ProjectSet and apply on condition is true.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q ) as sum_x from t;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name:  CorrelatedInputRef in ProjectSet and apply on condition refers to no table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i, 1 c) Q where k = c ) as sum_x from t;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name:  CorrelatedInputRef in ProjectSet and apply on condition refers to table function.
+  sql: |
+    create table t(x int[], y int[], k int primary key);
+    select *, (select sum(i) from (select unnest(x) i) Q where k = i ) as sum_x from t;
+  expected_outputs:
+    - optimizer_error
+- name: test over window subquery 1
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT row_number() OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1 ORDER BY i;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: test over window subquery 2 (with nested loop join so cannot be transformed into a stream plan)
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i1.i, (SELECT row_number() OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1, integers i2 ORDER BY i1.i;
+  expected_outputs:
+    - batch_plan
+    - stream_error
+- name: test over window subquery 3
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT SUM(i) OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1 ORDER BY i;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: test over window subquery 4  (with nested loop join so cannot be transformed into a stream plan)
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT SUM(s1.i) OVER (ORDER BY s1.i) FROM integers s1, integers s2 WHERE i1.i=s1.i LIMIT 1) col FROM integers i1 ORDER BY i;
+  expected_outputs:
+    - batch_plan
+    - stream_error
+- name: test over window subquery 5
+  sql: |
+    CREATE TABLE integers(i INTEGER, correlated_col int);
+    CREATE TABLE rows(k int, v int, correlated_col int);
+    SELECT i FROM integers where i in (select SUM(v) OVER(PARTITION BY k ORDER BY v) from rows where rows.correlated_col = integers.correlated_col);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

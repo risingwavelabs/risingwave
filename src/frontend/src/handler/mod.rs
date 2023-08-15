@@ -246,16 +246,9 @@ pub async fn handle(
                 .await;
             }
             // TODO(st1page): refacor it
-            let mut notice = Default::default();
-            let source_schema = source_schema
-                .map(|source_schema| -> Result<SourceSchema> {
-                    let (source_schema, _, n) = source_schema
-                        .into_source_schema()
-                        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
-                    notice = n;
-                    Ok(source_schema)
-                })
-                .transpose()?;
+            let notice = Default::default();
+            let source_schema =
+                source_schema.map(|source_schema| source_schema.into_source_schema_v2());
 
             create_table::handle_create_table(
                 handler_args,
@@ -297,26 +290,47 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
+            let mut cascade = false;
             if let AstOption::Some(DropMode::Cascade) = drop_mode {
-                return Err(
-                    ErrorCode::NotImplemented("DROP CASCADE".to_string(), None.into()).into(),
-                );
+                match object_type {
+                    ObjectType::MaterializedView
+                    | ObjectType::View
+                    | ObjectType::Sink
+                    | ObjectType::Source
+                    | ObjectType::Index
+                    | ObjectType::Table => {
+                        cascade = true;
+                    }
+                    ObjectType::Schema
+                    | ObjectType::Database
+                    | ObjectType::User
+                    | ObjectType::Connection => {
+                        return Err(ErrorCode::NotImplemented(
+                            "DROP CASCADE".to_string(),
+                            None.into(),
+                        )
+                        .into());
+                    }
+                };
             };
             match object_type {
                 ObjectType::Table => {
-                    drop_table::handle_drop_table(handler_args, object_name, if_exists).await
+                    drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::MaterializedView => {
-                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
+                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Index => {
-                    drop_index::handle_drop_index(handler_args, object_name, if_exists).await
+                    drop_index::handle_drop_index(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::Source => {
-                    drop_source::handle_drop_source(handler_args, object_name, if_exists).await
+                    drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::Sink => {
-                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(
@@ -346,7 +360,7 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::View => {
-                    drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+                    drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Connection => {
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)

@@ -89,7 +89,30 @@ RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
 
 cd ${RISINGWAVE_ROOT}/java
 
-(cd ${RISINGWAVE_ROOT} && cargo run --bin data-chunk-payload-generator) | \
+(cd ${RISINGWAVE_ROOT} && cargo run -p risingwave_java_binding --bin data-chunk-payload-generator) | \
     java -cp "./java-binding-integration-test/target/dependency/*:./java-binding-integration-test/target/classes" \
     com.risingwave.java.binding.StreamChunkDemo
+'''
+
+
+[tasks.run-java-binding-stream-chunk-benchmark]
+category = "RiseDev - Java Binding"
+description = "Run the java binding stream chunk benchmark"
+dependencies = [
+    "build-java-binding",
+]
+script = '''
+#!/usr/bin/env bash
+set -ex
+
+RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+
+cd ${RISINGWAVE_ROOT}/java
+
+mvn install --pl java-binding-benchmark --am -DskipTests=true
+
+mvn dependency:copy-dependencies --pl java-binding-benchmark
+
+java -cp "java-binding-benchmark/target/dependency/*:java-binding-benchmark/target/java-binding-benchmark-1.0-SNAPSHOT.jar" \
+             com.risingwave.java.binding.BenchmarkRunner
 '''

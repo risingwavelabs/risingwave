@@ -17,17 +17,37 @@ done
 
 source ci/scripts/common.sh
 
+echo "--- Run trailing spaces check"
+scripts/check/check-trailing-spaces.sh
+
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
+
 echo "--- Run clippy check (release)"
-cargo clippy --release  --all-targets --features "rw-static-link" --locked -- -D warnings
+cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
+
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
 echo "--- Build documentation"
 cargo doc --document-private-items --no-deps
 
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
+
 echo "--- Run doctest"
 cargo test --doc
 
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
+
 echo "--- Run audit check"
 cargo audit
+

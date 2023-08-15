@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
@@ -27,8 +28,9 @@ use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_with::{serde_as, DisplayFromStr};
 
 use super::{
     Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -41,7 +43,8 @@ use crate::sink::utils::{
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
-use crate::source::kafka::PrivateLinkProducerContext;
+use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
+use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
 };
@@ -68,8 +71,94 @@ const fn _default_force_append_only() -> bool {
     false
 }
 
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RdKafkaPropertiesProducer {
+    /// Maximum number of messages allowed on the producer queue. This queue is shared by all
+    /// topics and partitions. A value of 0 disables this limit.
+    #[serde(rename = "properties.queue.buffering.max.messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub queue_buffering_max_messages: Option<usize>,
+
+    /// Maximum total message size sum allowed on the producer queue. This queue is shared by all
+    /// topics and partitions. This property has higher priority than queue.buffering.max.messages.
+    #[serde(rename = "properties.queue.buffering.max.kbytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    queue_buffering_max_kbytes: Option<usize>,
+
+    /// Delay in milliseconds to wait for messages in the producer queue to accumulate before
+    /// constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+    /// larger and more effective (less overhead, improved compression) batches of messages to
+    /// accumulate at the expense of increased message delivery latency.
+    #[serde(rename = "properties.queue.buffering.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    queue_buffering_max_ms: Option<f64>,
+
+    /// When set to true, the producer will ensure that messages are successfully produced exactly
+    /// once and in the original produce order. The following configuration properties are adjusted
+    /// automatically (if not modified by the user) when idempotence is enabled:
+    /// max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
+    /// retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+    /// will fail if user-supplied configuration is incompatible.
+    #[serde(rename = "properties.enable.idempotence")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    enable_idempotence: Option<bool>,
+
+    /// How many times to retry sending a failing Message.
+    #[serde(rename = "properties.message.send.max.retries")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    message_send_max_retries: Option<usize>,
+
+    /// The backoff time in milliseconds before retrying a protocol request.
+    #[serde(rename = "properties.retry.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    retry_backoff_ms: Option<usize>,
+
+    /// Maximum number of messages batched in one MessageSet
+    #[serde(rename = "properties.batch.num.messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    batch_num_messages: Option<usize>,
+
+    /// Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+    /// framing overhead. This limit is applied after the first message has been added to the
+    /// batch, regardless of the first message's size, this is to ensure that messages that exceed
+    /// batch.size are produced.
+    #[serde(rename = "properties.batch.size")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    batch_size: Option<usize>,
+}
+
+impl RdKafkaPropertiesProducer {
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.queue_buffering_max_messages {
+            c.set("queue.buffering.max.messages", v.to_string());
+        }
+        if let Some(v) = self.queue_buffering_max_kbytes {
+            c.set("queue.buffering.max.kbytes", v.to_string());
+        }
+        if let Some(v) = self.queue_buffering_max_ms {
+            c.set("queue.buffering.max.ms", v.to_string());
+        }
+        if let Some(v) = self.enable_idempotence {
+            c.set("enable.idempotence", v.to_string());
+        }
+        if let Some(v) = self.message_send_max_retries {
+            c.set("message.send.max.retries", v.to_string());
+        }
+        if let Some(v) = self.retry_backoff_ms {
+            c.set("retry.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.batch_num_messages {
+            c.set("batch.num.messages", v.to_string());
+        }
+        if let Some(v) = self.batch_size {
+            c.set("batch.size", v.to_string());
+        }
+    }
+}
+
+#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
     #[serde(skip_serializing)]
     pub connector: String, // Must be "kafka" here.
@@ -118,6 +207,9 @@ pub struct KafkaConfig {
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
     pub primary_key: Option<String>,
+
+    #[serde(flatten)]
+    pub rdkafka_properties: RdKafkaPropertiesProducer,
 }
 
 impl KafkaConfig {
@@ -138,6 +230,28 @@ impl KafkaConfig {
             )));
         }
         Ok(config)
+    }
+
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        self.common.set_client(c);
+        self.rdkafka_properties.set_client(c);
+
+        tracing::info!("kafka client starts with: {:?}", c);
+    }
+}
+
+impl From<KafkaConfig> for KafkaProperties {
+    fn from(val: KafkaConfig) -> Self {
+        KafkaProperties {
+            bytes_per_second: None,
+            max_num_messages: None,
+            scan_startup_mode: None,
+            time_offset: None,
+            consumer_group: None,
+            upsert: None,
+            common: val.common,
+            rdkafka_properties: Default::default(),
+        }
     }
 }
 
@@ -193,9 +307,14 @@ impl Sink for KafkaSink {
         }
 
         // Try Kafka connection.
-        // TODO: Reuse the conductor instance we create during validation.
-        KafkaTransactionConductor::new(self.config.clone(), &"validation".to_string()).await?;
-
+        // There is no such interface for kafka producer to validate a connection
+        // use enumerator to validate broker reachability and existence of topic
+        let mut ticker = KafkaSplitEnumerator::new(
+            KafkaProperties::from(self.config.clone()),
+            Arc::new(SourceEnumeratorContext::default()),
+        )
+        .await?;
+        _ = ticker.list_splits().await?;
         Ok(())
     }
 }
@@ -431,6 +550,7 @@ impl KafkaTransactionConductor {
         let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
+            config.set_client(&mut c);
             c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
             config.use_transaction = false;
@@ -503,6 +623,55 @@ mod test {
 
     use super::*;
     use crate::sink::utils::*;
+
+    #[test]
+    fn parse_rdkafka_props() {
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            // RdKafkaPropertiesCommon
+            "properties.message.max.bytes".to_string() => "12345".to_string(),
+            "properties.receive.message.max.bytes".to_string() => "54321".to_string(),
+            // RdKafkaPropertiesProducer
+            "properties.queue.buffering.max.messages".to_string() => "114514".to_string(),
+            "properties.queue.buffering.max.kbytes".to_string() => "114514".to_string(),
+            "properties.queue.buffering.max.ms".to_string() => "114.514".to_string(),
+            "properties.enable.idempotence".to_string() => "false".to_string(),
+            "properties.message.send.max.retries".to_string() => "114514".to_string(),
+            "properties.retry.backoff.ms".to_string() => "114514".to_string(),
+            "properties.batch.num.messages".to_string() => "114514".to_string(),
+            "properties.batch.size".to_string() => "114514".to_string(),
+        };
+        let c = KafkaConfig::from_hashmap(props).unwrap();
+        assert_eq!(
+            c.rdkafka_properties.queue_buffering_max_ms,
+            Some(114.514f64)
+        );
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+
+            "properties.enable.idempotence".to_string() => "True".to_string(), // can only be 'true' or 'false'
+        };
+        assert!(KafkaConfig::from_hashmap(props).is_err());
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+        };
+        assert!(KafkaConfig::from_hashmap(props).is_err());
+    }
 
     #[test]
     fn parse_kafka_config() {

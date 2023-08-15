@@ -355,6 +355,11 @@ profile:
         address: ${id}
         id: grafana-0
 
+      - use: tempo
+        listen-address: "0.0.0.0"
+        address: ${id}
+        id: tempo-0
+
       - use: etcd
         listen-address: "0.0.0.0"
         address: ${id}
@@ -419,7 +424,6 @@ profile:
         id: compactor-0
         listen-address: "0.0.0.0"
         address: ${dns-host:rw-source-0}
-        max-concurrent-task-number: 15
         compaction-worker-threads-number: 15
 
       - use: redpanda
@@ -732,10 +736,21 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
+
   hummock-trace:
     config-path: src/config/hummock-trace.toml
     steps:
       - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-backfill:
+    config-path: "src/config/backfill.toml"
+    steps:
+      - use: minio
+      - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -748,6 +763,7 @@ compose:
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
   etcd: "quay.io/coreos/etcd:latest"
+  tempo: "grafana/tempo:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -1013,9 +1029,6 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
-    # Hint used by meta node
-    max-concurrent-task-number: 15
-
   connector-node:
     # Connector node advertise address
     address: "127.0.0.1"
@@ -1052,12 +1065,14 @@ template:
     # Id of this instance
     id: tempo
 
+    # Listen address of HTTP server and OTLP gRPC collector
     listen-address: "127.0.0.1"
 
-    port: 3200
+    # Advertise address of Tempo
+    address: "127.0.0.1"
 
-    # gRPC listen address of the OTLP collector
-    otlp-address: "127.0.0.1"
+    # HTTP server listen port
+    port: 3200
 
     # gRPC listen port of the OTLP collector
     otlp-port: 4317
