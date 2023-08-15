@@ -376,13 +376,14 @@ pub(crate) fn compute_bounds(
 }
 
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E>(
+pub(crate) async fn iter_chunks<'a, S, E, R>(
     mut iter: S,
     chunk_size: usize,
     builder: &'a mut DataChunkBuilder,
 ) where
     StreamExecutorError: From<E>,
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
+    R: Row,
+    S: Stream<Item = Result<R, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) =
         collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)

@@ -125,17 +125,20 @@ where
 }
 
 /// Collects data chunks from stream of rows.
-pub async fn collect_data_chunk_with_builder<E, S>(
+pub async fn collect_data_chunk_with_builder<E, S, R>(
     stream: &mut S,
     chunk_size: Option<usize>,
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+    R: Row,
+    S: Stream<Item = Result<R, E>> + Unpin,
 {
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
+                println!("appending: {:?}", row);
+                println!("builder: {:?}", builder.data_types());
                 builder.append_one_row_no_finish(row);
             }
             None => break,

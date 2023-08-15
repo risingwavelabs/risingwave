@@ -115,7 +115,7 @@ where
         // Table scan scans a subset of the columns of the upstream table.
         println!("pk: {:?}", self.upstream_table.pk_indices());
         println!("output: {:?}", self.output_indices);
-        let pk_indices = self.upstream_table.pk_indices().to_vec();
+        let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let state_len = pk_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
@@ -141,11 +141,13 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
+        let output_data_types = upstream_table.get_output_data_types();
+        println!("output_data_types: {:?}", output_data_types);
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
             .map(|_| {
-                DataChunkBuilder::new(upstream_table.get_data_types().to_vec(), self.chunk_size)
+                DataChunkBuilder::new(output_data_types.clone(), self.chunk_size)
             })
             .collect_vec();
 
@@ -295,6 +297,7 @@ where
                                             cur_barrier_snapshot_processed_rows +=
                                                 chunk_cardinality;
                                             total_snapshot_processed_rows += chunk_cardinality;
+                                            println!("{:#?}", "yielding chunks");
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
@@ -535,7 +538,7 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_with_pk_range(&range_bounds, vnode, Default::default())
+                .iter_with_pk_range_and_output_indices(&range_bounds, vnode, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?

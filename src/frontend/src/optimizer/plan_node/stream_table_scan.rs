@@ -119,8 +119,8 @@ impl StreamTableScan {
     }
 
     // TODO: Add note to reviewer about safety, because of `generic::Scan` limitation.
-    fn get_upstream_state_table(&self) -> &TableCatalog {
-        self.logical.table_catalog.as_ref().unwrap()
+    fn get_upstream_state_table(&self) -> Option<TableCatalog> {
+        self.logical.table_catalog.as_ref().map(|c| (**c).clone())
     }
 
     /// Build catalog for backfill state
@@ -264,17 +264,10 @@ impl StreamTableScan {
         //
         // On the other hand the arrangement within backfill is a full replica of the upstream
         // state table.
-        let table_output_indices = self
+        let upstream_table_catalog = self
             .get_upstream_state_table()
-            .columns()
-            .iter()
-            .map(|i| {
-                upstream_column_ids
-                    .iter()
-                    .position(|&x| x == i.column_desc.column_id.get_id())
-                    .unwrap() as u32
-            })
-            .collect_vec();
+            .unwrap()
+            .with_output_column_ids(&upstream_column_ids);
         let output_indices = self
             .logical
             .output_column_ids()
@@ -288,7 +281,7 @@ impl StreamTableScan {
             .collect_vec();
 
         let arrangement_table = if self.chain_type == ChainType::ArrangementBackfill {
-            Some(self.get_upstream_state_table().to_internal_table_prost())
+            Some(upstream_table_catalog.to_internal_table_prost())
         } else {
             None
         };

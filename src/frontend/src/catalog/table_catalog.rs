@@ -149,6 +149,9 @@ pub struct TableCatalog {
 
     /// Indicate whether to use watermark cache for state table.
     pub cleaned_by_watermark: bool,
+
+    /// Output indices for replicated state table.
+    pub output_indices: Vec<usize>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -233,6 +236,22 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
+        self
+    }
+
+    pub fn with_output_column_ids(mut self, output_column_ids: &[i32]) -> Self {
+        println!("output_column_ids: {:#?}", output_column_ids);
+        println!("own table ids: {:#?}", self.columns());
+        let output_indices = output_column_ids
+            .iter()
+            .map(|&x| {
+                self.columns()
+                    .iter()
+                    .position(|i| i.column_desc.column_id.get_id() == x)
+                    .unwrap()
+            })
+            .collect_vec();
+        self.output_indices = output_indices;
         self
     }
 
@@ -365,6 +384,7 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+        println!("output indices prost: {:#?}", self.output_indices);
         PbTable {
             id: self.id.table_id,
             schema_id,
@@ -401,6 +421,7 @@ impl TableCatalog {
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
+            output_indices: self.output_indices.iter().map(|x| *x as _).collect(),
         }
     }
 
@@ -507,6 +528,7 @@ impl From<PbTable> for TableCatalog {
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
+            output_indices: tb.output_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -597,6 +619,7 @@ mod tests {
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
+            output_indices: vec![],
         }
         .into();
 
@@ -651,6 +674,7 @@ mod tests {
                 created_at_epoch: None,
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
+                output_indices: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

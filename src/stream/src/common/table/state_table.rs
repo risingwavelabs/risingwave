@@ -295,7 +295,7 @@ where
             StateTableWatermarkCache::new(0)
         };
 
-        let output_indices = vec![];
+        let output_indices = table_catalog.output_indices.iter().map(|i| *i as usize).collect_vec();
 
         Self {
             table_id,
@@ -497,6 +497,12 @@ where
         &self.data_types
     }
 
+    /// FIXME(kwannoel): Should this constructed in plan phase?
+    pub fn get_output_data_types(&self) -> Vec<DataType> {
+        println!("output_indices: {:?}", self.output_indices);
+        self.output_indices.iter().map(|i| self.data_types[*i].clone()).collect_vec()
+    }
+
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
     }
@@ -549,6 +555,16 @@ where
     /// We want to check pk indices of upstream table.
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    /// Get the indices of the primary key columns in the output columns.
+    ///
+    /// Returns `None` if any of the primary key columns is not in the output columns.
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        self.pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
     }
 
     pub fn pk_serde(&self) -> &OrderedRowSerde {
