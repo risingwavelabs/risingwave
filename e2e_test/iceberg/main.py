@@ -12,17 +12,17 @@ def init_iceberg_table(args):
     global spark
     spark = SparkSession.builder.remote(spark_config['url']).getOrCreate()
 
-    # init_table_sqls = [
-    #     "CREATE SCHEMA IF NOT EXISTS demo_db",
-    #     "DROP TABLE IF EXISTS demo_db.demo_table",
-    #     """
-    #     CREATE TABLE demo_db.demo_table (v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');
-    #     """,
-    # ]
-    #
-    # for sql in init_table_sqls:
-    #     print(f"Executing sql: {sql}")
-    #     spark.sql(sql)
+    init_table_sqls = [
+        "CREATE SCHEMA IF NOT EXISTS demo_db",
+        "DROP TABLE IF EXISTS demo_db.demo_table",
+        """
+        CREATE TABLE demo_db.demo_table (v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');
+        """,
+    ]
+
+    for sql in init_table_sqls:
+        print(f"Executing sql: {sql}")
+        spark.sql(sql)
 
 
 def init_risingwave_mv(args):
@@ -57,5 +57,5 @@ if __name__ == "__main__":
     config.read("config.ini")
     print({section: dict(config[section]) for section in config.sections()})
     init_iceberg_table(config)
-    # init_risingwave_mv(config)
+    init_risingwave_mv(config)
     verify_result(config)
