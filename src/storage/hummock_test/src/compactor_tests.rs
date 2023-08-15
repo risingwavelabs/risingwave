@@ -41,7 +41,7 @@ pub(crate) mod tests {
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::MetaStore;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::{HummockVersion, InputLevel, TableOption};
+    use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
@@ -256,84 +256,75 @@ pub(crate) mod tests {
         )
         .await;
         // 2. get compact task
-        let mut compact_task = hummock_manager_ref
+        while let Some(mut compact_task) = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_level_selector(),
             )
             .await
             .unwrap()
-            .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::TTL;
-        compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.table_options = HashMap::from([(
-            0,
-            TableOption {
-                retention_seconds: 64,
-            },
-        )]);
-        compact_task.current_epoch_time = 0;
+        {
+            let compaction_filter_flag = CompactionFilterFlag::TTL;
+            compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
+            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+            compact_task.table_options = HashMap::from([(
+                0,
+                TableOption {
+                    retention_seconds: 64,
+                },
+            )]);
+            compact_task.current_epoch_time = 0;
+
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            let (mut result_task, task_stats) =
+                Compactor::compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
+
+            hummock_manager_ref
+                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .await
+                .unwrap();
+        }
+
         let mut val = b"0"[..].repeat(1 << 10);
-        val.extend_from_slice(&compact_task.watermark.to_be_bytes());
+        val.extend_from_slice(&((TEST_WATERMARK * 1000) << 16).to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         let _recv = compactor_manager.add_compactor(worker_node.id);
-        let version = hummock_manager_ref.get_current_version().await;
-        let group =
-            version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
-
-        compact_task.input_ssts = group
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .map(|level| InputLevel {
-                level_idx: 0,
-                level_type: level.level_type,
-                table_infos: level.table_infos.clone(),
-            })
-            .collect();
-
-        // assert compact_task
-        assert_eq!(compact_task.input_ssts.len(), SST_COUNT as usize);
-
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
-
-        hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
-            .await
-            .unwrap();
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let group =
             version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
 
-        let output_table = group
+        // base level
+        let output_tables = group
             .levels
-            .last()
-            .unwrap()
-            .table_infos
-            .first()
-            .unwrap()
-            .clone();
+            .iter()
+            .flat_map(|level| level.table_infos.clone())
+            .chain(
+                group
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .flat_map(|level| level.table_infos.clone()),
+            )
+            .collect_vec();
+
         storage.wait_version(version).await;
-        let table = storage
-            .sstable_store()
-            .sstable(&output_table, &mut StoreLocalStatistic::default())
-            .await
-            .unwrap();
+        let mut table_key_count = 0;
+        for output_sst in output_tables {
+            let table = storage
+                .sstable_store()
+                .sstable(&output_sst, &mut StoreLocalStatistic::default())
+                .await
+                .unwrap();
+            table_key_count += table.value().meta.key_count;
+        }
 
         // we have removed these 31 keys before watermark 32.
-        assert_eq!(
-            table.value().meta.key_count,
-            (SST_COUNT - TEST_WATERMARK + 1) as u32
-        );
+        assert_eq!(table_key_count, (SST_COUNT - TEST_WATERMARK + 1) as u32);
         let read_epoch = (TEST_WATERMARK * 1000) << 16;
 
         let get_ret = storage
