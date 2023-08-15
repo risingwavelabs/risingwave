@@ -88,10 +88,12 @@ impl BitmapBuilder {
 
     /// Creates a new bitmap with all bits set to 1.
     pub fn filled(len: usize) -> BitmapBuilder {
-        BitmapBuilder {
-            len,
-            data: vec![usize::MAX; Bitmap::vec_len(len)],
+        let vec_len = Bitmap::vec_len(len);
+        let mut data = vec![usize::MAX; vec_len];
+        if vec_len >= 1 && len % BITS != 0 {
+            data[vec_len - 1] = 1 << (len % BITS) - 1;
         }
+        BitmapBuilder { len, data }
     }
 
     /// Writes a new value into a single bit.
