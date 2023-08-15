@@ -147,11 +147,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                agg_funcs: args
-                    .agg_calls
-                    .iter()
-                    .map(|call| build(call))
-                    .try_collect()?,
+                agg_funcs: args.agg_calls.iter().map(build).try_collect()?,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,

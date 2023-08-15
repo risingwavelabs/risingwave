@@ -101,7 +101,7 @@ impl StatelessSimpleAggExecutor {
                             .zip_eq_fast(states.iter_mut())
                             .zip_eq_fast(builders.iter_mut())
                         {
-                            let data = agg.get_result(&state).await?;
+                            let data = agg.get_result(state).await?;
                             trace!("append: {:?}", data);
                             builder.append(data);
                         }

@@ -77,7 +77,7 @@ impl EstimateSize for AggregateState {
     fn estimated_heap_size(&self) -> usize {
         match self {
             Self::Datum(d) => d.estimated_heap_size(),
-            Self::Any(a) => std::mem::size_of_val(&*a) + a.estimated_heap_size(),
+            Self::Any(a) => std::mem::size_of_val(&**a) + a.estimated_heap_size(),
         }
     }
 }

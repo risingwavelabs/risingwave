@@ -118,7 +118,7 @@ impl AggregateFunction for PercentileDisc {
     }
 
     fn init_state(&self) -> AggregateState {
-        AggregateState::Any(Box::new(State::default()))
+        AggregateState::Any(Box::<State>::default())
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {

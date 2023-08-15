@@ -307,7 +307,7 @@ mod tests {
     }
 
     /// Even if there is no element after some insertions and equal number of deletion operations,
-    /// sum AggregateFunction should output `0` instead of `None`.
+    /// sum `AggregateFunction` should output `0` instead of `None`.
     #[test]
     fn sum_no_none() {
         test_agg("(sum:int8 $0:int8)", StreamChunk::from_pretty("I"), None);

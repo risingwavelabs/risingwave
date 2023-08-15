@@ -263,11 +263,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             self.states[self.row_count_index],
             AggState::Value(ref state) => state
         );
-        let row_count = row_count_state
+        let row_count = *row_count_state
             .as_datum()
             .as_ref()
             .expect("row count state should not be NULL")
-            .into_int64();
+            .as_int64();
         if row_count < 0 {
             tracing::error!(group = ?self.group_key_row(), "bad row count");
             panic!("row count should be non-negative")

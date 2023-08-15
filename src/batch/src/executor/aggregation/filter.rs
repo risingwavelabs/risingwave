@@ -24,8 +24,8 @@ use risingwave_expr::Result;
 /// A special aggregator that filters out rows that do not satisfy the given _condition_
 /// and feeds the rows that satisfy to the _inner_ aggregator.
 pub struct Filter {
-    inner: BoxedAggregateFunction,
     condition: Arc<dyn Expression>,
+    inner: BoxedAggregateFunction,
 }
 
 impl Filter {
