@@ -391,7 +391,7 @@ impl VisMut {
         match &self.state {
             VisMutState::Bitmap(b) => b.is_set(idx),
             VisMutState::Compact(c) => {
-                assert!(idx <= *c);
+                assert!(idx < *c);
                 true
             }
             VisMutState::Builder(b) => b.is_set(idx),
