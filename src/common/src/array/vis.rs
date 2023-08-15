@@ -402,15 +402,15 @@ impl VisMut {
     pub fn set(&mut self, n: usize, val: bool) {
         if let VisMutState::Builder(b) = &mut self.state {
             b.set(n, val);
+        } else {
+            let state = mem::replace(&mut self.state, VisMutState::Undefined);
+            let mut builder = match state {
+                VisMutState::Bitmap(b) => b.into(),
+                VisMutState::Compact(c) => BitmapBuilder::filled(c),
+                VisMutState::Builder(_) | VisMutState::Undefined => unreachable!(),
+            };
+            builder.set(n, val);
+            self.state = VisMutState::Builder(builder);
         }
-
-        let state = mem::replace(&mut self.state, VisMutState::Undefined);
-        let mut builder = match state {
-            VisMutState::Bitmap(b) => b.into(),
-            VisMutState::Compact(c) => BitmapBuilder::filled(c),
-            VisMutState::Builder(_) | VisMutState::Undefined => unreachable!(),
-        };
-        builder.set(n, val);
-        self.state = VisMutState::Builder(builder);
     }
 }
