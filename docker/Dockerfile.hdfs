@@ -18,7 +18,7 @@ RUN mkdir -p /risingwave
 WORKDIR /risingwave
 
 COPY ./ /risingwave
-COPY ./docker/hdfs_env.sh /risingwave/hdfs_env.sh 
+COPY ./docker/hdfs_env.sh /risingwave/hdfs_env.sh
 
 ENV PATH /root/.cargo/bin/:$PATH
 
