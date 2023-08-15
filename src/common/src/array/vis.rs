@@ -402,15 +402,118 @@ impl VisMut {
     pub fn set(&mut self, n: usize, val: bool) {
         if let VisMutState::Builder(b) = &mut self.state {
             b.set(n, val);
+        } else {
+            let state = mem::replace(&mut self.state, VisMutState::Undefined);
+            let mut builder = match state {
+                VisMutState::Bitmap(b) => b.into(),
+                VisMutState::Compact(c) => BitmapBuilder::filled(c),
+                VisMutState::Builder(_) | VisMutState::Undefined => unreachable!(),
+            };
+            builder.set(n, val);
+            self.state = VisMutState::Builder(builder);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vis_mut_from_compact() {
+        let n: usize = 128;
+        let vis = Vis::Compact(n);
+        let mut vis = vis.into_mut();
+        assert_eq!(vis.len(), n);
+
+        for i in 0..n {
+            assert!(vis.is_set(i), "{}", i);
+        }
+        vis.set(0, true);
+        for i in 0..n {
+            assert!(vis.is_set(i), "{}", i);
+        }
+        assert_eq!(vis.len(), n);
+
+        let to_false = vec![1usize, 2, 14, 25, 17, 77, 62, 96];
+        for i in &to_false {
+            vis.set(*i, false);
+        }
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), !to_false.contains(&i), "{}", i);
         }
 
-        let state = mem::replace(&mut self.state, VisMutState::Undefined);
-        let mut builder = match state {
-            VisMutState::Bitmap(b) => b.into(),
-            VisMutState::Compact(c) => BitmapBuilder::filled(c),
-            VisMutState::Builder(_) | VisMutState::Undefined => unreachable!(),
+        let vis: Vis = vis.into();
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), !to_false.contains(&i), "{}", i);
+        }
+        let count_ones = match &vis {
+            Vis::Bitmap(b) => b.count_ones(),
+            Vis::Compact(len) => *len,
         };
-        builder.set(n, val);
-        self.state = VisMutState::Builder(builder);
+        assert_eq!(count_ones, n - to_false.len());
+    }
+    #[test]
+    fn test_vis_mut_from_bitmap() {
+        let zeros = 61usize;
+        let ones = 62usize;
+        let n: usize = ones + zeros;
+
+        let mut builder = BitmapBuilder::default();
+        builder.append_bitmap(&Bitmap::zeros(zeros));
+        builder.append_bitmap(&Bitmap::ones(ones));
+
+        let vis = Vis::Bitmap(builder.finish());
+        assert_eq!(vis.len(), n);
+
+        let mut vis = vis.into_mut();
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), i >= zeros, "{}", i);
+        }
+
+        vis.set(0, false);
+        assert_eq!(vis.len(), n);
+        for i in 0..n {
+            assert_eq!(vis.is_set(i), i >= zeros, "{}", i);
+        }
+
+        let toggles = vec![1usize, 2, 14, 25, 17, 77, 62, 96];
+        for i in &toggles {
+            let i = *i;
+            vis.set(i, i < zeros);
+        }
+        assert_eq!(vis.len(), n);
+        for i in 0..zeros {
+            assert_eq!(vis.is_set(i), toggles.contains(&i), "{}", i);
+        }
+        for i in zeros..n {
+            assert_eq!(vis.is_set(i), !toggles.contains(&i), "{}", i);
+        }
+
+        let vis: Vis = vis.into();
+        assert_eq!(vis.len(), n);
+        for i in 0..zeros {
+            assert_eq!(vis.is_set(i), toggles.contains(&i), "{}", i);
+        }
+        for i in zeros..n {
+            assert_eq!(vis.is_set(i), !toggles.contains(&i), "{}", i);
+        }
+        let count_ones = match &vis {
+            Vis::Bitmap(b) => b.count_ones(),
+            Vis::Compact(len) => *len,
+        };
+        let mut expected_ones = ones;
+        for i in &toggles {
+            let i = *i;
+            if i < zeros {
+                expected_ones += 1;
+            } else {
+                expected_ones -= 1;
+            }
+        }
+        assert_eq!(count_ones, expected_ones);
     }
 }
