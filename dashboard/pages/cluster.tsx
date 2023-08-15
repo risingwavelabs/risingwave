@@ -37,6 +37,7 @@ import {
   getClusterInfoFrontend,
   getClusterMetrics,
 } from "./api/cluster"
+import {Metrics, MetricsSample} from "../components/metrics";
 
 function WorkerNodeComponent({
   workerNodeType,
@@ -132,19 +133,9 @@ function WorkerNodeMetricsComponent({
   )
 }
 
-interface MetricsSample {
-  timestamp: number
-  value: number
-}
-
-interface NodeMetrics {
-  metric: { [key: string]: string }
-  sample: MetricsSample[]
-}
-
 interface ClusterNodeMetrics {
-  cpuData: NodeMetrics[]
-  memoryData: NodeMetrics[]
+  cpuData: Metrics[]
+  memoryData: Metrics[]
 }
 
 export default function Cluster() {

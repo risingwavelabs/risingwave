@@ -6,7 +6,7 @@ import {
   ModalContent,
   ModalFooter,
   ModalHeader,
-  ModalOverlay,
+  ModalOverlay, Tab, TabList, TabPanel, TabPanels, Tabs,
   theme,
   useDisclosure,
 } from "@chakra-ui/react"
@@ -21,6 +21,8 @@ import {
   layout,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/streaming_plan"
+import BackPressureTable from "./BackPressureTable";
+import {match} from "assert";
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -133,7 +135,7 @@ export default function FragmentGraph({
         layoutRoot,
         width,
         height,
-        extraInfo: fragmentRoot.data.extraInfo ?? "",
+        extraInfo: `Actor ${fragmentRoot.data.actor_ids?.join(", ")}` || "",
       })
     }
     const fragmentLayout = layout(
@@ -394,23 +396,41 @@ export default function FragmentGraph({
       <Modal isOpen={isOpen} onClose={onClose} size="5xl">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>
-            {currentStreamNode?.operatorId} - {currentStreamNode?.name}
-          </ModalHeader>
-          <ModalCloseButton />
-          <ModalBody>
-            {isOpen && currentStreamNode?.node && (
-              <ReactJson
-                shouldCollapse={({ name }) =>
-                  name === "input" || name === "fields" || name === "streamKey"
-                } // collapse top-level fields for better readability
-                src={currentStreamNode.node}
-                collapsed={3}
-                name={null}
-                displayDataTypes={false}
-              />
-            )}
-          </ModalBody>
+          <Tabs isManual variant='enclosed'>
+            <TabList>
+              <Tab>Info</Tab>
+              <Tab>Back Pressures</Tab>
+            </TabList>
+
+            <TabPanels>
+              <TabPanel>
+                <ModalHeader>
+                  {currentStreamNode?.operatorId} - {currentStreamNode?.name}
+                </ModalHeader>
+                <ModalCloseButton />
+                <ModalBody>
+                  {isOpen && currentStreamNode?.node && (
+                      <ReactJson
+                          shouldCollapse={({ name }) =>
+                              name === "input" || name === "fields" || name === "streamKey"
+                          } // collapse top-level fields for better readability
+                          src={currentStreamNode.node}
+                          collapsed={3}
+                          name={null}
+                          displayDataTypes={false}
+                      />
+                  )}
+                </ModalBody>
+              </TabPanel>
+              {isOpen && currentStreamNode?.node && (
+                  <TabPanel>
+                    <BackPressureTable
+                      selectedActorIds={new Set(currentStreamNode.actor_ids)}
+                    />
+                  </TabPanel>
+                )}
+            </TabPanels>
+          </Tabs>
 
           <ModalFooter>
             <Button colorScheme="blue" mr={3} onClick={onClose}>
