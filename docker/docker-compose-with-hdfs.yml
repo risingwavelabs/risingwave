@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
+    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64
     command:
       - compactor-node
       - "--listen-addr"
@@ -25,10 +25,9 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "<$HADOOP_HOME>:/opt/hadoop/"
+      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop/"
     environment:
       - HADOOP_HOME=/opt/hadoop/
-    entrypoint: ["sh", "-c", "export CLASSPATH=$(find $HADOOP_HOME -iname \"*.jar\" | xargs echo | tr ' ' ':'):${CLASSPATH} && exec \"$@\"", "--"]
     container_name: compactor-0
     healthcheck:
       test:
@@ -38,7 +37,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64"
     command:
       - compute-node
       - "--listen-addr"
@@ -63,10 +62,9 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "<$HADOOP_HOME>:/opt/hadoop/"
+      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop/"
     environment:
       - HADOOP_HOME=/opt/hadoop/
-    entrypoint: ["sh", "-c", "export CLASSPATH=$(find $HADOOP_HOME -iname \"*.jar\" | xargs echo | tr ' ' ':'):${CLASSPATH} && exec \"$@\"", "--"]
     container_name: compute-node-0
     healthcheck:
       test:
@@ -111,8 +109,9 @@ services:
     depends_on: []
     volumes:
       - "etcd-0:/etcd-data"
-      - "<$HADOOP_HOME>:/opt/hadoop/"
-    environment: {}
+      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop/"
+    environment:
+      - HADOOP_HOME=/opt/hadoop/
     container_name: etcd-0
     healthcheck:
       test:
@@ -125,7 +124,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64"
     command:
       - frontend-node
       - "--listen-addr"
@@ -148,7 +147,6 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "<$HADOOP_HOME>:/opt/hadoop/"
     environment:
       RUST_BACKTRACE: "1"
     container_name: frontend-node-0
@@ -183,7 +181,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64"
     command:
       - meta-node
       - "--listen-addr"
@@ -201,7 +199,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+hdfs://<namenode/cluster_name>@<data_directory>"
+      - "hummock+hdfs://sh@001"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -217,10 +215,9 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-      - "<$HADOOP_HOME>:/opt/hadoop/"
+      - "/home/ubuntu/hadoop-2.7.3:/opt/hadoop"
     environment:
       - HADOOP_HOME=/opt/hadoop/
-    entrypoint: ["sh", "-c", "export CLASSPATH=$(find $HADOOP_HOME -iname \"*.jar\" | xargs echo | tr ' ' ':'):${CLASSPATH} && exec \"$@\"", "--"]
     container_name: meta-node-0
     healthcheck:
       test:
@@ -256,7 +253,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:RW_0801_HDFS_273-x86_64
+    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HDFS2-x86_64
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051
