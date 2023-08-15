@@ -71,10 +71,8 @@ enum Commands {
     Trace,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
-    Profile {
-        #[clap(short, long = "sleep")]
-        sleep: u64,
-    },
+    #[clap(subcommand)]
+    Profile(ProfileCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -264,7 +262,7 @@ enum TableCommands {
 }
 
 #[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
 pub struct ScaleResizeCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
@@ -280,9 +278,15 @@ pub struct ScaleResizeCommands {
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host, ..."
     )]
     include_workers: Option<Vec<String>>,
+
+    /// The target parallelism, currently, it is used to limit the target parallelism and only
+    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
+    /// with exclude/include_workers.
+    #[clap(long)]
+    target_parallelism: Option<u32>,
 
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
@@ -413,6 +417,22 @@ enum MetaCommands {
         /// If privatelink is used, specify `connection.id` instead of `connection.name`
         #[clap(long)]
         props: String,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum ProfileCommands {
+    /// CPU profile
+    Cpu {
+        /// The time to active profiling for (in seconds)
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
+    /// Heap profile
+    Heap {
+        /// The output directory of the dumped file
+        #[clap(long = "dir")]
+        dir: String,
     },
 }
 
@@ -579,7 +599,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::validate_source(context, props).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
-        Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
+        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
+            cmd_impl::profile::cpu_profile(context, sleep).await?
+        }
+        Commands::Profile(ProfileCommands::Heap { dir }) => {
+            cmd_impl::profile::heap_profile(context, dir).await?
+        }
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
         }

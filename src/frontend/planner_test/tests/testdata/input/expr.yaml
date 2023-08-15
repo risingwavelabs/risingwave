@@ -433,8 +433,7 @@
     select * from range(1,2);
   expected_outputs:
   - batch_plan
-  # TODO: support this
-  - stream_error
+  - stream_plan
 - sql: |
     select * from max();
   expected_outputs:

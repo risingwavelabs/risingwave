@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, Op, Vis, VisRef};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -260,19 +260,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         &mut self,
         ops: &[Op],
         columns: &[ArrayRef],
-        visibilities: Vec<Option<Bitmap>>,
+        mut visibilities: Vec<Vis>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
-    ) -> StreamExecutorResult<Vec<Option<Bitmap>>> {
-        // convert `Option<Bitmap>` to `Vis` for convenience
-        let mut visibilities = visibilities
-            .into_iter()
-            .map(|v| match v {
-                Some(bitmap) => Vis::from(bitmap),
-                None => Vis::from(ops.len()),
-            })
-            .collect_vec();
+    ) -> StreamExecutorResult<Vec<Vis>> {
         for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
             let column = &columns[*distinct_col];
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
@@ -291,10 +283,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
                 )
                 .await?;
         }
-        Ok(visibilities
-            .into_iter()
-            .map(|v| v.into_visibility())
-            .collect())
+        Ok(visibilities)
     }
 
     /// Flush dedup state caches to dedup tables.
@@ -382,13 +371,6 @@ mod tests {
         dedup_tables
     }
 
-    fn option_bitmap_to_vec_bool(bm: &Option<Bitmap>, size: usize) -> Vec<bool> {
-        match bm {
-            Some(bm) => bm.iter().take(size).collect(),
-            None => vec![true; size],
-        }
-    }
-
     #[tokio::test]
     async fn test_distinct_deduplicater() {
         // Schema:
@@ -444,19 +426,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[0], ops.len()),
+            visibilities[0].iter().collect_vec(),
             vec![true, true] // same as original chunk
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[1], ops.len()),
+            visibilities[1].iter().collect_vec(),
             vec![true, false] // distinct on a
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[2], ops.len()),
+            visibilities[2].iter().collect_vec(),
             vec![true, false] // distinct on a, same as above
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[3], ops.len()),
+            visibilities[3].iter().collect_vec(),
             vec![true, true] // distinct on b
         );
 
@@ -494,19 +476,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[0], ops.len()),
+            visibilities[0].iter().collect_vec(),
             vec![true, false, true] // same as original chunk
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[1], ops.len()),
+            visibilities[1].iter().collect_vec(),
             vec![false, false, true] // distinct on a
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[2], ops.len()),
+            visibilities[2].iter().collect_vec(),
             vec![false, false, true] // distinct on a, same as above
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[3], ops.len()),
+            visibilities[3].iter().collect_vec(),
             vec![false, false, true] // distinct on b
         );
 
@@ -553,11 +535,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[0], ops.len()),
+            visibilities[0].iter().collect_vec(),
             vec![false, true, true] // same as original chunk
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[1], ops.len()),
+            visibilities[1].iter().collect_vec(),
             // distinct on a
             vec![
                 false, // hidden in original chunk
@@ -566,7 +548,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[2], ops.len()),
+            visibilities[2].iter().collect_vec(),
             // distinct on a, same as above
             vec![
                 false, // hidden in original chunk
@@ -575,7 +557,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[3], ops.len()),
+            visibilities[3].iter().collect_vec(),
             // distinct on b
             vec![
                 false, // hidden in original chunk
@@ -652,15 +634,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[0], ops.len()),
+            visibilities[0].iter().collect_vec(),
             vec![true, true, true, false, true] // same as original chunk
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[1], ops.len()),
+            visibilities[1].iter().collect_vec(),
             vec![true, false, false, false, true] // distinct on a
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[2], ops.len()),
+            visibilities[2].iter().collect_vec(),
             vec![true, true, false, false, true] // distinct on b
         );
 
@@ -696,11 +678,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[0], ops.len()),
+            visibilities[0].iter().collect_vec(),
             vec![false, true, true] // same as original chunk
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[1], ops.len()),
+            visibilities[1].iter().collect_vec(),
             // distinct on a
             vec![
                 false, // hidden in original chunk
@@ -709,7 +691,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            option_bitmap_to_vec_bool(&visibilities[2], ops.len()),
+            visibilities[2].iter().collect_vec(),
             // distinct on b
             vec![
                 false, // hidden in original chunk

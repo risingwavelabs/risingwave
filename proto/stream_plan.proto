@@ -169,19 +169,28 @@ message SinkDesc {
   repeated plan_common.ColumnCatalog column_catalogs = 10;
 }
 
+enum SinkLogStoreType {
+  /// Default value is the normal in memory log store to be backward compatible with the previously unset value
+  SINK_LOG_STORE_TYPE_UNSPECIFIED = 0;
+  KV_LOG_STORE = 1;
+  IN_MEMORY_LOG_STORE = 2;
+}
+
 message SinkNode {
   SinkDesc sink_desc = 1;
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
+  SinkLogStoreType log_store_type = 3;
 }
 
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
-  // watermark with `watermark_input_key[i]` column index, it should derive a new watermark
-  // with `watermark_output_key[i]`th expression
-  repeated uint32 watermark_input_key = 2;
-  repeated uint32 watermark_output_key = 3;
+  // watermark with `watermark_input_cols[i]` column index, it should derive a new watermark
+  // with `watermark_output_cols[i]`th expression
+  repeated uint32 watermark_input_cols = 2;
+  repeated uint32 watermark_output_cols = 3;
+  repeated uint32 nondecreasing_exprs = 4;
 }
 
 message FilterNode {
@@ -207,13 +216,8 @@ message MaterializeNode {
 }
 
 message AggCallState {
-  // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
-  message ResultValueState {}
-
-  // use untransformed result as the AggCall's state, used for append-only approx count distinct.
-  message TableState {
-    catalog.Table table = 1;
-  }
+  // the state is stored in the intermediate state table. used for count/sum/append-only extreme.
+  message ValueState {}
 
   // use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
   message MaterializedInputState {
@@ -224,10 +228,11 @@ message AggCallState {
   }
 
   oneof inner {
-    ResultValueState result_value_state = 1;
-    TableState table_state = 2;
+    ValueState value_state = 1;
     MaterializedInputState materialized_input_state = 3;
   }
+  reserved 2;
+  reserved "table_state";
 }
 
 message SimpleAggNode {

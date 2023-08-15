@@ -130,6 +130,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             current_watermark.clone(),
         ));
 
+        // If the input is idle
+        let mut idle_input = true;
+
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -180,6 +183,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         yield Message::Chunk(output_chunk);
                     };
 
+                    idle_input = false;
                     yield Message::Watermark(Watermark::new(
                         event_time_col_idx,
                         watermark_type.clone(),
@@ -192,6 +196,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         let watermark = watermark.val;
                         if current_watermark.default_cmp(&watermark).is_lt() {
                             current_watermark = watermark;
+                            idle_input = false;
                             yield Message::Watermark(Watermark::new(
                                 event_time_col_idx,
                                 watermark_type.clone(),
@@ -229,6 +234,20 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             table.insert(row);
                         }
                         table.commit(barrier.epoch).await?;
+
+                        if idle_input {
+                            // Align watermark
+                            let global_max_watermark =
+                                Self::get_global_max_watermark(&table, watermark_type.clone())
+                                    .await?;
+                            current_watermark = cmp::max_by(
+                                current_watermark,
+                                global_max_watermark,
+                                DefaultOrd::default_cmp,
+                            );
+                        } else {
+                            idle_input = true;
+                        }
                     } else {
                         table.commit_no_data_expected(barrier.epoch);
                     }

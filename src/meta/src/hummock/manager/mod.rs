@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -25,13 +25,13 @@ use fail::fail_point;
 use function_name::named;
 use futures::future::Either;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::{pending_on_none, select_all};
-use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
+use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockLevelsExt, HummockVersionExt,
@@ -951,22 +951,7 @@ where
                 compaction_group_id,
             );
 
-            let (file_count, file_size) = {
-                let mut count = 0;
-                let mut size = 0;
-                for select_level in &compact_task.input_ssts {
-                    count += select_level.table_infos.len();
-
-                    for sst in &select_level.table_infos {
-                        size += sst.get_file_size();
-                    }
-                }
-
-                (count, size)
-            };
-
-            let (compact_task_size, compact_task_file_count, _) =
-                estimate_state_for_compaction(&compact_task);
+            let compact_task_statistics = statistics_compact_task(&compact_task);
 
             let level_type_label = format!(
                 "L{}->L{}",
@@ -985,23 +970,30 @@ where
             self.metrics
                 .compact_task_size
                 .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_size as _);
+                .observe(compact_task_statistics.total_file_size as _);
+
+            self.metrics
+                .compact_task_size
+                .with_label_values(&[
+                    &compaction_group_id.to_string(),
+                    &format!("{} uncompressed", level_type_label),
+                ])
+                .observe(compact_task_statistics.total_uncompressed_file_size as _);
 
             self.metrics
                 .compact_task_file_count
                 .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_file_count as _);
+                .observe(compact_task_statistics.total_file_count as _);
 
             tracing::trace!(
-                    "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
+                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
                     compaction_group_id,
                     level_count,
                     compact_task.input_ssts[0].level_type().as_str_name(),
                     compact_task.input_ssts[0].level_idx,
-                    file_count,
-                    file_size,
                     compact_task.target_level,
-                    start_time.elapsed()
+                    start_time.elapsed(),
+                    compact_task_statistics
                 );
         }
 
@@ -1245,6 +1237,9 @@ where
                     add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
 
+                // apply version delta before we persist this change. If it causes panic we can
+                // recover to a correct state after restarting meta-node.
+                current_version.apply_version_delta(&version_delta);
                 commit_multi_var!(
                     self,
                     None,
@@ -1255,7 +1250,6 @@ where
                     version_stats
                 )?;
                 branched_ssts.commit_memory();
-                current_version.apply_version_delta(&version_delta);
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
@@ -1956,6 +1950,8 @@ where
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
+
+                FullGc,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -2015,6 +2011,14 @@ where
             let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
                 .map(|_| HummockTimerEvent::TtlCompactionTrigger);
 
+            let mut full_gc_interval = tokio::time::interval(Duration::from_secs(
+                hummock_manager.env.opts.full_gc_interval_sec,
+            ));
+            full_gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            full_gc_interval.reset();
+            let full_gc_trigger =
+                IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
@@ -2022,6 +2026,7 @@ where
                 Box::pin(dynamic_tick_trigger),
                 Box::pin(space_reclaim_trigger),
                 Box::pin(ttl_reclaim_trigger),
+                Box::pin(full_gc_trigger),
             ];
 
             let periodic_check_split_group_interval_sec = hummock_manager
@@ -2206,6 +2211,15 @@ where
                                     hummock_manager
                                         .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
                                         .await;
+                                }
+
+                                HummockTimerEvent::FullGc => {
+                                    if hummock_manager
+                                        .start_full_gc(Duration::from_secs(3600))
+                                        .is_ok()
+                                    {
+                                        tracing::info!("Start full GC from meta node.");
+                                    }
                                 }
                             }
                         }
@@ -2414,7 +2428,6 @@ where
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> (JoinHandle<()>, Sender<()>) {
-        use futures::StreamExt;
         let mut compactor_request_streams = FuturesUnordered::new();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let shutdown_rx_shared = shutdown_rx.shared();
@@ -2432,8 +2445,16 @@ where
                     compactor_request_streams.push(future);
                 };
 
+            let mut event_loop_iteration_now = Instant::now();
             loop {
                 let shutdown_rx_shared = shutdown_rx_shared.clone();
+
+                // report
+                hummock_manager
+                    .metrics
+                    .compaction_event_loop_iteration_latency
+                    .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                event_loop_iteration_now = Instant::now();
 
                 tokio::select! {
                     _ = shutdown_rx_shared => {
@@ -2442,19 +2463,54 @@ where
 
                     compactor_stream = compactor_streams_change_rx.recv() => {
                         if let Some((context_id, stream)) = compactor_stream {
-                                push_stream(context_id, stream, &mut compactor_request_streams);
+                            tracing::info!("compactor {} enters the cluster", context_id);
+                            push_stream(context_id, stream, &mut compactor_request_streams);
                         }
                     },
 
                     result = pending_on_none(compactor_request_streams.next()) => {
                         let mut compactor_alive = true;
                         let (context_id, compactor_stream_req) = result;
-                        let (event, stream) = match compactor_stream_req {
+                        let (event, create_at, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
-                                (req.event.unwrap(), stream)
+                                (req.event.unwrap(), req.create_at, stream)
                             }
-                            _ => continue,
+
+                            (Some(Err(err)), _stream) => {
+                                tracing::warn!("compactor {} leaving the cluster with err {:?}", context_id, err);
+                                hummock_manager.compactor_manager
+                                    .remove_compactor(context_id);
+                                continue
+                            }
+
+                            _ => {
+                                tracing::warn!("compactor {} leaving the cluster", context_id);
+                                hummock_manager.compactor_manager
+                                    .remove_compactor(context_id);
+                                continue
+                            },
                         };
+
+                        {
+                            const MAX_CONSUMED_LATENCY_MS: u64 = 500;
+                            let consumed_latency_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                            - create_at;
+                            hummock_manager.metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_latency_ms as _);
+                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
+                                tracing::warn!(
+                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
+                                    event,
+                                    create_at,
+                                    consumed_latency_ms
+                                );
+                            }
+                        }
 
                         match event {
                             RequestEvent::PullTask(PullTask {
@@ -2483,9 +2539,6 @@ where
                                                             e
                                                         );
 
-                                                        hummock_manager.compactor_manager
-                                                            .remove_compactor(compactor.context_id());
-
                                                         compactor_alive = false;
                                                         break;
                                                     }
@@ -2513,8 +2566,6 @@ where
                                             );
 
                                             compactor_alive = false;
-                                            hummock_manager.compactor_manager
-                                                .remove_compactor(context_id);
                                         }
                                     }
                                 } else {
@@ -2580,8 +2631,13 @@ where
                             }
                         }
 
+
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
+                        } else {
+                            tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
+                            hummock_manager.compactor_manager
+                                .remove_compactor(context_id);
                         }
                     }
                 }
@@ -2733,32 +2789,24 @@ async fn write_exclusive_cluster_id(
 ) -> Result<()> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
-
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    let metadata = match object_store.list(&cluster_id_dir).await {
-        Ok(metadata) => metadata,
-        Err(_) => {
-            return Err(ObjectError::internal(
-                "Fail to access remote object storage,
-            please check if your Access Key and Secret Key are configured correctly. ",
-            )
-            .into())
-        }
-    };
-
-    if metadata.is_empty() {
-        object_store
-            .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
-            .await?;
-        Ok(())
-    } else {
-        let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
-        Err(ObjectError::internal(format!(
-            "Data directory is already used by another cluster with id {:?}, please try again after deleting the `{:?}`.",
-            String::from_utf8(cluster_id.to_vec()).unwrap(), cluster_id_full_path,
+    match object_store.read(&cluster_id_full_path, None).await {
+        Ok(cluster_id) => Err(ObjectError::internal(format!(
+            "Data directory is already used by another cluster with id {:?}, path {}.",
+            String::from_utf8(cluster_id.to_vec()).unwrap(),
+            cluster_id_full_path,
         ))
-        .into())
+        .into()),
+        Err(e) => {
+            if e.is_object_not_found_error() {
+                object_store
+                    .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
+                    .await?;
+                return Ok(());
+            }
+            Err(e.into())
+        }
     }
 }
 

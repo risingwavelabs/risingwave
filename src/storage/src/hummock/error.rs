@@ -17,7 +17,6 @@ use std::backtrace::Backtrace;
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
-
 #[derive(Error, Debug)]
 enum HummockErrorInner {
     #[error("Magic number mismatch: expected {expected}, found: {found}.")]
@@ -51,8 +50,8 @@ enum HummockErrorInner {
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
     CompactionExecutor(String),
-    #[error("TieredCache error {0}.")]
-    TieredCache(String),
+    #[error("FileCache error {0}.")]
+    FileCache(String),
     #[error("SstObjectIdTracker error {0}.")]
     SstObjectIdTrackerError(String),
     #[error("CompactionGroup error {0}.")]
@@ -134,6 +133,10 @@ impl HummockError {
         matches!(self.inner, HummockErrorInner::MetaError(..))
     }
 
+    pub fn is_object_error(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::ObjectIoError { .. })
+    }
+
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }
@@ -146,8 +149,8 @@ impl HummockError {
         HummockErrorInner::CompactionGroupError(error.to_string()).into()
     }
 
-    pub fn tiered_cache(error: impl ToString) -> HummockError {
-        HummockErrorInner::TieredCache(error.to_string()).into()
+    pub fn file_cache(error: impl ToString) -> HummockError {
+        HummockErrorInner::FileCache(error.to_string()).into()
     }
 
     pub fn sstable_upload_error(error: impl ToString) -> HummockError {

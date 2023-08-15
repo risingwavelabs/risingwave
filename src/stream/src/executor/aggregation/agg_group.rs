@@ -17,8 +17,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
-use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
@@ -160,7 +159,7 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     group_key: Option<GroupKey>,
 
     /// Current managed states for all [`AggCall`]s.
-    states: Vec<AggState<S>>,
+    states: Vec<AggState>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
@@ -168,7 +167,7 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
 
-    _phantom: PhantomData<Strtg>,
+    _phantom: PhantomData<(S, Strtg)>,
 }
 
 impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
@@ -202,7 +201,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
+    ) -> StreamExecutorResult<Self> {
         let prev_outputs: Option<OwnedRow> = result_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
@@ -210,19 +209,18 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
-        let states =
-            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
-                AggState::create(
-                    agg_call,
-                    &storages[idx],
-                    prev_outputs.as_ref().map(|outputs| &outputs[idx]),
-                    pk_indices,
-                    group_key.as_ref(),
-                    extreme_cache_size,
-                    input_schema,
-                )
-            }))
-            .await?;
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            let state = AggState::create(
+                agg_call,
+                &storages[idx],
+                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                pk_indices,
+                extreme_cache_size,
+                input_schema,
+            )?;
+            states.push(state);
+        }
 
         Ok(Self {
             group_key,
@@ -265,6 +263,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         );
         let row_count = row_count_state
             .get_output()
+            .expect("failed to get agg output")
             .expect("row count should never output NULL")
             .into_int64();
         if row_count < 0 {
@@ -279,53 +278,29 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     }
 
     /// Apply input chunk to all managed agg states.
+    ///
+    /// `mappings` contains the column mappings from input chunk to each agg call.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
-        storages: &mut [AggStateStorage<S>],
-        ops: &[Op],
-        columns: &[ArrayRef],
-        visibilities: Vec<Option<Bitmap>>,
-        materialized: &Bitmap,
+        chunk: &StreamChunk,
+        calls: &[AggCall],
+        visibilities: Vec<Vis>,
     ) -> StreamExecutorResult<()> {
         if self.curr_row_count() == 0 {
             tracing::trace!(group = ?self.group_key_row(), "first time see this group");
         }
-
-        for (((state, storage), visibility), materialized) in self
-            .states
-            .iter_mut()
-            .zip_eq_fast(storages)
-            .zip_eq_fast(&visibilities)
-            .zip_eq_fast(materialized.iter())
+        for ((state, call), visibility) in (self.states.iter_mut())
+            .zip_eq_fast(calls)
+            .zip_eq_fast(visibilities)
         {
-            state.apply_chunk(ops, visibility.as_ref(), columns, storage, materialized)?;
+            state.apply_chunk(chunk, call, visibility).await?;
         }
 
         if self.curr_row_count() == 0 {
             tracing::trace!(group = ?self.group_key_row(), "last time see this group");
         }
 
-        Ok(())
-    }
-
-    /// Flush in-memory state into state table if needed.
-    /// The calling order of this method and `get_outputs` doesn't matter, but this method
-    /// must be called before committing state tables.
-    pub async fn flush_state_if_needed(
-        &self,
-        storages: &mut [AggStateStorage<S>],
-    ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
-            |(state, storage)| match state {
-                AggState::Table(state) => Some(state.flush_state_if_needed(
-                    must_match!(storage, AggStateStorage::Table { table } => table),
-                    self.group_key(),
-                )),
-                _ => None,
-            },
-        ))
-        .await?;
         Ok(())
     }
 

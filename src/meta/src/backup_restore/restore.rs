@@ -328,6 +328,8 @@ mod tests {
             backup_storage_url: Some("backup_storage_url".to_string()),
             backup_storage_directory: Some("backup_storage_directory".to_string()),
             telemetry_enabled: Some(false),
+            parallel_compact_size_mb: Some(255),
+            max_concurrent_creating_streaming_jobs: Some(1),
         }
     }
 

@@ -15,7 +15,8 @@
 use risingwave_pb::expr::expr_node;
 
 use super::{ExprImpl, ExprVisitor};
-struct ImpureAnalyzer {}
+use crate::expr::FunctionCall;
+pub(crate) struct ImpureAnalyzer {}
 
 impl ExprVisitor<bool> for ImpureAnalyzer {
     fn merge(a: bool, b: bool) -> bool {
@@ -64,6 +65,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
             | expr_node::Type::ToTimestamp1
+            | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
             | expr_node::Type::SubtractWithTimeZone
@@ -125,6 +127,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sqrt
             | expr_node::Type::Cbrt
             | expr_node::Type::Sign
+            | expr_node::Type::Scale
+            | expr_node::Type::MinScale
+            | expr_node::Type::TrimScale
             | expr_node::Type::Left
             | expr_node::Type::Right
             | expr_node::Type::Degrees
@@ -181,7 +186,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
-            | expr_node::Type::StringToArray =>
+            | expr_node::Type::StringToArray
+            | expr_node::Type::Format =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
@@ -201,9 +207,15 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
 pub fn is_pure(expr: &ExprImpl) -> bool {
     !is_impure(expr)
 }
+
 pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer {};
     a.visit_expr(expr)
+}
+
+pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
+    let mut a = ImpureAnalyzer {};
+    a.visit_function_call(func_call)
 }
 
 #[cfg(test)]
