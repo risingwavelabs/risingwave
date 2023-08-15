@@ -1,3 +1,6 @@
+# FIXME: This test failed on recovery test.
+# Because the stored state of updatable `approx_count_distinct` is incorrect.
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
