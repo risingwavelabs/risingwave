@@ -235,12 +235,12 @@
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
   logical_plan: |-
-    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr2, rw_users.name] }
+    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, rw_users.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
       │ └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = rw_tables.schema_id), output: all }
       │   ├─LogicalShare { id: 16 }
-      │   │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32] }
+      │   │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2] }
       │   │   └─LogicalShare { id: 14 }
       │   │     └─LogicalUnion { all: true }
       │   │       ├─LogicalUnion { all: true }
@@ -272,45 +272,41 @@
               └─LogicalScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
   batch_plan: |-
     BatchExchange { order: [rw_schemas.name ASC, rw_tables.name ASC], dist: Single }
-    └─BatchProject
-      ├─exprs:
-      │ ┌─rw_schemas.name
-      │ ├─rw_tables.name
-      │ ├─Case((Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'r':Varchar), 'table':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'v':Varchar), 'view':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'm':Varchar), 'materialized view':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'i':Varchar), 'index':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'S':Varchar), 'sequence':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 's':Varchar), 'special':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 't':Varchar), 'TOAST table':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'f':Varchar), 'foreign table':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'p':Varchar), 'partitioned table':Varchar, (Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) = 'I':Varchar), 'partitioned index':Varchar) as $expr1
-      │ └─rw_users.name
-      └─BatchSort { order: [rw_schemas.name ASC, rw_tables.name ASC] }
-        └─BatchHashJoin { type: LeftOuter, predicate: rw_tables.owner = rw_users.id, output: all }
-          ├─BatchExchange { order: [], dist: HashShard(rw_tables.owner) }
-          │ └─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id, output: all }
-          │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
-          │   │ └─BatchUnion { all: true }
-          │   │   ├─BatchProject { exprs: [rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner] }
-          │   │   │ └─BatchFilter { predicate: true }
-          │   │   │   └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
-          │   │   ├─BatchProject { exprs: [rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner] }
-          │   │   │ └─BatchFilter { predicate: true }
-          │   │   │   └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
-          │   │   ├─BatchProject { exprs: [rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner] }
-          │   │   │ └─BatchFilter { predicate: null:Boolean }
-          │   │   │   └─BatchScan { table: rw_sources, columns: [rw_sources.name, rw_sources.schema_id, rw_sources.owner], distribution: Single }
-          │   │   ├─BatchProject { exprs: [rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner] }
-          │   │   │ └─BatchFilter { predicate: false:Boolean }
-          │   │   │   └─BatchScan { table: rw_indexes, columns: [rw_indexes.name, rw_indexes.schema_id, rw_indexes.owner], distribution: Single }
-          │   │   ├─BatchProject { exprs: [rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner] }
-          │   │   │ └─BatchFilter { predicate: null:Boolean }
-          │   │   │   └─BatchScan { table: rw_sinks, columns: [rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner], distribution: Single }
-          │   │   ├─BatchProject { exprs: [rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner] }
-          │   │   │ └─BatchFilter { predicate: true }
-          │   │   │   └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
-          │   │   └─BatchProject { exprs: [rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner] }
-          │   │     └─BatchFilter { predicate: true }
-          │   │       └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
-          │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-          │     └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
-          │       └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
-          └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-            └─BatchProject { exprs: [rw_users.name, rw_users.id] }
-              └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+    └─BatchProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr2, rw_users.name] }
+      └─BatchProject { exprs: [rw_tables.name, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, rw_schemas.name, rw_users.name] }
+        └─BatchSort { order: [rw_schemas.name ASC, rw_tables.name ASC] }
+          └─BatchHashJoin { type: LeftOuter, predicate: rw_tables.owner = rw_users.id, output: all }
+            ├─BatchExchange { order: [], dist: HashShard(rw_tables.owner) }
+            │ └─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id, output: all }
+            │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
+            │   │ └─BatchUnion { all: true }
+            │   │   ├─BatchProject { exprs: [rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner] }
+            │   │   │ └─BatchFilter { predicate: true }
+            │   │   │   └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner] }
+            │   │   │ └─BatchFilter { predicate: true }
+            │   │   │   └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner] }
+            │   │   │ └─BatchFilter { predicate: null:Boolean }
+            │   │   │   └─BatchScan { table: rw_sources, columns: [rw_sources.name, rw_sources.schema_id, rw_sources.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner] }
+            │   │   │ └─BatchFilter { predicate: false:Boolean }
+            │   │   │   └─BatchScan { table: rw_indexes, columns: [rw_indexes.name, rw_indexes.schema_id, rw_indexes.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner] }
+            │   │   │ └─BatchFilter { predicate: null:Boolean }
+            │   │   │   └─BatchScan { table: rw_sinks, columns: [rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner], distribution: Single }
+            │   │   ├─BatchProject { exprs: [rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner] }
+            │   │   │ └─BatchFilter { predicate: true }
+            │   │   │   └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
+            │   │   └─BatchProject { exprs: [rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner] }
+            │   │     └─BatchFilter { predicate: true }
+            │   │       └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
+            │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+            │     └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
+            │       └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+            └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
+              └─BatchProject { exprs: [rw_users.name, rw_users.id] }
+                └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
 - sql: |
     create table auction (date_time date);
     select * from hop( auction, auction.date_time, INTERVAL '1', INTERVAL '3600' ) AS hop_1

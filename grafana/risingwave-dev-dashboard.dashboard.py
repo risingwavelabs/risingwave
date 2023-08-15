@@ -1602,6 +1602,7 @@ def section_hummock(panels):
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
     file_cache_get_filter = "op='get'"
+
     return [
         panels.row("Hummock"),
         panels.timeseries_latency(
@@ -1743,6 +1744,36 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_bytes(
+            "Materialized View Read Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_iter_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id) + sum((histogram_quantile({quantile}, sum(rate({metric("state_store_get_key_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({metric("state_store_get_value_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id)',
+                        f"read p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+        panels.timeseries_bytes(
+            "Materialized View Write Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_write_batch_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id, table_name)',
+                        f"write p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+
         panels.timeseries_count(
             "Read Item Count - Iter",
             "",
@@ -2404,6 +2435,48 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     [
                         panels.target(f"{metric('storage_full_gc_last_object_id_watermark')}",
                                       "full_gc_last_object_id_watermark"),
+                    ],
+                ),
+
+                panels.timeseries_latency_ms(
+                    "Compaction Event Loop Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"meta consumed latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"meta iteration latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"compactor consumed latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"compactor iteration latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
                     ],
                 ),
             ],

@@ -17,7 +17,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -80,7 +80,7 @@ use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
-use tokio::time;
+use tokio::time::{self};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
@@ -1204,6 +1204,10 @@ impl HummockMetaClient for MetaClient {
                         context_id: self.worker_id(),
                     },
                 )),
+                create_at: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
             })
             .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
 
@@ -1254,8 +1258,10 @@ impl GrpcMetaClientCore {
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
-        let hummock_client = HummockManagerServiceClient::new(channel.clone());
-        let notification_client = NotificationServiceClient::new(channel.clone());
+        let hummock_client =
+            HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let notification_client =
+            NotificationServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let stream_client =
             StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());

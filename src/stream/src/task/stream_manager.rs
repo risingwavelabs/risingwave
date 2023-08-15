@@ -41,7 +41,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::{StreamError, StreamResult};
+use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -605,9 +605,10 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
     ) -> StreamResult<()> {
         for &actor_id in actors {
-            let actor = self.actors.remove(&actor_id).ok_or_else(|| {
-                StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
-            })?;
+            let actor = self
+                .actors
+                .remove(&actor_id)
+                .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))?;
             let mview_definition = &actor.mview_definition;
             let actor_context = ActorContext::create_with_metrics(
                 actor_id,
