@@ -738,6 +738,10 @@ pub struct SystemConfig {
 
     #[serde(default = "default::system::telemetry_enabled")]
     pub telemetry_enabled: Option<bool>,
+
+    /// Max number of concurrent creating streaming jobs.
+    #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
+    pub max_concurrent_creating_streaming_jobs: Option<u32>,
 }
 
 impl SystemConfig {
@@ -754,6 +758,7 @@ impl SystemConfig {
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
             telemetry_enabled: self.telemetry_enabled,
+            max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
         }
     }
 }
@@ -1158,6 +1163,10 @@ pub mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+
+        pub fn max_concurrent_creating_streaming_jobs() -> Option<u32> {
+            system_param::default::max_concurrent_creating_streaming_jobs()
         }
     }
 
