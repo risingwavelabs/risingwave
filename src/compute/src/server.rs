@@ -404,11 +404,18 @@ pub async fn compute_node_serve(
             .add_service(
                 ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
             )
-            .add_service(
-                AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(
-                    StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX),
-                ),
-            )
+            .add_service({
+                let srv =
+                    StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
+                #[cfg(madsim)]
+                {
+                    srv
+                }
+                #[cfg(not(madsim))]
+                {
+                    AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(srv)
+                }
+            })
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
