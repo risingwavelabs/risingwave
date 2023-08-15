@@ -5583,10 +5583,9 @@ dependencies = [
 name = "prost-helpers"
 version = "0.1.0"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.28",
  "workspace-hack",
 ]
 
@@ -6615,7 +6614,7 @@ dependencies = [
  "itertools 0.11.0",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.28",
 ]
 
 [[package]]
