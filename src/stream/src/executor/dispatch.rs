@@ -100,16 +100,6 @@ impl DispatchExecutorInner {
             .actor_output_buffer_blocking_duration_ns
             .with_label_values(&[&self.actor_id_str])
             .inc_by(start_time.elapsed().as_nanos() as u64);
-        let x = self
-            .metrics
-            .actor_output_buffer_blocking_duration_ns
-            .get_metric_with_label_values(&[&self.actor_id_str])
-            .unwrap()
-            .get();
-        tracing::info!(
-            "dispatch blocking duration: {:?}",
-            std::time::Duration::from_nanos(x)
-        );
         Ok(())
     }
 
