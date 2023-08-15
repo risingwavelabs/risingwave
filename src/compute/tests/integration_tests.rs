@@ -17,7 +17,6 @@
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 
-use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,10 +46,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MockExternalTableReader,
-    MySqlOffset, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
 };
-use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::source::{MockExternalTableReader, SourceCtrlOpts};
 use risingwave_connector::ConnectorParams;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -60,7 +58,6 @@ use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
@@ -115,8 +112,6 @@ impl SingleChunkExecutor {
 
 // mock upstream binlog offset from "1.binlog, pos=0"
 pub struct MockOffsetGenExecutor {
-    ctx: ActorContextRef,
-
     upstream: Option<StreamBoxedExecutor>,
 
     schema: Schema,
@@ -129,14 +124,8 @@ pub struct MockOffsetGenExecutor {
 }
 
 impl MockOffsetGenExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        upstream: StreamBoxedExecutor,
-        schema: Schema,
-        pk_indices: PkIndices,
-    ) -> Self {
+    pub fn new(upstream: StreamBoxedExecutor, schema: Schema, pk_indices: PkIndices) -> Self {
         Self {
-            ctx,
             upstream: Some(upstream),
             schema,
             pk_indices,
@@ -239,12 +228,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let actor_ctx = ActorContext::create(0x3a3a3a);
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
-    let mock_offset_executor = MockOffsetGenExecutor::new(
-        actor_ctx,
-        Box::new(source),
-        schema.clone(),
-        pk_indices.clone(),
-    );
+    let mock_offset_executor =
+        MockOffsetGenExecutor::new(Box::new(source), schema.clone(), pk_indices.clone());
 
     let binlog_file = String::from("1.binlog");
 
@@ -267,15 +252,12 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         vec![OrderType::ascending()],
         pk_indices,
         vec![0, 1],
-        Distribution::fallback(),
     );
 
     let cdc_backfill = CdcBackfillExecutor::new(
-        memory_state_store.clone(),
         ActorContext::create(0x1a),
         external_table,
         Box::new(mock_offset_executor),
-        None,
         vec![0, 1],
         None,
         schema.clone(),
@@ -392,7 +374,7 @@ async fn consume_message_stream(mut stream: BoxedMessageStream) -> StreamResult<
                     break;
                 }
                 Message::Chunk(c) => {
-                    println!("[output] chunk: {:#?}", c);
+                    println!("[mv] chunk: {:#?}", c);
                 }
                 Message::Barrier(b) => {
                     if let Some(m) = b.mutation && matches!(*m, Mutation::Stop(_)) {

@@ -21,14 +21,14 @@ use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row;
+
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::store::PrefetchOptions;
+
+
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::get_second;
+
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -37,8 +37,7 @@ use crate::executor::backfill::upstream_table::snapshot::{
 };
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk,
+    check_all_vnode_finished, construct_initial_finished_state, get_new_pos, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{

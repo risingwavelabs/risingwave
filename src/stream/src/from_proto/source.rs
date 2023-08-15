@@ -15,19 +15,15 @@
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::cdc::CdcProperties;
-use risingwave_connector::source::external::{
-    ExternalTableReaderImpl, ExternalTableType, MySqlExternalTableReader, SchemaTableName,
-};
-use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
+use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
-use risingwave_storage::table::Distribution;
+
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
 use crate::executor::external::ExternalStorageTable;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::source_executor::SourceExecutor;
@@ -162,15 +158,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                         .collect_vec();
 
-                    // let table_reader = match table_type {
-                    //     ExternalTableType::MySQL => {
-                    //         MySqlExternalTableReader::new(source.properties.clone(), schema.clone())?
-                    //     }
-                    //     _ => {
-                    //         unreachable!("cdc backfill source only support mysql")
-                    //     }
-                    // };
-
                     let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
                     let external_table = ExternalStorageTable::new(
                          TableId::new(table_desc.table_id),
@@ -180,21 +167,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         order_types.clone(),
                         pk_indices.clone(),
                          (0..table_desc.columns.len()).collect_vec(),
-                        Distribution::fallback(),
                     );
 
                     let cdc_backfill = CdcBackfillExecutor::new(
-                        store,
                         params.actor_context.clone(),
                         external_table,
                         Box::new(source_exec),
-                        None,
                         (0..source.columns.len()).collect_vec(),
                         None,
                         schema.clone(),
                         pk_indices,
                         params.executor_stats,
-                        4,  // todo: make this configurable
+                        source_ctrl_opts.chunk_size
                     );
                     Ok(Box::new(cdc_backfill))
 

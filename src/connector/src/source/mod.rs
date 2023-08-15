@@ -31,8 +31,8 @@ pub use kinesis::KINESIS_CONNECTOR;
 pub mod external;
 mod manager;
 mod mock_external_table;
-
 pub use manager::SourceColumnDesc;
+pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;

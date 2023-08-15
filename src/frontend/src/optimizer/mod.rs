@@ -56,7 +56,7 @@ use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
-    BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamTableScan,
+    BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;

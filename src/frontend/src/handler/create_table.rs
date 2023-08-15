@@ -45,7 +45,7 @@ use crate::handler::create_source::{
     validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
+use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::{CheckRelationError, SessionImpl};

@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::stream_plan::ChainType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -32,7 +31,6 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::Convention::Stream;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,

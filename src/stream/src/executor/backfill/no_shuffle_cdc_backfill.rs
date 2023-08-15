@@ -22,34 +22,23 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::Datum;
-use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
-use risingwave_connector::source::SplitImpl;
-use risingwave_storage::StateStore;
+use risingwave_connector::source::external::BinlogOffset;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
-use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    construct_initial_finished_state, get_chunk_last_binlog_offset, get_new_pos, mapping_chunk,
-    mapping_message, mark_cdc_chunk, restore_backfill_progress,
+    get_chunk_last_binlog_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
-    StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-pub struct CdcBackfillExecutor<S: StateStore> {
-    /// dumb field for binding the StateStore trait
-    dumb_store: S,
-
+pub struct CdcBackfillExecutor {
     actor_ctx: ActorContextRef,
 
     /// Upstream external table
@@ -57,9 +46,6 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     /// Upstream changelog with the same schema with the external table.
     upstream: BoxedExecutor,
-
-    /// Internal state table for persisting state of backfill state.
-    state_table: Option<StateTable<S>>,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     /// User may select a subset of columns from the upstream table.
@@ -74,17 +60,12 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     chunk_size: usize,
 }
 
-impl<S> CdcBackfillExecutor<S>
-where
-    S: StateStore,
-{
+impl CdcBackfillExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        store: S,
         actor_ctx: ActorContextRef,
         upstream_table: ExternalStorageTable,
         upstream: BoxedExecutor,
-        state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         _progress: Option<CreateMviewProgress>,
         schema: Schema,
@@ -93,7 +74,6 @@ where
         chunk_size: usize,
     ) -> Self {
         Self {
-            dumb_store: store,
             info: ExecutorInfo {
                 schema,
                 pk_indices,
@@ -101,7 +81,6 @@ where
             },
             upstream_table,
             upstream,
-            state_table,
             output_indices,
             actor_id: 0,
             metrics,
@@ -111,12 +90,11 @@ where
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self) {
+    async fn execute_inner(self) {
         tracing::info!("cdc backfill started: actor {:?}", self.actor_ctx.id);
 
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
 
         let pk_order = self
             .upstream_table
@@ -131,7 +109,7 @@ where
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
-        let mut current_pk_pos: Option<OwnedRow> = None;
+        let mut current_pk_pos: Option<OwnedRow>;
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -166,9 +144,6 @@ where
             #[for_await]
             for msg in upstream {
                 if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                    if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
-                        state_table.commit_no_data_expected(barrier.epoch);
-                    }
                     yield msg;
                 }
             }
@@ -176,17 +151,10 @@ where
             return Ok(());
         }
 
-        tracing::info!("valid cdc backfill: actor {:?}", self.actor_ctx.id);
-        if let Some(state_table) = self.state_table.as_mut() {
-            state_table.init_epoch(first_barrier.epoch);
-        }
+        tracing::debug!("start cdc backfill: actor {:?}", self.actor_ctx.id);
 
         // TODO(siyuan): restore backfill offset from persistent state
-        let (backfill_offset, is_finished) = if let Some(state_table) = self.state_table.as_mut() {
-            restore_backfill_progress(state_table, state_len).await?
-        } else {
-            (None, false)
-        };
+        let (backfill_offset, is_finished) = (None, false);
 
         current_pk_pos = backfill_offset;
 
@@ -209,18 +177,14 @@ where
         // | f                    | f              | t                |
         let to_backfill = !is_finished && !is_snapshot_empty;
 
-        // Use these to persist state.
-        // They contain the backfill position, as well as the progress.
-        let mut current_state: Vec<Datum> = vec![None; state_len];
-        let mut old_state: Option<Vec<Datum>> = None;
-
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
+        #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
 
-        let mut last_binlog_offset: Option<BinlogOffset> = None;
+        let mut last_binlog_offset: Option<BinlogOffset>;
 
         let mut consumed_binlog_offset: Option<BinlogOffset> = None;
 
@@ -249,7 +213,7 @@ where
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             // TODO: we can setup debezium connector starts at latest offset to avoid pulling old
             // events.
-            let first_chunk = Pin::new(&mut upstream).peek().await;
+            let _ = Pin::new(&mut upstream).peek().await;
 
             tracing::info!(
                 "start the bacfill loop: [initial] binlog offset: {:?}",
@@ -331,17 +295,7 @@ where
                                         last_binlog_offset = consumed_binlog_offset.clone();
                                     }
 
-                                    // Persist state on barrier
-                                    // TODO(siyuan): persist the `last_binlog_offset`
-                                    Self::persist_state(
-                                        barrier.epoch,
-                                        &mut self.state_table,
-                                        false,
-                                        &current_pk_pos,
-                                        &mut old_state,
-                                        &mut current_state,
-                                    )
-                                    .await?;
+                                    // TODO(siyuan): Persist state on barrier
 
                                     yield Message::Barrier(barrier);
                                     // Break the for loop and start a new snapshot read stream.
@@ -353,7 +307,7 @@ where
                                         &chunk,
                                     )?;
 
-                                    tracing::info!(
+                                    tracing::trace!(
                                         "recv changelog chunk: bin offset: {:?}, capactiy: {}",
                                         chunk_binlog_offset,
                                         chunk.capacity()
@@ -365,7 +319,7 @@ where
                                     if let Some(last_binlog_offset) = &last_binlog_offset {
                                         if let Some(chunk_binlog_offset) = chunk_binlog_offset {
                                             if chunk_binlog_offset < *last_binlog_offset {
-                                                tracing::info!(
+                                                tracing::trace!(
                                                     "skip changelog chunk: offset: {:?}, capacity: {}",
                                                     chunk_binlog_offset,
                                                     chunk.capacity()
@@ -386,7 +340,7 @@ where
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
-                                    tracing::info!(
+                                    tracing::debug!(
                                         "snapshot read stream ends: last_binlog_offset {:?}",
                                         last_binlog_offset
                                     );
@@ -413,12 +367,6 @@ where
                                     // just use the last row to update `current_pos`.
                                     current_pk_pos =
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                                    tracing::info!(
-                                        "snapshot got chunk: pos: {:?}, {:#?}",
-                                        current_pk_pos,
-                                        chunk
-                                    );
 
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -448,42 +396,13 @@ where
             // upstream offsets will be removed from the message before forwarding to
             // downstream
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
-                        state_table.commit_no_data_expected(barrier.epoch);
-                    }
                 yield msg;
             }
         }
     }
-
-    async fn persist_state(
-        epoch: EpochPair,
-        table: &mut Option<StateTable<S>>,
-        is_finished: bool,
-        current_pos: &Option<OwnedRow>,
-        old_state: &mut Option<Vec<Datum>>,
-        current_state: &mut [Datum],
-    ) -> StreamExecutorResult<()> {
-        // Backwards compatibility with no state table in backfill.
-        let Some(table) = table else {
-            return Ok(())
-        };
-        utils::persist_state(
-            epoch,
-            table,
-            is_finished,
-            current_pos,
-            old_state,
-            current_state,
-        )
-        .await
-    }
 }
 
-impl<S> Executor for CdcBackfillExecutor<S>
-where
-    S: StateStore,
-{
+impl Executor for CdcBackfillExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

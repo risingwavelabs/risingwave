@@ -90,16 +90,16 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
+    
 
-    use futures::{pin_mut, Stream};
-    use futures_async_stream::stream;
+    use futures::{pin_mut};
+    
     use mysql_async::prelude::*;
     use mysql_async::Row;
-    use risingwave_common::array::DataChunk;
+    
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{DataType, Decimal, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use tokio_stream::StreamExt;
 
     // manual test case
@@ -121,7 +121,7 @@ mod tests {
             let mut mysql_row = row.unwrap();
             let mut datums = vec![];
 
-            let mysql_columns = mysql_row.columns_ref();
+            let _mysql_columns = mysql_row.columns_ref();
             for i in 0..mysql_row.len() {
                 let rw_field = &t1schema.fields[i];
                 let datum = match rw_field.data_type {

@@ -17,7 +17,6 @@ use std::sync::atomic::AtomicUsize;
 
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
-use mysql_async::prelude::*;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 
@@ -52,24 +51,14 @@ impl MockExternalTableReader {
             Some(ScalarImpl::Float64(1.0001.into())),
         ])];
         let snap1 = vec![
-            // chunk 1
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(1)),
-                Some(ScalarImpl::Float64(1.0001.into())),
+                Some(ScalarImpl::Float64(10.01.into())),
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(2)),
-                Some(ScalarImpl::Float64(1.0002.into())),
+                Some(ScalarImpl::Float64(2.02.into())),
             ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(3)),
-                Some(ScalarImpl::Float64(1.0003.into())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(4)),
-                Some(ScalarImpl::Float64(1.0004.into())),
-            ]),
-            // chunk 2
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(5)),
                 Some(ScalarImpl::Float64(1.0005.into())),
@@ -77,6 +66,10 @@ impl MockExternalTableReader {
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(6)),
                 Some(ScalarImpl::Float64(1.0006.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(8)),
+                Some(ScalarImpl::Float64(1.0008.into())),
             ]),
         ];
 
@@ -90,7 +83,7 @@ impl MockExternalTableReader {
 impl ExternalTableReader for MockExternalTableReader {
     type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
 
-    fn get_normalized_table_name(_table_name: &SchemaTableName) -> String {
+    fn get_normalized_table_name(&self, _table_name: &SchemaTableName) -> String {
         format!("`mock_table`")
     }
 

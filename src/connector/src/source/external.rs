@@ -17,22 +17,22 @@ use std::future::Future;
 
 use anyhow::anyhow;
 use futures::stream::BoxStream;
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{Datum, ScalarImpl, F64};
+use risingwave_common::row::OwnedRow;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::error::ConnectorError;
 use crate::parser::mysql_row_to_datums;
-use crate::source::mock_external_table::MockExternalTableReader;
+use crate::source::MockExternalTableReader;
 
 pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
+#[derive(Debug)]
 pub enum ExternalTableType {
     Undefined,
     MySQL,
@@ -68,7 +68,10 @@ impl ExternalTableType {
             Self::MySQL => Ok(ExternalTableReaderImpl::MYSQL(
                 MySqlExternalTableReader::new(properties, schema)?,
             )),
-            _ => bail!(ConnectorError::Parse("Invalid connector")),
+            _ => bail!(ConnectorError::Config(anyhow!(
+                "invalid external table type: {:?}",
+                *self
+            ))),
         }
     }
 }
@@ -206,7 +209,7 @@ pub trait ExternalTableReader {
     where
         Self: 'a;
 
-    fn get_normalized_table_name(table_name: &SchemaTableName) -> String;
+    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_>;
 
@@ -224,23 +227,6 @@ pub enum ExternalTableReaderImpl {
     MYSQL(MySqlExternalTableReader),
     MOCK(MockExternalTableReader),
 }
-
-// impl ExternalTableReaderImpl {
-//     pub fn deserialize_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
-//         match self {
-//             ExternalTableReaderImpl::MYSQL(_) => {
-//                 Ok(BinlogOffset::MySQL(MySqlOffset::from_str(offset)?))
-//             }
-//             #[cfg(test)]
-//             ExternalTableReaderImpl::MOCK(_) => {
-//                 Ok(BinlogOffset::MySQL(MySqlOffset::from_str(offset)?))
-//             }
-//             _ => {
-//                 unreachable!("unexpected external table reader")
-//             }
-//         }
-//     }
-// }
 
 #[derive(Debug)]
 pub struct MySqlExternalTableReader {
@@ -267,7 +253,7 @@ pub struct ExternalTableConfig {
 impl ExternalTableReader for MySqlExternalTableReader {
     type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
 
-    fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
     }
 
@@ -337,7 +323,7 @@ impl MySqlExternalTableReader {
         let order_key = primary_keys.into_iter().join(",");
         let sql = format!(
             "SELECT * FROM {} ORDER BY {}",
-            Self::get_normalized_table_name(&table_name),
+            self.get_normalized_table_name(&table_name),
             order_key
         );
         let mut conn = self
@@ -368,8 +354,11 @@ impl MySqlExternalTableReader {
 impl ExternalTableReader for ExternalTableReaderImpl {
     type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
 
-    fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
-        unimplemented!("get normalized table name")
+    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
+        match self {
+            ExternalTableReaderImpl::MYSQL(mysql) => mysql.get_normalized_table_name(table_name),
+            ExternalTableReaderImpl::MOCK(mock) => mock.get_normalized_table_name(table_name),
+        }
     }
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
@@ -416,12 +405,10 @@ impl ExternalTableReaderImpl {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
-    use futures::{pin_mut, Stream, StreamExt};
+    use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
-    use mysql_async::prelude::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::DataType;
 

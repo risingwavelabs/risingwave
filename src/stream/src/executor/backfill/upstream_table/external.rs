@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 
-use risingwave_common::buffer::Bitmap;
+
+
+
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
-use risingwave_storage::table::Distribution;
+
 
 // pub type HummockStorageType = impl StateStore + AsHummockTrait;
 /// This struct represents an external table to be read during backfill
@@ -48,17 +48,6 @@ pub struct ExternalStorageTable {
     pk_indices: Vec<usize>,
 
     output_indices: Vec<usize>,
-
-    /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the primary key columns by `pk_indices`.
-    dist_key_in_pk_indices: Vec<usize>,
-
-    /// Virtual nodes that the table is partitioned into.
-    ///
-    /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. For READ_WRITE instances, the table will also check whether the written rows
-    /// confirm to this partition.
-    vnodes: Arc<Bitmap>,
 }
 
 impl ExternalStorageTable {
@@ -73,7 +62,6 @@ impl ExternalStorageTable {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         output_indices: Vec<usize>,
-        distribution: Distribution,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -90,8 +78,6 @@ impl ExternalStorageTable {
             pk_serializer,
             pk_indices,
             output_indices,
-            dist_key_in_pk_indices: distribution.dist_key_in_pk_indices,
-            vnodes: distribution.vnodes,
         }
     }
 
