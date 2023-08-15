@@ -6,7 +6,12 @@ import {
   ModalContent,
   ModalFooter,
   ModalHeader,
-  ModalOverlay, Tab, TabList, TabPanel, TabPanels, Tabs,
+  ModalOverlay,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
   theme,
   useDisclosure,
 } from "@chakra-ui/react"
@@ -21,8 +26,7 @@ import {
   layout,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/streaming_plan"
-import BackPressureTable from "./BackPressureTable";
-import {match} from "assert";
+import BackPressureTable from "./BackPressureTable"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -396,7 +400,7 @@ export default function FragmentGraph({
       <Modal isOpen={isOpen} onClose={onClose} size="5xl">
         <ModalOverlay />
         <ModalContent>
-          <Tabs isManual variant='enclosed'>
+          <Tabs isManual variant="enclosed">
             <TabList>
               <Tab>Info</Tab>
               <Tab>Back Pressures</Tab>
@@ -410,25 +414,27 @@ export default function FragmentGraph({
                 <ModalCloseButton />
                 <ModalBody>
                   {isOpen && currentStreamNode?.node && (
-                      <ReactJson
-                          shouldCollapse={({ name }) =>
-                              name === "input" || name === "fields" || name === "streamKey"
-                          } // collapse top-level fields for better readability
-                          src={currentStreamNode.node}
-                          collapsed={3}
-                          name={null}
-                          displayDataTypes={false}
-                      />
+                    <ReactJson
+                      shouldCollapse={({ name }) =>
+                        name === "input" ||
+                        name === "fields" ||
+                        name === "streamKey"
+                      } // collapse top-level fields for better readability
+                      src={currentStreamNode.node}
+                      collapsed={3}
+                      name={null}
+                      displayDataTypes={false}
+                    />
                   )}
                 </ModalBody>
               </TabPanel>
               {isOpen && currentStreamNode?.node && (
-                  <TabPanel>
-                    <BackPressureTable
-                      selectedActorIds={new Set(currentStreamNode.actor_ids)}
-                    />
-                  </TabPanel>
-                )}
+                <TabPanel>
+                  <BackPressureTable
+                    selectedActorIds={new Set(currentStreamNode.actor_ids)}
+                  />
+                </TabPanel>
+              )}
             </TabPanels>
           </Tabs>
 

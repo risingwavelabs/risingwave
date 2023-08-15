@@ -14,22 +14,22 @@
  * limitations under the License.
  *
  */
+import { MetricsSample } from "../../components/metrics"
 import api from "./api"
-import {MetricsSample} from "../../components/metrics";
 
 export async function getActorBackPressures() {
-    const res = await api.get("/api/metrics/actor/back_pressures")
-    return res
+  const res = await api.get("/api/metrics/actor/back_pressures")
+  return res
 }
 
 export function sampleAverage(samples: MetricsSample[]) {
-    return samples.reduce((a, b) => a + b.value, 0) / samples.length
+  return samples.reduce((a, b) => a + b.value, 0) / samples.length
 }
 
 export function sampleMax(samples: MetricsSample[]) {
-    return samples.reduce((a, b) => Math.max(a, b.value), 0)
+  return samples.reduce((a, b) => Math.max(a, b.value), 0)
 }
 
 export function sampleMin(samples: MetricsSample[]) {
-    return samples.reduce((a, b) => Math.min(a, b.value), 0)
+  return samples.reduce((a, b) => Math.min(a, b.value), 0)
 }

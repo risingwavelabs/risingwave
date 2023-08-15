@@ -16,11 +16,11 @@
  */
 
 export interface MetricsSample {
-    timestamp: number
-    value: number
+  timestamp: number
+  value: number
 }
 
 export interface Metrics {
-    metric: { [key: string]: string }
-    sample: MetricsSample[]
+  metric: { [key: string]: string }
+  sample: MetricsSample[]
 }
