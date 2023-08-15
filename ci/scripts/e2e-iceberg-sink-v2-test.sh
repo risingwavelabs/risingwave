@@ -35,8 +35,8 @@ echo "--- preparing iceberg"
 cd e2e_test/iceberg
 bash ./start_spark_connect_server.sh
 
-poetry update
-poetry run python main.py
+"$HOME"/.local/bin/poetry update
+"$HOME"/.local/bin/poetry run python main.py
 
 
 echo "--- Kill cluster"
