@@ -109,6 +109,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
+        if let Some(Err(e)) = self.client.poll(self.sync_call_timeout) {
+            // poll once to get metrics
+            tracing::warn!("failed to poll kafka client, error: {}", e);
+        }
         let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
             anyhow!(format!(
                 "failed to fetch metadata from kafka ({}), error: {}",

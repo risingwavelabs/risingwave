@@ -235,7 +235,7 @@ impl StatsWindow {
         let cnt = register_int_gauge_vec_with_registry!(
             get_metric_name("cnt"),
             "Count of values",
-            &["id"],
+            &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
