@@ -449,6 +449,11 @@ mod tests {
         for i in 0..n {
             assert_eq!(vis.is_set(i), !to_false.contains(&i), "{}", i);
         }
+        let count_ones = match &vis {
+            Vis::Bitmap(b) => b.count_ones(),
+            Vis::Compact(len) => *len,
+        };
+        assert_eq!(count_ones, n - to_false.len());
     }
     #[test]
     fn test_vis_mut_from_bitmap() {
@@ -496,5 +501,19 @@ mod tests {
         for i in zeros..n {
             assert_eq!(vis.is_set(i), !toggles.contains(&i), "{}", i);
         }
+        let count_ones = match &vis {
+            Vis::Bitmap(b) => b.count_ones(),
+            Vis::Compact(len) => *len,
+        };
+        let mut expected_ones = ones;
+        for i in &toggles {
+            let i = *i;
+            if i < zeros {
+                expected_ones += 1;
+            } else {
+                expected_ones -= 1;
+            }
+        }
+        assert_eq!(count_ones, expected_ones);
     }
 }
