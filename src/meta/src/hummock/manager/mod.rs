@@ -2322,6 +2322,17 @@ where
         }
     }
 
+    /// * For compaction group with only one single state-table, do not change it again.
+    /// * For state-table which only write less than `HISTORY_TABLE_INFO_WINDOW_SIZE` times, do not
+    ///   change it. Because we need more statistic data to decide split strategy.
+    /// * For state-table with low throughput which write no more than
+    ///   `min_table_split_write_throughput/2` data, never split it.
+    /// * For state-table whose size less than `split_group_size_limit`, do not split it unless its
+    ///   throughput keep larger than `min_table_split_write_throughput` for a long time.
+    /// * For state-table whose size less than `min_table_split_size`, do not split it unless its
+    ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
+    /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
+    ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
@@ -2342,7 +2353,6 @@ where
                 let mut do_not_split = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
-                        let window_total_size = history.iter().sum::<u64>();
                         is_high_write_throughput = history.iter().all(|throughput| {
                             *throughput > self.env.opts.table_write_throughput_threshold
                         });
