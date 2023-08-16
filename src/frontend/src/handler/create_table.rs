@@ -25,6 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -460,20 +461,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
         .into());
     }
 
-    let can_backfill = properties.get(UPSTREAM_SOURCE_KEY).map_or_else(
-        || false,
-        |connector| {
-            if let Some((src, _)) = connector.split_once('-') {
-                src == "mysql"
-            } else {
-                false
-            }
-        },
-    );
-
-    if can_backfill && context.session_ctx().config().get_cdc_backfill() {
-        tracing::info!("cdc backfill enabled");
+    let table_type = ExternalTableType::from_properties(&properties);
+    if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
         const CDC_SNAPSHOT_MODE: &str = "debezium.snapshot.mode";
+        // TODO(siyuan): setup connector with latest binlog offset
         // configure debezium connector only emit changelogs
         properties.insert(CDC_SNAPSHOT_MODE.into(), "never".into());
 
@@ -482,19 +473,20 @@ pub(crate) async fn gen_create_table_plan_with_source(
             columns.iter().enumerate().for_each(|(idx, c)| {
                 id_to_idx.insert(c.column_id(), idx);
             });
+            // pk column id must exist in table columns.
             pk_column_ids
                 .iter()
-                .map(|c| id_to_idx.get(c).copied().unwrap()) // pk column id must exist in table columns.
+                .map(|c| id_to_idx.get(c).copied().unwrap())
                 .collect_vec()
         };
-        let pk = pk_column_indices
+        let table_pk = pk_column_indices
             .iter()
             .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
             .collect();
 
         let upstream_table_desc = TableDesc {
             table_id: TableId::placeholder(),
-            pk,
+            pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: pk_column_indices.clone(),
             stream_key: pk_column_indices,
@@ -505,7 +497,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
             watermark_columns: Default::default(),
             versioned: false,
         };
-        tracing::info!("upstream table desc: {:?}", upstream_table_desc);
+        tracing::debug!("upstream table desc: {:?}", upstream_table_desc);
+        // save external table info to `source_info`
         source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
     }
 

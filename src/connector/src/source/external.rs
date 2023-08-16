@@ -123,13 +123,6 @@ impl MySqlOffset {
     pub fn new(filename: String, position: u64) -> Self {
         Self { filename, position }
     }
-
-    pub fn min() -> Self {
-        Self {
-            filename: "".to_string(),
-            position: u64::MIN,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
