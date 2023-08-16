@@ -593,6 +593,8 @@ impl<S: MetaStore> HummockManager<S> {
                 new_compaction_group_id
             }
         };
+        let mut current_version = versioning.current_version.clone();
+        let sst_split_info = current_version.apply_version_delta(&new_version_delta);
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -612,9 +614,7 @@ impl<S: MetaStore> HummockManager<S> {
         } else {
             self.env.meta_store().txn(trx).await?;
         }
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
+        versioning.current_version = current_version;
         // Updates SST split info
         let mut changed_sst_ids: HashSet<u64> = HashSet::default();
         for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {

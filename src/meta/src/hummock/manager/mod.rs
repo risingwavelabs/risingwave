@@ -1164,7 +1164,7 @@ where
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
             let versioning = versioning_guard.deref_mut();
-            let current_version = &mut versioning.current_version;
+            let mut current_version = versioning.current_version.clone();
             // purge stale compact_status
             for group_id in original_keys {
                 if !current_version.levels.contains_key(&group_id) {
@@ -1228,7 +1228,7 @@ where
                 let version_delta = gen_version_delta(
                     &mut hummock_version_deltas,
                     &mut branched_ssts,
-                    current_version,
+                    &current_version,
                     compact_task,
                     deterministic_mode,
                 );
@@ -1251,9 +1251,10 @@ where
                 )?;
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
+                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
+                versioning.current_version = current_version;
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -2326,9 +2327,7 @@ where
     /// * For state-table which only write less than `HISTORY_TABLE_INFO_WINDOW_SIZE` times, do not
     ///   change it. Because we need more statistic data to decide split strategy.
     /// * For state-table with low throughput which write no more than
-    ///   `min_table_split_write_throughput/2` data, never split it.
-    /// * For state-table whose size less than `split_group_size_limit`, do not split it unless its
-    ///   throughput keep larger than `min_table_split_write_throughput` for a long time.
+    ///   `min_table_split_write_throughput` data, never split it.
     /// * For state-table whose size less than `min_table_split_size`, do not split it unless its
     ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
@@ -2338,10 +2337,9 @@ where
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-        let group_size_limit = self.env.opts.split_group_size_limit;
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let mut partition_vnode_count = self.env.opts.partition_vnode_count;
+        let partition_vnode_count = self.env.opts.partition_vnode_count;
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 continue;
@@ -2350,7 +2348,6 @@ where
             for (table_id, table_size) in &group.table_statistic {
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
-                let mut do_not_split = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
                         is_high_write_throughput = history.iter().all(|throughput| {
@@ -2359,14 +2356,11 @@ where
                         is_low_write_throughput = history.iter().any(|throughput| {
                             *throughput < self.env.opts.min_table_split_write_throughput
                         });
-                        do_not_split = history.iter().any(|throughput| {
-                            *throughput < self.env.opts.min_table_split_write_throughput / 2
-                        });
                     }
                 }
                 let state_table_size = *table_size;
 
-                if do_not_split {
+                if is_low_write_throughput {
                     continue;
                 }
 
@@ -2376,15 +2370,7 @@ where
                     continue;
                 }
 
-                if state_table_size < self.env.opts.split_group_size_limit
-                    && is_low_write_throughput
-                {
-                    continue;
-                }
-
                 let parent_group_id = group.group_id;
-                let mut target_compact_group_id = None;
-                let mut allow_split_by_table = false;
 
                 // do not split a large table and a small table because it would increase IOPS
                 // of small table.
@@ -2397,47 +2383,30 @@ where
                     }
                 }
 
-                if is_low_write_throughput {
-                    for group in &group_infos {
-                        // do not move to mv group or state group
-                        if !group.split_by_table || group.group_id == mv_group_id
-                            || group.group_id == default_group_id
-                            || group.group_id == parent_group_id
-                            // do not move state-table to a large group.
-                            || group.group_size + state_table_size > group_size_limit
-                            // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
-                            || group.group_size + state_table_size > group.group_size - state_table_size
-                        {
-                            continue;
-                        }
-                        target_compact_group_id = Some(group.group_id);
-                    }
-                    allow_split_by_table = true;
-                    partition_vnode_count = 1;
-                }
-
                 let ret = self
                     .move_state_table_to_compaction_group(
                         parent_group_id,
                         &[*table_id],
-                        target_compact_group_id,
-                        allow_split_by_table,
+                        None,
+                        false,
                         partition_vnode_count,
                     )
                     .await;
                 match ret {
                     Ok(_) => {
                         tracing::info!(
-                        "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
-                        table_id, parent_group_id, target_compact_group_id, allow_split_by_table
+                        "move state table [{}] from group-{} success, Allow split by table: false",
+                        table_id, parent_group_id
                     );
                         return;
                     }
                     Err(e) => {
                         tracing::info!(
-                        "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
-                        table_id, parent_group_id, target_compact_group_id, e
-                    )
+                            "failed to move state table [{}] from group-{} because {:?}",
+                            table_id,
+                            parent_group_id,
+                            e
+                        )
                     }
                 }
             }
