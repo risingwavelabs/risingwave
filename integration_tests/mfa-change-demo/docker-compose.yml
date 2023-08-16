@@ -20,6 +20,11 @@ services:
     depends_on:
       [ zookeeper ]
     healthcheck: { test: nc -z localhost 9092, interval: 1s, start_period: 120s }
+    command: >
+      bash -c "
+        sleep 10 && 
+        kafka-topics --create --topic taxi --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
+      "
   zookeeper:
     image: confluentinc/cp-zookeeper:7.1.0
     platform: linux/amd64
@@ -55,7 +60,7 @@ services:
       file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
-    build:
+    build: 
     extends:
       file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
@@ -87,3 +92,4 @@ volumes:
   prometheus-0:
     external: false
 name: risingwave-compose
+

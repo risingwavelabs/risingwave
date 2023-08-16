@@ -1,13 +1,28 @@
 #!/bin/bash
 set -ex
 
-docker compose exec kafka kafka-topics --create --topic taxi --partitions 1 --replication-factor 1 --bootstrap-server=127.0.0.1:29092
-sleep 5
-
-psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f taxi-start.sql || {
+psql -U root -h meta-node-0 -p 4566 -d dev -a -f taxi-start.sql || {
   echo "failed to initialize db for taxi"
   exit 1
 }
 sleep 2
 
-pip3 install -r server/model/requirements.txt
+export GENERATOR_PATH=/opt/feature-store/generator
+python3 generator --num-users=15 \
+  --dump-users="$GENERATOR_PATH/users.json"
+
+python3 server/model &
+MODEL_PID=$!
+./feature-store-server &
+RECOMMENDER_PID=$!
+sleep 2
+./feature-store-simulator &
+SIMULATOR_PID=$!
+
+trap 'kill $SIMULATOR_PID; kill $RECOMMENDER_PID; kill $MODEL_PID' SIGINT
+wait $SIMULATOR_PID
+echo "Simulator finished"
+wait $RECOMMENDER_PID
+echo "Recommender finished"
+wait $MODEL_PID
+echo "Model finished"
