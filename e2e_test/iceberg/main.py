@@ -11,7 +11,7 @@ init_table_sqls = [
     "DROP TABLE IF EXISTS demo_db.demo_table",
     """
     CREATE TABLE demo_db.demo_table (
-    id long, 
+    id long,
     v_int int,
     v_long long,
     v_float float,
