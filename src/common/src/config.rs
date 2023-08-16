@@ -844,11 +844,11 @@ pub mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            128 * 1024 * 1024 // 128MB
+            16 * 1024 * 1024 // 16MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
-            32 * 1024 * 1024 // 32MB
+            4 * 1024 * 1024 // 4MB
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {

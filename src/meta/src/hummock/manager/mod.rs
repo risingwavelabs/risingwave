@@ -2333,6 +2333,12 @@ where
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
+        let params = self.env.system_params_manager().get_params().await;
+        let barrier_interval_ms = params.barrier_interval_ms() as u64;
+        let checkpoint_secs = std::cmp::max(
+            1,
+            params.checkpoint_frequency() * barrier_interval_ms / 1000,
+        );
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
@@ -2351,10 +2357,12 @@ where
                 if let Some(history) = table_write_throughput.get(table_id) {
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
                         is_high_write_throughput = history.iter().all(|throughput| {
-                            *throughput > self.env.opts.table_write_throughput_threshold
+                            *throughput / checkpoint_secs
+                                > self.env.opts.table_write_throughput_threshold
                         });
                         is_low_write_throughput = history.iter().any(|throughput| {
-                            *throughput < self.env.opts.min_table_split_write_throughput
+                            *throughput / checkpoint_secs
+                                < self.env.opts.min_table_split_write_throughput
                         });
                     }
                 }
