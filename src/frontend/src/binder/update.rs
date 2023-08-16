@@ -22,7 +22,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
-use super::{Binder, Relation};
+use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
 use crate::user::UserId;
@@ -42,7 +42,7 @@ pub struct BoundUpdate {
     pub owner: UserId,
 
     /// Used for scanning the records to update with the `selection`.
-    pub table: Relation,
+    pub table: BoundBaseTable,
 
     pub selection: Option<ExprImpl>,
 
@@ -60,8 +60,6 @@ pub struct BoundUpdate {
 
 impl RewriteExprsRecursive for BoundUpdate {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
-        self.table.rewrite_exprs_recursive(rewriter);
-
         self.selection =
             std::mem::take(&mut self.selection).map(|expr| rewriter.rewrite_expr(expr));
 
@@ -87,8 +85,7 @@ impl Binder {
         selection: Option<Expr>,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundUpdate> {
-        let (schema_name, table_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
         let default_columns_from_catalog =
@@ -99,17 +96,11 @@ impl Binder {
             )));
         }
 
-        let pk_indices = table_catalog
-            .pk()
-            .iter()
-            .map(|column_order| column_order.column_index)
-            .collect_vec();
-        let generated_columns = table_catalog.generated_col_idxes().collect_vec();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let table = self.bind_relation_by_name(name, None, false)?;
+        let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
@@ -149,13 +140,22 @@ impl Binder {
                 let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
                 let id_index = if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
                     let id_index = id_input_ref.index;
-                    if pk_indices.contains(&id_index) {
+                    if table
+                        .table_catalog
+                        .pk()
+                        .iter()
+                        .any(|k| k.column_index == id_index)
+                    {
                         return Err(ErrorCode::BindError(
                             "update modifying the PK column is unsupported".to_owned(),
                         )
                         .into());
                     }
-                    if generated_columns.contains(&id_index) {
+                    if table
+                        .table_catalog
+                        .generated_col_idxes()
+                        .contains(&id_index)
+                    {
                         return Err(ErrorCode::BindError(
                             "update modifying the generated column is unsupported".to_owned(),
                         )

@@ -24,7 +24,7 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
-        let scan = self.plan_relation(update.table)?;
+        let scan = self.plan_base_table(update.table)?;
         let input = if let Some(expr) = update.selection {
             LogicalFilter::create_with_expr(scan, expr)
         } else {
