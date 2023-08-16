@@ -3,6 +3,7 @@ import configparser
 import subprocess
 import csv
 import unittest
+import time
 
 g_spark = None
 
@@ -45,6 +46,7 @@ def init_risingwave_mv(args):
     subprocess.run(cmd,
                    shell=True,
                    check=True)
+    time.sleep(3)
 
 
 def verify_result(args):
