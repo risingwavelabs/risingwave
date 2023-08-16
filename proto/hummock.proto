@@ -456,20 +456,23 @@ message DispatchCompactionTaskRequest {
   repeated uint64 output_object_ids = 10;
 }
 
-message DispatchCompactionTaskResponse {
+message DispatchCompactionTaskResponse {}
+
+message ReportCompactionTaskRequest {
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
     CompactTask compact_task = 2;
     map<uint32, TableStats> table_stats_change = 3;
   }
   oneof event {
-    CompactTaskProgress progress = 1;
-    ReportTask report_task = 2;
+    ReportTask report_task = 1;
+    // CompactTaskProgress progress = 2;
     // Maybe heartbeat is no need in the response, because rpc proxy can get the compaction pod status.
     // HeartBeat heart_beat = 3;
   }
 }
 
+message ReportCompactionTaskResponse {}
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
