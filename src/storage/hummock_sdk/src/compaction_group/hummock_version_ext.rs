@@ -361,6 +361,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
+            assert!(can_concat(&cur_levels.levels[z].table_infos));
             level
                 .table_infos
                 .drain_filter(|sst_info| sst_info.table_ids.is_empty())
@@ -827,6 +828,7 @@ pub fn add_ssts_to_sub_level(
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
+        assert!(can_concat(&l0.sub_levels[sub_level_idx].table_infos));
     }
 }
 
