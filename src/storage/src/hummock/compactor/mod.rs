@@ -462,6 +462,7 @@ impl Compactor {
             .with_label_values(&[&group_label, level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
+        Self::trim_compact_task(&mut compact_task);
         (compact_task, table_stats_map)
     }
 
@@ -1212,5 +1213,21 @@ impl Compactor {
             .await?;
 
         Ok((ssts, compaction_statistics))
+    }
+
+    // Trim `compact_task` to reduce the size of the ReportTask Event
+    fn trim_compact_task(compact_task: &mut CompactTask) {
+        // 1. remove split
+        compact_task.splits.clear();
+
+        // 2. remove key_range
+        compact_task.input_ssts.iter_mut().for_each(|level| {
+            level.table_infos.iter_mut().for_each(|sst| {
+                if let Some(key_range) = sst.key_range.as_mut() {
+                    key_range.left.clear();
+                    key_range.right.clear();
+                }
+            })
+        });
     }
 }
