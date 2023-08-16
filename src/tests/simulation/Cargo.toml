@@ -28,10 +28,10 @@ pretty_assertions = "1"
 prometheus = { version = "0.13" }
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
-risingwave_connector = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
+risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_frontend = { workspace = true }
