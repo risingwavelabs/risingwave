@@ -31,6 +31,7 @@ use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
@@ -519,7 +520,8 @@ impl MetaMetrics {
                 "table_id",
                 "actor_id",
                 "table_name",
-                "table_type"
+                "table_type",
+                "compaction_group_id"
             ],
             registry
         )
@@ -725,6 +727,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;
@@ -760,6 +763,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 .collect();
             let table_name_and_type_mapping =
                 catalog_manager.get_table_name_and_type_mapping().await;
+            let table_compaction_group_id_mapping = hummock_manager
+                .get_table_compaction_group_id_mapping()
+                .await;
 
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {
@@ -796,6 +802,10 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                 .get(table_id)
                                 .cloned()
                                 .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                            let compaction_group_id = table_compaction_group_id_mapping
+                                .get(table_id)
+                                .map(|cg_id| cg_id.to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
 
                             meta_metrics
                                 .table_info
@@ -805,6 +815,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                     &actor_id_str,
                                     &table_name,
                                     &table_type,
+                                    &compaction_group_id,
                                 ])
                                 .set(1);
                         }
