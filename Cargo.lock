@@ -9276,6 +9276,7 @@ dependencies = [
  "fail",
  "fixedbitset",
  "flate2",
+ "frunk_core",
  "futures",
  "futures-channel",
  "futures-core",

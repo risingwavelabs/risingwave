@@ -39,7 +39,7 @@ pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 #[derive(Debug)]
 pub enum ExternalTableType {
     Undefined,
-    MySQL,
+    MySql,
     Postgres,
 }
 
@@ -50,14 +50,14 @@ impl ExternalTableType {
             .map(|c| c.to_ascii_lowercase())
             .unwrap_or_default();
         match connector.as_str() {
-            "mysql-cdc" => Self::MySQL,
+            "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
             _ => Self::Undefined,
         }
     }
 
     pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySQL)
+        matches!(self, Self::MySql)
     }
 
     pub fn create_table_reader(
@@ -66,7 +66,7 @@ impl ExternalTableType {
         schema: Schema,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
-            Self::MySQL => Ok(ExternalTableReaderImpl::MySql(
+            Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(properties, schema)?,
             )),
             _ => bail!(ConnectorError::Config(anyhow!(
@@ -134,7 +134,7 @@ pub struct PostgresOffset {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum BinlogOffset {
-    MySQL(MySqlOffset),
+    MySql(MySqlOffset),
     Postgres(PostgresOffset),
 }
 
@@ -267,7 +267,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
                 .exactly_one()
                 .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
 
-            Ok(BinlogOffset::MySQL(MySqlOffset {
+            Ok(BinlogOffset::MySql(MySqlOffset {
                 filename: row.take("File").unwrap(),
                 position: row.take("Position").unwrap(),
             }))
@@ -275,7 +275,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
-        Ok(BinlogOffset::MySQL(MySqlOffset::parse_str(offset)?))
+        Ok(BinlogOffset::MySql(MySqlOffset::parse_str(offset)?))
     }
 
     fn snapshot_read(
@@ -507,11 +507,11 @@ mod tests {
         let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
         let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
 
-        let off0 = BinlogOffset::MySQL(MySqlOffset::parse_str(off0_str).unwrap());
-        let off1 = BinlogOffset::MySQL(MySqlOffset::parse_str(off1_str).unwrap());
-        let off2 = BinlogOffset::MySQL(MySqlOffset::parse_str(off2_str).unwrap());
-        let off3 = BinlogOffset::MySQL(MySqlOffset::parse_str(off3_str).unwrap());
-        let off4 = BinlogOffset::MySQL(MySqlOffset::parse_str(off4_str).unwrap());
+        let off0 = BinlogOffset::MySql(MySqlOffset::parse_str(off0_str).unwrap());
+        let off1 = BinlogOffset::MySql(MySqlOffset::parse_str(off1_str).unwrap());
+        let off2 = BinlogOffset::MySql(MySqlOffset::parse_str(off2_str).unwrap());
+        let off3 = BinlogOffset::MySql(MySqlOffset::parse_str(off3_str).unwrap());
+        let off4 = BinlogOffset::MySql(MySqlOffset::parse_str(off4_str).unwrap());
 
         assert!(off0 <= off1);
         assert!(off1 > off2);

@@ -91,13 +91,13 @@ impl ExternalTableReader for MockExternalTableReader {
         static IDX: AtomicUsize = AtomicUsize::new(0);
         async move {
             let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(BinlogOffset::MySQL(self.binlog_watermarks[idx].clone()))
+            Ok(BinlogOffset::MySql(self.binlog_watermarks[idx].clone()))
         }
     }
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
         // same as mysql offset
-        Ok(BinlogOffset::MySQL(MySqlOffset::parse_str(offset)?))
+        Ok(BinlogOffset::MySql(MySqlOffset::parse_str(offset)?))
     }
 
     fn snapshot_read(
