@@ -250,14 +250,14 @@ impl<S: MetaStore> HummockManager<S> {
                 })),
             });
         }
+        let mut current_version = versioning.current_version.clone();
+        let sst_split_info = current_version.apply_version_delta(&new_version_delta);
+        assert!(sst_split_info.is_empty());
 
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
-        assert!(sst_split_info.is_empty());
+        versioning.current_version = current_version;
         new_version_delta.commit();
 
         self.notify_last_version_delta(versioning);
@@ -345,6 +345,9 @@ impl<S: MetaStore> HummockManager<S> {
                 delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
             });
         }
+        let mut current_version = versioning.current_version.clone();
+        let sst_split_info = current_version.apply_version_delta(&new_version_delta);
+        assert!(sst_split_info.is_empty());
 
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -358,10 +361,7 @@ impl<S: MetaStore> HummockManager<S> {
             remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
         }
 
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
-        assert!(sst_split_info.is_empty());
+        versioning.current_version = current_version;
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
