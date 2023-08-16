@@ -30,22 +30,6 @@ impl Planner {
         } else {
             scan
         };
-        let input = if update.table.table_catalog.has_generated_column() {
-            LogicalProject::with_out_col_idx(
-                input,
-                update
-                    .table
-                    .table_catalog
-                    .columns()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| !c.is_generated())
-                    .map(|(i, _)| i),
-            )
-            .into()
-        } else {
-            input
-        };
         let returning = !update.returning_list.is_empty();
         let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
             input,

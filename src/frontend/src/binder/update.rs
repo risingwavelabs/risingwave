@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, S
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
-use crate::expr::{Expr as _, ExprImpl};
+use crate::expr::{Expr as _, ExprImpl, InputRef};
 use crate::user::UserId;
 
 #[derive(Debug, Clone)]
@@ -190,9 +190,14 @@ impl Binder {
             }
         }
 
-        let all_columns = Self::iter_bound_columns(self.context.columns.iter()).0;
-        let exprs = all_columns
-            .into_iter()
+        let exprs = table
+            .table_catalog
+            .columns()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                (!c.is_generated()).then_some(InputRef::new(i, c.data_type().clone()).into())
+            })
             .map(|c| assignment_exprs.remove(&c).unwrap_or(c))
             .collect_vec();
 
