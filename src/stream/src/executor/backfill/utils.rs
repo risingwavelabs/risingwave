@@ -232,6 +232,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         };
         result.push((vnode, backfill_progress));
     }
+    assert_eq!(result.len(), state_table.vnodes().len());
     Ok(result)
 }
 

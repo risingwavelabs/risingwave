@@ -193,7 +193,6 @@ where
         // | f                    | t              | -> | f                |
         // | f                    | f              | -> | t                |
         let to_backfill = !is_completely_finished && !is_snapshot_empty;
-        // let to_backfill = true;
 
         // Use these to persist state.
         // They contain the backfill position, and the progress.
