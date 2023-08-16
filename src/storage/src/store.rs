@@ -15,6 +15,7 @@
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
+use std::default::Default;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -267,16 +268,33 @@ pub trait LocalStateStore: StaticSendSync {
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
+/// TODO(kwannoel): Refactor this to `StateTableReadOptions`
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
     pub exhaust_iter: bool,
+
+    /// If None -> read from state table's current epoch.
+    /// If Some(epoch) -> read from this epoch instead.
+    /// Used to read previously checkpointed data.
+    pub read_epoch: Option<u64>,
 }
 
 impl PrefetchOptions {
     pub fn new_for_exhaust_iter() -> Self {
-        Self { exhaust_iter: true }
+        Self::new_with_exhaust_iter(true)
+    }
+
+    pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
+        Self { exhaust_iter, ..Default::default() }
+    }
+
+    pub fn new_with_epoch(epoch_option: Option<u64>) -> Self {
+        Self {
+            read_epoch: epoch_option,
+            ..Default::default()
+        }
     }
 }
 
@@ -284,6 +302,7 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
             exhaust_iter: value.exhaust_iter,
+            read_epoch: None,
         }
     }
 }
@@ -311,6 +330,10 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
+
+    /// If None -> read from state store current epoch.
+    /// If Some(epoch) -> read from this epoch instead.
+    pub read_epoch: Option<u64>,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -323,6 +346,7 @@ impl From<TracedReadOptions> for ReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            ..Default::default()
         }
     }
 }

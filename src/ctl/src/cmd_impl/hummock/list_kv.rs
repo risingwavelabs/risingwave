@@ -48,6 +48,7 @@ pub async fn list_kv(
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::NotFill,
+                    read_epoch: None,
                 },
             )
             .await?

@@ -153,8 +153,14 @@ impl LocalHummockStorage {
                     return Err(HummockError::wait_epoch("tx dropped").into());
                 }
                 Ok(Ok(_)) => {
-                    println!("wait for epoch OK");
+
                     let max_committed_epoch = *receiver.borrow();
+                    tracing::warn!(
+                        "wait_epoch {:?} OK, max_committed_epoch {:?}, wait_epoch {:?}",
+                        wait_epoch,
+                        max_committed_epoch,
+                        wait_epoch
+                    );
                     if max_committed_epoch >= wait_epoch {
                         return Ok(());
                     }
@@ -176,9 +182,12 @@ impl LocalHummockStorage {
             self.read_version.clone(),
         )?;
 
-        if self.is_replicated {
-            self.wait_for_epoch(epoch).await?;
-        }
+        let epoch = if self.is_replicated && let Some(read_epoch) = read_options.read_epoch {
+            self.wait_for_epoch(read_epoch).await?;
+            read_epoch
+        } else {
+            epoch
+        };
         self.hummock_version_reader
             .iter(table_key_range, epoch, read_options, read_snapshot)
             .await

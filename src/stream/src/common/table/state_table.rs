@@ -653,6 +653,7 @@ where
             read_version_from_backup: false,
             prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            read_epoch: None,
         };
 
         self.local_store
@@ -1173,8 +1174,8 @@ where
 
     /// Replicated tables might not have all columns in the output, so we need to project the
     /// output.
-    /// Instead of doing this in the `iter_with_pk_range` function, we do it in a separate function
-    /// to avoid complexity of the `RowStream` type.
+    /// Instead of doing this in the `iter_with_pk_range` function, we do it in a separate function,
+    /// since `RowStream` is an TAIT, hence we can't return a `RowStream` with a different type.
     pub async fn iter_with_pk_range_and_output_indices(
         &self,
         pk_range: &(Bound<OwnedRow>, Bound<OwnedRow>),
@@ -1182,9 +1183,12 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        // TODO(kwannoel): Refactor `PrefetchOptions` -> `StorageIterOptions`, so we can include epoch?
         prefetch_options: PrefetchOptions,
+        snapshot_read_epoch: Option<u64>
     ) -> StreamExecutorResult<ProjectedRowStream<'_, S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>>
     {
+        assert!(IS_REPLICATED, "Only replicated tables can use this function");
         Ok(self
             .iter_with_pk_range(pk_range, vnode, prefetch_options)
             .await?
@@ -1270,6 +1274,7 @@ where
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+        let read_epoch = prefetch_options.read_epoch.clone();
         let read_options = ReadOptions {
             prefix_hint,
             ignore_range_tombstone: false,
@@ -1278,6 +1283,7 @@ where
             read_version_from_backup: false,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            read_epoch,
         };
 
         Ok(self.local_store.iter(key_range, read_options).await?)
@@ -1325,6 +1331,7 @@ where
             read_version_from_backup: false,
             prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            read_epoch: None,
         };
 
         self.local_store

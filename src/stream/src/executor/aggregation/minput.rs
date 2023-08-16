@@ -188,9 +188,7 @@ impl MaterializedInputState {
             let all_data_iter = state_table
                 .iter_with_pk_prefix(
                     group_key.map(GroupKey::table_pk),
-                    PrefetchOptions {
-                        exhaust_iter: cache_filler.capacity().is_none(),
-                    },
+                    PrefetchOptions::new_with_exhaust_iter(cache_filler.capacity().is_none()),
                 )
                 .await?;
             pin_mut!(all_data_iter);

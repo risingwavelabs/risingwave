@@ -33,6 +33,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
@@ -129,6 +130,8 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let first_checkpointing_epoch = first_barrier.epoch.prev;
+
         println!("backfill_first_barrier: {:?}", first_barrier);
         self.state_table.init_epoch(first_barrier.epoch);
         upstream_table.init_epoch(first_barrier.epoch);
@@ -141,6 +144,9 @@ where
         if is_completely_finished {
             assert!(!first_barrier.is_newly_added(self.actor_id));
         }
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
@@ -169,6 +175,7 @@ where
                         backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                         self.chunk_size,
                         &mut builders,
+                        Some(first_checkpointing_epoch),
                     );
                     pin_mut!(snapshot);
                     snapshot.try_next().await?.unwrap().is_none()
@@ -178,6 +185,7 @@ where
                 snapshot_is_empty && builder_is_empty
             }
         };
+        println!("is_snapshot_empty: {}", is_snapshot_empty);
 
         // | backfill_is_finished | snapshot_empty | -> | need_to_backfill |
         // | -------------------- | -------------- | -- | ---------------- |
@@ -192,9 +200,6 @@ where
         // However, they do not contain the vnode key (index 0).
         // That is filled in when we flush the state table.
         let mut temporary_state: Vec<Datum> = vec![None; state_len];
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
@@ -256,6 +261,7 @@ where
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
                         &mut builders,
+                        None,
                     )
                     .map(Either::Right),);
 
@@ -533,6 +539,9 @@ where
         backfill_state: BackfillState,
         chunk_size: usize,
         builders: &'a mut [DataChunkBuilder],
+        // If present, we will use it for snapshot read.
+        // It is required for the first snapshot read.
+        snapshot_read_epoch: Option<u64>,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for (vnode, builder) in upstream_table
@@ -558,7 +567,7 @@ where
             println!("range_bounds: {:?}", range_bounds);
 
             let vnode_row_iter = upstream_table
-                .iter_with_pk_range_and_output_indices(&range_bounds, vnode, Default::default())
+                .iter_with_pk_range_and_output_indices(&range_bounds, vnode, PrefetchOptions::new_with_epoch(snapshot_read_epoch), snapshot_read_epoch)
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?

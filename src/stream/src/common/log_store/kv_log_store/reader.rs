@@ -115,6 +115,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 retention_seconds: None,
                                 table_id,
                                 read_version_from_backup: false,
+                                read_epoch: None,
                             },
                         )
                         .await
@@ -194,6 +195,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                                 retention_seconds: None,
                                                 table_id,
                                                 read_version_from_backup: false,
+                                                read_epoch: None,
                                             },
                                         )
                                         .await?,
