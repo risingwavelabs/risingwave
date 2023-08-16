@@ -156,6 +156,7 @@ async fn test_merger_sum_aggr() {
         ],
         3,
         MultiMap::new(),
+        vec![],
         0.0,
     );
 

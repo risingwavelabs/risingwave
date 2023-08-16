@@ -13,6 +13,7 @@ message StackTraceResponse {
   map<string, string> compaction_task_traces = 3;
 }
 
+// CPU profiling
 message ProfilingRequest {
   // How long the profiling should last.
   uint64 sleep_s = 1;
@@ -22,7 +23,16 @@ message ProfilingResponse {
   bytes result = 1;
 }
 
+// Heap profiling
+message HeapProfilingRequest {
+  // The directory that the dumped file in
+  string dir = 1;
+}
+
+message HeapProfilingResponse {}
+
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
+  rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
 }

@@ -48,9 +48,10 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+resolver = "2"
 
 [workspace.package]
-version = "1.0.0-alpha"
+version = "1.1.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -75,9 +76,10 @@ futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"] }
-criterion = "0.5"
+criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.3.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "b1ef7d1ad74078275de6d1970d3a6503be36681e" }
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }

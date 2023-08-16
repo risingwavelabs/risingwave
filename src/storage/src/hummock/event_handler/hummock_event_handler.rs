@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -29,6 +29,7 @@ use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, trace, warn};
 
+use super::cache_refill_policy::CacheRefillPolicyConfig;
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
@@ -125,7 +126,7 @@ pub struct HummockEventHandler {
 
     last_instance_id: LocalInstanceId,
 
-    cache_fill_policy: Arc<CacheRefillPolicy>,
+    cache_refill_policy: Arc<CacheRefillPolicy>,
     sstable_object_id_manager: SstableObjectIdManagerRef,
 }
 
@@ -155,6 +156,7 @@ impl HummockEventHandler {
         pinned_version: PinnedVersion,
         compactor_context: Arc<CompactorContext>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
+        refill_data_file_cache_levels: HashSet<u32>,
     ) -> Self {
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
@@ -185,11 +187,13 @@ impl HummockEventHandler {
             &compactor_context.storage_opts,
             compactor_context.compaction_executor.clone(),
         );
-        let cache_fill_policy = Arc::new(CacheRefillPolicy::new(
+        let cache_refill_policy_config = CacheRefillPolicyConfig {
             sstable_store,
             metrics,
             max_preload_wait_time_mill,
-        ));
+            refill_data_file_cache_levels,
+        };
+        let cache_refill_policy = Arc::new(CacheRefillPolicy::new(cache_refill_policy_config));
 
         Self {
             hummock_event_tx,
@@ -201,7 +205,7 @@ impl HummockEventHandler {
             read_version_mapping,
             uploader,
             last_instance_id: 0,
-            cache_fill_policy,
+            cache_refill_policy,
             sstable_object_id_manager,
         }
     }
@@ -426,8 +430,9 @@ impl HummockEventHandler {
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        self.cache_fill_policy
-                            .execute(version_delta.clone(), max_level)
+                        let sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
+                        self.cache_refill_policy
+                            .execute(sst_delta_infos, max_level)
                             .await;
                     }
                     version_to_apply.apply_version_delta(version_delta);

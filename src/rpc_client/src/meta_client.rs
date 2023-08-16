@@ -17,7 +17,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -45,6 +45,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -70,7 +71,7 @@ use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClie
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::meta::{PbReschedule, *};
+use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -79,7 +80,7 @@ use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
-use tokio::time;
+use tokio::time::{self};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
@@ -1052,6 +1053,10 @@ impl MetaClient {
         let resp = self.inner.rw_cloud_validate_source(req).await?;
         Ok(resp)
     }
+
+    pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClient {
+        self.inner.core.read().await.sink_coordinate_client.clone()
+    }
 }
 
 #[async_trait]
@@ -1138,8 +1143,17 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
-        let req = ReportFullScanTaskRequest { object_ids };
+    async fn report_full_scan_task(
+        &self,
+        filtered_object_ids: Vec<HummockSstableObjectId>,
+        total_object_count: u64,
+        total_object_size: u64,
+    ) -> Result<()> {
+        let req = ReportFullScanTaskRequest {
+            object_ids: filtered_object_ids,
+            total_object_count,
+            total_object_size,
+        };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
     }
@@ -1190,6 +1204,10 @@ impl HummockMetaClient for MetaClient {
                         context_id: self.worker_id(),
                     },
                 )),
+                create_at: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
             })
             .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
 
@@ -1213,6 +1231,8 @@ impl TelemetryInfoFetcher for MetaClient {
     }
 }
 
+pub type SinkCoordinationRpcClient = SinkCoordinationServiceClient<Channel>;
+
 #[derive(Debug, Clone)]
 struct GrpcMetaClientCore {
     cluster_client: ClusterServiceClient<Channel>,
@@ -1229,6 +1249,7 @@ struct GrpcMetaClientCore {
     system_params_client: SystemParamsServiceClient<Channel>,
     serving_client: ServingServiceClient<Channel>,
     cloud_client: CloudServiceClient<Channel>,
+    sink_coordinate_client: SinkCoordinationRpcClient,
 }
 
 impl GrpcMetaClientCore {
@@ -1237,16 +1258,21 @@ impl GrpcMetaClientCore {
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
-        let hummock_client = HummockManagerServiceClient::new(channel.clone());
-        let notification_client = NotificationServiceClient::new(channel.clone());
-        let stream_client = StreamManagerServiceClient::new(channel.clone());
+        let hummock_client =
+            HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let notification_client =
+            NotificationServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let stream_client =
+            StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel.clone());
+        let scale_client =
+            ScaleServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
-        let cloud_client = CloudServiceClient::new(channel);
+        let cloud_client = CloudServiceClient::new(channel.clone());
+        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1263,6 +1289,7 @@ impl GrpcMetaClientCore {
             system_params_client,
             serving_client,
             cloud_client,
+            sink_coordinate_client,
         }
     }
 }

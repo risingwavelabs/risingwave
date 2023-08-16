@@ -57,11 +57,6 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
     type Writer = W::Writer;
 
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
-        // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
-        let tracker = self
-            .limiter
-            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
-            .await;
         let timer = Instant::now();
         let table_id = self
             .sstable_object_id_manager
@@ -71,7 +66,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {
             capacity_hint: Some(self.options.capacity + self.options.block_capacity),
-            tracker: Some(tracker),
+            tracker: None,
             policy: self.policy,
         };
         let writer = self
@@ -87,6 +82,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             ),
             self.options.clone(),
             self.filter_key_extractor.clone(),
+            Some(self.limiter.clone()),
         );
         Ok(builder)
     }
@@ -128,6 +124,7 @@ pub struct TaskConfig {
     pub is_target_l0_or_lbase: bool,
     pub split_by_table: bool,
     pub split_weight_by_vnode: u32,
+    pub use_block_based_filter: bool,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -199,9 +196,14 @@ pub async fn generate_splits(
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
+        let worker_num = context.compaction_executor.worker_num();
+
         let parallelism = std::cmp::min(
-            indexes.len() as u64,
-            context.storage_opts.max_sub_compaction as u64,
+            worker_num as u64,
+            std::cmp::min(
+                indexes.len() as u64,
+                context.storage_opts.max_sub_compaction as u64,
+            ),
         );
         let sub_compaction_data_size =
             std::cmp::max(compaction_size / parallelism, parallel_compact_size);
@@ -232,17 +234,8 @@ pub async fn generate_splits(
     Ok(vec![])
 }
 
-pub fn estimate_task_memory_capacity(
-    context: Arc<CompactorContext>,
-    task: &CompactTask,
-) -> (usize, usize, usize) {
+pub fn estimate_task_output_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
     let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
-    let total_input_file_size = task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .map(|table| table.file_size)
-        .sum::<u64>();
     let total_input_uncompressed_file_size = task
         .input_ssts
         .iter()
@@ -251,15 +244,5 @@ pub fn estimate_task_memory_capacity(
         .sum::<u64>();
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
-    let total_file_size = (total_input_file_size as f64 * 1.4).round() as usize;
-
-    let c = match task.compression_algorithm {
-        0 => std::cmp::min(capacity, total_file_size),
-        _ => capacity,
-    };
-    (
-        c,
-        total_input_file_size as usize,
-        total_input_uncompressed_file_size as usize,
-    )
+    std::cmp::min(capacity, total_input_uncompressed_file_size as usize)
 }

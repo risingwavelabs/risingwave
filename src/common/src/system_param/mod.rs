@@ -55,6 +55,7 @@ macro_rules! for_all_undeprecated_params {
             { backup_storage_url, String, Some("memory".to_string()), false },
             { backup_storage_directory, String, Some("backup".to_string()), false },
             { telemetry_enabled, bool, Some(true), true },
+            { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             $({ $field, $type, $default },)*
         }
     };
@@ -179,7 +180,13 @@ macro_rules! impl_system_params_from_kv {
             });
             derive_missing_fields(&mut ret);
             if !kvs.is_empty() {
-                Err(format!("unrecognized system params {:?}", kvs))
+                let unrecognized_params = kvs.into_iter().map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                    )
+                }).collect::<Vec<_>>();
+                Err(format!("unrecognized system params {:?}", unrecognized_params))
             } else {
                 Ok(ret)
             }
@@ -260,7 +267,7 @@ macro_rules! impl_set_system_param {
                         let v = if let Some(v) = value {
                             v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
-                            $default.ok_or(format!("{} does not have a default value", key))?
+                            $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);
@@ -362,6 +369,7 @@ mod tests {
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (TELEMETRY_ENABLED_KEY, "false"),
+            (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
         ];
 
         // To kv - missing field.

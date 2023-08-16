@@ -222,7 +222,7 @@ impl RemoteSinkWriter {
         use futures::StreamExt;
         use tokio_stream::wrappers::UnboundedReceiverStream;
 
-        let stream_handle = SinkWriterStreamHandle::new(
+        let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
             UnboundedReceiverStream::new(response_receiver).boxed(),
         );

@@ -49,33 +49,40 @@
   expected_outputs:
   - planner_error
 - sql: |
-    select 1 limit 1
+    select 1 c limit 1
   expected_outputs:
   - batch_plan
+  - stream_plan
 - sql: |
-    select 1 order by 1 limit 1
+    select 1 c order by 1 limit 1
   expected_outputs:
   - batch_plan
+  - stream_plan
 - sql: |
-    select 1 union all select 1 limit 10
+    select 1 c union all select 1 c limit 10
   expected_outputs:
   - batch_plan
+  - stream_plan
 - sql: |
-    select 1 union all select 1 order by 1 limit 10
+    select 1 c union all select 1 c order by 1 limit 10
   expected_outputs:
   - batch_plan
+  - stream_plan
 - sql: |
     create table t (a int);
     select count(*) from t limit 1;
   expected_outputs:
   - batch_plan
+  - stream_plan
 - sql: |
     create table t (a int);
     select count(*) from t order by 1 limit 1;
   expected_outputs:
   - batch_plan
+  - stream_plan
 - sql: |
     create table t (a int primary key);
     select * from t limit 1;
   expected_outputs:
   - batch_plan
+  - stream_plan
