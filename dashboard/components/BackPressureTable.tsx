@@ -29,12 +29,8 @@ import {
 import { sortBy } from "lodash"
 import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
-import {
-  getActorBackPressures,
-  sampleAverage,
-  sampleMax,
-  sampleMin,
-} from "../pages/api/metric"
+import { getActorBackPressures } from "../pages/api/metric"
+import RateBar from "./RateBar"
 import { Metrics } from "./metrics"
 
 interface BackPressuresMetrics {
@@ -83,13 +79,11 @@ export default function BackPressureTable({
   const retVal = (
     <TableContainer>
       <Table variant="simple">
-        <TableCaption>Back Pressures (Last 1 hour)</TableCaption>
+        <TableCaption>Back Pressures (Last 30 minutes)</TableCaption>
         <Thead>
           <Th>Actor ID</Th>
           <Th>Instance</Th>
-          <Th>Block Rate(Min~Max)</Th>
-          <Th>Block Rate(Last)</Th>
-          <Th>Block Rate(Avg)</Th>
+          <Th>Block Rate</Th>
         </Thead>
         <Tbody>
           {backPressuresMetrics &&
@@ -100,13 +94,8 @@ export default function BackPressureTable({
                   <Td>{m.metric.actor_id}</Td>
                   <Td>{m.metric.instance}</Td>
                   <Td>
-                    {(sampleMin(m.sample) * 100).toFixed(6)}%~
-                    {(sampleMax(m.sample) * 100).toFixed(6)}%
+                    <RateBar samples={m.sample} />
                   </Td>
-                  <Td>
-                    {(m.sample[m.sample.length - 1].value * 100).toFixed(6)}%
-                  </Td>
-                  <Td>{(sampleAverage(m.sample) * 100).toFixed(6)}%</Td>
                 </Tr>
               ))}
         </Tbody>

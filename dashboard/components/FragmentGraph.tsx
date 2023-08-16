@@ -7,11 +7,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Tab,
-  TabList,
-  TabPanel,
-  TabPanels,
-  Tabs,
   theme,
   useDisclosure,
 } from "@chakra-ui/react"
@@ -122,6 +117,7 @@ export default function FragmentGraph({
         extraInfo: string
       }
     >()
+    const includedActorIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
         dx: nodeMarginX,
@@ -141,6 +137,7 @@ export default function FragmentGraph({
         height,
         extraInfo: `Actor ${fragmentRoot.data.actor_ids?.join(", ")}` || "",
       })
+      fragmentRoot.data.actor_ids?.forEach((id) => includedActorIds.add(id))
     }
     const fragmentLayout = layout(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
@@ -166,7 +163,14 @@ export default function FragmentGraph({
       svgWidth = Math.max(svgWidth, x + width)
     })
     const links = generateBoxLinks(fragmentLayout)
-    return { layoutResult, fragmentLayout, svgWidth, svgHeight, links }
+    return {
+      layoutResult,
+      fragmentLayout,
+      svgWidth,
+      svgHeight,
+      links,
+      includedActorIds,
+    }
   }, [planNodeDependencies, fragmentDependency])
 
   type PlanNodeDesc = {
@@ -185,6 +189,7 @@ export default function FragmentGraph({
     links,
     fragmentLayout: fragmentDependencyDag,
     layoutResult: planNodeDependencyDag,
+    includedActorIds,
   } = planNodeDependencyDagCallback()
 
   useEffect(() => {
@@ -400,43 +405,23 @@ export default function FragmentGraph({
       <Modal isOpen={isOpen} onClose={onClose} size="5xl">
         <ModalOverlay />
         <ModalContent>
-          <Tabs isManual variant="enclosed">
-            <TabList>
-              <Tab>Info</Tab>
-              <Tab>Back Pressures</Tab>
-            </TabList>
-
-            <TabPanels>
-              <TabPanel>
-                <ModalHeader>
-                  {currentStreamNode?.operatorId} - {currentStreamNode?.name}
-                </ModalHeader>
-                <ModalCloseButton />
-                <ModalBody>
-                  {isOpen && currentStreamNode?.node && (
-                    <ReactJson
-                      shouldCollapse={({ name }) =>
-                        name === "input" ||
-                        name === "fields" ||
-                        name === "streamKey"
-                      } // collapse top-level fields for better readability
-                      src={currentStreamNode.node}
-                      collapsed={3}
-                      name={null}
-                      displayDataTypes={false}
-                    />
-                  )}
-                </ModalBody>
-              </TabPanel>
-              {isOpen && currentStreamNode?.node && (
-                <TabPanel>
-                  <BackPressureTable
-                    selectedActorIds={new Set(currentStreamNode.actor_ids)}
-                  />
-                </TabPanel>
-              )}
-            </TabPanels>
-          </Tabs>
+          <ModalHeader>
+            {currentStreamNode?.operatorId} - {currentStreamNode?.name}
+          </ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            {isOpen && currentStreamNode?.node && (
+              <ReactJson
+                shouldCollapse={({ name }) =>
+                  name === "input" || name === "fields" || name === "streamKey"
+                } // collapse top-level fields for better readability
+                src={currentStreamNode.node}
+                collapsed={3}
+                name={null}
+                displayDataTypes={false}
+              />
+            )}
+          </ModalBody>
 
           <ModalFooter>
             <Button colorScheme="blue" mr={3} onClick={onClose}>
@@ -449,6 +434,7 @@ export default function FragmentGraph({
         <g className="actor-links" />
         <g className="actors" />
       </svg>
+      <BackPressureTable selectedActorIds={includedActorIds} />
     </Fragment>
   )
 }

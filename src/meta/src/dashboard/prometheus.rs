@@ -142,7 +142,7 @@ pub async fn list_prometheus_actor_back_pressure<S: MetaStore>(
                 now.duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i64
-                    - 3600,
+                    - 1800,
                 now.duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i64,

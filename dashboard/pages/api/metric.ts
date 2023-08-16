@@ -22,14 +22,24 @@ export async function getActorBackPressures() {
   return res
 }
 
-export function sampleAverage(samples: MetricsSample[]) {
-  return samples.reduce((a, b) => a + b.value, 0) / samples.length
+function calculatePercentile(samples: MetricsSample[], percentile: number) {
+  const sorted = samples.sort((a, b) => a.value - b.value)
+  const index = Math.floor(sorted.length * percentile)
+  return sorted[index].value
 }
 
-export function sampleMax(samples: MetricsSample[]) {
-  return samples.reduce((a, b) => Math.max(a, b.value), 0)
+export function p50(samples: MetricsSample[]) {
+  return calculatePercentile(samples, 0.5)
 }
 
-export function sampleMin(samples: MetricsSample[]) {
-  return samples.reduce((a, b) => Math.min(a, b.value), 0)
+export function p90(samples: MetricsSample[]) {
+  return calculatePercentile(samples, 0.9)
+}
+
+export function p95(samples: MetricsSample[]) {
+  return calculatePercentile(samples, 0.95)
+}
+
+export function p99(samples: MetricsSample[]) {
+  return calculatePercentile(samples, 0.99)
 }
