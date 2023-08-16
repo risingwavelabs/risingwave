@@ -127,7 +127,7 @@ pub struct FrontendEnv {
     compute_runtime: Arc<BackgroundShutdownRuntime>,
 }
 
-/// Session map identified by (process_id, secret_key)
+/// Session map identified by `(process_id, secret_key)`
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
