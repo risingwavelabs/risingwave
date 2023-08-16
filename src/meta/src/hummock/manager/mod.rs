@@ -2359,7 +2359,7 @@ where
                         is_low_write_throughput = history.iter().any(|throughput| {
                             *throughput < self.env.opts.min_table_split_write_throughput
                         });
-                        do_not_split = history.iter().all(|throughput| {
+                        do_not_split = history.iter().any(|throughput| {
                             *throughput < self.env.opts.min_table_split_write_throughput / 2
                         });
                     }
