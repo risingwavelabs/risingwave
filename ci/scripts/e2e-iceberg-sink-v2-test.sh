@@ -35,7 +35,7 @@ echo "--- preparing iceberg"
 cd e2e_test/iceberg
 bash ./start_spark_connect_server.sh
 
-"$HOME"/.local/bin/poetry update
+"$HOME"/.local/bin/poetry update --quiet
 "$HOME"/.local/bin/poetry run python main.py
 
 
