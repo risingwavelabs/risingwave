@@ -213,6 +213,16 @@ def section_overview(panels):
             ],
             ["last"],
         ),
+        panels.timeseries_count(
+            "Active Sessions",
+            "Number of active sessions in frontend nodes",
+            [
+                panels.target(
+                    f"{metric('frontend_active_sessions')}",
+                    "",
+                ),
+            ]
+        ),
     ]
 
 

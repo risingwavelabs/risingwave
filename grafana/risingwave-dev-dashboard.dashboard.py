@@ -1508,8 +1508,18 @@ def section_frontend(outer_panels):
         outer_panels.row_collapsed(
             "Frontend",
             [
+                panels.timeseries_count(
+                    "Active Sessions",
+                    "Number of active sessions",
+                    [
+                        panels.target(
+                            f"{metric('frontend_active_sessions')}",
+                            "",
+                        ),
+                    ]
+                ),
                 panels.timeseries_query_per_sec(
-                    "Query Per Second(Local Query Mode)",
+                    "Query Per Second (Local Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1519,7 +1529,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_query_per_sec(
-                    "Query Per Second(Distributed Query Mode)",
+                    "Query Per Second (Distributed Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1529,7 +1539,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "The Number of Running Queries(Distributed Query Mode)",
+                    "The Number of Running Queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_running_query_num')}",
@@ -1538,7 +1548,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "The Number of Rejected queries(Distributed Query Mode)",
+                    "The Number of Rejected queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_rejected_query_counter')}",
@@ -1547,7 +1557,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "The Number of Completed Queries(Distributed Query Mode)",
+                    "The Number of Completed Queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_completed_query_counter')}",
@@ -1556,7 +1566,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_latency(
-                    "Query Latency(Distributed Query Mode)",
+                    "Query Latency (Distributed Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1574,7 +1584,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Query Latency(Local Query Mode)",
+                    "Query Latency (Local Query Mode)",
                     "",
                     [
                         panels.target(
