@@ -360,19 +360,11 @@ impl StreamFragmentGraph {
             }
         }
         if new_ids.len() != old_tables.len() {
-            return Err(MetaError::from(anyhow!(
-                "Different number of internal tables.\n
-                New: {}, Old: {}",
-                new_ids.len(),
-                old_tables.len(),
-            )));
-        }
-        if new_ids.len() != old_tables.len() {
-            return Err(MetaError::from(anyhow!(
-                "Numbers of internal tables mismatch. New: {}, Old: {}",
+            bail!(
+                "Different number of internal tables. New: {}, Old: {}",
                 new_ids.len(),
                 old_tables.len()
-            )));
+            );
         }
         old_tables.sort_by(|a, b| a.id.cmp(&b.id));
         new_ids.sort();
@@ -384,13 +376,11 @@ impl StreamFragmentGraph {
             for table in &mut fragment.internal_tables {
                 let old_table = id_map.get(&table.id).unwrap();
                 if old_table.get_columns() != table.get_columns() {
-                    return Err(MetaError::from(anyhow!(
-                        "Mismatch of internal tables.\n
-                        Old table: {:?}\n
-                        New table: {:?}\n",
+                    bail!(
+                        "Mismatch of internal tables.\nOld table: {:?}\nNew table: {:?}\n",
                         old_table,
                         table
-                    )));
+                    );
                 }
                 table.id = old_table.get_id();
             }

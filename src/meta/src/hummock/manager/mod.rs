@@ -34,8 +34,8 @@ use risingwave_common::util::{pending_on_none, select_all};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
-    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockLevelsExt, HummockVersionExt,
-    HummockVersionUpdateExt,
+    get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
+    BranchedSstInfo, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
@@ -1237,6 +1237,9 @@ where
                     add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
 
+                // apply version delta before we persist this change. If it causes panic we can
+                // recover to a correct state after restarting meta-node.
+                current_version.apply_version_delta(&version_delta);
                 commit_multi_var!(
                     self,
                     None,
@@ -1247,7 +1250,6 @@ where
                     version_stats
                 )?;
                 branched_ssts.commit_memory();
-                current_version.apply_version_delta(&version_delta);
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
@@ -1669,6 +1671,14 @@ where
     #[named]
     pub async fn get_branched_ssts_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
         read_lock!(self, versioning).await.branched_ssts.clone()
+    }
+
+    #[named]
+    /// Gets the mapping from table id to compaction group id
+    pub async fn get_table_compaction_group_id_mapping(
+        &self,
+    ) -> HashMap<StateTableId, CompactionGroupId> {
+        get_table_compaction_group_id_mapping(&read_lock!(self, versioning).await.current_version)
     }
 
     /// Get version deltas from meta store

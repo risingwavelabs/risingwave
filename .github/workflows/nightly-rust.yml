@@ -1,0 +1,23 @@
+name: Build with Latest Nightly Rust
+
+# Helpful to know when it does not compile.
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Rust toolchain
+        run: |
+          rustup override set nightly
+          rustup update nightly
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+      - name: cargo build
+        run: |
+          cargo build

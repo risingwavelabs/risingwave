@@ -1,18 +1,21 @@
 statement ok
-set streaming_parallelism = 1;
-
-statement ok
-CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar);
+CREATE TABLE t6 (
+id bigint primary key,
+v_int int,
+v_long bigint,
+v_float real,
+v_double double,
+v_varchar varchar);
 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
-CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
+CREATE SINK s6 AS select * from mv6 WITH (
     connector = 'iceberg_v2',
     type = 'append-only',
     force_append_only = 'true',
-    warehouse.path = 's3://iceberg',
+    warehouse.path = 's3://icebergdata/demo',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
@@ -21,13 +24,18 @@ CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
 );
 
 statement ok
-INSERT INTO t6 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2'), (8, 2, '8-2'), (13, 2, '13-2'), (21, 2, '21-2');
+INSERT INTO t6 VALUES
+(1, 1, 1000, 1.1, 1.11, '1-1'),
+(2, 2, 2000, 2.2, 2.22,'2-2'),
+(3, 3, 3000, 3.3, 3.33, '3-3'),
+(4, 4, 4000, 4.4, 4.44, '4-4');
 
 statement ok
 FLUSH;
 
 statement ok
-INSERT INTO t6 VALUES (1, 50, '1-50');
+INSERT INTO t6 VALUES
+(5, 5, 5000, 5.5, 5.55, '5-5');
 
 statement ok
 FLUSH;

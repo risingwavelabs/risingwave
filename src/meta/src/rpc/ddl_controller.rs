@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -29,14 +30,15 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use tokio::sync::Semaphore;
 use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, RelationIdEnum, SchemaId, SinkId,
-    SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -113,13 +115,81 @@ pub struct DdlController<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,
 
     aws_client: Arc<Option<AwsEc2Client>>,
+    // The semaphore is used to limit the number of concurrent streaming job creation.
+    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit<S>>,
+}
+
+#[derive(Clone)]
+pub struct CreatingStreamingJobPermit<S: MetaStore> {
+    semaphore: Arc<Semaphore>,
+    _phantom: std::marker::PhantomData<S>,
+}
+
+impl<S> CreatingStreamingJobPermit<S>
+where
+    S: MetaStore,
+{
+    async fn new(env: &MetaSrvEnv<S>) -> Self {
+        let mut permits = env
+            .system_params_manager()
+            .get_params()
+            .await
+            .max_concurrent_creating_streaming_jobs() as usize;
+        if permits == 0 {
+            // if the system parameter is set to zero, use the max permitted value.
+            permits = Semaphore::MAX_PERMITS;
+        }
+        let semaphore = Arc::new(Semaphore::new(permits));
+
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
+        let semaphore_clone = semaphore.clone();
+        tokio::spawn(async move {
+            while let Some(notification) = local_notification_rx.recv().await {
+                let LocalNotification::SystemParamsChange(p) = &notification else {
+                    continue;
+                };
+                let mut new_permits = p.max_concurrent_creating_streaming_jobs() as usize;
+                if new_permits == 0 {
+                    new_permits = Semaphore::MAX_PERMITS;
+                }
+                match permits.cmp(&new_permits) {
+                    Ordering::Less => {
+                        semaphore_clone.add_permits(new_permits - permits);
+                    }
+                    Ordering::Equal => continue,
+                    Ordering::Greater => {
+                        semaphore_clone
+                            .acquire_many((permits - new_permits) as u32)
+                            .await
+                            .unwrap()
+                            .forget();
+                    }
+                }
+                tracing::info!(
+                    "max_concurrent_creating_streaming_jobs changed from {} to {}",
+                    permits,
+                    new_permits
+                );
+                permits = new_permits;
+            }
+        });
+
+        Self {
+            semaphore,
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<S> DdlController<S>
 where
     S: MetaStore,
 {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
@@ -129,6 +199,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
+        let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
             env,
             catalog_manager,
@@ -138,6 +209,7 @@ where
             fragment_manager,
             barrier_manager,
             aws_client,
+            creating_streaming_job_permits,
         }
     }
 
@@ -339,6 +411,12 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
+        let _permit = self
+            .creating_streaming_job_permits
+            .semaphore
+            .acquire()
+            .await
+            .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
@@ -826,6 +904,18 @@ where
         if !stream_job.has_associated_source() {
             fragment_graph.fit_internal_table_ids(old_internal_tables)?;
         }
+
+        let old_table_fragments = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&id.into())
+            .await?;
+        let old_internal_table_ids = old_table_fragments.internal_table_ids();
+        let old_internal_tables = self
+            .catalog_manager
+            .get_tables(&old_internal_table_ids)
+            .await;
+
+        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
