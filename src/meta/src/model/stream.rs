@@ -303,6 +303,17 @@ impl TableFragments {
             .cloned()
     }
 
+    /// Returns the fragments with the `Source` type flag.
+    pub fn source_fragments(&self) -> Vec<Fragment> {
+        self.fragments
+            .values()
+            .filter(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            })
+            .cloned()
+            .collect_vec()
+    }
+
     /// Returns actors that contains Chain node.
     pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {

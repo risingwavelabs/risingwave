@@ -183,8 +183,13 @@ impl DispatchExecutorInner {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
-                if let Some(updates) = dispatchers.get(&self.actor_id) {
+            // Currently `added_dispatchers` is nonempty iff `source` is nonempty iff this update is from altering table
+            Mutation::Update { dispatchers, added_dispatchers, .. } => {
+                if !added_dispatchers.is_empty() && 
+                let Some(new_dispatchers) = added_dispatchers.get(&self.actor_id) {
+                    // self.dispatchers.clear();
+                    self.add_dispatchers(new_dispatchers)?;
+                } else if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.pre_update_dispatcher(update)?;
                     }
@@ -1083,6 +1088,8 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            source: Default::default(),
+            added_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1134,6 +1141,8 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            source: Default::default(),
+            added_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();

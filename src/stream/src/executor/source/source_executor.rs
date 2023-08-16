@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::catalog::{Field, ColumnDesc};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
@@ -169,6 +170,30 @@ impl<S: StateStore> SourceExecutor<S> {
                 .clone(),
             self.actor_ctx.id.to_string(),
         ]
+    }
+
+    async fn apply_new_desc<const BIASED: bool>(
+        &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+    ) -> StreamExecutorResult<()> {
+        self.schema = Schema {
+            fields: source_desc
+                .columns
+                .iter()
+                .map(|col| Field::from(ColumnDesc::from(col)))
+                .collect_vec(),
+        };
+        let core = self.stream_source_core.as_mut().unwrap();
+        let state = core
+            .state_cache
+            .clone()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<_>>();
+        self.replace_stream_reader_with_target_state(source_desc, stream, state)
+            .await?;
+        Ok(())
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -356,8 +381,9 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut core = self.stream_source_core.unwrap();
 
         // Build source description from the builder.
-        let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
+        let mut source_desc = source_desc_builder
+            .clone()
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
@@ -465,10 +491,30 @@ impl<S: StateStore> SourceExecutor<S> {
                                     should_trim_state = true;
                                 }
 
-                                Mutation::Update { actor_splits, .. } => {
-                                    target_state = self
-                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                        .await?;
+                                Mutation::Update {
+                                    actor_splits,
+                                    source,
+                                    ..
+                                } => {
+                                    if let Some(source) = source {
+                                        // TODO:
+                                        // 1. core info
+                                        // 3. match source_id
+                                        source_desc_builder.alter_columns(&source.columns);
+                                        source_desc = source_desc_builder
+                                            .clone()
+                                            .build()
+                                            .map_err(StreamExecutorError::connector_error)?;
+                                        self.apply_new_desc(&source_desc, &mut stream).await?;
+                                    } else {
+                                        target_state = self
+                                            .apply_split_change(
+                                                &source_desc,
+                                                &mut stream,
+                                                actor_splits,
+                                            )
+                                            .await?;
+                                    }
                                 }
                                 _ => {}
                             }

@@ -32,7 +32,7 @@ use uuid::Uuid;
 use super::Locations;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, StreamingJob};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::SourceManagerRef;
@@ -150,6 +150,8 @@ pub struct ReplaceTableContext {
     /// The properties of the streaming job.
     // TODO: directly store `StreamingJob here.
     pub table_properties: HashMap<String, String>,
+
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -466,7 +468,9 @@ where
             building_locations,
             existing_locations,
             table_properties: _,
+            dispatchers,
         }: ReplaceTableContext,
+        stream_job: &StreamingJob,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
@@ -480,10 +484,12 @@ where
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_command_with_paused(Command::ReplaceTable {
+            .run_command(Command::ReplaceTable {
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
+                source: stream_job.source().map(|e| e.clone()),
+                dispatchers,
             })
             .await
         {

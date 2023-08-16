@@ -188,6 +188,8 @@ It only indicates the physical clustering of the data, which may improve the per
         (table, graph)
     };
 
+    println!("graph=\n{}",serde_json::to_string_pretty(&graph).unwrap());
+
     let _job_guard =
         session
             .env()

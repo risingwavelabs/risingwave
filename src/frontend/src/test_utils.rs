@@ -262,6 +262,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn replace_table(
         &self,
+        _source: Option<PbSource>,
         table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,

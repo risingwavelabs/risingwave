@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
+use risingwave_pb::catalog::Source;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -340,6 +341,7 @@ where
         table_id: TableId,
         dummy_table_id: TableId,
         merge_updates: &[MergeUpdate],
+        source: &Option<Source>,
     ) -> MetaResult<()> {
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
@@ -350,10 +352,23 @@ where
         // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
         // with the real table ID, then replace the dummy table ID with the real table ID. This is a
         // workaround for not having the version info in the fragment manager.
-        #[allow(unused_variables)]
-        let old_table_fragment = table_fragments
+
+        // If we are operating on table with source, the old source will still lie in the old
+        // fragments, and we need to add it back to meta.
+        let mut old_table_fragment = table_fragments
             .remove(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+        if let Some(source) = source {
+            let table_id = TableId::new(source.id);
+            old_table_fragment.set_table_id(table_id);
+            old_table_fragment.fragments = old_table_fragment
+                .source_fragments()
+                .into_iter()
+                .map(|f| (f.fragment_id, f))
+                .collect();
+            table_fragments.insert(table_id, old_table_fragment);
+        }
+
         let mut table_fragment = table_fragments
             .remove(dummy_table_id)
             .with_context(|| format!("table_fragment not exist: id={}", dummy_table_id))?;
@@ -1067,6 +1082,19 @@ where
         }
 
         Ok(fragments)
+    }
+
+    pub async fn get_upstream_source_fragments(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<Vec<Fragment>> {
+        let map = &self.core.read().await.table_fragments;
+
+        let table_fragments = map
+            .get(&table_id)
+            .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+        Ok(table_fragments.source_fragments())
     }
 
     /// Get the downstream `Chain` fragments of the specified table.

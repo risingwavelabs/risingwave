@@ -142,9 +142,19 @@ impl ActorBuilder {
                 assert!(stream_node.input.is_empty());
 
                 // Index the upstreams by the an internal edge ID.
-                let upstreams = &self.upstreams[&EdgeId::Internal {
-                    link_id: stream_node.get_operator_id(),
-                }];
+                let upstreams = self
+                    .upstreams
+                    .iter()
+                    .find(|(k, v)| match k {
+                        EdgeId::Internal { link_id } => link_id == &stream_node.get_operator_id(),
+                        EdgeId::UpstreamSourceExternal {
+                            upstream_fragment_id: _,
+                            downstream_fragment_id,
+                        } => &self.fragment_id == downstream_fragment_id,
+                        _ => false,
+                    })
+                    .map(|(_, v)| v)
+                    .expect("Upstream not found");
 
                 Ok(StreamNode {
                     node_body: Some(NodeBody::Merge(MergeNode {
@@ -860,6 +870,33 @@ impl ActorGraphBuilder {
                 edge,
             );
         }
+
+        // for (upstream_fragment_id, edge) in self.fragment_graph.get_upstreams(fragment_id) {
+        //     let upstream_actors = if let Some(fragment) = self.upstream_fragments.get(&upstream_fragment_id) {
+        //         fragment.actors.iter()
+        //         .map(|a| GlobalActorId::new(a.actor_id))
+        //         .collect_vec()
+        //     } else {
+        //         continue;
+        //     };
+
+        //     let upstream_distribution: &Distribution = self.get_distribution(upstream_fragment_id);
+
+        //     state.inner.add_link(
+        //         FragmentLinkNode {
+        //             fragment_id: upstream_fragment_id,
+        //             actor_ids: &upstream_actors,
+        //             distribution: upstream_distribution,
+        //         },
+        //         FragmentLinkNode {
+        //             fragment_id,
+        //             actor_ids: &actor_ids,
+        //             distribution,
+        //         },
+        //         edge,
+        //     );
+        // }
+        
 
         // Finally, record the actor IDs for the current fragment.
         state

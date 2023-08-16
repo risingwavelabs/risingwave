@@ -419,6 +419,7 @@ impl MetaClient {
 
     pub async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
@@ -427,6 +428,7 @@ impl MetaClient {
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+            source,
         };
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here

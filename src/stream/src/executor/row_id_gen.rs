@@ -14,19 +14,20 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
 };
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, Field};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef, Mutation,
 };
 use crate::executor::{Message, StreamExecutorError};
 
@@ -115,6 +116,23 @@ impl RowIdGenExecutor {
                     // barrier, duplicated row id won't be generated.
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.row_id_generator = Self::new_generator(&vnodes);
+                    }
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::Update { source, .. } => {
+                                if let Some(source) = source {
+                                    self.schema = Schema {
+                                        fields: source
+                                            .columns
+                                            .iter()
+                                            .map(|c| Field::from(c.column_desc.as_ref().unwrap()))
+                                            .collect_vec(),
+                                    };
+                                    self.row_id_index = self.schema.fields.len() - 1;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     yield Message::Barrier(barrier);
                 }

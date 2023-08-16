@@ -159,6 +159,10 @@ impl SourceDescBuilder {
             metrics: self.metrics.clone(),
         })
     }
+
+    pub fn alter_columns(&mut self, columns: &Vec<PbColumnCatalog>) {
+        self.columns = columns.clone();
+    }
 }
 
 // Only return valid (format, encode)

@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::manager::{IdGeneratorManagerRef, StreamingJob};
-use crate::model::FragmentId;
+use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -199,6 +199,11 @@ pub(super) enum EdgeId {
         /// The ID of the upstream table or materialized view.
         upstream_table_id: TableId,
         /// The ID of the downstream fragment.
+        downstream_fragment_id: GlobalFragmentId,
+    },
+
+    UpstreamSourceExternal {
+        upstream_fragment_id: GlobalFragmentId,
         downstream_fragment_id: GlobalFragmentId,
     },
 
@@ -572,11 +577,13 @@ impl CompleteStreamFragmentGraph {
     }
 
     /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
-    /// downstream existing `Chain` fragments.
-    pub fn with_downstreams(
+    /// downstream existing `Chain` fragments and upstream source fragments
+    pub fn with_downstreams_upstreams(
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        upstream_fragments: Vec<Fragment>,
+        dispatch_strategy: Option<DispatchStrategy>,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
@@ -586,7 +593,7 @@ impl CompleteStreamFragmentGraph {
 
         // Build the extra edges between the `Materialize` and the downstream `Chain` of the
         // existing materialized views.
-        for (dispatch_strategy, fragment) in &downstream_fragments {
+        for (dispatch_strategy, fragment) in downstream_fragments.iter() {
             let id = GlobalFragmentId::new(fragment.fragment_id);
 
             let edge = StreamFragmentEdge {
@@ -609,9 +616,36 @@ impl CompleteStreamFragmentGraph {
                 .unwrap();
         }
 
+        for fragment in upstream_fragments.iter() {
+            let id = GlobalFragmentId::new(fragment.fragment_id);
+            let edge = StreamFragmentEdge {
+                id: EdgeId::UpstreamSourceExternal {
+                    upstream_fragment_id: id,
+                    downstream_fragment_id: table_fragment_id,
+                },
+                dispatch_strategy: dispatch_strategy.clone().unwrap(),
+            };
+
+            extra_upstreams
+                .entry(table_fragment_id)
+                .or_insert_with(HashMap::new)
+                .try_insert(id, edge.clone())
+                .unwrap();
+            extra_downstreams
+                .entry(id)
+                .or_insert_with(HashMap::new)
+                .try_insert(table_fragment_id, edge)
+                .unwrap();
+        }
+
         let existing_fragments = downstream_fragments
             .into_iter()
             .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f))
+            .chain(
+                upstream_fragments
+                    .into_iter()
+                    .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
+            )
             .collect();
 
         Ok(Self {

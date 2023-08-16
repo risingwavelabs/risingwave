@@ -24,7 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -33,8 +33,10 @@ use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
+use risingwave_pb::catalog::PbSource;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
@@ -225,6 +227,8 @@ pub enum Mutation {
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        source: Option<PbSource>,
+        added_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
@@ -412,6 +416,8 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
+                source,
+                added_dispatchers,
             } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -421,6 +427,18 @@ impl Mutation {
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
+                source: source.clone(),
+                added_dispatchers: added_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Add {
                 adds,
@@ -493,6 +511,12 @@ impl Mutation {
                                 .collect(),
                         )
                     })
+                    .collect(),
+                source: update.source.clone(),
+                added_dispatchers: update
+                    .added_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
             },
 

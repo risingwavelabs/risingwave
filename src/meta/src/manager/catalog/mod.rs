@@ -2030,9 +2030,11 @@ where
         }
     }
 
+    // TODO: should we alter source into creating?
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn finish_replace_table_procedure(
         &self,
+        source: &Option<Source>,
         table: &Table,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
@@ -2040,6 +2042,7 @@ where
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             tables.contains_key(&table.id)
@@ -2073,7 +2076,12 @@ where
         database_core.in_progress_creation_tracker.remove(&key);
 
         tables.insert(table.id, table.clone());
-        commit_meta!(self, tables, indexes)?;
+        if let Some(source) = &source {
+            assert!(sources.contains_key(&source.id), "source must exist");
+            sources.insert(source.id, source.clone());
+        }
+        
+        commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
         let version = self
@@ -2086,6 +2094,9 @@ where
                     .into_iter()
                     .chain(updated_indexes.into_iter().map(|index| Relation {
                         relation_info: RelationInfo::Index(index).into(),
+                    }))
+                    .chain(source.to_owned().into_iter().map(|source| Relation {
+                        relation_info: RelationInfo::Source(source).into(),
                     }))
                     .collect_vec(),
                 }),

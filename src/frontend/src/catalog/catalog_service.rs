@@ -81,6 +81,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
@@ -222,13 +223,14 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(table, graph, mapping)
+            .replace_table(source, table, graph, mapping)
             .await?;
         self.wait_version(version).await
     }

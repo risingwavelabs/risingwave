@@ -30,6 +30,9 @@ message StopMutation {
 }
 
 message UpdateMutation {
+  message Dispatchers {
+    repeated Dispatcher dispatchers = 1;
+  }
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;
@@ -65,6 +68,10 @@ message UpdateMutation {
   repeated uint32 dropped_actors = 4;
   // Source updates.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+  // Source definition update 
+  catalog.Source source = 6;
+  // Added dispatchers 
+  map<uint32, AddMutation.Dispatchers> added_dispatchers = 7;
 }
 
 message SourceChangeSplitMutation {

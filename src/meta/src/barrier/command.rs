@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -21,13 +21,15 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::catalog::Source;
+use risingwave_pb::meta::table_fragments::actor_status;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, UpdateMutation,
+    AddMutation, Dispatcher, FragmentTypeFlag, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -130,6 +132,8 @@ pub enum Command {
         old_table_fragments: TableFragments,
         new_table_fragments: TableFragments,
         merge_updates: Vec<MergeUpdate>,
+        source: Option<Source>,
+        dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     },
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
@@ -175,10 +179,22 @@ impl Command {
             Command::ReplaceTable {
                 old_table_fragments,
                 new_table_fragments,
+                source,
                 ..
             } => {
                 let to_add = new_table_fragments.actor_ids().into_iter().collect();
-                let to_remove = old_table_fragments.actor_ids().into_iter().collect();
+                // don't remove the original table source actors if the table has source
+                let to_remove = if source.is_some() {
+                    old_table_fragments
+                        .fragments
+                        .values()
+                        .filter(|f| (f.fragment_type_mask & FragmentTypeFlag::Source as u32) == 0)
+                        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+                        .collect()
+                } else {
+                    old_table_fragments.actor_ids().into_iter().collect()
+                };
+                println!("Added actors: {:?}\nRemoved actors: {:?}", to_add, to_remove);
                 CommandChanges::Actor { to_add, to_remove }
             }
             Command::SourceSplitAssignment(_) => CommandChanges::None,
@@ -319,13 +335,39 @@ where
             Command::ReplaceTable {
                 old_table_fragments,
                 merge_updates,
+                source,
+                dispatchers,
                 ..
             } => {
-                let dropped_actors = old_table_fragments.actor_ids();
+                // don't remove the original table source actors if the table has source
+                let dropped_actors = if source.is_some() {
+                    old_table_fragments
+                        .fragments
+                        .values()
+                        .filter(|f| (f.fragment_type_mask & FragmentTypeFlag::Source as u32) == 0)
+                        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+                        .collect()
+                } else {
+                    old_table_fragments.actor_ids()
+                };
+
+                let added_dispatchers = dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect();
 
                 Some(Mutation::Update(UpdateMutation {
                     merge_update: merge_updates.clone(),
                     dropped_actors,
+                    source: source.clone(),
+                    added_dispatchers,
                     ..Default::default()
                 }))
             }
@@ -451,6 +493,8 @@ where
                     actor_vnode_bitmap_update,
                     dropped_actors,
                     actor_splits,
+                    source: None,
+                    added_dispatchers: HashMap::new(),
                 });
                 tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
@@ -685,11 +729,21 @@ where
                 old_table_fragments,
                 new_table_fragments,
                 merge_updates,
+                source,
+                ..
             } => {
-                let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
+                let to_remove = non_source_actors(old_table_fragments, source)
+                    .into_iter()
+                    .collect::<HashSet<_>>();
+                let mut node_actors = BTreeMap::new();
+                for (actor_id, actor_status) in &old_table_fragments.actor_status {
+                    if to_remove.contains(actor_id) {
+                        let node_id =
+                            actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+                        node_actors.entry(node_id).or_insert_with(Vec::new).push(*actor_id);
+                    }
+                }
 
-                // Tell compute nodes to drop actors.
-                let node_actors = self.fragment_manager.table_node_actors(&table_ids).await?;
                 self.clean_up(node_actors).await?;
 
                 // Drop fragment info in meta store.
@@ -698,6 +752,7 @@ where
                         old_table_fragments.table_id(),
                         new_table_fragments.table_id(),
                         merge_updates,
+                        source,
                     )
                     .await?;
             }
@@ -724,5 +779,18 @@ where
         }
 
         Ok(())
+    }
+}
+
+fn non_source_actors(fragments: &TableFragments, source: &Option<Source>) -> Vec<u32> {
+    if source.is_some() {
+        fragments
+            .fragments
+            .values()
+            .filter(|f| (f.fragment_type_mask & FragmentTypeFlag::Source as u32) == 0)
+            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+            .collect()
+    } else {
+        fragments.actor_ids()
     }
 }

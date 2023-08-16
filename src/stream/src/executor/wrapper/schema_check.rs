@@ -15,14 +15,16 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{ExecutorInfo, Message, MessageStream};
+use crate::executor::{ExecutorInfo, Message, MessageStream, Mutation};
 
 /// Streams wrapped by `schema_check` will check the passing stream chunk against the expected
 /// schema.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
+pub async fn schema_check(mut info: Arc<ExecutorInfo>, input: impl MessageStream) {
     #[for_await]
     for message in input {
         let message = message?;
@@ -43,7 +45,29 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                     Ok(())
                 }
             }
-            Message::Barrier(_) => Ok(()),
+            Message::Barrier(barrier) => {
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Update { source, .. } => {
+                            if let Some(source) = source {
+                                info = Arc::new(ExecutorInfo {
+                                    schema: Schema {
+                                        fields: source
+                                            .columns
+                                            .iter()
+                                            .map(|c| Field::from(c.column_desc.as_ref().unwrap()))
+                                            .collect_vec(),
+                                    },
+                                    pk_indices: info.pk_indices.clone(),
+                                    identity: info.identity.clone(),
+                                })
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            }
         }
         .unwrap_or_else(|e| panic!("schema check failed on {}: {}", info.identity, e));
 
