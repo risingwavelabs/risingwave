@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
-set -exuo pipefail
+set -euo pipefail
 
 source ci/scripts/common.sh
 
@@ -35,6 +35,8 @@ echo "--- preparing iceberg"
 cd e2e_test/iceberg
 bash ./start_spark_connect_server.sh
 
+# Don't remove the `--quiet` option since poetry has a bug when printing output, see
+# https://github.com/python-poetry/poetry/issues/3412
 "$HOME"/.local/bin/poetry update --quiet
 "$HOME"/.local/bin/poetry run python main.py
 
