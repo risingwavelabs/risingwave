@@ -456,7 +456,9 @@ message DispatchCompactionTaskRequest {
   repeated uint64 output_object_ids = 10;
 }
 
-message DispatchCompactionTaskResponse {}
+message DispatchCompactionTaskResponse {
+  common.Status status = 1;
+}
 
 message ReportCompactionTaskRequest {
   // ReportTask provides the compact task to report to the meta.
@@ -472,7 +474,10 @@ message ReportCompactionTaskRequest {
   }
 }
 
-message ReportCompactionTaskResponse {}
+message ReportCompactionTaskResponse {
+  common.Status status = 1;
+}
+
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
@@ -699,8 +704,8 @@ service HummockManagerService {
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
-  rpc DispatchCompactionTask(DispatchCompactionTaskRequest) returns (DispatchCompactionTaskResponse);
-  rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
+  // rpc DispatchCompactionTask(DispatchCompactionTaskRequest) returns (DispatchCompactionTaskResponse);
+  // rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
 }
 
 message CompactionConfig {
