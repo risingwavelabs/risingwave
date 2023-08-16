@@ -22,7 +22,7 @@ use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
 use risingwave_connector::ConnectorParams;
-use risingwave_pb::catalog::PbStreamSourceInfo;
+use risingwave_pb::catalog::{PbStreamSourceInfo, Source};
 use risingwave_pb::plan_common::{PbColumnCatalog, PbEncodeType, PbFormatType, RowFormatType};
 
 use crate::connector_source::ConnectorSource;
@@ -160,8 +160,10 @@ impl SourceDescBuilder {
         })
     }
 
-    pub fn alter_columns(&mut self, columns: &Vec<PbColumnCatalog>) {
-        self.columns = columns.clone();
+    pub fn alter_builder(&mut self, source: &Source) {
+        self.columns = source.columns.clone();
+        self.row_id_index = source.row_id_index.map(|x| x as _);
+        self.pk_indices = source.pk_column_ids.iter().map(|x| *x as usize).collect();
     }
 }
 

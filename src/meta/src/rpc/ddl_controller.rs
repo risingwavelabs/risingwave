@@ -875,7 +875,7 @@ where
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
         let default_parallelism =
             self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
-        let mut actor_graph_builder =
+        let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
         let ActorGraphBuildResult {

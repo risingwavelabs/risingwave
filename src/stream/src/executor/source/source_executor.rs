@@ -176,6 +176,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        boot_state: &Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         self.schema = Schema {
             fields: source_desc
@@ -185,12 +186,17 @@ impl<S: StateStore> SourceExecutor<S> {
                 .collect_vec(),
         };
         let core = self.stream_source_core.as_mut().unwrap();
-        let state = core
-            .state_cache
-            .clone()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect::<Vec<_>>();
+        let mut state = vec![];
+        for ele in boot_state {
+            if let Some(recover_state) = core
+                .split_state_store
+                .try_recover_from_state_store(ele)
+                .await?
+            {
+                state.push(recover_state);
+            }
+        }
+        println!("#### Actor {:?} apply state {:?}", self.actor_ctx.id, state);
         self.replace_stream_reader_with_target_state(source_desc, stream, state)
             .await?;
         Ok(())
@@ -200,7 +206,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,        
     ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
         self.metrics
             .source_split_change_count
@@ -302,7 +308,11 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader = self
-            .build_stream_source_reader(source_desc, Some(target_state.clone()))
+            .build_stream_source_reader(source_desc, if target_state.is_empty() {
+                None
+            } else {
+                Some(target_state.clone())
+            })
             .await?;
 
         stream.replace_data_stream(reader);
@@ -415,6 +425,8 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        let mut latest_state = boot_state.clone();
+
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
 
@@ -494,18 +506,16 @@ impl<S: StateStore> SourceExecutor<S> {
                                 Mutation::Update {
                                     actor_splits,
                                     source,
+                                    added_dispatchers,
                                     ..
                                 } => {
-                                    if let Some(source) = source {
-                                        // TODO:
-                                        // 1. core info
-                                        // 3. match source_id
-                                        source_desc_builder.alter_columns(&source.columns);
+                                    if let Some(source) = source && added_dispatchers.contains_key(&self.actor_ctx.id) {
+                                        source_desc_builder.alter_builder(&source);
                                         source_desc = source_desc_builder
                                             .clone()
                                             .build()
                                             .map_err(StreamExecutorError::connector_error)?;
-                                        self.apply_new_desc(&source_desc, &mut stream).await?;
+                                        self.apply_new_desc(&source_desc, &mut stream, &latest_state).await?;
                                     } else {
                                         target_state = self
                                             .apply_split_change(
@@ -520,9 +530,12 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                         }
 
+                        if target_state.is_some() {
+                            latest_state = target_state.as_ref().unwrap().clone();
+                        }
                         self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
                             .await?;
-
+                        
                         self.metrics
                             .source_row_per_barrier
                             .with_label_values(&[
@@ -604,6 +617,8 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .collect::<Vec<&str>>(),
                         )
                         .inc_by(chunk.cardinality() as u64);
+                    let (_, columns, _) = chunk.clone().into_inner();
+                    println!("SOURCE CHUNK: {:?}", columns);
                     yield Message::Chunk(chunk);
                 }
             }

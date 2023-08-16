@@ -145,7 +145,7 @@ impl ActorBuilder {
                 let upstreams = self
                     .upstreams
                     .iter()
-                    .find(|(k, v)| match k {
+                    .find(|(k, _)| match k {
                         EdgeId::Internal { link_id } => link_id == &stream_node.get_operator_id(),
                         EdgeId::UpstreamSourceExternal {
                             upstream_fragment_id: _,

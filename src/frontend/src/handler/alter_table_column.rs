@@ -29,7 +29,6 @@ use super::create_table::{
 };
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
 use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
@@ -214,7 +213,6 @@ pub async fn handle_alter_table_column(
 
         (graph, table, source)
     };
-    println!("graph=\n{}",serde_json::to_string_pretty(&graph).unwrap());
     // Calculate the mapping from the original columns to the new columns.
     let col_index_mapping = ColIndexMapping::with_target_size(
         original_catalog

@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::manager::{IdGeneratorManagerRef, StreamingJob};
-use crate::model::{FragmentId, TableFragments};
+use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;

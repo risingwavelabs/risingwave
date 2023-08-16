@@ -216,6 +216,9 @@ impl KafkaSplitReader {
                     None => 0,
                     Some(payload) => payload.len(),
                 };
+                if msg.payload().is_some() {
+                    println!("Kafka receive {:?}", String::from_utf8(msg.payload().unwrap().to_vec()));
+                }
                 num_messages += 1;
                 let source_message = SourceMessage::from_kafka_message(&msg);
                 let split_id = source_message.split_id.clone();
