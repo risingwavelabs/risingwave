@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp};
 use rust_decimal::Decimal as RustDecimal;
 use simd_json::{BorrowedValue, ValueAccess};
 
@@ -79,6 +79,14 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                 DataType::Date => {
                     let v = mysql_row.take::<NaiveDate, _>(i);
                     v.map(|v| ScalarImpl::from(Date::from(v)))
+                }
+                DataType::Time => {
+                    let v = mysql_row.take::<chrono::NaiveTime, _>(i);
+                    v.map(|v| ScalarImpl::from(Time::from(v)))
+                }
+                DataType::Timestamp => {
+                    let v = mysql_row.take::<chrono::NaiveDateTime, _>(i);
+                    v.map(|v| ScalarImpl::from(Timestamp::from(v)))
                 }
                 _ => unimplemented!("unsupported data type: {:?}", rw_field.data_type),
             }

@@ -386,9 +386,10 @@ impl MySqlExternalTableReader {
                             DataType::Int64 => Value::from(value.into_int64()),
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
-                            DataType::Date => Value::from(value.into_date().0),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
+                            DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
+                            DataType::Timestamp => Value::from(value.into_timestamp().0),
                             _ => unimplemented!("unsupported data type: {:?}", ty),
                         };
                         (pk.clone(), val)
