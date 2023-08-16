@@ -15,9 +15,7 @@
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{
-    ExternalTableReader, ExternalTableType, SchemaTableName,
-};
+use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;

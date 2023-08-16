@@ -216,7 +216,7 @@ impl CdcBackfillExecutor {
             let _ = Pin::new(&mut upstream).peek().await;
 
             tracing::info!(
-                "start the bacfill loop: [initial] binlog offset: {:?}",
+                "start the bacfill loop: [initial] binlog offset {:?}",
                 last_binlog_offset,
             );
 
@@ -308,7 +308,7 @@ impl CdcBackfillExecutor {
                                     )?;
 
                                     tracing::trace!(
-                                        "recv changelog chunk: bin offset: {:?}, capactiy: {}",
+                                        "recv changelog chunk: bin offset {:?}, capactiy {}",
                                         chunk_binlog_offset,
                                         chunk.capacity()
                                     );
@@ -320,7 +320,7 @@ impl CdcBackfillExecutor {
                                         if let Some(chunk_binlog_offset) = chunk_binlog_offset {
                                             if chunk_binlog_offset < *last_binlog_offset {
                                                 tracing::trace!(
-                                                    "skip changelog chunk: offset: {:?}, capacity: {}",
+                                                    "skip changelog chunk: offset {:?}, capacity {}",
                                                     chunk_binlog_offset,
                                                     chunk.capacity()
                                                 );
@@ -341,8 +341,8 @@ impl CdcBackfillExecutor {
                             match msg? {
                                 None => {
                                     tracing::debug!(
-                                        "snapshot read stream ends: last_binlog_offset {:?}",
-                                        last_binlog_offset
+                                        "snapshot read stream ends: last_binlog_offset {:?}, current_pk_pos {:?}",
+                                        last_binlog_offset, current_pk_pos
                                     );
                                     // End of the snapshot read stream.
                                     // We should not mark the chunk anymore,

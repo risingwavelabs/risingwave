@@ -329,14 +329,15 @@ impl MySqlExternalTableReader {
                 order_key
             )
         } else {
-            let order_condition = primary_keys
-                .iter()
-                .map(|pk| format!("{} >= :{}", pk, pk))
-                .join(" AND ");
+            // > where (L_ORDERKEY,L_LINENUMBER) >= (5999968,7) order by L_ORDERKEY, L_LINENUMBER;
+            // FIXME: seems mysql cannot leverage the given key to narrow down the range of scan,
+            // we need to rewrite the order conditons by our own.
+            let range_params = primary_keys.iter().map(|pk| format!(":{}", pk)).join(",");
             format!(
-                "SELECT * FROM {} WHERE {} ORDER BY {}",
+                "SELECT * FROM {} WHERE ({}) >= ({}) ORDER BY {}",
                 self.get_normalized_table_name(&table_name),
-                order_condition,
+                order_key,
+                range_params,
                 order_key
             )
         };

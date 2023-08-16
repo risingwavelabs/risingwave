@@ -327,11 +327,6 @@ where
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
-                                    tracing::info!(
-                                        "bacfill recv chunk: rows {}",
-                                        chunk.cardinality()
-                                    );
-
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }

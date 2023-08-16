@@ -145,7 +145,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 })
                 .collect_vec();
 
-            tracing::debug!("snapshot_read primary keys: {:?}", primary_keys);
+            tracing::debug!(
+                "snapshot_read primary keys: {:?}, current_pos: {:?}",
+                primary_keys,
+                args.current_pos
+            );
 
             let row_stream = self.inner.table_reader().snapshot_read(
                 self.inner.schema_table_name(),
