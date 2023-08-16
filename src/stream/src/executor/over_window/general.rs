@@ -337,9 +337,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
             let mut partition = OverPartition::new(
                 &part_key,
+                &this.partition_key_indices,
                 &mut cache,
                 &this.order_key_data_types,
                 &this.order_key_order_types,
+                &this.order_key_indices,
+                &this.input_pk_indices,
             );
 
             // Build changes for current partition.

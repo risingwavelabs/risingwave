@@ -74,6 +74,8 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     range_cache: &'a mut PartitionCache,
     order_key_data_types: &'a [DataType],
     order_key_order_types: &'a [OrderType],
+    order_key_indices: &'a [usize],
+    input_pk_indices: &'a [usize],
     _phantom: PhantomData<S>,
 }
 
@@ -86,6 +88,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         cache: &'a mut PartitionCache,
         order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
+        order_key_indices: &'a [usize],
+        input_pk_indices: &'a [usize],
     ) -> Self {
         Self {
             this_partition_key,
@@ -93,6 +97,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             range_cache: cache,
             order_key_data_types,
             order_key_order_types,
+            order_key_indices,
+            input_pk_indices,
             _phantom: PhantomData,
         }
     }
@@ -266,7 +272,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             || cache_real_last_key.is_some() && *range.start() > cache_real_last_key.unwrap()
         {
             // completely not overlapping, for the sake of simplicity, we re-init the cache
-            std::mem::replace(self.range_cache, new_empty_partition_cache());
+            tracing::info!(
+                cache_first=?cache_real_first_key,
+                cache_last=?cache_real_last_key,
+                range=?range,
+                "newly-modified range is completely not overlapping with the cache, re-init the cache"
+            );
+            *self.range_cache = new_empty_partition_cache();
         }
 
         if self.cache_real_len() == 0 {
@@ -275,6 +287,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.state_key_to_table_pk(range.start())?),
                 Bound::Included(self.state_key_to_table_pk(range.end())?),
             );
+            tracing::debug!(table_pk_range=?table_pk_range, "cache is empty, just load the given range");
             return self
                 .extend_cache_by_range_inner(table, table_pk_range)
                 .await;
@@ -290,6 +303,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.state_key_to_table_pk(range.start())?),
                 Bound::Excluded(self.state_key_to_table_pk(cache_real_first_key)?),
             );
+            tracing::debug!(table_pk_range=?table_pk_range, "load the left half of given range");
             return self
                 .extend_cache_by_range_inner(table, table_pk_range)
                 .await;
@@ -301,6 +315,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Excluded(self.state_key_to_table_pk(cache_real_last_key)?),
                 Bound::Included(self.state_key_to_table_pk(range.end())?),
             );
+            tracing::debug!(table_pk_range=?table_pk_range, "load the right half of given range");
             return self
                 .extend_cache_by_range_inner(table, table_pk_range)
                 .await;
@@ -370,6 +385,29 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
         .clone();
 
+        self.extend_cache_leftward_by_n_inner(table, &range_to_exclusive)
+            .await?;
+
+        if self.cache_real_len() == 0 {
+            // Cache was empty, and extending leftward didn't add anything to the cache, but we
+            // can't just remove the smallest sentinel, we must also try extending rightward.
+            self.extend_cache_rightward_by_n_inner(table, hint_key)
+                .await?;
+            if self.cache_real_len() == 0 {
+                // still empty, meaning the table is empty
+                self.range_cache.remove(&CacheKey::Smallest);
+                self.range_cache.remove(&CacheKey::Largest);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn extend_cache_leftward_by_n_inner(
+        &mut self,
+        table: &StateTable<S>,
+        range_to_exclusive: &StateKey,
+    ) -> StreamExecutorResult<()> {
         let mut to_extend: VecDeque<OwnedRow> = VecDeque::with_capacity(MAGIC_BATCH_SIZE);
         {
             let pk_range = (
@@ -443,10 +481,33 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
         .clone();
 
+        self.extend_cache_rightward_by_n_inner(table, &range_from_exclusive)
+            .await?;
+
+        if self.cache_real_len() == 0 {
+            // Cache was empty, and extending rightward didn't add anything to the cache, but we
+            // can't just remove the smallest sentinel, we must also try extending leftward.
+            self.extend_cache_leftward_by_n_inner(table, hint_key)
+                .await?;
+            if self.cache_real_len() == 0 {
+                // still empty, meaning the table is empty
+                self.range_cache.remove(&CacheKey::Smallest);
+                self.range_cache.remove(&CacheKey::Largest);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn extend_cache_rightward_by_n_inner(
+        &mut self,
+        table: &StateTable<S>,
+        range_from_exclusive: &StateKey,
+    ) -> StreamExecutorResult<()> {
         let mut n_extended = 0usize;
         {
             let pk_range = (
-                Bound::Excluded(self.state_key_to_table_pk(&range_from_exclusive)?),
+                Bound::Excluded(self.state_key_to_table_pk(range_from_exclusive)?),
                 // currently we can't get the first possible key after this partition, so use
                 // `Unbounded` plus manual check for workaround
                 Bound::<OwnedRow>::Unbounded,
@@ -507,7 +568,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     }
 
     fn row_to_state_key(&self, full_row: impl Row + Copy) -> StreamExecutorResult<StateKey> {
-        todo!()
+        Ok(StateKey {
+            order_key: memcmp_encoding::encode_row(
+                full_row.project(self.order_key_indices),
+                &self.order_key_order_types,
+            )?,
+            pk: full_row
+                .project(&self.input_pk_indices)
+                .into_owned_row()
+                .into(),
+        })
     }
 
     pub fn shrink_cache_to_range(&mut self, range: RangeInclusive<&StateKey>) {
