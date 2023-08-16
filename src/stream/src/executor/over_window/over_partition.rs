@@ -15,11 +15,12 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
-use futures::StreamExt;
+use futures::stream::select_all;
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::hash::VnodeBitmapExt;
@@ -69,6 +70,7 @@ pub(super) fn new_empty_partition_cache() -> PartitionCache {
 /// methods.
 pub(super) struct OverPartition<'a, S: StateStore> {
     this_partition_key: &'a OwnedRow,
+    partition_key_indices: &'a [usize],
     range_cache: &'a mut PartitionCache,
     order_key_data_types: &'a [DataType],
     order_key_order_types: &'a [OrderType],
@@ -80,12 +82,14 @@ const MAGIC_BATCH_SIZE: usize = 512;
 impl<'a, S: StateStore> OverPartition<'a, S> {
     pub fn new(
         this_partition_key: &'a OwnedRow,
+        partition_key_indices: &'a [usize],
         cache: &'a mut PartitionCache,
         order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
     ) -> Self {
         Self {
             this_partition_key,
+            partition_key_indices,
             range_cache: cache,
             order_key_data_types,
             order_key_order_types,
@@ -115,6 +119,37 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         len - sentinels.into_iter().filter(|x| *x).count()
     }
 
+    fn cache_real_first_key(&self) -> Option<&StateKey> {
+        self.range_cache
+            .inner()
+            .iter()
+            .find(|(k, _)| k.is_normal())
+            .map(|(k, _)| k.as_normal_expect())
+    }
+
+    fn cache_real_last_key(&self) -> Option<&StateKey> {
+        self.range_cache
+            .inner()
+            .iter()
+            .rev()
+            .find(|(k, _)| k.is_normal())
+            .map(|(k, _)| k.as_normal_expect())
+    }
+
+    fn cache_left_is_sentinel(&self) -> bool {
+        self.range_cache
+            .first_key_value()
+            .map(|(k, _)| k.is_sentinel())
+            .unwrap_or(false)
+    }
+
+    fn cache_right_is_sentinel(&self) -> bool {
+        self.range_cache
+            .last_key_value()
+            .map(|(k, _)| k.is_sentinel())
+            .unwrap_or(false)
+    }
+
     /// Write a change record to state table and cache.
     /// This function must be called after finding affected ranges, which means the change records
     /// should never exceed the cached range.
@@ -131,6 +166,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             }
             Record::Delete { .. } => {
                 self.range_cache.remove(&CacheKey::from(key));
+
+                if self.cache_real_len() == 0 && self.range_cache.len() == 1 {
+                    // only one sentinel remains, should insert the other
+                    self.range_cache
+                        .insert(CacheKey::Smallest, OwnedRow::empty());
+                    self.range_cache
+                        .insert(CacheKey::Largest, OwnedRow::empty());
+                }
             }
         }
     }
@@ -155,10 +198,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     where
         's: 'cache,
     {
-        // ensure the cache covers all delta (if possible)
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
-        self.extend_cache_by_range(table, delta_first..=delta_last)
+
+        // ensure the cache covers all delta (if possible)
+        self.extend_cache_by_range(table, &delta_first..=&delta_last)
             .await?;
 
         loop {
@@ -189,149 +233,155 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if left_reached_sentinel {
                 // TODO(rc): should count cache miss for this, and also the below
                 tracing::info!("partition cache left extension triggered");
-                self.extend_cache_leftward_by_n(table).await?;
+                let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
+                self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if right_reached_sentinel {
                 tracing::info!("partition cache right extension triggered");
-                self.extend_cache_rightward_by_n(table).await?;
+                let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
+                self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
             tracing::info!("partition cache extended");
         }
     }
 
+    /// Try to load the given range of entries from table into cache.
+    /// When the function returns, it's guaranteed that there's no entry in the table that is within
+    /// the given range but not in the cache.
     async fn extend_cache_by_range(
         &mut self,
         table: &StateTable<S>,
         range: RangeInclusive<&StateKey>,
     ) -> StreamExecutorResult<()> {
-        // TODO(): load the range of entries and some more into the cache, ensuring there's real
-        // entries in cache
+        if self.cache_real_len() == self.range_cache.len() {
+            // no sentinel in the cache, meaning we already cached all entries of this partition
+            return Ok(());
+        }
+        assert!(self.range_cache.len() >= 2);
 
-        // TODO(): assert must have at least one entry, or, no entry at all
+        let cache_real_first_key = self.cache_real_first_key();
+        let cache_real_last_key = self.cache_real_last_key();
 
-        // TODO(rc): prefetch something before the start of the range;
-        self.extend_cache_leftward_by_n(table).await?;
+        if cache_real_first_key.is_some() && *range.end() < cache_real_first_key.unwrap()
+            || cache_real_last_key.is_some() && *range.start() > cache_real_last_key.unwrap()
+        {
+            // completely not overlapping, for the sake of simplicity, we re-init the cache
+            std::mem::replace(self.range_cache, new_empty_partition_cache());
+        }
 
-        // prefetch something after the end of the range
-        self.extend_cache_rightward_by_n(table).await
+        if self.cache_real_len() == 0 {
+            // no normal entry in the cache, just load the given range
+            let table_pk_range = (
+                Bound::Included(self.state_key_to_table_pk(range.start())?),
+                Bound::Included(self.state_key_to_table_pk(range.end())?),
+            );
+            return self
+                .extend_cache_by_range_inner(table, table_pk_range)
+                .await;
+        }
+
+        // get the first and last keys again, now we are guaranteed to have at least a normal key
+        let cache_real_first_key = self.cache_real_first_key().unwrap();
+        let cache_real_last_key = self.cache_real_last_key().unwrap();
+
+        if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
+            // extend leftward only if there's smallest sentinel
+            let table_pk_range = (
+                Bound::Included(self.state_key_to_table_pk(range.start())?),
+                Bound::Excluded(self.state_key_to_table_pk(cache_real_first_key)?),
+            );
+            return self
+                .extend_cache_by_range_inner(table, table_pk_range)
+                .await;
+        }
+
+        if self.cache_right_is_sentinel() && *range.end() > cache_real_last_key {
+            // extend rightward only if there's largest sentinel
+            let table_pk_range = (
+                Bound::Excluded(self.state_key_to_table_pk(cache_real_last_key)?),
+                Bound::Included(self.state_key_to_table_pk(range.end())?),
+            );
+            return self
+                .extend_cache_by_range_inner(table, table_pk_range)
+                .await;
+        }
+
+        // TODO(rc): uncomment the following to enable prefetching rows before the start of the
+        // range;
+        // self.extend_cache_leftward_by_n(table, range.start()).await?;
+
+        // prefetch rows after the end of the range
+        self.extend_cache_rightward_by_n(table, range.end()).await
+    }
+
+    async fn extend_cache_by_range_inner(
+        &mut self,
+        table: &StateTable<S>,
+        table_pk_range: (Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<()> {
+        let streams = stream::iter(table.vnode_bitmap().iter_vnodes())
+            .map(|vnode| {
+                table.iter_with_pk_range(
+                    &table_pk_range,
+                    vnode,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
+            })
+            .buffer_unordered(10)
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .map(Box::pin);
+
+        #[for_await]
+        for row in select_all(streams) {
+            let row: OwnedRow = row?;
+            let key = self.row_to_state_key(&row)?;
+            self.range_cache.insert(CacheKey::from(key), row);
+        }
+
+        Ok(())
     }
 
     async fn extend_cache_leftward_by_n(
         &mut self,
         table: &StateTable<S>,
+        hint_key: &StateKey,
     ) -> StreamExecutorResult<()> {
-        if self.range_cache.inner().len() <= 1 {
-            // empty or only one entry in the table (no sentinel)
+        if self.cache_real_len() == self.range_cache.len() {
+            // no sentinel in the cache, meaning we already cached all entries of this partition
             return Ok(());
         }
+        assert!(self.range_cache.len() >= 2);
 
-        let (left_first, left_second) = {
+        let left_second = {
             let mut iter = self.range_cache.inner().iter();
-            let first = iter.next().unwrap().0;
-            let second = iter.next().unwrap().0;
-            (first, second)
+            let left_first = iter.next().unwrap().0;
+            if left_first.is_normal() {
+                // the leftside already reaches the beginning of this partition in the table
+                return Ok(());
+            }
+            iter.next().unwrap().0
         };
-
-        match (left_first, left_second) {
-            (CacheKey::Normal(_), _) => {
-                // no sentinel here, meaning we've already cached all of the 2 entries
-                Ok(())
-            }
-            (CacheKey::Smallest, CacheKey::Normal(key)) => {
-                // For leftward extension, we now must iterate the table in order from the
-                // beginning of this partition and fill only the last n rows
-                // to the cache. This is called `rotate`. TODO(rc): WE NEED
-                // STATE TABLE REVERSE ITERATOR!!
-                let rotate = true;
-
-                let key = key.clone();
-                self.extend_cache_take_n(
-                    table,
-                    Bound::Unbounded,
-                    Bound::Excluded(&key),
-                    MAGIC_BATCH_SIZE,
-                    rotate,
-                )
-                .await
-            }
-            (CacheKey::Smallest, CacheKey::Largest) => {
-                // TODO()
-                panic!("must call `extend_cache_from_table_with_range` before");
-            }
-            _ => {
-                unreachable!();
-            }
+        let range_to_exclusive = match left_second {
+            CacheKey::Normal(smallest_in_cache) => smallest_in_cache,
+            CacheKey::Largest => hint_key, // no normal entry in the cache
+            _ => unreachable!(),
         }
-    }
+        .clone();
 
-    async fn extend_cache_rightward_by_n(
-        &mut self,
-        table: &StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        if self.range_cache.inner().len() <= 1 {
-            // empty or only one entry in the table (no sentinel)
-            return Ok(());
-        }
-
-        // note the order of keys here
-        let (right_second, right_first) = {
-            let mut iter = self.range_cache.inner().iter();
-            let first = iter.next_back().unwrap().0;
-            let second = iter.next_back().unwrap().0;
-            (second, first)
-        };
-
-        match (right_second, right_first) {
-            (_, CacheKey::Normal(_)) => {
-                // no sentinel here, meaning we've already cached all of the 2 entries
-                Ok(())
-            }
-            (CacheKey::Normal(key), CacheKey::Largest) => {
-                let key = key.clone();
-                self.extend_cache_take_n(
-                    table,
-                    Bound::Excluded(&key),
-                    Bound::Unbounded,
-                    MAGIC_BATCH_SIZE,
-                    false,
-                )
-                .await
-            }
-            (CacheKey::Smallest, CacheKey::Largest) => {
-                // TODO()
-                panic!("must call `extend_cache_from_table_with_range` before");
-            }
-            _ => {
-                unreachable!();
-            }
-        }
-    }
-
-    async fn extend_cache_take_n(
-        &mut self,
-        table: &StateTable<S>,
-        start: Bound<&StateKey>,
-        end: Bound<&StateKey>,
-        n: usize,
-        rotate: bool,
-    ) -> StreamExecutorResult<()> {
-        debug_assert!(
-            table.value_indices().is_none(),
-            "we must have full row as value here"
-        );
-
-        let mut to_extend = Vec::with_capacity(n.min(MAGIC_BATCH_SIZE));
-
+        let mut to_extend: VecDeque<OwnedRow> = VecDeque::with_capacity(MAGIC_BATCH_SIZE);
         {
-            let range = (self.convert_bound(start)?, self.convert_bound(end)?);
+            let pk_range = (
+                Bound::Included(self.this_partition_key.into_owned_row()),
+                Bound::Excluded(self.state_key_to_table_pk(&range_to_exclusive)?),
+            );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
                     table.iter_key_and_val_with_pk_range(
-                        &range,
+                        &pk_range,
                         vnode,
-                        PrefetchOptions {
-                            exhaust_iter: n == usize::MAX || rotate,
-                        },
+                        PrefetchOptions::new_for_exhaust_iter(),
                     )
                 }))
                 .await?
@@ -340,42 +390,111 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .collect();
 
             #[for_await]
-            for kv in merge_sort(streams).take(n) {
+            for kv in merge_sort(streams) {
                 let (_, row): (_, OwnedRow) = kv?;
-                // TODO(): fill the cache
+
+                // For leftward extension, we now must iterate the table in order from the beginning
+                // of this partition and fill only the last n rows to the cache.
+                // TODO(rc): WE NEED STATE TABLE REVERSE ITERATOR!!
+                if to_extend.len() == MAGIC_BATCH_SIZE {
+                    to_extend.pop_front();
+                }
+                to_extend.push_back(row);
             }
         }
 
-        for (key, row) in to_extend {
-            self.range_cache.insert(key, row);
+        let n_extended = to_extend.len();
+        for row in to_extend {
+            let key = self.row_to_state_key(&row)?;
+            self.range_cache.insert(CacheKey::from(key), row);
         }
-
-        // TODO(): handle the sentinel
+        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
+            // we reached the beginning of this partition in the table
+            self.range_cache.remove(&CacheKey::Smallest);
+        }
 
         Ok(())
     }
 
-    fn convert_bound<'s, 'k>(
-        &'s self,
-        bound: Bound<&'k StateKey>,
-    ) -> StreamExecutorResult<Bound<impl Row + 'k>>
-    where
-        's: 'k,
-    {
-        Ok(match bound {
-            Bound::Included(key) => Bound::Included(self.state_key_to_table_pk(key)?),
-            Bound::Excluded(key) => Bound::Excluded(self.state_key_to_table_pk(key)?),
-            Bound::Unbounded => Bound::Unbounded,
-        })
+    async fn extend_cache_rightward_by_n(
+        &mut self,
+        table: &StateTable<S>,
+        hint_key: &StateKey,
+    ) -> StreamExecutorResult<()> {
+        if self.cache_real_len() == self.range_cache.len() {
+            // no sentinel in the cache, meaning we already cached all entries of this partition
+            return Ok(());
+        }
+        assert!(self.range_cache.len() >= 2);
+
+        let right_second = {
+            let mut iter = self.range_cache.inner().iter();
+            let right_first = iter.next_back().unwrap().0;
+            if right_first.is_normal() {
+                // the rightside already reaches the end of this partition in the table
+                return Ok(());
+            }
+            iter.next_back().unwrap().0
+        };
+        let range_from_exclusive = match right_second {
+            CacheKey::Normal(largest_in_cache) => largest_in_cache,
+            CacheKey::Smallest => hint_key, // no normal entry in the cache
+            _ => unreachable!(),
+        }
+        .clone();
+
+        let mut n_extended = 0usize;
+        {
+            let pk_range = (
+                Bound::Excluded(self.state_key_to_table_pk(&range_from_exclusive)?),
+                // currently we can't get the first possible key after this partition, so use
+                // `Unbounded` plus manual check for workaround
+                Bound::<OwnedRow>::Unbounded,
+            );
+            let streams: Vec<_> =
+                futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
+                    table.iter_key_and_val_with_pk_range(
+                        &pk_range,
+                        vnode,
+                        PrefetchOptions::default(),
+                    )
+                }))
+                .await?
+                .into_iter()
+                .map(Box::pin)
+                .collect();
+
+            #[for_await]
+            for kv in merge_sort(streams) {
+                let (_, row): (_, OwnedRow) = kv?;
+
+                if !Row::eq(
+                    self.this_partition_key,
+                    &(&row).project(self.partition_key_indices),
+                ) {
+                    // we've reached the end of this partition
+                    break;
+                }
+
+                let key = self.row_to_state_key(&row)?;
+                self.range_cache.insert(CacheKey::from(key), row);
+
+                n_extended += 1;
+                if n_extended == MAGIC_BATCH_SIZE {
+                    break;
+                }
+            }
+        }
+
+        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
+            // we reached the end of this partition in the table
+            self.range_cache.remove(&CacheKey::Largest);
+        }
+
+        Ok(())
     }
 
-    fn state_key_to_table_pk<'s, 'k>(
-        &'s self,
-        key: &'k StateKey,
-    ) -> StreamExecutorResult<impl Row + 'k>
-    where
-        's: 'k,
-    {
+    fn state_key_to_table_pk(&self, key: &StateKey) -> StreamExecutorResult<OwnedRow> {
         Ok(self
             .this_partition_key
             .chain(memcmp_encoding::decode_row(
@@ -383,7 +502,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 self.order_key_data_types,
                 self.order_key_order_types,
             )?)
-            .chain(key.pk.as_inner()))
+            .chain(key.pk.as_inner())
+            .into_owned_row())
+    }
+
+    fn row_to_state_key(&self, full_row: impl Row + Copy) -> StreamExecutorResult<StateKey> {
+        todo!()
     }
 
     pub fn shrink_cache_to_range(&mut self, range: RangeInclusive<&StateKey>) {
