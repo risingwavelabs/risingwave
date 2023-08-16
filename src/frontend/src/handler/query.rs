@@ -69,7 +69,7 @@ pub async fn handle_query(
 pub fn handle_parse(
     handler_args: HandlerArgs,
     statement: Statement,
-    specific_param_types: Vec<DataType>,
+    specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     let session = handler_args.session;
     let bound_result = gen_bound(&session, statement.clone(), specific_param_types)?;
@@ -122,7 +122,7 @@ pub struct BoundResult {
 fn gen_bound(
     session: &SessionImpl,
     stmt: Statement,
-    specific_param_types: Vec<DataType>,
+    specific_param_types: Vec<Option<DataType>>,
 ) -> Result<BoundResult> {
     let stmt_type = StatementType::infer_from_statement(&stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;

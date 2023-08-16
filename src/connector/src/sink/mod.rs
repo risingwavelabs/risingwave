@@ -14,6 +14,7 @@
 
 pub mod catalog;
 pub mod clickhouse;
+pub mod coordinate;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -34,7 +35,7 @@ use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::ConnectorClient;
+use risingwave_rpc_client::{ConnectorClient, MetaClient};
 use thiserror::Error;
 pub use tracing;
 
@@ -57,7 +58,7 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
     pub sink_id: SinkId,
     pub properties: HashMap<String, String>,
@@ -119,16 +120,17 @@ impl From<SinkCatalog> for SinkParam {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
+    pub meta_client: Option<MetaClient>,
 }
 
 #[async_trait]
 pub trait Sink {
-    type Writer: SinkWriter;
+    type Writer: SinkWriter<CommitMetadata = ()>;
     type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
@@ -142,7 +144,8 @@ pub trait Sink {
 }
 
 #[async_trait]
-pub trait SinkWriter: Send {
+pub trait SinkWriter: Send + 'static {
+    type CommitMetadata: Send = ();
     /// Begin a new epoch
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
 
@@ -151,7 +154,7 @@ pub trait SinkWriter: Send {
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
     /// Clean up
     async fn abort(&mut self) -> Result<()>;
@@ -162,7 +165,7 @@ pub trait SinkWriter: Send {
 
 #[async_trait]
 // An old version of SinkWriter for backward compatibility
-pub trait SinkWriterV1: Send {
+pub trait SinkWriterV1: Send + 'static {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -336,9 +339,9 @@ impl SinkConfig {
     }
 }
 
-pub async fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
     let config = SinkConfig::from_hashmap(param.properties.clone())?;
-    SinkImpl::new(config, param).await
+    SinkImpl::new(config, param)
 }
 
 #[derive(Debug)]
@@ -384,7 +387,7 @@ macro_rules! dispatch_sink {
 }
 
 impl SinkImpl {
-    pub async fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
+    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
@@ -407,9 +410,7 @@ impl SinkImpl {
                 param.pk_indices,
                 param.sink_type.is_append_only(),
             )?),
-            SinkConfig::Iceberg(cfg) => {
-                SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema()).await?)
-            }
+            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),
         })
     }
 }
@@ -427,7 +428,7 @@ pub enum SinkError {
     #[error("Json parse error: {0}")]
     JsonParse(String),
     #[error("Iceberg error: {0}")]
-    Iceberg(String),
+    Iceberg(anyhow::Error),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]

@@ -55,6 +55,7 @@ macro_rules! for_all_undeprecated_params {
             { backup_storage_url, String, Some("memory".to_string()), false },
             { backup_storage_directory, String, Some("backup".to_string()), false },
             { telemetry_enabled, bool, Some(true), true },
+            { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             $({ $field, $type, $default },)*
         }
     };
@@ -266,7 +267,7 @@ macro_rules! impl_set_system_param {
                         let v = if let Some(v) = value {
                             v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
-                            $default.ok_or(format!("{} does not have a default value", key))?
+                            $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);
@@ -368,6 +369,7 @@ mod tests {
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (TELEMETRY_ENABLED_KEY, "false"),
+            (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
         ];
 
         // To kv - missing field.

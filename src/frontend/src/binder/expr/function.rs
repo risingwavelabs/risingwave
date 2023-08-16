@@ -135,9 +135,10 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
-            &function_name,
-            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        if let Ok(schema) = self.first_valid_schema() &&
+            let Some(func) = schema.get_function_by_name_args(
+                &function_name,
+                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
         ) {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
@@ -637,6 +638,9 @@ impl Binder {
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
                 ("sign", raw_call(ExprType::Sign)),
+                ("scale", raw_call(ExprType::Scale)),
+                ("min_scale", raw_call(ExprType::MinScale)),
+                ("trim_scale", raw_call(ExprType::TrimScale)),
 
                 (
                     "to_timestamp",
@@ -848,6 +852,62 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_relation_size", dispatch_by_len(vec![
+                    (1, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    })),
+                    (2, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        match inputs[1].as_literal() {
+                            Some(literal) if literal.return_type() == DataType::Varchar => {
+                                match literal
+                                     .get_data()
+                                     .as_ref()
+                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
+                                     .as_utf8()
+                                     .as_ref() {
+                                        "main" => {
+                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                                                BoundQuery {
+                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
+                                                    order: vec![],
+                                                    limit: None,
+                                                    offset: None,
+                                                    with_ties: false,
+                                                    extra_order_exprs: vec![],
+                                                },
+                                                SubqueryKind::Scalar,
+                                            ))))
+                                        },
+                                        // These options are invalid in RW so we return 0 value as the result
+                                        "fsm"|"vm"|"init" => {
+                                            Ok(ExprImpl::literal_int(0))
+                                        },
+                                        _ => Err(ErrorCode::InvalidInputSyntax(
+                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
+                                    }
+                            },
+                            _ => Err(ErrorCode::ExprError(
+                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
+                            )
+                            .into())
+                        }
+                    })),
+                    ]
+                )),
                 ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
@@ -950,6 +1010,8 @@ impl Binder {
                 }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
@@ -978,6 +1040,7 @@ impl Binder {
                 ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.

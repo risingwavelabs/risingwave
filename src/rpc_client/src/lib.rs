@@ -39,7 +39,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 #[cfg(not(madsim))]
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
@@ -50,16 +50,16 @@ use tokio::sync::mpsc::{channel, Sender};
 #[cfg(madsim)]
 use tokio::sync::Mutex;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status};
 
 pub mod error;
 use error::{Result, RpcError};
+mod compactor_client;
 mod compute_client;
 mod connector_client;
 mod hummock_meta_client;
 mod meta_client;
-// mod sink_client;
-mod compactor_client;
+mod sink_coordinate_client;
 mod stream_client;
 mod tracing;
 
@@ -67,7 +67,8 @@ pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
-pub use meta_client::MetaClient;
+pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
+pub use sink_coordinate_client::CoordinatorStreamHandle;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]
@@ -207,7 +208,7 @@ impl<REQ: 'static, RSP: 'static> Debug for BidiStreamHandle<REQ, RSP> {
 }
 
 impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
-    pub fn new(
+    pub fn for_test(
         request_sender: Sender<REQ>,
         response_stream: BoxStream<'static, std::result::Result<RSP, Status>>,
     ) -> Self {
@@ -219,7 +220,8 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
 
     pub async fn initialize<
         F: FnOnce(Request<ReceiverStream<REQ>>) -> Fut,
-        Fut: Future<Output = std::result::Result<Response<Streaming<RSP>>, Status>> + Send,
+        St: Stream<Item = std::result::Result<RSP, Status>> + Send + Unpin + 'static,
+        Fut: Future<Output = std::result::Result<Response<St>, Status>> + Send,
     >(
         first_request: REQ,
         init_stream_fn: F,
@@ -231,7 +233,7 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
         request_sender
             .send(first_request)
             .await
-            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+            .map_err(|err| anyhow!(err.to_string()))?;
 
         let mut response_stream =
             init_stream_fn(Request::new(ReceiverStream::new(request_receiver)))
@@ -241,12 +243,13 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
         let first_response = response_stream
             .next()
             .await
-            .ok_or(RpcError::Internal(anyhow!(
-                "get empty response from start sink request"
-            )))??;
+            .ok_or_else(|| anyhow!("get empty response from start sink request"))??;
 
         Ok((
-            Self::new(request_sender, response_stream.boxed()),
+            Self {
+                request_sender,
+                response_stream: response_stream.boxed(),
+            },
             first_response,
         ))
     }
@@ -256,12 +259,14 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
             .response_stream
             .next()
             .await
-            .ok_or(RpcError::Internal(anyhow!("end of response stream")))??)
+            .ok_or_else(|| anyhow!("end of response stream"))??)
     }
 
     pub async fn send_request(&mut self, request: REQ) -> Result<()> {
-        self.request_sender.send(request).await.map_err(|_| {
-            RpcError::Internal(anyhow!("unable to send request {}", type_name::<REQ>()))
-        })
+        Ok(self
+            .request_sender
+            .send(request)
+            .await
+            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()))?)
     }
 }

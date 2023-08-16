@@ -15,7 +15,7 @@
 use bytes::Bytes;
 use tokio::io::AsyncRead;
 
-use super::{BoxedStreamingUploader, ObjectMetadata};
+use super::{BoxedStreamingUploader, ObjectMetadata, ObjectMetadataIter};
 use crate::object::{BlockLocation, ObjectResult, ObjectStore};
 
 pub struct ScheduledObjectStore<OS>
@@ -70,7 +70,7 @@ where
         self.store.delete_objects(paths).await
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         self.store.list(prefix).await
     }
 

@@ -20,9 +20,9 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
@@ -31,7 +31,10 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::catalog::{
+    SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
+};
+pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -75,6 +78,7 @@ impl SourceStreamChunkBuilder {
             .iter()
             .map(|desc| desc.data_type.create_array_builder(cap))
             .collect();
+
         Self {
             descs,
             builders,
@@ -90,6 +94,7 @@ impl SourceStreamChunkBuilder {
         }
     }
 
+    /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
         StreamChunk::new(
             self.op_builder,
@@ -101,8 +106,21 @@ impl SourceStreamChunkBuilder {
         )
     }
 
+    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
+    /// the builders of the next [`StreamChunk`].
+    #[must_use]
+    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish()
+    }
+
     pub fn op_num(&self) -> usize {
         self.op_builder.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.op_builder.is_empty()
     }
 }
 
@@ -308,6 +326,12 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+/// Transaction control message. Currently only used by Debezium messages.
+pub enum TransactionControl {
+    Begin { id: Box<str> },
+    Commit { id: Box<str> },
+}
+
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
 /// the input data stream and return a stream of parsed msgs.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
@@ -325,6 +349,20 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<WriteGuard>> + Send + 'a;
 
+    /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
+    /// as a transaction control message.
+    ///
+    /// The default implementation forwards to [`ByteStreamSourceParser::parse_one`] for
+    /// non-transactional sources.
+    fn parse_one_with_txn<'a>(
+        &'a mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> impl Future<Output = Result<Either<WriteGuard, TransactionControl>>> + Send + 'a {
+        self.parse_one(key, payload, writer).map_ok(Either::Left)
+    }
+
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
     ///
     /// # Arguments
@@ -339,18 +377,60 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
+/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
+/// committed to avoid potential OOM.
+const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
+
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+    let columns = parser.columns().to_vec();
+
+    let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut split_offset_mapping = HashMap::<SplitId, String>::new();
+
+    struct Transaction {
+        id: Box<str>,
+        len: usize,
+    }
+    let mut current_transaction = None;
+    let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
+
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
-        let mut builder =
-            SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), batch.len());
-        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+        let batch_len = batch.len();
 
-        for msg in batch {
+        if let Some(Transaction { len, id }) = &mut current_transaction {
+            // Dirty state. The last batch is not yielded due to uncommitted transaction.
+            if *len > MAX_ROWS_FOR_TRANSACTION {
+                // Large transaction. Force commit.
+                tracing::warn!(
+                    id,
+                    len,
+                    "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
+                );
+                *len = 0; // reset `len` while keeping `id`
+                yield_asap = false;
+                yield StreamChunkWithState {
+                    chunk: builder.take(batch_len),
+                    split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                };
+            } else {
+                // Normal transaction. After the transaction is committed, we should yield the last
+                // batch immediately, so set `yield_asap` to true.
+                yield_asap = true;
+            }
+        } else {
+            // Clean state. Reserve capacity for the builder.
+            assert!(builder.is_empty());
+            assert!(!yield_asap);
+            assert!(split_offset_mapping.is_empty());
+            let _ = builder.take(batch_len);
+        }
+
+        for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 continue;
             }
@@ -359,23 +439,23 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
             let old_op_num = builder.op_num();
 
-            if let Err(e) = parser
-                .parse_one(msg.key, msg.payload, builder.row_writer())
+            match parser
+                .parse_one_with_txn(msg.key, msg.payload, builder.row_writer())
                 .await
             {
-                tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                // This will throw an error for batch
-                parser.source_ctx().report_user_source_error(e)?;
-                continue;
-            }
+                Ok(Either::Left(WriteGuard(_))) => {
+                    // new_op_num - old_op_num is the number of rows added to the builder
+                    let new_op_num = builder.op_num();
 
-            let new_op_num = builder.op_num();
+                    // Aggregate the number of rows in the current transaction.
+                    if let Some(Transaction { len, .. }) = &mut current_transaction {
+                        *len += new_op_num - old_op_num;
+                    }
 
-            // new_op_num - old_op_num is the number of rows added to the builder
-            for _ in old_op_num..new_op_num {
-                // TODO: support more kinds of SourceMeta
-                if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                    let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                    for _ in old_op_num..new_op_num {
+                        // TODO: support more kinds of SourceMeta
+                        if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                            let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
                         if !desc.is_meta {
                             return None;
                         }
@@ -390,15 +470,56 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             }
                         }
                     };
-                    builder.row_writer().fulfill_meta_column(f)?;
+                            builder.row_writer().fulfill_meta_column(f)?;
+                        }
+                    }
+                }
+
+                Ok(Either::Right(txn_ctl)) => {
+                    match txn_ctl {
+                        TransactionControl::Begin { id } => {
+                            if let Some(Transaction { id: current_id, .. }) = &current_transaction {
+                                tracing::warn!(current_id, id, "already in transaction");
+                            }
+                            current_transaction = Some(Transaction { id, len: 0 });
+                        }
+                        TransactionControl::Commit { id } => {
+                            let current_id = current_transaction.as_ref().map(|t| &t.id);
+                            if current_id != Some(&id) {
+                                tracing::warn!(?current_id, id, "transaction id mismatch");
+                            }
+                            current_transaction = None;
+                        }
+                    }
+
+                    // Not in a transaction anymore and `yield_asap` is set, so we should yield the
+                    // chunk now.
+                    if current_transaction.is_none() && yield_asap {
+                        yield_asap = false;
+                        yield StreamChunkWithState {
+                            chunk: builder.take(batch_len - (i + 1)),
+                            split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                        };
+                    }
+                }
+
+                Err(error) => {
+                    tracing::warn!(%error, "message parsing failed, skipping");
+                    // This will throw an error for batch
+                    parser.source_ctx().report_user_source_error(error)?;
+                    continue;
                 }
             }
         }
 
-        yield StreamChunkWithState {
-            chunk: builder.finish(),
-            split_offset_mapping: Some(split_offset_mapping),
-        };
+        // If we are not in a transaction, we should yield the chunk now.
+        if current_transaction.is_none() {
+            yield_asap = false;
+            yield StreamChunkWithState {
+                chunk: builder.take(0),
+                split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+            };
+        }
     }
 }
 
@@ -582,6 +703,9 @@ pub struct AvroProperties {
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
     pub enable_upsert: bool,
+    pub record_name: Option<String>,
+    pub key_record_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -591,7 +715,10 @@ pub struct ProtobufProperties {
     pub row_schema_location: String,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub client_config: SchemaRegistryAuth,
+    pub enable_upsert: bool,
     pub topic: String,
+    pub key_message_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -686,6 +813,14 @@ impl SpecificParserConfig {
             (SourceFormat::Plain, SourceEncode::Avro)
             | (SourceFormat::Upsert, SourceEncode::Avro) => {
                 let mut config = AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    key_record_name: info.key_message_name.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     upsert_primary_key: info.upsert_avro_primary_key.clone(),
@@ -704,7 +839,8 @@ impl SpecificParserConfig {
                 }
                 EncodingProperties::Avro(config)
             }
-            (SourceFormat::Plain, SourceEncode::Protobuf) => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
+            | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
                 if info.row_schema_location.is_empty() {
                     return Err(
                         ProtocolError("protobuf file location not provided".to_string()).into(),
@@ -714,8 +850,14 @@ impl SpecificParserConfig {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
+                    key_message_name: info.key_message_name.clone(),
                     ..Default::default()
                 };
+                if format == SourceFormat::Upsert {
+                    config.enable_upsert = true;
+                }
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
@@ -728,6 +870,14 @@ impl SpecificParserConfig {
             }
             (SourceFormat::Debezium, SourceEncode::Avro) => {
                 EncodingProperties::Avro(AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
+                    key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: SchemaRegistryAuth::from(props),

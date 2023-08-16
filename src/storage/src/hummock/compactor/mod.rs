@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use await_tree::InstrumentAwait;
 pub use compaction_executor::CompactionExecutor;
@@ -41,7 +41,7 @@ pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use itertools::Itertools;
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{
-    compact_task_to_string, estimate_memory_for_compact_task, estimate_state_for_compaction,
+    compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::table_stats::{
@@ -57,7 +57,6 @@ use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse,
 };
-use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -70,7 +69,7 @@ use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_memory_capacity, generate_splits,
+    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -78,8 +77,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, MonotonicDeleteEvent,
-    SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
+    HummockError, MonotonicDeleteEvent, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -256,7 +255,7 @@ impl Compactor {
             }
         }
 
-        let (_, total_file_count, total_key_count) = estimate_state_for_compaction(&compact_task);
+        let compact_task_statistics = statistics_compact_task(&compact_task);
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -280,8 +279,7 @@ impl Compactor {
             }
         };
 
-        let (capacity, total_file_size, total_file_size_uncompressed) =
-            estimate_task_memory_capacity(context.clone(), &compact_task);
+        let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
 
         let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
             &compact_task,
@@ -295,16 +293,15 @@ impl Compactor {
         ) * compact_task.splits.len() as u64;
 
         tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} input_file_size {} input_file_size_uncompressed {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {}",
+            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                compact_task.compaction_group_id,
                 compact_task.task_id,
-                task_memory_capacity_with_parallelism,
-                total_file_count,
-                total_file_size,
-                total_file_size_uncompressed,
-                total_key_count,
+                compact_task_statistics,
                 compact_task.target_level,
                 compact_task.compression_algorithm,
+                compact_task.existing_table_ids,
                 parallelism,
+                task_memory_capacity_with_parallelism
             );
 
         // If the task does not have enough memory, it should cancel the task and let the meta
@@ -473,8 +470,8 @@ impl Compactor {
     #[cfg_attr(coverage, no_coverage)]
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> (JoinHandle<()>, Sender<()>) {
+        let hummock_meta_client = compactor_context.hummock_meta_client.clone();
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(30);
@@ -486,6 +483,7 @@ impl Compactor {
         let pid = sysinfo::get_current_pid().unwrap();
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
+        const MAX_CONSUMED_LATENCY_MS: u64 = 500;
 
         assert_ge!(
             compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -537,7 +535,17 @@ impl Compactor {
                 let mut last_workload = CompactorWorkload::default();
 
                 // This inner loop is to consume stream or report task progress.
+                let mut event_loop_iteration_now = Instant::now();
                 'consume_stream: loop {
+                    {
+                        // report
+                        compactor_context
+                            .compactor_metrics
+                            .compaction_event_loop_iteration_latency
+                            .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                        event_loop_iteration_now = Instant::now();
+                    }
+
                     let running_task_count = running_task_count.clone();
                     let pull_task_ack = pull_task_ack.clone();
                     let request_sender = request_sender.clone();
@@ -561,11 +569,16 @@ impl Compactor {
                                         progress: progress_list
                                     }
                                 )),
+                                create_at: SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .expect("Clock may have gone backwards")
+                                    .as_millis() as u64,
                             }) {
                                 tracing::warn!("Failed to report task progress. {e:?}");
                                 // re subscribe stream
                                 continue 'start_stream;
                             }
+
 
                             let mut pending_pull_task_count = 0;
                             if pull_task_ack.load(Ordering::SeqCst) {
@@ -582,8 +595,12 @@ impl Compactor {
                                                 pull_task_count: pending_pull_task_count,
                                             }
                                         )),
+                                        create_at: SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .expect("Clock may have gone backwards")
+                                            .as_millis() as u64,
                                     }) {
-                                        tracing::warn!("Failed to report task progress. {e:?}");
+                                        tracing::warn!("Failed to pull task {e:?}");
 
                                         // re subscribe stream
                                         continue 'start_stream;
@@ -634,14 +651,33 @@ impl Compactor {
                     };
 
                     match event {
-                        Some(Ok(SubscribeCompactionEventResponse { event })) => {
+                        Some(Ok(SubscribeCompactionEventResponse { event, create_at })) => {
                             let event = match event {
                                 Some(event) => event,
                                 None => continue 'consume_stream,
                             };
-
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
+                            let consumed_latency_ms = SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis()
+                                as u64
+                                - create_at;
+                            context
+                                .compactor_metrics
+                                .compaction_event_consumed_latency
+                                .observe(consumed_latency_ms as _);
+
+                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
+                                tracing::warn!(
+                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
+                                    event,
+                                    create_at,
+                                    consumed_latency_ms
+                                );
+                            }
+
                             let meta_client = hummock_meta_client.clone();
                             executor.spawn(async move {
                                 let running_task_count = running_task_count.clone();
@@ -662,6 +698,10 @@ impl Compactor {
                                                     table_stats_change:to_prost_table_stats_map(table_stats),
                                                 }
                                             )),
+                                            create_at: SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .expect("Clock may have gone backwards")
+                                                .as_millis() as u64,
                                         }) {
                                             tracing::warn!("Failed to report task {task_id:?} . {e:?}");
                                         }
@@ -1010,28 +1050,54 @@ impl Compactor {
             .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                factory,
-                iter,
-                compaction_filter,
-                del_agg,
-                filter_key_extractor,
-                task_progress.clone(),
-            )
-            .verbose_instrument_await("compact")
-            .await?
+            if self.task_config.use_block_based_filter {
+                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            } else {
+                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            }
         } else {
             let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
-            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                factory,
-                iter,
-                compaction_filter,
-                del_agg,
-                filter_key_extractor,
-                task_progress.clone(),
-            )
-            .verbose_instrument_await("compact")
-            .await?
+            if self.task_config.use_block_based_filter {
+                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            } else {
+                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            }
         };
 
         compact_timer.observe_duration();

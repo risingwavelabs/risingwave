@@ -578,6 +578,7 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
+    use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
         RelationIdEnum, StreamingClusterInfo,
@@ -656,6 +657,10 @@ mod tests {
             &self,
             _request: Request<ForceStopActorsRequest>,
         ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            self.inner.actor_streams.lock().unwrap().clear();
+            self.inner.actor_ids.lock().unwrap().clear();
+            self.inner.actor_infos.lock().unwrap().clear();
+
             Ok(Response::new(ForceStopActorsResponse::default()))
         }
 
@@ -677,7 +682,7 @@ mod tests {
             &self,
             _request: Request<WaitEpochCommitRequest>,
         ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
-            unimplemented!()
+            Ok(Response::new(WaitEpochCommitResponse::default()))
         }
     }
 
@@ -774,6 +779,8 @@ mod tests {
                 .await?,
             );
 
+            let (sink_manager, _) = SinkCoordinatorManager::start_worker(None);
+
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
@@ -782,6 +789,7 @@ mod tests {
                 fragment_manager.clone(),
                 hummock_manager.clone(),
                 source_manager.clone(),
+                sink_manager,
                 meta_metrics.clone(),
             ));
 
@@ -1029,6 +1037,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
+        tokio::time::sleep(Duration::from_secs(2)).await;
         services
             .drop_materialized_views(vec![table_id])
             .await

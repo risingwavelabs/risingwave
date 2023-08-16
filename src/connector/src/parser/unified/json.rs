@@ -79,13 +79,23 @@ pub enum VarcharHandling {
 }
 
 #[derive(Clone, Debug)]
+pub enum StructHandling {
+    // only allow object parsed to struct
+    Strict,
+    // allow string containing a serialized json object (like "{\"a\": 1, \"b\": 2}") parsed to
+    // struct
+    AllowJsonString,
+}
+
+#[derive(Clone, Debug)]
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
-    pub boolean_handing: BooleanHandling,
-    pub varchar_handing: VarcharHandling,
+    pub boolean_handling: BooleanHandling,
+    pub varchar_handling: VarcharHandling,
+    pub struct_handling: StructHandling,
     pub ignoring_keycase: bool,
 }
 
@@ -103,11 +113,12 @@ impl JsonParseOptions {
         numeric_handling: NumericHandling::Relax {
             string_parsing: true,
         },
-        boolean_handing: BooleanHandling::Relax {
+        boolean_handling: BooleanHandling::Relax {
             string_parsing: true,
             string_integer_parsing: true,
         },
-        varchar_handing: VarcharHandling::Strict,
+        varchar_handling: VarcharHandling::Strict,
+        struct_handling: StructHandling::Strict,
         ignoring_keycase: true,
     };
     pub const DEBEZIUM: JsonParseOptions = JsonParseOptions {
@@ -117,11 +128,12 @@ impl JsonParseOptions {
         numeric_handling: NumericHandling::Relax {
             string_parsing: false,
         },
-        boolean_handing: BooleanHandling::Relax {
+        boolean_handling: BooleanHandling::Relax {
             string_parsing: false,
             string_integer_parsing: false,
         },
-        varchar_handing: VarcharHandling::Strict,
+        varchar_handling: VarcharHandling::Strict,
+        struct_handling: StructHandling::Strict,
         ignoring_keycase: true,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
@@ -131,8 +143,9 @@ impl JsonParseOptions {
         numeric_handling: NumericHandling::Relax {
             string_parsing: true,
         },
-        boolean_handing: BooleanHandling::Strict,
-        varchar_handing: VarcharHandling::OnlyPrimaryTypes,
+        boolean_handling: BooleanHandling::Strict,
+        varchar_handling: VarcharHandling::OnlyPrimaryTypes,
+        struct_handling: StructHandling::AllowJsonString,
         ignoring_keycase: true,
     };
 
@@ -154,7 +167,7 @@ impl JsonParseOptions {
             (
                 Some(DataType::Boolean),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) if matches!(self.boolean_handing, BooleanHandling::Relax { .. })
+            ) if matches!(self.boolean_handling, BooleanHandling::Relax { .. })
                 && matches!(value.as_i64(), Some(0i64) | Some(1i64)) =>
             {
                 (value.as_i64() == Some(1i64)).into()
@@ -162,7 +175,7 @@ impl JsonParseOptions {
 
             (Some(DataType::Boolean), ValueType::String)
                 if matches!(
-                    self.boolean_handing,
+                    self.boolean_handling,
                     BooleanHandling::Relax {
                         string_parsing: true,
                         ..
@@ -174,7 +187,7 @@ impl JsonParseOptions {
                     "false" => false.into(),
                     c @ ("1" | "0")
                         if matches!(
-                            self.boolean_handing,
+                            self.boolean_handling,
                             BooleanHandling::Relax {
                                 string_parsing: true,
                                 string_integer_parsing: true
@@ -358,7 +371,7 @@ impl JsonParseOptions {
                 | ValueType::U64
                 | ValueType::U128
                 | ValueType::F64,
-            ) if matches!(self.varchar_handing, VarcharHandling::OnlyPrimaryTypes) => {
+            ) if matches!(self.varchar_handling, VarcharHandling::OnlyPrimaryTypes) => {
                 value.to_string().into()
             }
             (
@@ -371,7 +384,7 @@ impl JsonParseOptions {
                 | ValueType::F64
                 | ValueType::Array
                 | ValueType::Object,
-            ) if matches!(self.varchar_handing, VarcharHandling::AllTypes) => {
+            ) if matches!(self.varchar_handling, VarcharHandling::AllTypes) => {
                 value.to_string().into()
             }
             // ---- Time -----
@@ -446,6 +459,19 @@ impl JsonParseOptions {
                     .collect::<Result<_, _>>()?,
             )
             .into(),
+
+            // String containing json object, e.g. "{\"a\": 1, \"b\": 2}"
+            // Try to parse it as json object.
+            (Some(DataType::Struct(_)), ValueType::String)
+                if matches!(self.struct_handling, StructHandling::AllowJsonString) =>
+            {
+                // TODO: avoid copy by accepting `&mut BorrowedValue` in `parse` method.
+                let mut value = value.as_str().unwrap().as_bytes().to_vec();
+                let value =
+                    simd_json::to_borrowed_value(&mut value[..]).map_err(|_| create_error())?;
+                return self.parse(&value, type_expected);
+            }
+
             // ---- List -----
             (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new(
                 value

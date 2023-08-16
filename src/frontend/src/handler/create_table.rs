@@ -29,7 +29,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Encode, ObjectName, SourceSchemaV2,
+    ColumnDef, ColumnOption, DataType as AstDataType, Encode, Format, ObjectName, SourceSchemaV2,
     SourceWatermark, TableConstraint,
 };
 
@@ -155,9 +155,9 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             ..
         } = column;
 
-        let data_type = data_type.clone().ok_or(ErrorCode::InvalidInputSyntax(
-            "data type is not specified".into(),
-        ))?;
+        let data_type = data_type
+            .clone()
+            .ok_or_else(|| ErrorCode::InvalidInputSyntax("data type is not specified".into()))?;
         if let Some(collation) = collation {
             return Err(ErrorCode::NotImplemented(
                 format!("collation \"{}\"", collation),
@@ -416,6 +416,17 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+    if append_only
+        && source_schema.format != Format::Plain
+        && source_schema.format != Format::Native
+    {
+        return Err(ErrorCode::BindError(format!(
+            "Append only table does not support format {}.",
+            source_schema.format
+        ))
+        .into());
+    }
+
     let session = context.session_ctx();
     let mut properties = context.with_options().inner().clone().into_iter().collect();
     validate_compatibility(&source_schema, &mut properties)?;

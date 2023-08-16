@@ -25,7 +25,7 @@ risingwave_rpc_client = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors"] }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
