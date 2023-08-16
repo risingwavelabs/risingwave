@@ -832,8 +832,6 @@ where
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
-        assert!(fragment_graph.internal_tables().is_empty());
-        assert!(fragment_graph.dependent_table_ids().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -854,11 +852,23 @@ where
         &self,
         env: StreamEnvironment,
         stream_job: &StreamingJob,
-        fragment_graph: StreamFragmentGraph,
+        mut fragment_graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
+
+        let old_table_fragments = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&id.into())
+            .await?;
+        let old_internal_table_ids = old_table_fragments.internal_table_ids();
+        let old_internal_tables = self
+            .catalog_manager
+            .get_tables(&old_internal_table_ids)
+            .await;
+
+        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -923,11 +933,6 @@ where
             &building_locations.actor_locations,
             env,
         );
-
-        let old_table_fragments = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&id.into())
-            .await?;
 
         let ctx = ReplaceTableContext {
             old_table_fragments,
