@@ -251,13 +251,17 @@ impl<S: MetaStore> HummockManager<S> {
             });
         }
 
+        // We must perform an apply on the new_version_delta and check its legitimacy before
+        // persisting it. This prevents the data from being messed up after a restart with the wrong
+        // delta.
+        assert!(versioning
+            .current_version
+            .apply_version_delta(&new_version_delta)
+            .is_empty());
+
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
-        assert!(sst_split_info.is_empty());
         new_version_delta.commit();
 
         self.notify_last_version_delta(versioning);
@@ -346,6 +350,14 @@ impl<S: MetaStore> HummockManager<S> {
             });
         }
 
+        // We must perform an apply on the new_version_delta and check its legitimacy before
+        // persisting it. This prevents the data from being messed up after a restart with the wrong
+        // delta.
+        assert!(versioning
+            .current_version
+            .apply_version_delta(&new_version_delta)
+            .is_empty());
+
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
@@ -357,11 +369,6 @@ impl<S: MetaStore> HummockManager<S> {
                 .len();
             remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
         }
-
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
-        assert!(sst_split_info.is_empty());
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
@@ -597,6 +604,14 @@ impl<S: MetaStore> HummockManager<S> {
                 new_compaction_group_id
             }
         };
+
+        // We must perform an apply on the new_version_delta and check its legitimacy before
+        // persisting it. This prevents the data from being messed up after a restart with the wrong
+        // delta.
+        let sst_split_info = versioning
+            .current_version
+            .apply_version_delta(&new_version_delta);
+
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -616,9 +631,6 @@ impl<S: MetaStore> HummockManager<S> {
         } else {
             self.env.meta_store().txn(trx).await?;
         }
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
         // Updates SST split info
         let mut changed_sst_ids: HashSet<u64> = HashSet::default();
         for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {
