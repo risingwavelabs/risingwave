@@ -155,10 +155,10 @@ impl BatchManager {
 
     async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
         let _metric_guard = scopeguard::guard((), |_| {
-            tracing::trace!("heartbeat worker for task {:?} stopped", task_id);
+            tracing::debug!("heartbeat worker for task {:?} stopped", task_id);
             self.metrics.batch_heartbeat_worker_num.dec();
         });
-        tracing::trace!("heartbeat worker for task {:?} started", task_id);
+        tracing::debug!("heartbeat worker for task {:?} started", task_id);
         self.metrics.batch_heartbeat_worker_num.inc();
         // The heartbeat is to ensure task cancellation when frontend's cancellation request fails
         // to reach compute node (for any reason like RPC fails, frontend crashes).

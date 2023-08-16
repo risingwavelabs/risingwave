@@ -865,14 +865,15 @@ where
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &mut compact_task, &mut compaction_guard, None)
                 .await?;
-            // tracing::debug!(
-            //     "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact
-            // to target_level {}  cost time: {:?}",     compaction_group_id,
-            //     compact_task.input_ssts[0].table_infos.len(),
-            //     compact_task.input_ssts[0].level_idx,
-            //     compact_task.target_level,
-            //     start_time.elapsed()
-            // );
+            tracing::debug!(
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact
+            to target_level {}  cost time: {:?}",
+                compaction_group_id,
+                compact_task.input_ssts[0].table_infos.len(),
+                compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
+                start_time.elapsed()
+            );
         } else {
             compact_task.table_options = table_id_to_option
                 .into_iter()

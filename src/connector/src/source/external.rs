@@ -334,7 +334,7 @@ impl MySqlExternalTableReader {
             // we need to rewrite the order conditons by our own.
             let range_params = primary_keys.iter().map(|pk| format!(":{}", pk)).join(",");
             format!(
-                "SELECT * FROM {} WHERE ({}) >= ({}) ORDER BY {}",
+                "SELECT * FROM {} WHERE ({}) > ({}) ORDER BY {}",
                 self.get_normalized_table_name(&table_name),
                 order_key,
                 range_params,

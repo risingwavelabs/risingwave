@@ -15,7 +15,6 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(let_chains)]
-#![feature(impl_trait_in_assoc_type)]
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
