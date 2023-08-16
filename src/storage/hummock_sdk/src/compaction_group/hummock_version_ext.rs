@@ -846,6 +846,21 @@ pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
         .collect()
 }
 
+pub fn get_table_compaction_group_id_mapping(
+    version: &HummockVersion,
+) -> HashMap<StateTableId, CompactionGroupId> {
+    version
+        .levels
+        .iter()
+        .flat_map(|(group_id, levels)| {
+            levels
+                .member_table_ids
+                .iter()
+                .map(|table_id| (*table_id, *group_id))
+        })
+        .collect()
+}
+
 /// Gets all SSTs in `group_id`
 pub fn get_compaction_group_ssts(
     version: &HummockVersion,
