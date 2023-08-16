@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::cmp::Ordering;
 use std::collections::btree_map::{BTreeMap, CursorMut, Iter};
 use std::fmt::Debug;
@@ -52,13 +51,14 @@ impl<Idx: Ord + Copy + Debug> From<OrdRange<Idx>> for Range<Idx> {
     }
 }
 
-trait RangeExt: Sized {
+pub trait RangeExt: Sized {
     type Idx: Ord + Copy + Debug;
 
     fn new(start: Self::Idx, end: Self::Idx) -> Option<Self>;
     fn is_contiguous(lhs: &Self, rhs: &Self) -> bool;
-    fn overlaps(lhs: &Self, rhs: &Self) -> bool;
+    fn is_overlapping(lhs: &Self, rhs: &Self) -> bool;
     fn mergeable(lhs: &Self, rhs: &Self) -> bool;
+    fn overlaps(lhs: &Self, rhs: &Self) -> Option<Self>;
     fn covers(lhs: &Self, rhs: &Self) -> bool;
     fn merge(lhs: &Self, rhs: &Self) -> Option<Self>;
     fn split(lhs: &Self, rhs: &Self) -> (Option<Self>, Option<Self>);
@@ -79,12 +79,12 @@ impl<Idx: Ord + Copy + Debug> RangeExt for Range<Idx> {
         lhs.start == rhs.end || rhs.start == lhs.end
     }
 
-    fn overlaps(lhs: &Self, rhs: &Self) -> bool {
+    fn is_overlapping(lhs: &Self, rhs: &Self) -> bool {
         std::cmp::max(lhs.start, rhs.start) < std::cmp::min(lhs.end, rhs.end)
     }
 
     fn mergeable(lhs: &Self, rhs: &Self) -> bool {
-        Self::is_contiguous(lhs, rhs) || Self::overlaps(lhs, rhs)
+        Self::is_contiguous(lhs, rhs) || Self::is_overlapping(lhs, rhs)
     }
 
     fn covers(lhs: &Self, rhs: &Self) -> bool {
@@ -96,6 +96,13 @@ impl<Idx: Ord + Copy + Debug> RangeExt for Range<Idx> {
             return None;
         }
         Some(std::cmp::min(lhs.start, rhs.start)..std::cmp::max(lhs.end, rhs.end))
+    }
+
+    fn overlaps(lhs: &Self, rhs: &Self) -> Option<Self> {
+        Self::new(
+            std::cmp::max(lhs.start, rhs.start),
+            std::cmp::min(lhs.end, rhs.end),
+        )
     }
 
     /// Split `lhs` by `rhs`. Returns the left part and the right part.
@@ -161,7 +168,7 @@ impl<Idx: Ord + Copy + Debug, T> RangeMap<Idx, T> {
     pub fn insert(&mut self, range: Range<Idx>, value: T) {
         let range = range.into();
         let cursor = self.ranges.lower_bound(Bound::Included(&range));
-        if let Some(r) = cursor.key() && RangeExt::overlaps(&range.inner, &r.inner) {
+        if let Some(r) = cursor.key() && RangeExt::is_overlapping(&range.inner, &r.inner) {
             panic!("{:?} overlaps {:?}, cannot insert", range.inner, r.inner);
         }
         self.ranges.insert(range, value);
@@ -245,7 +252,7 @@ impl<Idx: Ord + Copy + Debug, T> RangeMap<Idx, T> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Entry<Idx: Ord + Copy + Debug> {
     Range(Range<Idx>),
     Gap(Range<Idx>),
@@ -269,7 +276,7 @@ impl<'a, Idx: Ord + Copy + Debug, T> RangeMapSplitMut<'a, Idx, T> {
         let mut cursor = map
             .ranges
             .lower_bound_mut(Bound::Included(&range.clone().into()));
-        if let Some((r, _)) = cursor.peek_prev() && RangeExt::overlaps(&range, &r.inner) {
+        if let Some((r, _)) = cursor.peek_prev() && RangeExt::is_overlapping(&range, &r.inner) {
             cursor.move_prev();
         }
         let mut res = Self {
@@ -291,9 +298,11 @@ impl<'a, Idx: Ord + Copy + Debug, T> RangeMapSplitMut<'a, Idx, T> {
         self.update();
     }
 
-    pub fn value_mut(&mut self) -> &mut T {
-        assert_matches!(self.entry, Some(Entry::Range(..)));
-        self.cursor.value_mut().unwrap()
+    pub fn value_mut(&mut self) -> Option<&mut T> {
+        match self.entry {
+            Some(Entry::Range(..)) => self.cursor.value_mut(),
+            _ => None,
+        }
     }
 
     pub fn insert(&mut self, value: T) {
@@ -546,20 +555,20 @@ mod tests {
 
         let mut s = m.split(10..20);
         assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
-        assert_eq!(s.value_mut(), &mut 1);
+        assert_eq!(s.value_mut().unwrap(), &mut 1);
         s.skip();
         assert_eq!(s.entry(), None);
         drop(s);
 
         let mut s = m.split(0..30);
         assert_eq!(s.entry(), Some(&Entry::Range(0..10)));
-        assert_eq!(s.value_mut(), &mut 0);
+        assert_eq!(s.value_mut().unwrap(), &mut 0);
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
-        assert_eq!(s.value_mut(), &mut 1);
+        assert_eq!(s.value_mut().unwrap(), &mut 1);
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Range(20..30)));
-        assert_eq!(s.value_mut(), &mut 2);
+        assert_eq!(s.value_mut().unwrap(), &mut 2);
         s.skip();
         assert_eq!(s.entry(), None);
         drop(s);
@@ -569,7 +578,7 @@ mod tests {
 
         let mut s = m.split(15..30);
         assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
-        assert_eq!(s.value_mut(), &mut 0);
+        assert_eq!(s.value_mut().unwrap(), &mut 0);
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Gap(20..30)));
         s.insert(1);
@@ -582,8 +591,8 @@ mod tests {
         m.insert(0..30, 0);
         let mut s = m.split(10..20);
         assert_eq!(s.entry(), Some(&Entry::Range(0..30)));
-        assert_eq!(s.value_mut(), &mut 0);
-        *s.value_mut() = 1;
+        assert_eq!(s.value_mut().unwrap(), &mut 0);
+        *s.value_mut().unwrap() = 1;
         s.skip();
         assert_eq!(s.entry(), None);
         drop(s);
@@ -598,21 +607,21 @@ mod tests {
 
         let mut s = m.split(0..70);
         assert_eq!(s.entry(), Some(&Entry::Range(0..10)));
-        assert_eq!(s.value_mut(), &mut 0);
+        assert_eq!(s.value_mut().unwrap(), &mut 0);
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Gap(10..20)));
         s.insert(4);
         assert_eq!(s.entry(), Some(&Entry::Range(20..30)));
-        assert_eq!(s.value_mut(), &mut 1);
+        assert_eq!(s.value_mut().unwrap(), &mut 1);
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Range(30..40)));
-        assert_eq!(s.value_mut(), &mut 2);
-        *s.value_mut() = 7;
+        assert_eq!(s.value_mut().unwrap(), &mut 2);
+        *s.value_mut().unwrap() = 7;
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Gap(40..50)));
         s.insert(5);
         assert_eq!(s.entry(), Some(&Entry::Range(50..60)));
-        assert_eq!(s.value_mut(), &mut 3);
+        assert_eq!(s.value_mut().unwrap(), &mut 3);
         s.skip();
         assert_eq!(s.entry(), Some(&Entry::Gap(60..70)));
         s.insert(6);

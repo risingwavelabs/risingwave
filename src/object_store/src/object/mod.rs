@@ -30,6 +30,9 @@ pub mod s3;
 use await_tree::InstrumentAwait;
 pub use s3::*;
 
+pub mod scheduled;
+pub use scheduled::*;
+
 pub mod error;
 pub mod object_metrics;
 
