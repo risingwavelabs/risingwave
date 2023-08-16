@@ -50,7 +50,6 @@ impl From<VisMut> for Vis {
             VisMutState::Bitmap(x) => Vis::Bitmap(x),
             VisMutState::Compact(x) => Vis::Compact(x),
             VisMutState::Builder(x) => Vis::Bitmap(x.finish()),
-            VisMutState::Undefined => unreachable!(),
         }
     }
 }
@@ -359,9 +358,6 @@ enum VisMutState {
     Compact(usize), // equivalent to all ones of this size
 
     Builder(BitmapBuilder),
-
-    /// intermediate state
-    Undefined,
 }
 
 impl From<Vis> for VisMut {
@@ -380,22 +376,20 @@ impl VisMut {
             VisMutState::Bitmap(b) => b.len(),
             VisMutState::Compact(c) => *c,
             VisMutState::Builder(b) => b.len(),
-            VisMutState::Undefined => unreachable!(),
         }
     }
 
     /// # Panics
     ///
-    /// Panics if `idx > len`.
+    /// Panics if `idx >= len`.
     pub fn is_set(&self, idx: usize) -> bool {
         match &self.state {
             VisMutState::Bitmap(b) => b.is_set(idx),
             VisMutState::Compact(c) => {
-                assert!(idx <= *c);
+                assert!(idx < *c);
                 true
             }
             VisMutState::Builder(b) => b.is_set(idx),
-            VisMutState::Undefined => unreachable!(),
         }
     }
 
@@ -403,11 +397,11 @@ impl VisMut {
         if let VisMutState::Builder(b) = &mut self.state {
             b.set(n, val);
         } else {
-            let state = mem::replace(&mut self.state, VisMutState::Undefined);
+            let state = mem::replace(&mut self.state, VisMutState::Compact(0)); // intermediate state
             let mut builder = match state {
                 VisMutState::Bitmap(b) => b.into(),
                 VisMutState::Compact(c) => BitmapBuilder::filled(c),
-                VisMutState::Builder(_) | VisMutState::Undefined => unreachable!(),
+                VisMutState::Builder(_) => unreachable!(),
             };
             builder.set(n, val);
             self.state = VisMutState::Builder(builder);

@@ -18,6 +18,7 @@ RUN mkdir -p /risingwave
 WORKDIR /risingwave
 
 COPY ./ /risingwave
+COPY ./docker/hdfs_env.sh /risingwave/hdfs_env.sh
 
 ENV PATH /root/.cargo/bin/:$PATH
 
@@ -62,6 +63,8 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=builder /risingwave/ui /risingwave/ui
+COPY --from=builder /risingwave/hdfs_env.sh /risingwave/hdfs_env.sh
+RUN chmod +x /risingwave/hdfs_env.sh
 
 # hadoop
 RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop-2.7.3.tar.gz -P /root/
@@ -79,18 +82,12 @@ ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
-
-# set classpath
-RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop_classpath_273.txt -P /root/
-
-# Need to copy the content in the hadoop_classpath_273.txt file, and then set env.
-# Since the env command can only be written but not read, The following line is deleted here, and then added manually when packaging.
-
-# ENV CLASSPATH=/root/hadoop_classpath_273.txt:$CLASSPATH
-
+ENV CLASSPATH ${CLASSPATH}
+ENV CLASSPATH ${HADOOP_CONF_DIR}:${CLASSPATH}
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
-ENTRYPOINT [ "/risingwave/bin/risingwave" ]
+
+ENTRYPOINT [ "/risingwave/hdfs_env.sh" ]
 CMD [ "playground" ]

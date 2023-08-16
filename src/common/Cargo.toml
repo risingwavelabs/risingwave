@@ -30,7 +30,7 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
-comfy-table = "6"
+comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
 educe = "0.4"
