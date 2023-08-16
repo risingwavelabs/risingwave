@@ -62,6 +62,10 @@ impl LogicalExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.core.column_subsets
     }
+
+    pub fn decompose(self) -> (PlanRef, Vec<Vec<usize>>) {
+        self.core.decompose()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
