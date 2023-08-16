@@ -77,6 +77,7 @@ where
         }
     }
 
+    #[expect(dead_code)]
     pub fn clear(&mut self) {
         self.inner.clear();
         self.heap_size.set(0);
