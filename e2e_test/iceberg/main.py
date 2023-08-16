@@ -60,7 +60,6 @@ def verify_result(args):
 
     with open(args['default']['result'], newline='') as csv_file:
         csv_result = list(csv.reader(csv_file))
-        tc.assertEqual(len(df), len(csv_result))
         for (row1, row2) in zip(df, csv_result):
             print(f"Row1: {row1}, row 2: {row2}")
             tc.assertEqual(row1[0], int(row2[0]))
@@ -69,6 +68,8 @@ def verify_result(args):
             tc.assertEqual(round(row1[3], 5), round(float(row2[3]), 5))
             tc.assertEqual(round(row1[4], 5), round(float(row2[4]), 5))
             tc.assertEqual(row1[5], row2[5])
+
+        tc.assertEqual(len(df), len(csv_result))
 
 
 if __name__ == "__main__":
