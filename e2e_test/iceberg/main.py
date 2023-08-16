@@ -4,22 +4,35 @@ import subprocess
 import csv
 import unittest
 
-spark = None
+g_spark = None
+
+init_table_sqls = [
+    "CREATE SCHEMA IF NOT EXISTS demo_db",
+    "DROP TABLE IF EXISTS demo_db.demo_table",
+    """
+    CREATE TABLE demo_db.demo_table (
+    id long, 
+    v_int int,
+    v_long long,
+    v_float float,
+    v_double double,
+    v_varchar string
+    ) TBLPROPERTIES ('format-version'='2');
+    """,
+]
+
+
+def get_spark(args):
+    spark_config = args['spark']
+    global g_spark
+    if g_spark is None:
+        g_spark = SparkSession.builder.remote(spark_config['url']).getOrCreate()
+
+    return g_spark
 
 
 def init_iceberg_table(args):
-    spark_config = args['spark']
-    global spark
-    spark = SparkSession.builder.remote(spark_config['url']).getOrCreate()
-
-    init_table_sqls = [
-        "CREATE SCHEMA IF NOT EXISTS demo_db",
-        "DROP TABLE IF EXISTS demo_db.demo_table",
-        """
-        CREATE TABLE demo_db.demo_table (v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');
-        """,
-    ]
-
+    spark = get_spark(args)
     for sql in init_table_sqls:
         print(f"Executing sql: {sql}")
         spark.sql(sql)
@@ -35,21 +48,25 @@ def init_risingwave_mv(args):
 
 
 def verify_result(args):
-    sql = "SELECT * FROM demo_db.demo_table ORDER BY v1,v2 ASC"
+    sql = "SELECT * FROM demo_db.demo_table ORDER BY id ASC"
     tc = unittest.TestCase()
     print(f"Executing sql: {sql}")
-    global spark
+    spark = get_spark(args)
     df = spark.sql(sql).collect()
     for row in df:
         print(row)
 
     with open(args['default']['result'], newline='') as csv_file:
-        csv_result = csv.reader(csv_file)
+        csv_result = list(csv.reader(csv_file))
+        tc.assertEqual(len(df), len(csv_result))
         for (row1, row2) in zip(df, csv_result):
             print(f"Row1: {row1}, row 2: {row2}")
             tc.assertEqual(row1[0], int(row2[0]))
             tc.assertEqual(row1[1], int(row2[1]))
-            tc.assertEqual(row1[2], row2[2])
+            tc.assertEqual(row1[2], int(row2[2]))
+            tc.assertEqual(round(row1[3], 5), round(float(row2[3]), 5))
+            tc.assertEqual(round(row1[4], 5), round(float(row2[4]), 5))
+            tc.assertEqual(row1[5], row2[5])
 
 
 if __name__ == "__main__":
