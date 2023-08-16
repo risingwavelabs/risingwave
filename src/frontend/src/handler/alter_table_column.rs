@@ -117,6 +117,11 @@ pub async fn handle_alter_table_column(
                     6903.into(),
                 ))?
             }
+            if original_catalog.has_associated_source() {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "cannot remove column of table with source"
+                )))?
+            }
 
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();

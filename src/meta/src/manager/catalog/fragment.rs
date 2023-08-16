@@ -370,11 +370,9 @@ where
                 .into_iter()
                 .map(|f| (f.fragment_id, f))
                 .collect();
-            old_table_fragment.actor_status = old_table_fragment
+            old_table_fragment
                 .actor_status
-                .into_iter()
-                .filter(|(k, _)| source_actor_ids.contains(k))
-                .collect();
+                .retain(|k, _| source_actor_ids.contains(k));
             table_fragments.insert(table_id, old_table_fragment);
         }
 

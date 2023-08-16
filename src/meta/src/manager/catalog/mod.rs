@@ -2030,7 +2030,6 @@ where
         }
     }
 
-    // TODO: should we alter source into creating?
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn finish_replace_table_procedure(
         &self,
@@ -2080,7 +2079,7 @@ where
             assert!(sources.contains_key(&source.id), "source must exist");
             sources.insert(source.id, source.clone());
         }
-        
+
         commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
@@ -2095,7 +2094,7 @@ where
                     .chain(updated_indexes.into_iter().map(|index| Relation {
                         relation_info: RelationInfo::Index(index).into(),
                     }))
-                    .chain(source.to_owned().into_iter().map(|source| Relation {
+                    .chain(source.iter().cloned().map(|source| Relation {
                         relation_info: RelationInfo::Source(source).into(),
                     }))
                     .collect_vec(),

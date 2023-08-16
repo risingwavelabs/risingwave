@@ -593,7 +593,7 @@ impl CompleteStreamFragmentGraph {
 
         // Build the extra edges between the `Materialize` and the downstream `Chain` of the
         // existing materialized views.
-        for (dispatch_strategy, fragment) in downstream_fragments.iter() {
+        for (dispatch_strategy, fragment) in &downstream_fragments {
             let id = GlobalFragmentId::new(fragment.fragment_id);
 
             let edge = StreamFragmentEdge {
@@ -616,7 +616,7 @@ impl CompleteStreamFragmentGraph {
                 .unwrap();
         }
 
-        for fragment in upstream_fragments.iter() {
+        for fragment in &upstream_fragments {
             let id = GlobalFragmentId::new(fragment.fragment_id);
             let edge = StreamFragmentEdge {
                 id: EdgeId::UpstreamSourceExternal {

@@ -133,14 +133,12 @@ impl StreamingJob {
     /// Returns the reference to the [`Source`] of the job if it exists.
     pub fn source(&self) -> Option<&Source> {
         match self {
-            Self::Table(source, _) => {
-                source.as_ref()
-            }
+            Self::Table(source, _) => source.as_ref(),
             _ => None,
         }
     }
 
-    /// Returns whether the table in stream_job has associated source
+    /// Returns whether the table in `stream_job` has associated source
     pub fn has_associated_source(&self) -> bool {
         match self {
             Self::Table(_, table) => table.optional_associated_source_id.is_some(),

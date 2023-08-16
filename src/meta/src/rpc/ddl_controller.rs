@@ -27,7 +27,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, DispatchStrategy,
+    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use tracing::log::warn;
 use tracing::Instrument;
@@ -497,12 +497,6 @@ where
         Ok(parallelism)
     }
 
-    // Things need to be changed
-    // 1. add external locations: reuse source executor
-    // 2. add external changes: new dispatcher
-    // 3. add old source fragment into graph
-    // 4. 
-
     /// `build_stream_job` builds a streaming job and returns the context and table fragments.
     async fn build_stream_job(
         &self,
@@ -722,8 +716,6 @@ where
         let (fragment_graph, dispatch_strategy) = self
             .prepare_replace_table(&mut stream_job, fragment_graph)
             .await?;
-
-        // let fragment_graph = self.rewrite_source_fragment(&stream_job, fragment_graph);
 
         let result = try {
             let (ctx, table_fragments) = self

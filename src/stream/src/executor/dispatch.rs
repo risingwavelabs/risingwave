@@ -185,9 +185,8 @@ impl DispatchExecutorInner {
             }
             // Currently `added_dispatchers` is nonempty iff `source` is nonempty iff this update is from altering table
             Mutation::Update { dispatchers, added_dispatchers, .. } => {
-                if !added_dispatchers.is_empty() && 
+                if !added_dispatchers.is_empty() &&
                 let Some(new_dispatchers) = added_dispatchers.get(&self.actor_id) {
-                    // self.dispatchers.clear();
                     self.add_dispatchers(new_dispatchers)?;
                 } else if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
@@ -217,7 +216,7 @@ impl DispatchExecutorInner {
                 }
             }
             Mutation::Update { dispatchers, added_dispatchers, .. } => {
-                if !added_dispatchers.is_empty() && 
+                if !added_dispatchers.is_empty() &&
                 let Some(new_dispatchers) = added_dispatchers.get(&self.actor_id) {
                     let new_dispatchers = new_dispatchers.iter().map(|d| d.dispatcher_id).collect::<HashSet<_>>();
                     self.dispatchers.retain(|d| new_dispatchers.contains(&d.dispatcher_id()));

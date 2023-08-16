@@ -419,7 +419,7 @@ where
         let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         if let Some(source) = &mut source {
             let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
-            bind_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph).await;
+            bind_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
@@ -517,14 +517,13 @@ where
         let mut fragment_graph = req.fragment_graph.unwrap();
         let mut table = req.table.unwrap();
         if let Some(source) = &mut source {
-            let source_id = try_match_expand!(
+            let source_id = *try_match_expand!(
                 table.get_optional_associated_source_id()?,
                 OptionalAssociatedSourceId::AssociatedSourceId
             )
-            .map_err(|e| MetaError::from(e))?
-            .clone();
+            .map_err(MetaError::from)?;
             let table_id = table.id;
-            bind_table_source(source, source_id, &mut table, table_id, &mut fragment_graph).await;
+            bind_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
         }
         let table_col_index_mapping =
             ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
@@ -745,7 +744,7 @@ where
     }
 }
 
-async fn bind_table_source(
+fn bind_table_source(
     source: &mut PbSource,
     source_id: u32,
     table: &mut PbTable,

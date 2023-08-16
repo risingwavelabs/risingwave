@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{Field, ColumnDesc};
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
@@ -196,7 +196,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 state.push(recover_state);
             }
         }
-        println!("#### Actor {:?} apply state {:?}", self.actor_ctx.id, state);
+        println!(
+            "#### Actor {:?} apply state {:?}, latest: {:?}",
+            self.actor_ctx.id, state, boot_state
+        );
         self.replace_stream_reader_with_target_state(source_desc, stream, state)
             .await?;
         Ok(())
@@ -206,7 +209,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,        
+        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
         self.metrics
             .source_split_change_count
@@ -308,11 +311,14 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader = self
-            .build_stream_source_reader(source_desc, if target_state.is_empty() {
-                None
-            } else {
-                Some(target_state.clone())
-            })
+            .build_stream_source_reader(
+                source_desc,
+                if target_state.is_empty() {
+                    None
+                } else {
+                    Some(target_state.clone())
+                },
+            )
             .await?;
 
         stream.replace_data_stream(reader);
@@ -425,6 +431,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        // Record the latest state after each barrier, only split id is used
         let mut latest_state = boot_state.clone();
 
         // init in-memory split states with persisted state if any
@@ -510,7 +517,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     ..
                                 } => {
                                     if let Some(source) = source && added_dispatchers.contains_key(&self.actor_ctx.id) {
-                                        source_desc_builder.alter_builder(&source);
+                                        source_desc_builder.alter_builder(source);
                                         source_desc = source_desc_builder
                                             .clone()
                                             .build()
@@ -535,7 +542,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                         self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
                             .await?;
-                        
+
                         self.metrics
                             .source_row_per_barrier
                             .with_label_values(&[

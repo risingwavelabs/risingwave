@@ -46,25 +46,22 @@ pub async fn schema_check(mut info: Arc<ExecutorInfo>, input: impl MessageStream
                 }
             }
             Message::Barrier(barrier) => {
-                if let Some(mutation) = barrier.mutation.as_deref() {
-                    match mutation {
-                        Mutation::Update { source, .. } => {
-                            if let Some(source) = source {
-                                info = Arc::new(ExecutorInfo {
-                                    schema: Schema {
-                                        fields: source
-                                            .columns
-                                            .iter()
-                                            .map(|c| Field::from(c.column_desc.as_ref().unwrap()))
-                                            .collect_vec(),
-                                    },
-                                    pk_indices: info.pk_indices.clone(),
-                                    identity: info.identity.clone(),
-                                })
-                            }
-                        }
-                        _ => {}
-                    }
+                if let Some(Mutation::Update {
+                    source: Some(source),
+                    ..
+                }) = barrier.mutation.as_deref()
+                {
+                    info = Arc::new(ExecutorInfo {
+                        schema: Schema {
+                            fields: source
+                                .columns
+                                .iter()
+                                .map(|c| Field::from(c.column_desc.as_ref().unwrap()))
+                                .collect_vec(),
+                        },
+                        pk_indices: info.pk_indices.clone(),
+                        identity: info.identity.clone(),
+                    })
                 }
                 Ok(())
             }

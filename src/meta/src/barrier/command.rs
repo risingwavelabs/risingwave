@@ -183,17 +183,10 @@ impl Command {
             } => {
                 let to_add = new_table_fragments.actor_ids().into_iter().collect();
                 // don't remove the original table source actors if the table has source
-                let to_remove = if source.is_some() {
-                    old_table_fragments
-                        .fragments
-                        .values()
-                        .filter(|f| (f.fragment_type_mask & FragmentTypeFlag::Source as u32) == 0)
-                        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-                        .collect()
-                } else {
-                    old_table_fragments.actor_ids().into_iter().collect()
-                };
-                println!("Added actors: {:?}\nRemoved actors: {:?}", to_add, to_remove);
+                let to_remove = non_source_actors(old_table_fragments, source)
+                    .into_iter()
+                    .collect();
+
                 CommandChanges::Actor { to_add, to_remove }
             }
             Command::SourceSplitAssignment(_) => CommandChanges::None,
@@ -339,16 +332,7 @@ where
                 ..
             } => {
                 // don't remove the original table source actors if the table has source
-                let dropped_actors = if source.is_some() {
-                    old_table_fragments
-                        .fragments
-                        .values()
-                        .filter(|f| (f.fragment_type_mask & FragmentTypeFlag::Source as u32) == 0)
-                        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-                        .collect()
-                } else {
-                    old_table_fragments.actor_ids()
-                };
+                let dropped_actors = non_source_actors(old_table_fragments, source);
 
                 let added_dispatchers = dispatchers
                     .iter()
@@ -739,7 +723,10 @@ where
                     if to_remove.contains(actor_id) {
                         let node_id =
                             actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
-                        node_actors.entry(node_id).or_insert_with(Vec::new).push(*actor_id);
+                        node_actors
+                            .entry(node_id)
+                            .or_insert_with(Vec::new)
+                            .push(*actor_id);
                     }
                 }
 

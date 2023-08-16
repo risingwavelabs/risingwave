@@ -386,7 +386,6 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
-    println!("####INTO CHUNK STREAM: columns :{:?}", columns);
 
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
     let mut split_offset_mapping = HashMap::<SplitId, String>::new();
