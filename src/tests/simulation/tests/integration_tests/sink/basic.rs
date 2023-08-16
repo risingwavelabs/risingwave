@@ -181,8 +181,11 @@ async fn test_sink_basic() -> Result<()> {
 #[madsim::test]
 async fn test_sink_decouple_basic() -> Result<()> {
     let config_path = {
-        let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config
-file");         file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
+        let mut file = tempfile::NamedTempFile::new().expect(
+            "failed to create temp config
+file",
+        );
+        file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
             .expect("failed to write config file");
         file.into_temp_path()
     };
@@ -197,7 +200,7 @@ file");         file.write_all(include_bytes!("../../../../../config/ci-sim.toml
         etcd_timeout_rate: 0.0,
         etcd_data_path: None,
     })
-        .await?;
+    .await?;
 
     let row_counter = Arc::new(AtomicUsize::new(0));
     let parallelism_counter = Arc::new(AtomicUsize::new(0));
