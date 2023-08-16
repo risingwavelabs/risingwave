@@ -150,7 +150,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             }
             let mut pk_indices = pk_indices.into_iter().collect_vec();
             pk_indices.sort_unstable();
-            Table::new_with_pk(
+            Table::new_for_base_table(
                 name.0[0].real_value(),
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
