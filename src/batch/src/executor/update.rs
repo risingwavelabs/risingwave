@@ -62,12 +62,6 @@ impl UpdateExecutor {
         identity: String,
         returning: bool,
     ) -> Self {
-        assert_eq!(
-            child.schema().data_types(),
-            exprs.iter().map(|e| e.return_type()).collect_vec(),
-            "bad update schema"
-        );
-
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -116,6 +110,15 @@ impl UpdateExecutor {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
+        assert_eq!(
+            table_dml_handle
+                .column_descs()
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then_some(c.data_type.clone()))
+                .collect_vec(),
+            self.exprs.iter().map(|e| e.return_type()).collect_vec(),
+            "bad update schema"
+        );
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
         write_handle.begin()?;
