@@ -20,6 +20,9 @@ update t1 set v1 = 1;
 statement ok
 update t1 set v2 = 1;
 
+statement ok
+flush;
+
 query IIIR
 select * from t1;
 ----
@@ -28,6 +31,9 @@ select * from t1;
 
 statement ok
 delete from t1;
+
+statement ok
+flush;
 
 query IIIR
 select * from t1;

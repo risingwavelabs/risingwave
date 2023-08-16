@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::select::LogicalFilter;
@@ -31,6 +32,15 @@ impl Planner {
             scan
         };
         let returning = !update.returning_list.is_empty();
+        let update_column_indices = update
+            .table
+            .table_catalog
+            .columns()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| (!c.is_generated()).then_some(i))
+            .collect_vec();
+
         let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
             input,
             update.table_name.clone(),
@@ -38,6 +48,7 @@ impl Planner {
             update.table_version_id,
             update.exprs,
             returning,
+            update_column_indices,
         ))
         .into();
 
