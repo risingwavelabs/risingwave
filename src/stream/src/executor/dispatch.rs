@@ -216,8 +216,12 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
-                if let Some(updates) = dispatchers.get(&self.actor_id) {
+            Mutation::Update { dispatchers, added_dispatchers, .. } => {
+                if !added_dispatchers.is_empty() && 
+                let Some(new_dispatchers) = added_dispatchers.get(&self.actor_id) {
+                    let new_dispatchers = new_dispatchers.iter().map(|d| d.dispatcher_id).collect::<HashSet<_>>();
+                    self.dispatchers.retain(|d| new_dispatchers.contains(&d.dispatcher_id()));
+                } else if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
                     }

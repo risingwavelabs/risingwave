@@ -361,10 +361,19 @@ where
         if let Some(source) = source {
             let table_id = TableId::new(source.id);
             old_table_fragment.set_table_id(table_id);
-            old_table_fragment.fragments = old_table_fragment
-                .source_fragments()
+            let source_fragments = old_table_fragment.source_fragments();
+            let source_actor_ids = source_fragments
+                .iter()
+                .flat_map(|f| f.actors.iter().map(|a| a.actor_id))
+                .collect::<HashSet<_>>();
+            old_table_fragment.fragments = source_fragments
                 .into_iter()
                 .map(|f| (f.fragment_id, f))
+                .collect();
+            old_table_fragment.actor_status = old_table_fragment
+                .actor_status
+                .into_iter()
+                .filter(|(k, _)| source_actor_ids.contains(k))
                 .collect();
             table_fragments.insert(table_id, old_table_fragment);
         }
