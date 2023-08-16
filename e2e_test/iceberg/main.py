@@ -46,7 +46,7 @@ def init_risingwave_mv(args):
     subprocess.run(cmd,
                    shell=True,
                    check=True)
-    time.sleep(3)
+    time.sleep(100)
 
 
 def verify_result(args):
