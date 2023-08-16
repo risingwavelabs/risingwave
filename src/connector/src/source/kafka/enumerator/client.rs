@@ -89,11 +89,8 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(
-            broker_rewrite_map,
-            Some(format!("source-{}", context.info.source_id)),
-            Some(context.metrics.kafka_native_metrics.clone()),
-        )?;
+        // don't need kafka metrics from enumerator
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None, None)?;
         let client: BaseConsumer<PrivateLinkConsumerContext> =
             config.create_with_context(client_ctx).await?;
 
@@ -109,10 +106,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
-        if let Some(Err(e)) = self.client.poll(self.sync_call_timeout) {
-            // poll once to get metrics
-            tracing::warn!("failed to poll kafka client, error: {}", e);
-        }
         let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
             anyhow!(format!(
                 "failed to fetch metadata from kafka ({}), error: {}",

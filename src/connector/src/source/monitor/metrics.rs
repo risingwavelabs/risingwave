@@ -25,7 +25,6 @@ use crate::source::kafka::stats::RdKafkaStats;
 pub struct EnumeratorMetrics {
     pub registry: Registry,
     pub high_watermark: GenericGaugeVec<AtomicI64>,
-    pub kafka_native_metrics: Arc<RdKafkaStats>,
 }
 
 impl EnumeratorMetrics {
@@ -37,11 +36,9 @@ impl EnumeratorMetrics {
             registry,
         )
         .unwrap();
-        let kafka_native_metrics = Arc::new(RdKafkaStats::new(registry.clone()));
         EnumeratorMetrics {
             registry,
             high_watermark,
-            kafka_native_metrics,
         }
     }
 
@@ -65,6 +62,7 @@ pub struct SourceMetrics {
     pub user_source_error_count: GenericCounterVec<AtomicU64>,
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,
+    pub rdkafka_native_metric: Arc<RdKafkaStats>,
 }
 
 impl SourceMetrics {
@@ -103,12 +101,14 @@ impl SourceMetrics {
             registry,
         )
         .unwrap();
+        let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             registry,
             partition_input_count,
             partition_input_bytes,
             user_source_error_count,
             latest_message_id,
+            rdkafka_native_metric,
         }
     }
 
