@@ -402,13 +402,12 @@ impl KafkaSinkWriter {
 
         for _ in 0..self.config.max_retry_num {
             match self.send_result_inner(record).await {
-                // Successfully sent the record
                 Ok(delivery_future) => match delivery_future.await {
                     Ok(delivery_future_result) => match delivery_future_result {
-                        // If the message failed to be delivered.
+                        // Successfully sent the record
                         // Will return the partition and offset of the message (i32, i64)
                         Ok(_) => return Ok(()),
-                        // If the message failed to be delivered.
+                        // If the message failed to be delivered. (i.e., flush)
                         // The error & the copy of the original message will be returned (KafkaError, OwnedMessage)
                         // We will just stop the loop and return the error
                         // The sink executor will back to the latest checkpoint
