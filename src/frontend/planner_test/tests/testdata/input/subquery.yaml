@@ -262,3 +262,10 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: test cardinality visitor with correlated filter
+  sql: |
+    CREATE TABLE t1(i INT);
+    CREATE TABLE t2(j INT);
+    select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
+  expected_outputs:
+    - optimizer_error
