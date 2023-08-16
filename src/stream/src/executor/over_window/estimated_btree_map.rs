@@ -32,6 +32,15 @@ impl<K, V> EstimatedBTreeMap<K, V> {
     pub fn inner(&self) -> &BTreeMap<K, V> {
         &self.inner
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[expect(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 impl<K, V> Default for EstimatedBTreeMap<K, V> {
@@ -45,6 +54,14 @@ where
     K: EstimateSize + Ord,
     V: EstimateSize,
 {
+    pub fn first_key_value(&self) -> Option<(&K, &V)> {
+        self.inner.first_key_value()
+    }
+
+    pub fn last_key_value(&self) -> Option<(&K, &V)> {
+        self.inner.last_key_value()
+    }
+
     pub fn insert(&mut self, key: K, row: V) {
         let key_size = self.heap_size.add_val(&key);
         self.heap_size.add_val(&row);
