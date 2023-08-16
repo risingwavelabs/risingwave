@@ -77,12 +77,10 @@ impl Rule for ApplyExpandTransposeRule {
         let new_expand = {
             // Shift index of column_subsets with `apply_left_len`.
             // Add domain to the column_subsets.
-            column_subsets
-                .iter_mut()
-                .for_each(|subset| {
-                    subset.iter_mut().for_each(|i| *i += apply_left_len);
-                    *subset = (0..apply_left_len).chain(subset.drain(..)).collect_vec();
-                });
+            column_subsets.iter_mut().for_each(|subset| {
+                subset.iter_mut().for_each(|i| *i += apply_left_len);
+                *subset = (0..apply_left_len).chain(subset.drain(..)).collect_vec();
+            });
             LogicalExpand::new(new_apply, column_subsets)
         };
 
