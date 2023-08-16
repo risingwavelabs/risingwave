@@ -29,6 +29,7 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(un
 
 # install python dependencies
 RUN pip3 install pyarrow pytest
+RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
