@@ -23,11 +23,27 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
-        let scan = self.plan_base_table(delete.table)?;
+        let scan = self.plan_base_table(&delete.table)?;
         let input = if let Some(expr) = delete.selection {
             LogicalFilter::create_with_expr(scan, expr)
         } else {
             scan
+        };
+        let input = if delete.table.table_catalog.has_generated_column() {
+            LogicalProject::with_out_col_idx(
+                input,
+                delete
+                    .table
+                    .table_catalog
+                    .columns()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| !c.is_generated())
+                    .map(|(i, _)| i),
+            )
+            .into()
+        } else {
+            input
         };
         let returning = !delete.returning_list.is_empty();
         let mut plan: PlanRef = LogicalDelete::from(generic::Delete::new(
