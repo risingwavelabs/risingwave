@@ -569,9 +569,16 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Precedence::UnaryNot)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY => {
+                Keyword::ARRAY if self.peek_token() == Token::LBracket => {
                     self.expect_token(&Token::LBracket)?;
                     self.parse_array_expr(true)
+                }
+                Keyword::ARRAY if self.peek_token() == Token::LParen => {
+                    // similar to `exists(subquery)`
+                    self.expect_token(&Token::LParen)?;
+                    let exists_node = Expr::ArraySubquery(Box::new(self.parse_query()?));
+                    self.expect_token(&Token::RParen)?;
+                    Ok(exists_node)
                 }
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
