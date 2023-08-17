@@ -12,19 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ffi::OsString;
-
 use anyhow::Result;
 use clap::Parser;
 use tokio::signal;
 
-enum RisingWaveService {
-    Compute(Vec<OsString>),
-    Meta(Vec<OsString>),
-    Frontend(Vec<OsString>),
-    Compactor(Vec<OsString>),
-    ConnectorNode(Vec<OsString>),
-}
+use crate::common::{osstrs, RisingWaveService};
 
 #[derive(Debug, Clone, Parser)]
 pub struct AllInOneOpts {
@@ -46,16 +38,11 @@ fn get_services(opts: &AllInOneOpts) -> Vec<RisingWaveService> {
     let compute_opts = opts.compute_opts.split_whitespace().collect::<Vec<_>>();
     let frontend_opts = opts.frontend_opts.split_whitespace().collect::<Vec<_>>();
     let services = vec![
-        RisingWaveService::Meta(osstrs(&meta_opts)),
-        RisingWaveService::Compute(osstrs(&compute_opts)),
-        RisingWaveService::Frontend(osstrs(&frontend_opts)),
+        RisingWaveService::Meta(osstrs(meta_opts)),
+        RisingWaveService::Compute(osstrs(compute_opts)),
+        RisingWaveService::Frontend(osstrs(frontend_opts)),
     ];
     services
-}
-
-/// TODO: Refactor into utils.
-fn osstrs(s: &[&str]) -> Vec<OsString> {
-    s.iter().map(OsString::from).collect()
 }
 
 pub async fn all_in_one(opts: AllInOneOpts) -> Result<()> {
