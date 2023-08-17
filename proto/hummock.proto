@@ -466,12 +466,13 @@ message ReportCompactionTaskRequest {
     CompactTask compact_task = 2;
     map<uint32, TableStats> table_stats_change = 3;
   }
-  oneof event {
-    ReportTask report_task = 1;
-    // CompactTaskProgress progress = 2;
-    // Maybe heartbeat is no need in the response, because rpc proxy can get the compaction pod status.
-    // HeartBeat heart_beat = 3;
-  }
+  ReportTask report_task = 1;
+  // oneof event {
+  //   ReportTask report_task = 1;
+  //   // CompactTaskProgress progress = 2;
+  //   // Maybe heartbeat is no need in the response, because rpc proxy can get the compaction pod status.
+  //   // HeartBeat heart_beat = 3;
+  // }
 }
 
 message ReportCompactionTaskResponse {
