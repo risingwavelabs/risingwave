@@ -6451,6 +6451,7 @@ dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema)",
  "arrow-array",
+ "arrow-schema",
  "async-trait",
  "auto_enums",
  "auto_impl",
