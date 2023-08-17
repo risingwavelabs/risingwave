@@ -187,6 +187,10 @@ where
         !self.core.read().await.table_fragments.is_empty()
     }
 
+    pub async fn has_fragment(&self, table_id: &TableId) -> bool {
+        self.core.read().await.table_fragments.contains_key(table_id)
+    }
+
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {

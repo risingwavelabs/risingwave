@@ -762,7 +762,7 @@ where
         if let Some(source_id) = source_id {
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
-            let (version, delete_jobs) = self
+            let (version, mut delete_jobs) = self
                 .catalog_manager
                 .drop_relation(
                     RelationIdEnum::Table(table_id),
@@ -770,6 +770,12 @@ where
                     drop_mode,
                 )
                 .await?;
+            // After altering a table, the source fragment will be in a independent 
+            // `TableFragments`
+            let source_fragment_id = source_id.into();
+            if self.fragment_manager.has_fragment(&source_fragment_id).await {
+                delete_jobs.push(source_fragment_id);
+            }
             // Unregister source connector worker.
             self.source_manager
                 .unregister_sources(vec![source_id])
@@ -820,30 +826,6 @@ where
                 Err(err)
             }
         }
-    }
-
-    fn remove_source_from_graph(
-        mut fragment_graph: StreamFragmentGraphProto,
-    ) -> (StreamFragmentGraphProto, Option<DispatchStrategy>) {
-        let source_id = fragment_graph
-            .fragments
-            .values()
-            .find(|f| (f.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0)
-            .map(|f| f.fragment_id)
-            .unwrap();
-        fragment_graph.fragments.remove(&source_id);
-        let mut edges = vec![];
-        let mut dispatch_strategy = None;
-        for edge in fragment_graph.edges {
-            if edge.upstream_id != source_id && edge.downstream_id != source_id {
-                edges.push(edge);
-            } else {
-                dispatch_strategy = edge.dispatch_strategy;
-            }
-        }
-        fragment_graph.edges = edges;
-        fragment_graph.table_ids_cnt -= 1;
-        (fragment_graph, dispatch_strategy)
     }
 
     /// `prepare_replace_table` prepares a table replacement and returns the new stream fragment
