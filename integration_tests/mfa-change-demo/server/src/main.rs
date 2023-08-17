@@ -51,7 +51,7 @@ fn get_args<'a>() -> ArgMatches<'a> {
                 .long("brokers")
                 .help("Kafka broker list")
                 .takes_value(true)
-                .default_value("localhost:29092"),
+                .default_value("kafka:9092"),
         )
         .arg(
             Arg::with_name("output-topic")

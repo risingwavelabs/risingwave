@@ -25,7 +25,7 @@ class TrainingModelService(ModelServicer):
     def __init__(self):
         super(TrainingModelService, self).__init__()
         self.model = GradientBoostingRegressor()
-        self.conn = psycopg.connect("dbname=dev user=root host=127.0.0.1 port=4566")
+        self.conn = psycopg.connect("dbname=dev user=root host=frontend-node-0 port=4566")
     def Training(self, request, context):
         print(f"training!")
         try:

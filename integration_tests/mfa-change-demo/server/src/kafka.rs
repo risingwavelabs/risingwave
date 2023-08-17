@@ -46,11 +46,11 @@ impl KafkaSink {
     pub async fn mock_consume() {
         let consumer: LoggingConsumer = ClientConfig::new()
             .set("group.id", "feature-store")
-            .set("bootstrap.servers", "localhost:29092")
+            .set("bootstrap.servers", "kafka:9092")
             .create_with_context(CustomContext)
             .expect("Failed to create consumer");
         consumer
-            .subscribe(&vec!["mfa"])
+            .subscribe(&vec!["taxi"])
             .expect("Failed to subscribe");
         println!("Ready to consume");
 

@@ -22,7 +22,7 @@ create source if not exists taxiallfeature (
 ) with (
     connector = 'kafka',
     topic = 'taxi',
-    properties.bootstrap.server = 'localhost:9092',
+    properties.bootstrap.server = 'kafka:9092',
 )
 FORMAT PLAIN ENCODE JSON;
 

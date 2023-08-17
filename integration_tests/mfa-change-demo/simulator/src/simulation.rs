@@ -21,7 +21,7 @@ fn get_delay_mills(delay_val: f64) -> u64 {
 
 pub async fn main_loop(simulator_type: String) {
     let client = Arc::new(Mutex::new(
-        ServerClient::connect("https://127.0.0.1:2666")
+        ServerClient::connect("https://localhost:2666")
             .await
             .expect("failed to connect to feature store server"),
     ));

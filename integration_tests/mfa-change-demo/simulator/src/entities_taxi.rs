@@ -50,7 +50,8 @@ pub fn read_feature_for_csv(path: PathBuf) -> Result<Vec<TaxiFeature>, Box<dyn E
 }
 
 pub fn parse_taxi_metadata() -> (Vec<TaxiFeature>, Vec<TaxiFeature>) {
-    let mut offlines = read_feature_for_csv(Path::new("../").join("parquet_data.csv")).unwrap();
+    let path = std::env::var("WORK_DIR").unwrap_or("/opt/feature-store".to_string());
+    let mut offlines = read_feature_for_csv(Path::new(&*path).join("parquet_data.csv")).unwrap();
 
     let onlines = offlines.split_off(offlines.len() / 10 * 9);
 
