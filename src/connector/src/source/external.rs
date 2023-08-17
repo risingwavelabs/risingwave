@@ -260,7 +260,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
                 .await
                 .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
 
-            let sql = format!("SHOW MASTER STATUS");
+            let sql = "SHOW MASTER STATUS".to_string();
             let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
             let row = rs
                 .iter_mut()
