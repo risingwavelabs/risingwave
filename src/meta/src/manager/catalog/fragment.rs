@@ -187,7 +187,7 @@ where
         !self.core.read().await.table_fragments.is_empty()
     }
 
-    pub async fn has_fragment(&self, table_id: &TableId) -> bool {
+    pub async fn has_fragments(&self, table_id: &TableId) -> bool {
         self.core.read().await.table_fragments.contains_key(table_id)
     }
 

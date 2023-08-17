@@ -762,7 +762,7 @@ where
         if let Some(source_id) = source_id {
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
-            let (version, mut delete_jobs) = self
+            let (version, delete_jobs) = self
                 .catalog_manager
                 .drop_relation(
                     RelationIdEnum::Table(table_id),
@@ -770,12 +770,6 @@ where
                     drop_mode,
                 )
                 .await?;
-            // After altering a table, the source fragment will be in a independent 
-            // `TableFragments`
-            let source_fragment_id = source_id.into();
-            if self.fragment_manager.has_fragment(&source_fragment_id).await {
-                delete_jobs.push(source_fragment_id);
-            }
             // Unregister source connector worker.
             self.source_manager
                 .unregister_sources(vec![source_id])

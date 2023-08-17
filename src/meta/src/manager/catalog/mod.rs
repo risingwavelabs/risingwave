@@ -829,6 +829,8 @@ where
         let mut all_sink_ids: HashSet<SinkId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
+        // Used for altered table
+        let mut upstream_source_id: Option<SourceId> = None;
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -930,6 +932,14 @@ where
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&table_id.into())
                         .await?;
+
+                    // Dealing with altered table where there will be independent source fragments as upstream
+                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) = table.optional_associated_source_id && 
+                        fragment_manager.has_fragments(&source_id.into()).await {
+                        let source_fragments = fragment_manager.select_table_fragments_by_table_id(&source_id.into()).await?;
+                        all_internal_table_ids.extend(source_fragments.internal_table_ids());
+                        upstream_source_id = Some(source_id);
+                    }
 
                     all_internal_table_ids.extend(table_fragments.internal_table_ids());
 
@@ -1303,6 +1313,7 @@ where
             .into_iter()
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
+            .chain(upstream_source_id.into_iter().map(|id| id.into()))
             .collect_vec();
 
         Ok((version, catalog_deleted_ids))
