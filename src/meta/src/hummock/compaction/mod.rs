@@ -15,6 +15,7 @@
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
+mod tombstone_compaction_selector;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
@@ -39,6 +40,7 @@ pub use crate::hummock::compaction::level_selector::{
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
+pub use crate::hummock::compaction::tombstone_compaction_selector::TombstoneCompactionSelector;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;

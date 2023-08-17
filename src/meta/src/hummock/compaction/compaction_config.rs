@@ -64,6 +64,8 @@ impl CompactionConfigBuilder {
                     compaction_config::level0_sub_level_compact_level_count(),
                 level0_overlapping_sub_level_compact_level_count:
                     compaction_config::level0_overlapping_sub_level_compact_level_count(),
+                tombstone_reclaim_ratio_percent: compaction_config::tombstone_reclaim_ratio_percent(
+                ),
             },
         }
     }
@@ -91,6 +93,7 @@ impl CompactionConfigBuilder {
             )
             .max_space_reclaim_bytes(opt.max_space_reclaim_bytes)
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
+            .tombstone_reclaim_ratio_percent(opt.tombstone_reclaim_ratio_percent)
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -150,4 +153,5 @@ builder_field! {
     level0_max_compact_file_number: u64,
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
+    tombstone_reclaim_ratio_percent: u32,
 }
