@@ -471,3 +471,43 @@ fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> R
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::catalog::Field;
+
+    use crate::source::DataType;
+
+    #[test]
+    fn test_compatible_arrow_schema() {
+        use arrow_schema::{DataType as ArrowDataType, Field as ArrowField};
+
+        use super::*;
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "a"),
+            Field::with_name(DataType::Int32, "b"),
+            Field::with_name(DataType::Int32, "c"),
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new("a", ArrowDataType::Int32, false),
+            ArrowField::new("b", ArrowDataType::Int32, false),
+            ArrowField::new("c", ArrowDataType::Int32, false),
+        ]);
+
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "d"),
+            Field::with_name(DataType::Int32, "c"),
+            Field::with_name(DataType::Int32, "a"),
+            Field::with_name(DataType::Int32, "b"),
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new("a", ArrowDataType::Int32, false),
+            ArrowField::new("b", ArrowDataType::Int32, false),
+            ArrowField::new("d", ArrowDataType::Int32, false),
+            ArrowField::new("c", ArrowDataType::Int32, false),
+        ]);
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+    }
+}
