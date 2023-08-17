@@ -1,14 +1,42 @@
 ---
 version: "3"
 services:
-  risingwave:
-    image: ghcr.io/risingwavelabs/risingwave:latest
-    ports:
-      - 4566:4566
-      - 5691:5691
-    command:
-      - playground
-    container_name: risingwave
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
 
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2017-latest
@@ -28,11 +56,6 @@ services:
       timeout: 5s
       retries: 5
     container_name: sqlserver
-
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
 
   debezium:
     image: debezium/connect:1.9

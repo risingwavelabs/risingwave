@@ -28,6 +28,7 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::sig::FuncSigDebug;
 
 mod generate_series;
+mod generate_subscripts;
 mod jsonb;
 mod regexp_matches;
 mod repeat;

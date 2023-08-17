@@ -738,6 +738,10 @@ pub struct SystemConfig {
 
     #[serde(default = "default::system::telemetry_enabled")]
     pub telemetry_enabled: Option<bool>,
+
+    /// Max number of concurrent creating streaming jobs.
+    #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
+    pub max_concurrent_creating_streaming_jobs: Option<u32>,
 }
 
 impl SystemConfig {
@@ -754,6 +758,7 @@ impl SystemConfig {
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
             telemetry_enabled: self.telemetry_enabled,
+            max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
         }
     }
 }
@@ -827,7 +832,7 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            4 * 1024 * 1024 * 1024 // 4GB
+            10 * 1024 * 1024 * 1024 // 10GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -839,11 +844,11 @@ pub mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            128 * 1024 * 1024 // 128MB
+            16 * 1024 * 1024 // 16MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
-            32 * 1024 * 1024 // 32MB
+            4 * 1024 * 1024 // 4MB
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
@@ -1158,6 +1163,10 @@ pub mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+
+        pub fn max_concurrent_creating_streaming_jobs() -> Option<u32> {
+            system_param::default::max_concurrent_creating_streaming_jobs()
         }
     }
 

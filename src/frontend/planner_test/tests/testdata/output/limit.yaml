@@ -75,25 +75,41 @@
     Feature is not yet implemented: WITH TIES is not supported with OFFSET
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
-    select 1 limit 1
+    select 1 c limit 1
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
     └─BatchValues { rows: [[1:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
-    select 1 order by 1 limit 1
+    select 1 c order by 1 limit 1
   batch_plan: |-
     BatchTopN { order: [1:Int32 ASC], limit: 1, offset: 0 }
     └─BatchValues { rows: [[1:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [c], pk_conflict: NoCheck }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
-    select 1 union all select 1 limit 10
+    select 1 c union all select 1 c limit 10
   batch_plan: |-
     BatchLimit { limit: 10, offset: 0 }
     └─BatchValues { rows: [[1:Int32], [1:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 10, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64], [1:Int32, 1:Int64]] }
 - sql: |
-    select 1 union all select 1 order by 1 limit 10
+    select 1 c union all select 1 c order by 1 limit 10
   batch_plan: |-
     BatchTopN { order: [1:Int32 ASC], limit: 10, offset: 0 }
     └─BatchValues { rows: [[1:Int32], [1:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [_row_id], pk_columns: [c, _row_id], pk_conflict: NoCheck }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 10, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64], [1:Int32, 1:Int64]] }
 - sql: |
     create table t (a int);
     select count(*) from t limit 1;
@@ -103,6 +119,14 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [count] }
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
+      └─StreamProject { exprs: [sum0(count)] }
+        └─StreamSimpleAgg { aggs: [sum0(count), count] }
+          └─StreamExchange { dist: Single }
+            └─StreamStatelessSimpleAgg { aggs: [count] }
+              └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int);
     select count(*) from t order by 1 limit 1;
@@ -112,6 +136,14 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [count] }
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [count], pk_conflict: NoCheck }
+    └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
+      └─StreamProject { exprs: [sum0(count)] }
+        └─StreamSimpleAgg { aggs: [sum0(count), count] }
+          └─StreamExchange { dist: Single }
+            └─StreamStatelessSimpleAgg { aggs: [count] }
+              └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int primary key);
     select * from t limit 1;
@@ -120,3 +152,11 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: t, columns: [t.a], distribution: UpstreamHashShard(t.a) }
+  stream_plan: |-
+    StreamMaterialize { columns: [a], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a] }
+      └─StreamTopN { order: [t.a ASC], limit: 1, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [$expr1] }
+            └─StreamProject { exprs: [t.a, Vnode(t.a) as $expr1] }
+              └─StreamTableScan { table: t, columns: [t.a], pk: [t.a], dist: UpstreamHashShard(t.a) }

@@ -72,6 +72,10 @@ impl SystemParamsReader {
         self.prost.backup_storage_directory.as_ref().unwrap()
     }
 
+    pub fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
+        self.prost.max_concurrent_creating_streaming_jobs.unwrap()
+    }
+
     pub fn telemetry_enabled(&self) -> bool {
         self.prost.telemetry_enabled.unwrap()
     }
