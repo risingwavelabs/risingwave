@@ -20,6 +20,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
+use risingwave_simulation::utils::AssertResult;
 
 const NUM_ROWS: usize = 10000;
 const NUM_OVERWRITES: usize = 20000;
@@ -56,8 +57,10 @@ async fn test_storage_with_random_writes() -> Result<()> {
     let reader_task = tokio::spawn(async move {
         let mut session: risingwave_simulation::cluster::Session = cluster.start_session();
         while !finished_clone.load(Ordering::Acquire) {
-            let result = session.run("select * from t1 full outer join mv1 where t1.id = mv1.id and t1.val is distinct from mv1.val").await?;
-            assert_eq!(&result, "", "inconsistency between t1 and mv1");
+            session
+                .run("select * from t1 full outer join mv1 where t1.id = mv1.id and t1.val is distinct from mv1.val")
+                .await?
+                .assert_result_eq("");
         }
         anyhow::Ok(())
     });
