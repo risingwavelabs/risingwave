@@ -55,7 +55,8 @@ impl CardinalityVisitor {
 
         if unique_keys
             .iter()
-            .any(|unique_key| eq_set.is_superset(unique_key) && !unique_key.is_empty())
+            .filter(|unique_key| !unique_key.is_empty())
+            .any(|unique_key| eq_set.is_superset(unique_key))
         {
             input_card.min(0..=1)
         } else {
