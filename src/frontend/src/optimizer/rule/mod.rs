@@ -140,6 +140,8 @@ mod common_sub_expr_extract_rule;
 pub use common_sub_expr_extract_rule::*;
 mod apply_over_window_transpose_rule;
 pub use apply_over_window_transpose_rule::*;
+mod apply_expand_transpose_rule;
+pub use apply_expand_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -200,6 +202,7 @@ macro_rules! for_all_rules {
             , { CommonSubExprExtractRule }
             , { BatchProjectMergeRule }
             , { ApplyOverWindowTransposeRule }
+            , { ApplyExpandTransposeRule }
         }
     };
 }
