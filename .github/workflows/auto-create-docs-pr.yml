@@ -18,6 +18,8 @@ jobs:
       - name: Retrieve PR information
         uses: 8BitJonny/gh-get-current-pr@2.2.0
         id: PR
+        with:
+          sha: ${{ github.event.pull_request.head.sha }}
 
       - name: Check if documentation update is needed
         id: check_documentation_update
