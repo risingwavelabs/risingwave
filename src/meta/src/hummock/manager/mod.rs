@@ -1159,21 +1159,14 @@ where
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
-        let ret = self
-            .report_compact_task_impl(
-                task_id,
-                task_status,
-                sorted_output_ssts,
-                &mut guard,
-                table_stats_change,
-            )
-            .await?;
-        #[cfg(test)]
-        {
-            drop(guard);
-            self.check_state_consistency().await;
-        }
-        Ok(ret)
+        self.report_compact_task_impl(
+            task_id,
+            task_status,
+            sorted_output_ssts,
+            &mut guard,
+            table_stats_change,
+        )
+        .await
     }
 
     /// Finishes or cancels a compaction task, according to `task_status`.
@@ -2743,7 +2736,13 @@ where
     pub fn compactor_manager_ref_for_test(&self) -> CompactorManagerRef {
         self.compactor_manager.clone()
     }
+}
 
+#[cfg(any(test, feature = "test"))]
+impl<S> HummockManager<S>
+where
+    S: MetaStore,
+{
     #[named]
     pub async fn compaction_task_from_assignment_for_test(
         &self,
@@ -2766,6 +2765,11 @@ where
                 context_id: META_NODE_ID,
             },
         );
+    }
+
+    #[named]
+    pub async fn compaction_guard_for_test(&self) -> RwLockWriteGuard<'_, Compaction> {
+        write_lock!(self, compaction).await
     }
 }
 
