@@ -138,14 +138,6 @@ impl StreamingJob {
         }
     }
 
-    /// Returns whether the table in `stream_job` has associated source
-    pub fn has_associated_source(&self) -> bool {
-        match self {
-            Self::Table(_, table) => table.optional_associated_source_id.is_some(),
-            _ => false,
-        }
-    }
-
     pub fn schema_id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.schema_id,

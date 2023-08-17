@@ -188,7 +188,11 @@ where
     }
 
     pub async fn has_fragments(&self, table_id: &TableId) -> bool {
-        self.core.read().await.table_fragments.contains_key(table_id)
+        self.core
+            .read()
+            .await
+            .table_fragments
+            .contains_key(table_id)
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
@@ -357,12 +361,12 @@ where
         // with the real table ID, then replace the dummy table ID with the real table ID. This is a
         // workaround for not having the version info in the fragment manager.
 
-        // If we are operating on table with source, the old source will still lie in the old
-        // fragments, and we need to add it back to meta.
         let mut old_table_fragment = table_fragments
             .remove(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-        if let Some(source) = source {
+        // When we alter a table with source in the first time, the source fragments still lies in
+        // `old_table_fragment`, and we need to update it.
+        if let Some(source) = source && !table_fragments.contains_key(&source.id.into()){
             let table_id = TableId::new(source.id);
             old_table_fragment.set_table_id(table_id);
             let source_fragments = old_table_fragment.source_fragments();
@@ -1093,19 +1097,6 @@ where
         }
 
         Ok(fragments)
-    }
-
-    pub async fn get_upstream_source_fragments(
-        &self,
-        table_id: TableId,
-    ) -> MetaResult<Vec<Fragment>> {
-        let map = &self.core.read().await.table_fragments;
-
-        let table_fragments = map
-            .get(&table_id)
-            .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-
-        Ok(table_fragments.source_fragments())
     }
 
     /// Get the downstream `Chain` fragments of the specified table.

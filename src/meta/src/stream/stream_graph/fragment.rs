@@ -401,11 +401,11 @@ impl StreamFragmentGraph {
 
         let edge = self.downstreams.remove(&source_fragment_id).unwrap();
         let edge = edge.into_iter().next().unwrap().1;
-        
-        for (_, map) in &mut self.upstreams {
+
+        for map in &mut self.upstreams.values_mut() {
             map.remove(&source_fragment_id);
         }
-        self.upstreams.retain(|_,v| !v.is_empty());
+        self.upstreams.retain(|_, v| !v.is_empty());
 
         edge.dispatch_strategy
     }

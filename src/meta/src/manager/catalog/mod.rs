@@ -933,12 +933,18 @@ where
                         .select_table_fragments_by_table_id(&table_id.into())
                         .await?;
 
-                    // Dealing with altered table where there will be independent source fragments as upstream
-                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) = table.optional_associated_source_id && 
-                        fragment_manager.has_fragments(&source_id.into()).await {
-                        let source_fragments = fragment_manager.select_table_fragments_by_table_id(&source_id.into()).await?;
-                        all_internal_table_ids.extend(source_fragments.internal_table_ids());
-                        upstream_source_id = Some(source_id);
+                    // Dealing with altered table where there will be independent source fragments
+                    // as upstream
+                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+                        table.optional_associated_source_id
+                    {
+                        if fragment_manager.has_fragments(&source_id.into()).await {
+                            let source_fragments = fragment_manager
+                                .select_table_fragments_by_table_id(&source_id.into())
+                                .await?;
+                            all_internal_table_ids.extend(source_fragments.internal_table_ids());
+                            upstream_source_id = Some(source_id);
+                        }
                     }
 
                     all_internal_table_ids.extend(table_fragments.internal_table_ids());

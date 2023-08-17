@@ -27,9 +27,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
-use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
-};
+use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
 use tracing::log::warn;
 use tracing::Instrument;
@@ -874,17 +872,31 @@ where
             .catalog_manager
             .get_tables(&old_internal_table_ids)
             .await;
-        
-        // Fit internal table ids to old ones.
-        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 
-        // If there is a source, delete source fragment from the graph, and get related 
-        // dispatch strategy
-        let dispatch_strategy = if stream_job.has_associated_source() {
-            Some(fragment_graph.remove_source_fragment())
+        let dispatch_strategy;
+        let upstream_fragments;
+        if let Some(source) = stream_job.source() {
+            // If there is a `TableFragments` with source id, there will be two `TableFragments`
+            // for source and table respectively. And we should remove source fragment first before
+            // fit internal table ids.
+            if self.fragment_manager.has_fragments(&source.id.into()).await {
+                let source_fragments = self
+                    .fragment_manager
+                    .select_table_fragments_by_table_id(&source.id.into())
+                    .await?;
+                upstream_fragments = source_fragments.source_fragments();
+                dispatch_strategy = Some(fragment_graph.remove_source_fragment());
+                fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+            } else {
+                upstream_fragments = old_table_fragments.source_fragments();
+                fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+                dispatch_strategy = Some(fragment_graph.remove_source_fragment());
+            }
         } else {
-            None
-        };
+            upstream_fragments = vec![];
+            dispatch_strategy = None;
+            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -904,15 +916,6 @@ where
                     "unable to drop the column due to being referenced by downstream materialized views or sinks",
                 )
             })?;
-
-        // Original source fragments
-        let upstream_fragments = if stream_job.has_associated_source() {
-            self.fragment_manager
-                .get_upstream_source_fragments(id.into())
-                .await?
-        } else {
-            vec![]
-        };
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams_upstreams(
             fragment_graph,
