@@ -19,7 +19,7 @@ use tokio::signal;
 use crate::common::{osstrs, RisingWaveService};
 
 #[derive(Debug, Clone, Parser)]
-pub struct AllInOneOpts {
+pub struct MonolithicModeOpts {
     /// Compute node options
     #[clap(short, long, env = "ALL_IN_ONE_COMPUTE_OPTS", default_value = "")]
     compute_opts: String,
@@ -33,7 +33,7 @@ pub struct AllInOneOpts {
     frontend_opts: String,
 }
 
-fn get_services(opts: &AllInOneOpts) -> Vec<RisingWaveService> {
+fn get_services(opts: &MonolithicModeOpts) -> Vec<RisingWaveService> {
     let meta_opts = opts.meta_opts.split_whitespace().collect::<Vec<_>>();
     let compute_opts = opts.compute_opts.split_whitespace().collect::<Vec<_>>();
     let frontend_opts = opts.frontend_opts.split_whitespace().collect::<Vec<_>>();
@@ -45,7 +45,7 @@ fn get_services(opts: &AllInOneOpts) -> Vec<RisingWaveService> {
     services
 }
 
-pub async fn all_in_one(opts: AllInOneOpts) -> Result<()> {
+pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
     tracing::info!("launching Risingwave in all-in-one mode");
 
     let services = get_services(&opts);
