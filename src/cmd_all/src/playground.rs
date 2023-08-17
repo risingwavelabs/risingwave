@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::env;
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -24,7 +25,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::signal;
 
-use crate::common::{osstrs, RisingWaveService};
+use crate::common::{osstrs as common_osstrs, RisingWaveService};
 
 const IDLE_EXIT_SECONDS: u64 = 1800;
 
@@ -41,6 +42,10 @@ max_heartbeat_interval_secs = 600",
     .expect("failed to write config file");
     file.into_temp_path()
 });
+
+fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
+    common_osstrs(s)
+}
 
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     let mut services = match profile {

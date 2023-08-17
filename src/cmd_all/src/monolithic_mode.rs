@@ -15,6 +15,7 @@
 use anyhow::Result;
 use clap::Parser;
 use tokio::signal;
+use shell_words::split;
 
 use crate::common::{osstrs, RisingWaveService};
 
@@ -33,10 +34,15 @@ pub struct MonolithicModeOpts {
     frontend_opts: String,
 }
 
+fn parse_opt_args(opts: &MonolithicModeOpts) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let meta_opts = split(&opts.meta_opts).unwrap();
+    let compute_opts = split(&opts.compute_opts).unwrap();
+    let frontend_opts = split(&opts.frontend_opts).unwrap();
+    (meta_opts, compute_opts, frontend_opts)
+}
+
 fn get_services(opts: &MonolithicModeOpts) -> Vec<RisingWaveService> {
-    let meta_opts = opts.meta_opts.split_whitespace().collect::<Vec<_>>();
-    let compute_opts = opts.compute_opts.split_whitespace().collect::<Vec<_>>();
-    let frontend_opts = opts.frontend_opts.split_whitespace().collect::<Vec<_>>();
+    let (meta_opts, compute_opts, frontend_opts) = parse_opt_args(opts);
     let services = vec![
         RisingWaveService::Meta(osstrs(meta_opts)),
         RisingWaveService::Compute(osstrs(compute_opts)),
@@ -100,4 +106,44 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
     tracing::info!("Ctrl+C received, now exiting");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use std::fmt::Debug;
+    use super::*;
+    use expect_test::{expect, Expect};
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_parse_opt_args() {
+        let opts = MonolithicModeOpts {
+            compute_opts: "--listen-address 127.0.0.1 --port 8000".into(),
+            meta_opts: "--data-dir \"some path with spaces\" --port 8001".into(),
+            frontend_opts: "--some-option".into(),
+        };
+        let actual = parse_opt_args(&opts);
+        check(actual, expect![[r#"
+            (
+                [
+                    "--data-dir",
+                    "some path with spaces",
+                    "--port",
+                    "8001",
+                ],
+                [
+                    "--listen-address",
+                    "127.0.0.1",
+                    "--port",
+                    "8000",
+                ],
+                [
+                    "--some-option",
+                ],
+            )"#]]);
+    }
 }

@@ -14,7 +14,7 @@
 
 use std::ffi::OsString;
 
-pub fn osstrs<'a>(s: impl AsRef<[&'a str]>) -> Vec<OsString> {
+pub fn osstrs<'a, T: Into<OsString> + AsRef<std::ffi::OsStr>>(s: impl AsRef<[T]>) -> Vec<OsString> {
     s.as_ref().iter().map(OsString::from).collect()
 }
 
