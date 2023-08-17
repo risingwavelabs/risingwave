@@ -791,7 +791,7 @@ where
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
-        let (fragment_graph, dispatch_strategy) = self
+        let fragment_graph = self
             .prepare_replace_table(&mut stream_job, fragment_graph)
             .await?;
 
@@ -802,7 +802,6 @@ where
                     &stream_job,
                     fragment_graph,
                     table_col_index_mapping.clone(),
-                    dispatch_strategy,
                 )
                 .await?;
 
@@ -853,13 +852,13 @@ where
     async fn prepare_replace_table(
         &self,
         stream_job: &mut StreamingJob,
-        mut fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<(StreamFragmentGraph, Option<DispatchStrategy>)> {
-        let mut dispatch_strategy = None;
-        // If table has associated source, delete the source in the graph
-        if stream_job.has_associated_source() {
-            (fragment_graph, dispatch_strategy) = Self::remove_source_from_graph(fragment_graph);
-        }
+        fragment_graph: StreamFragmentGraphProto,
+    ) -> MetaResult<StreamFragmentGraph> {
+        // let mut dispatch_strategy = None;
+        // // If table has associated source, delete the source in the graph
+        // if stream_job.has_associated_source() {
+        //     (fragment_graph, dispatch_strategy) = Self::remove_source_from_graph(fragment_graph);
+        // }
         // 1. Build fragment graph.
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
@@ -875,7 +874,7 @@ where
             .start_replace_table_procedure(stream_job.table().unwrap())
             .await?;
 
-        Ok((fragment_graph, dispatch_strategy))
+        Ok(fragment_graph)
     }
 
     /// `build_replace_table` builds a table replacement and returns the context and new table
@@ -886,7 +885,6 @@ where
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
-        dispatch_strategy: Option<DispatchStrategy>,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
@@ -900,22 +898,17 @@ where
             .catalog_manager
             .get_tables(&old_internal_table_ids)
             .await;
-
-        if !stream_job.has_associated_source() {
-            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
-        }
-
-        let old_table_fragments = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&id.into())
-            .await?;
-        let old_internal_table_ids = old_table_fragments.internal_table_ids();
-        let old_internal_tables = self
-            .catalog_manager
-            .get_tables(&old_internal_table_ids)
-            .await;
-
+        
+        // Fit internal table ids to old ones.
         fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+
+        // If there is a source, delete source fragment from the graph, and get related 
+        // dispatch strategy
+        let dispatch_strategy = if stream_job.has_associated_source() {
+            Some(fragment_graph.remove_source_fragment())
+        } else {
+            None
+        };
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.

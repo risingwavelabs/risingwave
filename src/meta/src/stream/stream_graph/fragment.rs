@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -40,7 +40,7 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -386,6 +386,28 @@ impl StreamFragmentGraph {
             }
         }
         Ok(())
+    }
+
+    /// Remove the source fragment from graph. Return the dispatch strategy from source fragment to
+    /// downstream. Used only for `replace_table` and uniqueness of the edge is ensured.
+    pub fn remove_source_fragment(&mut self) -> DispatchStrategy {
+        let source_fragment_id = self
+            .fragments
+            .values()
+            .find(|f| (f.inner.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0)
+            .map(|f| GlobalFragmentId::new(f.fragment_id))
+            .unwrap();
+        self.fragments.remove(&source_fragment_id);
+
+        let edge = self.downstreams.remove(&source_fragment_id).unwrap();
+        let edge = edge.into_iter().next().unwrap().1;
+        
+        for (_, map) in &mut self.upstreams {
+            map.remove(&source_fragment_id);
+        }
+        self.upstreams.retain(|_,v| !v.is_empty());
+
+        edge.dispatch_strategy
     }
 
     /// Returns the fragment id where the table is materialized.
