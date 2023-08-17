@@ -758,3 +758,9 @@
               └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
                 └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
                   └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }
+- name: test cardinality visitor with correlated filter
+  sql: |
+    CREATE TABLE t1(i INT);
+    CREATE TABLE t2(j INT);
+    select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
