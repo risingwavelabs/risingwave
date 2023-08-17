@@ -1251,7 +1251,8 @@ impl GrpcMetaClientCore {
         let scale_client =
             ScaleServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let backup_client = BackupServiceClient::new(channel.clone());
-        let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
+        let telemetry_client =
+            TelemetryInfoServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel);
