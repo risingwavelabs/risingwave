@@ -85,7 +85,8 @@ pub struct IcebergConfig {
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let iceberg_table_config = Arc::new(TableConfig::try_from(&values)?);
+        let iceberg_table_config =
+            Arc::new(TableConfig::try_from(&values).map_err(|e| SinkError::Iceberg(anyhow!(e)))?);
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -151,7 +152,7 @@ impl IcebergSink {
             .map_err(|err| SinkError::Config(anyhow!("{err}")))?
             .finish();
 
-        let table = Table::with_config(op, self.config.iceberg_table_config.clone())
+        let table = Table::open_with_config(op, self.config.iceberg_table_config.clone())
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!("Create table fail: {}", err)))?;
 
