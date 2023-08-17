@@ -54,7 +54,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SubscribeCompactionEventRequest, TableOption,
+    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -778,13 +778,13 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn LevelSelector>,
+        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
     ) -> Result<Option<CompactTask>> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
         let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
 
-        let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let compaction_statuses = &mut compaction.compaction_statuses;
 
@@ -838,7 +838,8 @@ where
             return Ok(None);
         }
 
-        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
+        let can_trivial_move: bool =
+            matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -864,6 +865,7 @@ where
             }
             Some(task) => task,
         };
+
         compact_task.watermark = watermark;
         compact_task.existing_table_ids = current_version
             .levels
@@ -874,35 +876,17 @@ where
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
-        if is_trivial_reclaim {
-            compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
-                .await?;
-            tracing::debug!(
-                "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
-                compaction_group_id,
-                compact_task
-                    .input_ssts
-                    .iter()
-                    .map(|level| level.table_infos.len())
-                    .sum::<usize>(),
-                start_time.elapsed()
-            );
-        } else if is_trivial_move && can_trivial_move {
-            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
-            // this task has been finished and `trivial_move_task` does not need to be schedule.
-            compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
-                .await?;
-            tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
-                compaction_group_id,
-                compact_task.input_ssts[0].table_infos.len(),
-                compact_task.input_ssts[0].level_idx,
-                compact_task.target_level,
-                start_time.elapsed()
-            );
-        } else {
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+        compact_task_assignment.insert(
+            compact_task.task_id,
+            CompactTaskAssignment {
+                compact_task: Some(compact_task.clone()),
+                context_id: META_NODE_ID, // deprecated
+            },
+        );
+
+        if !(is_trivial_reclaim || (is_trivial_move && can_trivial_move)) {
             compact_task.table_options = table_id_to_option
                 .into_iter()
                 .filter_map(|(table_id, table_option)| {
@@ -916,16 +900,6 @@ where
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
-
-            let mut compact_task_assignment =
-                BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-            compact_task_assignment.insert(
-                compact_task.task_id,
-                CompactTaskAssignment {
-                    compact_task: Some(compact_task.clone()),
-                    context_id: META_NODE_ID, // deprecated
-                },
-            );
 
             // We are using a single transaction to ensure that each task has progress when it is
             // created.
@@ -995,36 +969,32 @@ where
                     start_time.elapsed(),
                     compact_task_statistics
                 );
-        }
-
-        #[cfg(test)]
-        {
-            drop(compaction_guard);
-            self.check_state_consistency().await;
+        } else {
+            // For trivial tasks, commit the memory state for subsequent reports.
+            compact_task_assignment.commit();
         }
 
         Ok(Some(compact_task))
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
-    pub async fn cancel_compact_task(
-        &self,
-        compact_task: &mut CompactTask,
-        task_status: TaskStatus,
-    ) -> Result<bool> {
-        compact_task.set_task_status(task_status);
+    pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
-        self.cancel_compact_task_impl(compact_task).await
+        self.cancel_compact_task_impl(task_id, task_status).await
     }
 
     #[named]
-    pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
-        assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
+    pub async fn cancel_compact_task_impl(
+        &self,
+        task_id: u64,
+        task_status: TaskStatus,
+    ) -> Result<bool> {
+        assert!(CANCEL_STATUS_SET.contains(&task_status));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let ret = self
-            .report_compact_task_impl(compact_task, &mut compaction_guard, None)
+            .report_compact_task_impl(task_id, task_status, vec![], &mut compaction_guard, None)
             .await?;
         #[cfg(test)]
         {
@@ -1053,6 +1023,7 @@ where
         Ok(())
     }
 
+    #[named]
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -1062,20 +1033,91 @@ where
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        while let Some(task) = self
-            .get_compact_task_impl(compaction_group_id, selector)
-            .await?
-        {
-            if let TaskStatus::Pending = task.task_status() {
-                return Ok(Some(task));
+        let result;
+        loop {
+            let mut compaction_guard = write_lock!(self, compaction).await;
+            if let Some(compact_task) = self
+                .get_compact_task_impl(compaction_group_id, selector, &mut compaction_guard)
+                .await?
+            {
+                let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
+                let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
+                let can_trivial_move: bool =
+                    matches!(selector.task_type(), compact_task::TaskType::Dynamic);
+
+                if is_trivial_reclaim {
+                    if let Err(err) = self
+                        .report_compact_task_impl(
+                            compact_task.task_id,
+                            TaskStatus::Success,
+                            vec![],
+                            &mut compaction_guard,
+                            None,
+                        )
+                        .await
+                    {
+                        let compaction = compaction_guard.deref_mut();
+                        let mut compact_task_assignment =
+                            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+
+                        // remove task_assignment
+                        let _ = compact_task_assignment.remove(compact_task.task_id);
+                        return Err(err);
+                    }
+
+                    tracing::debug!(
+                        "TrivialReclaim for compaction group {}: remove {} sstables",
+                        compaction_group_id,
+                        compact_task
+                            .input_ssts
+                            .iter()
+                            .map(|level| level.table_infos.len())
+                            .sum::<usize>(),
+                    );
+                } else if is_trivial_move && can_trivial_move {
+                    if let Err(err) = self
+                        .report_compact_task_impl(
+                            compact_task.task_id,
+                            TaskStatus::Success,
+                            compact_task.input_ssts[0].table_infos.clone(),
+                            &mut compaction_guard,
+                            None,
+                        )
+                        .await
+                    {
+                        let compaction = compaction_guard.deref_mut();
+                        let mut compact_task_assignment =
+                            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+
+                        // remove task_assignment
+                        let _ = compact_task_assignment.remove(compact_task.task_id);
+
+                        return Err(err);
+                    }
+                    tracing::debug!(
+                        "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {} ",
+                        compaction_group_id,
+                        compact_task.input_ssts[0].table_infos.len(),
+                        compact_task.input_ssts[0].level_idx,
+                        compact_task.target_level,
+                    );
+                } else {
+                    result = Some(compact_task);
+                    break;
+                }
+
+                #[cfg(test)]
+                {
+                    drop(compaction_guard);
+                    self.check_state_consistency().await;
+                }
+            } else {
+                result = None;
+                break;
             }
-            assert!(
-                CompactStatus::is_trivial_move_task(&task)
-                    || CompactStatus::is_trivial_reclaim(&task)
-            );
         }
 
-        Ok(None)
+        Ok(result)
     }
 
     pub async fn manual_get_compact_task(
@@ -1111,12 +1153,20 @@ where
     #[named]
     pub async fn report_compact_task(
         &self,
-        compact_task: &mut CompactTask,
+        task_id: u64,
+        task_status: TaskStatus,
+        sorted_output_ssts: Vec<SstableInfo>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
         let ret = self
-            .report_compact_task_impl(compact_task, &mut guard, table_stats_change)
+            .report_compact_task_impl(
+                task_id,
+                task_status,
+                sorted_output_ssts,
+                &mut guard,
+                table_stats_change,
+            )
             .await?;
         #[cfg(test)]
         {
@@ -1136,7 +1186,9 @@ where
     #[named]
     pub async fn report_compact_task_impl(
         &self,
-        compact_task: &mut CompactTask,
+        task_id: u64,
+        task_status: TaskStatus,
+        sorted_output_ssts: Vec<SstableInfo>,
         compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
@@ -1148,17 +1200,25 @@ where
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
-        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(compact_task);
-        let is_trivial_move = CompactStatus::is_trivial_move_task(compact_task);
-
         // remove task_assignment
-        if compact_task_assignment
-            .remove(compact_task.task_id)
-            .is_none()
-            && !(is_trivial_reclaim || is_trivial_move)
+        let mut compact_task = {
+            match compact_task_assignment.remove(task_id) {
+                Some(compact_task) => compact_task.compact_task.unwrap(),
+                None => {
+                    tracing::warn!("{}", format!("compact task {} not found", task_id));
+                    return Ok(false);
+                }
+            }
+        };
+
         {
-            return Ok(false);
+            // apply result
+            compact_task.set_task_status(task_status);
+            compact_task.sorted_output_ssts = sorted_output_ssts;
         }
+
+        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
+        let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
         {
             // The compaction task is finished.
@@ -1174,7 +1234,7 @@ where
 
             match compact_statuses.get_mut(compact_task.compaction_group_id) {
                 Some(mut compact_status) => {
-                    compact_status.report_compact_task(compact_task);
+                    compact_status.report_compact_task(&compact_task);
                 }
                 None => {
                     compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
@@ -1198,7 +1258,7 @@ where
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
-                    Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
+                    Self::is_compact_task_expired(&compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
@@ -1213,7 +1273,7 @@ where
                         compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
-                            compact_task_to_string(compact_task)
+                            compact_task_to_string(&compact_task)
                         );
                     }
                     input_exist
@@ -1229,7 +1289,7 @@ where
                     &mut hummock_version_deltas,
                     &mut branched_ssts,
                     current_version,
-                    compact_task,
+                    &compact_task,
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
@@ -1298,7 +1358,7 @@ where
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
-            compact_task_to_string(compact_task),
+            compact_task_to_string(&compact_task),
             start_time.elapsed(),
         );
 
@@ -1477,6 +1537,7 @@ where
                 .into_iter()
                 .map(|ExtendedSstableInfo { sst_info, .. }| sst_info)
                 .collect_vec();
+
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
@@ -1891,20 +1952,6 @@ where
         Ok(())
     }
 
-    pub fn compactor_manager_ref_for_test(&self) -> CompactorManagerRef {
-        self.compactor_manager.clone()
-    }
-
-    #[named]
-    pub async fn compaction_task_from_assignment_for_test(
-        &self,
-        task_id: u64,
-    ) -> Option<CompactTaskAssignment> {
-        let compaction_guard = read_lock!(self, compaction).await;
-        let assignment_ref = &compaction_guard.compact_task_assignment;
-        assignment_ref.get(&task_id).cloned()
-    }
-
     pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
         &self.cluster_manager
     }
@@ -2159,13 +2206,12 @@ where
                                     // side, and meta is just used as a last resort to clean up the
                                     // tasks that compactor has expired.
 
-                                    //
-                                    for mut task in
+                                    for task in
                                         compactor_manager.get_expired_tasks(Some(INTERVAL_SEC))
                                     {
                                         if let Err(e) = hummock_manager
                                             .cancel_compact_task(
-                                                &mut task,
+                                                task.task_id,
                                                 TaskStatus::HeartbeatCanceled,
                                             )
                                             .await
@@ -2575,15 +2621,14 @@ where
                             },
 
                             RequestEvent::ReportTask(ReportTask {
-                                compact_task,
+                                task_id,
+                                task_status,
+                                sorted_output_ssts,
                                 table_stats_change
                             }) => {
-                                if let Some(mut compact_task) = compact_task {
-                                    if let Err(e) =  hummock_manager
-                                        .report_compact_task(&mut compact_task, Some(table_stats_change))
+                                if let Err(e) =  hummock_manager.report_compact_task(task_id, TaskStatus::from_i32(task_status).unwrap(), sorted_output_ssts, Some(table_stats_change))
                                        .await {
                                         tracing::error!("report compact_tack fail {e:?}");
-                                    }
                                 }
                             },
 
@@ -2594,7 +2639,7 @@ where
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
 
                                 // TODO: task cancellation can be batched
-                                for mut task in cancel_tasks {
+                                for task in cancel_tasks {
                                     tracing::info!(
                                         "Task with task_id {} with context_id {} has expired due to lack of visible progress",
                                         context_id,
@@ -2603,7 +2648,7 @@ where
 
                                     if let Err(e) =
                                         hummock_manager
-                                        .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
+                                        .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
                                         .await
                                     {
                                         tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
@@ -2685,6 +2730,40 @@ where
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+impl<S> HummockManager<S>
+where
+    S: MetaStore,
+{
+    pub fn compactor_manager_ref_for_test(&self) -> CompactorManagerRef {
+        self.compactor_manager.clone()
+    }
+
+    #[named]
+    pub async fn compaction_task_from_assignment_for_test(
+        &self,
+        task_id: u64,
+    ) -> Option<CompactTaskAssignment> {
+        let compaction_guard = read_lock!(self, compaction).await;
+        let assignment_ref = &compaction_guard.compact_task_assignment;
+        assignment_ref.get(&task_id).cloned()
+    }
+
+    #[named]
+    pub async fn set_assignment_for_test(&self, compact_task: CompactTask) {
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction = compaction_guard.deref_mut();
+        let assignment_ref = &mut compaction.compact_task_assignment;
+        assignment_ref.insert(
+            compact_task.task_id,
+            CompactTaskAssignment {
+                compact_task: Some(compact_task),
+                context_id: META_NODE_ID,
+            },
+        );
     }
 }
 

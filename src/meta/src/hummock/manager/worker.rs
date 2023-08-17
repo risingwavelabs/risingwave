@@ -129,17 +129,16 @@ where
             }
             // TODO move `CompactionTaskNeedCancel` to `handle_hummock_manager_event`
             // TODO extract retry boilerplate code
-            LocalNotification::CompactionTaskNeedCancel(compact_task) => {
-                let task_id = compact_task.task_id;
+            LocalNotification::CompactionTaskNeedCancel((task_id, task_status)) => {
                 tokio_retry::RetryIf::spawn(
                     retry_strategy.clone(),
                     || async {
-                        let mut compact_task_mut = compact_task.clone();
-                        if let Err(err) = self.cancel_compact_task_impl(&mut compact_task_mut).await
+                        // let mut compact_task_mut = compact_task.clone();
+                        if let Err(err) = self.cancel_compact_task_impl(task_id, task_status).await
                         {
                             tracing::warn!(
                                 "Failed to cancel compaction task {}. {}. Will retry.",
-                                compact_task.task_id,
+                                task_id,
                                 err
                             );
                             return Err(err);

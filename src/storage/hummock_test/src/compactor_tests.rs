@@ -159,6 +159,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .uncommitted_ssts;
+
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
@@ -274,13 +275,21 @@ pub(crate) mod tests {
                 },
             )]);
             compact_task.current_epoch_time = 0;
+            hummock_manager_ref
+                .set_assignment_for_test(compact_task.clone())
+                .await;
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (mut result_task, task_stats) =
+            let (result_task, task_stats) =
                 Compactor::compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
 
             hummock_manager_ref
-                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .report_compact_task(
+                    result_task.task_id,
+                    result_task.task_status(),
+                    result_task.sorted_output_ssts,
+                    Some(to_prost_table_stats_map(task_stats)),
+                )
                 .await
                 .unwrap();
         }
@@ -416,6 +425,9 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::NONE;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         compact_task.current_epoch_time = 0;
+        hummock_manager_ref
+            .set_assignment_for_test(compact_task.clone())
+            .await;
 
         // assert compact_task
         assert_eq!(
@@ -430,11 +442,16 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
+        let (result_task, task_stats) =
             Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -731,6 +748,9 @@ pub(crate) mod tests {
             .unwrap();
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+        hummock_manager_ref
+            .set_assignment_for_test(compact_task.clone())
+            .await;
 
         // assert compact_task
         assert_eq!(
@@ -745,11 +765,16 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
+        let (result_task, task_stats) =
             Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -905,6 +930,9 @@ pub(crate) mod tests {
             },
         )]);
         compact_task.current_epoch_time = epoch;
+        hummock_manager_ref
+            .set_assignment_for_test(compact_task.clone())
+            .await;
 
         // assert compact_task
         assert_eq!(
@@ -918,11 +946,16 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
+        let (result_task, task_stats) =
             Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1088,14 +1121,22 @@ pub(crate) mod tests {
         // compact_task.table_options =
         //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
+        hummock_manager_ref
+            .set_assignment_for_test(compact_task.clone())
+            .await;
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
+        let (result_task, task_stats) =
             Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1238,14 +1279,22 @@ pub(crate) mod tests {
                 .sum::<usize>(),
             129
         );
+        hummock_manager_ref
+            .set_assignment_for_test(compact_task.clone())
+            .await;
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
+        let (result_task, task_stats) =
             Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 

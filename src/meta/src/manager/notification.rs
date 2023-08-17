@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::hummock::CompactTask;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
@@ -41,7 +41,7 @@ pub type NotificationVersion = u64;
 pub enum LocalNotification {
     WorkerNodeDeleted(WorkerNode),
     WorkerNodeActivated(WorkerNode),
-    CompactionTaskNeedCancel(CompactTask),
+    CompactionTaskNeedCancel((u64, TaskStatus)),
     SystemParamsChange(SystemParamsReader),
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),

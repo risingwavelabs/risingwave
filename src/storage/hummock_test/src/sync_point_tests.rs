@@ -201,10 +201,12 @@ async fn test_syncpoints_test_local_notification_receiver() {
         .await
         .unwrap()
         .unwrap();
-    task.task_status = TaskStatus::ManualCanceled as i32;
     assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
     env.notification_manager()
-        .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(task))
+        .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel((
+            task.id,
+            TaskStatus::ManualCanceled,
+        )))
         .await;
     sync_point::wait_timeout(
         "AFTER_CANCEL_COMPACTION_TASK_ASYNC",

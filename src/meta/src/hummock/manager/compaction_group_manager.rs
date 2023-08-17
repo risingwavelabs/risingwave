@@ -656,10 +656,15 @@ impl<S: MetaStore> HummockManager<S> {
                 }
             }
         }
-        for mut task in canceled_tasks {
-            task.set_task_status(TaskStatus::ManualCanceled);
+        for task in canceled_tasks {
             if !self
-                .report_compact_task_impl(&mut task, &mut compaction_guard, None)
+                .report_compact_task_impl(
+                    task.task_id,
+                    TaskStatus::ManualCanceled,
+                    vec![],
+                    &mut compaction_guard,
+                    None,
+                )
                 .await
                 .unwrap_or(false)
             {
