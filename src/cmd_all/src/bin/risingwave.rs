@@ -19,7 +19,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
-use risingwave_cmd_all::PlaygroundOpts;
+use risingwave_cmd_all::{AllInOneOpts, PlaygroundOpts};
 use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -143,7 +143,7 @@ impl Component {
             Component::Compactor => CompactorOpts::augment_args(cmd),
             Component::Ctl => CtlOpts::augment_args(cmd),
             Component::Playground => PlaygroundOpts::augment_args(cmd),
-            Component::AllInOne => PlaygroundOpts::augment_args(cmd),
+            Component::AllInOne => AllInOneOpts::augment_args(cmd),
         }
     }
 
@@ -199,7 +199,7 @@ fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }
 
-fn all_in_one(_opts: PlaygroundOpts, registry: prometheus::Registry) {
+fn all_in_one(_opts: AllInOneOpts, registry: prometheus::Registry) {
     let settings = risingwave_rt::LoggerSettings::new("all-in-one")
         .with_target("risingwave_storage", Level::WARN);
     risingwave_rt::init_risingwave_logger(settings, registry);

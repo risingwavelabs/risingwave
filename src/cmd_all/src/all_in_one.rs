@@ -33,6 +33,21 @@ pub enum RisingWaveService {
     ConnectorNode(Vec<OsString>),
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct AllInOneOpts {
+    /// Compute node options
+    #[clap(short, long, env = "ALL_IN_ONE_COMPUTE_OPTS", default_value = "")]
+    compute_opts: String,
+
+    #[clap(short, long, env = "ALL_IN_ONE_META_OPTS", default_value = "")]
+    /// Meta node options
+    meta_opts: String,
+
+    #[clap(short, long, env = "ALL_IN_ONE_FRONTEND_OPTS", default_value = "")]
+    /// Frontend node options
+    frontend_opts: String,
+}
+
 impl RisingWaveService {
     /// Extend additional arguments to the service.
     fn extend_args(&mut self, args: &[&str]) {
@@ -65,8 +80,7 @@ max_heartbeat_interval_secs = 600",
 });
 
 fn get_services() -> Vec<RisingWaveService> {
-    let mut services =
-    vec![
+    let mut services = vec![
         RisingWaveService::Meta(osstrs([
             "--dashboard-host",
             "0.0.0.0:5691",
@@ -81,7 +95,6 @@ fn get_services() -> Vec<RisingWaveService> {
         ])),
         RisingWaveService::Compute(osstrs(["--connector-rpc-endpoint", "127.0.0.1:50051"])),
         RisingWaveService::Frontend(osstrs([])),
-        RisingWaveService::ConnectorNode(osstrs([])),
     ];
     services
 }
@@ -144,7 +157,8 @@ pub async fn all_in_one() -> Result<()> {
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
-    // TODO(kwannoel): Why can't be shutdown gracefully? Is it that the service just does not support it?
+    // TODO(kwannoel): Why can't be shutdown gracefully? Is it that the service just does not
+    // support it?
     signal::ctrl_c().await.unwrap();
     tracing::info!("Ctrl+C received, now exiting");
 
