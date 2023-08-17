@@ -149,6 +149,8 @@ where
         yield Message::Barrier(first_barrier);
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
+        // TODO(kwannoel): This initial committed progress should also be read from state table,
+        // Perhaps via `progress_per_vnode`.
         let mut committed_progress = HashMap::new();
 
         let output_data_types = upstream_table.get_output_data_types();
@@ -168,7 +170,6 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                // println!("Verifying if snapshot is empty via: snapshot read per vnode");
                 let snapshot_is_empty = {
                     let snapshot = Self::snapshot_read_per_vnode(
                         &upstream_table,
@@ -494,8 +495,10 @@ where
                     self.progress.finish(barrier.epoch.curr);
                     yield msg;
                     break;
+                } else {
+                    // Allow other messages to pass through.
+                    yield msg;
                 }
-                yield msg;
             }
         }
 
@@ -525,13 +528,13 @@ where
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
     ///
-    /// We will return chunks based on the `BackfillProgressPerVnode`.
-    /// 1. Completed(vnode): Current iterator is complete, in that case we need to handle it
-    ///    in arrangement backfill. We should not buffer updates for this vnode,
-    ///    and we should forward all messages.
-    /// 2. InProgress(CHUNK): Current iterator is not complete, in that case we
-    ///    need to buffer updates for this vnode.
-    /// 3. Finished: All iterators finished.
+    /// The stream contains pairs of `(VirtualNode, StreamChunk)`.
+    /// The `VirtualNode` is the vnode that the chunk belongs to.
+    /// The `StreamChunk` is the chunk that contains the rows from the vnode.
+    /// If it's `None`, it means the vnode has no more rows for this snapshot read.
+    ///
+    /// The `snapshot_read_epoch` is supplied as a parameter for `state_table`.
+    /// It is required to ensure we read a fully-checkpointed snapshot the **first time**.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S, SD>,
