@@ -594,6 +594,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             catalog_manager,
             fragment_manager.clone(),
+            hummock_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
