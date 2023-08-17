@@ -17,6 +17,7 @@ use std::fmt::Debug;
 
 use anyhow::anyhow;
 use arrow_array::RecordBatch;
+use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema};
 use async_trait::async_trait;
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
@@ -25,6 +26,7 @@ use itertools::Itertools;
 use opendal::services::S3;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -144,13 +146,8 @@ impl IcebergSink {
             .clone()
             .try_into()
             .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?;
-        if !sink_schema.same_as_arrow_schema(&iceberg_schema) {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Schema not match, expect: {:?}, actual: {:?}",
-                sink_schema,
-                iceberg_schema
-            )));
-        }
+
+        try_matches_arrow_schema(&sink_schema, &iceberg_schema)?;
 
         Ok(table)
     }
@@ -429,4 +426,48 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         tracing::info!("Succeeded to commit ti iceberg table in epoch {epoch}.");
         Ok(())
     }
+}
+
+/// Try to match our schema with iceberg schema.
+fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
+    if rw_schema.fields.len() != arrow_schema.fields().len() {
+        return Err(SinkError::Iceberg(anyhow!(
+            "Schema length not match, ours is {}, and iceberg is {}",
+            rw_schema.fields.len(),
+            arrow_schema.fields.len()
+        )));
+    }
+
+    let mut schema_fields = HashMap::new();
+    rw_schema.fields.iter().for_each(|field| {
+        let res = schema_fields.insert(&field.name, &field.data_type);
+        // This assert is to make sure there is no duplicate field name in the schema.
+        assert!(res.is_none())
+    });
+
+    for arrow_field in &arrow_schema.fields {
+        let our_field_type = schema_fields.get(arrow_field.name()).ok_or_else(|| {
+            SinkError::Iceberg(anyhow!(
+                "Field {} not found in our schema",
+                arrow_field.name()
+            ))
+        })?;
+
+        let converted_arrow_data_type =
+            ArrowDataType::try_from(*our_field_type).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+
+        let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
+            (ArrowDataType::Decimal128(p1, s1), ArrowDataType::Decimal128(p2, s2)) => {
+                *p1 >= *p2 && *s1 >= *s2
+            }
+            (left, right) => left == right,
+        };
+        if !compatible {
+            return Err(SinkError::Iceberg(anyhow!("Field {}'s type not compatible, ours converted data type {}, iceberg's data type: {}",
+                    arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
+                )));
+        }
+    }
+
+    Ok(())
 }

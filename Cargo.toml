@@ -1,52 +1,55 @@
 [workspace]
 members = [
-  "scripts/source/prepare_ci_pubsub",
-  "src/batch",
-  "src/bench",
-  "src/cmd",
-  "src/cmd_all",
-  "src/common",
-  "src/common/common_service",
-  "src/compute",
-  "src/connector",
-  "src/ctl",
-  "src/expr",
-  "src/expr/macro",
-  "src/frontend",
-  "src/frontend/planner_test",
-  "src/java_binding",
-  "src/meta",
-  "src/object_store",
-  "src/prost",
-  "src/prost/helpers",
-  "src/risedevtool",
-  "src/risedevtool/config",
-  "src/rpc_client",
-  "src/source",
-  "src/sqlparser",
-  "src/sqlparser/test_runner",
-  "src/storage",
-  "src/storage/backup",
-  "src/storage/backup/cmd",
-  "src/storage/compactor",
-  "src/storage/hummock_sdk",
-  "src/storage/hummock_test",
-  "src/stream",
-  "src/test_runner",
-  "src/tests/compaction_test",
-  "src/tests/e2e_extended_mode",
-  "src/tests/regress",
-  "src/tests/simulation",
-  "src/tests/sqlsmith",
-  "src/tests/state_cleaning_test",
-  "src/udf",
-  "src/utils/local_stats_alloc",
-  "src/utils/pgwire",
-  "src/utils/runtime",
-  "src/utils/sync-point",
-  "src/utils/variables",
-  "src/utils/workspace-config",
-  "src/workspace-hack",
+    "scripts/source/prepare_ci_pubsub",
+    "src/batch",
+    "src/bench",
+    "src/cmd",
+    "src/cmd_all",
+    "src/common",
+    "src/common/common_service",
+    "src/compute",
+    "src/connector",
+    "src/ctl",
+    "src/expr",
+    "src/expr/macro",
+    "src/frontend",
+    "src/frontend/planner_test",
+    "src/java_binding",
+    "src/meta",
+    "src/object_store",
+    "src/prost",
+    "src/prost/helpers",
+    "src/risedevtool",
+    "src/risedevtool/config",
+    "src/rpc_client",
+    "src/source",
+    "src/sqlparser",
+    "src/sqlparser/test_runner",
+    "src/storage",
+    "src/storage/backup",
+    "src/storage/backup/cmd",
+    "src/storage/compactor",
+    "src/storage/hummock_sdk",
+    "src/storage/hummock_test",
+    "src/stream",
+    "src/test_runner",
+    "src/tests/compaction_test",
+    "src/tests/e2e_extended_mode",
+    "src/tests/regress",
+    "src/tests/simulation",
+    "src/tests/sqlsmith",
+    "src/tests/state_cleaning_test",
+    "src/udf",
+    "src/utils/local_stats_alloc",
+    "src/utils/pgwire",
+    "src/utils/runtime",
+    "src/utils/sync-point",
+    "src/utils/variables",
+    "src/utils/workspace-config",
+    "src/workspace-hack",
+]
+exclude = [
+    "/Users/renjieliu/Workspace/icelake"
 ]
 resolver = "2"
 
@@ -63,8 +66,8 @@ await-tree = "0.1.1"
 aws-config = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-kinesis = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-sqs = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.55"
@@ -79,7 +82,8 @@ hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"]
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.3.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "b1ef7d1ad74078275de6d1970d3a6503be36681e" }
+#icelake = { git = "https://github.com/icelake-io/icelake", rev = "6d0a888745fc8c25ba2e65acf9af2411452f9b97" }
+icelake = { path = "/Users/renjieliu/Workspace/icelake/icelake", package = "icelake" }
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
