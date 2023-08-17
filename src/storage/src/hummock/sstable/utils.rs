@@ -71,7 +71,7 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
 use bytes::{Buf, BufMut};
 
 pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
-    let len = slice.len() as u32;
+    let len = checked_into_u32!(slice.len());
     buf.put_u32_le(len);
     buf.put_slice(slice);
 }
@@ -146,3 +146,14 @@ impl TryFrom<u8> for CompressionAlgorithm {
         }
     }
 }
+
+macro_rules! checked_into_u32 {
+    ($value:expr) => {
+        match u32::try_from($value) {
+            Ok(v) => v,
+            Err(e) => panic!("u32 overflow: {:#?}", e),
+        }
+    };
+}
+
+pub(crate) use checked_into_u32;
