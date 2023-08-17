@@ -22,6 +22,12 @@ pub struct OrdRange<Idx: Ord + Copy + Debug> {
     inner: Range<Idx>,
 }
 
+impl<Idx: Ord + Copy + Debug> OrdRange<Idx> {
+    pub fn inner(&self) -> &Range<Idx> {
+        &self.inner
+    }
+}
+
 impl<Idx: Ord + Copy + Debug> Ord for OrdRange<Idx> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // // only compare `start`
@@ -333,6 +339,7 @@ impl<'a, Idx: Ord + Copy + Debug, T> RangeMapSplitMut<'a, Idx, T> {
         };
 
         if r.inner.start <= self.range.start {
+            debug_assert!(RangeExt::is_overlapping(&r.inner, &self.range));
             // 1.
             //   [ range ]
             // [  r  ]
@@ -340,6 +347,9 @@ impl<'a, Idx: Ord + Copy + Debug, T> RangeMapSplitMut<'a, Idx, T> {
             // 2.
             //   [ range ]
             // [     r     ]
+            // 3. (unreachable)
+            //        [ range ]
+            // [ r ]
             self.entry = Some(Entry::Range(r.clone().into()));
             self.range = r.inner.end..self.range.end;
         } else {
@@ -350,7 +360,12 @@ impl<'a, Idx: Ord + Copy + Debug, T> RangeMapSplitMut<'a, Idx, T> {
             // 2.
             // [ range ]
             //      [  r  ]
-            self.entry = Some(Entry::Gap(self.range.start..r.inner.start));
+            // 3.
+            // [ range ]
+            //              [ r ]
+            self.entry = Some(Entry::Gap(
+                self.range.start..std::cmp::min(r.inner.start, self.range.end),
+            ));
             self.range = r.inner.start..self.range.end;
         }
     }
@@ -632,6 +647,21 @@ mod tests {
             vec![0..10, 10..20, 20..30, 30..40, 40..50, 50..60, 60..70]
         );
         assert_eq!(m.values().copied().collect_vec(), vec![0, 4, 1, 7, 5, 3, 6]);
+
+        let mut m = RangeMap::new();
+        m.insert(10..20, 0);
+        m.insert(30..40, 1);
+        let mut s = m.split(5..25);
+        assert_eq!(s.entry(), Some(&Entry::Gap(5..10)));
+        s.insert(2);
+        assert_eq!(s.entry(), Some(&Entry::Range(10..20)));
+        assert_eq!(s.value_mut().unwrap(), &mut 0);
+        s.skip();
+        assert_eq!(s.entry(), Some(&Entry::Gap(20..25)));
+        s.insert(3);
+        drop(s);
+        assert_eq!(m.keys().collect_vec(), vec![5..10, 10..20, 20..25, 30..40]);
+        assert_eq!(m.values().copied().collect_vec(), vec![2, 0, 3, 1]);
     }
 
     #[test]

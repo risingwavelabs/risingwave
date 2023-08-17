@@ -264,6 +264,11 @@ impl TaskManager {
         }
         drop(split);
 
+        assert_eq!(
+            task.range.len(),
+            task.handles.keys().map(|r| r.inner().len()).sum::<usize>()
+        );
+
         let wait = self.waits.entry(path.clone()).or_default();
         let count = task.handles.len();
 
