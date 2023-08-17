@@ -199,9 +199,9 @@ fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }
 
-fn all_in_one(_opts: AllInOneOpts, registry: prometheus::Registry) {
+fn all_in_one(opts: AllInOneOpts, registry: prometheus::Registry) {
     let settings = risingwave_rt::LoggerSettings::new("all-in-one")
         .with_target("risingwave_storage", Level::WARN);
     risingwave_rt::init_risingwave_logger(settings, registry);
-    risingwave_rt::main_okk(risingwave_cmd_all::all_in_one()).unwrap();
+    risingwave_rt::main_okk(risingwave_cmd_all::all_in_one(opts)).unwrap();
 }

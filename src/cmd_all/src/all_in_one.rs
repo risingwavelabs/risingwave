@@ -12,20 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
 use std::ffi::OsString;
-use std::io::Write;
-use std::path::Path;
-use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::Parser;
-use tempfile::TempPath;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::signal;
 
-pub enum RisingWaveService {
+enum RisingWaveService {
     Compute(Vec<OsString>),
     Meta(Vec<OsString>),
     Frontend(Vec<OsString>),
@@ -48,66 +41,27 @@ pub struct AllInOneOpts {
     frontend_opts: String,
 }
 
-impl RisingWaveService {
-    /// Extend additional arguments to the service.
-    fn extend_args(&mut self, args: &[&str]) {
-        match self {
-            RisingWaveService::Compute(args0)
-            | RisingWaveService::Meta(args0)
-            | RisingWaveService::Frontend(args0)
-            | RisingWaveService::Compactor(args0)
-            | RisingWaveService::ConnectorNode(args0) => {
-                args0.extend(args.iter().map(|s| s.into()))
-            }
-        }
-    }
-}
-
-const IDLE_EXIT_SECONDS: u64 = 1800;
-
-/// Embed the config file and create a temporary file at runtime.
-static CONFIG_PATH_WITH_IDLE_EXIT: LazyLock<TempPath> = LazyLock::new(|| {
-    let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
-    write!(
-        file,
-        "[meta]
-disable_recovery = true
-dangerous_max_idle_secs = {IDLE_EXIT_SECONDS}
-max_heartbeat_interval_secs = 600",
-    )
-    .expect("failed to write config file");
-    file.into_temp_path()
-});
-
-fn get_services() -> Vec<RisingWaveService> {
-    let mut services = vec![
-        RisingWaveService::Meta(osstrs([
-            "--dashboard-host",
-            "0.0.0.0:5691",
-            "--state-store",
-            "hummock+memory",
-            "--data-directory",
-            "hummock_001",
-            "--advertise-addr",
-            "127.0.0.1:5690",
-            "--connector-rpc-endpoint",
-            "127.0.0.1:50051",
-        ])),
-        RisingWaveService::Compute(osstrs(["--connector-rpc-endpoint", "127.0.0.1:50051"])),
-        RisingWaveService::Frontend(osstrs([])),
+fn get_services(opts: &AllInOneOpts) -> Vec<RisingWaveService> {
+    let meta_opts = opts.meta_opts.split_whitespace().collect::<Vec<_>>();
+    let compute_opts = opts.compute_opts.split_whitespace().collect::<Vec<_>>();
+    let frontend_opts = opts.frontend_opts.split_whitespace().collect::<Vec<_>>();
+    let services = vec![
+        RisingWaveService::Meta(osstrs(&meta_opts)),
+        RisingWaveService::Compute(osstrs(&compute_opts)),
+        RisingWaveService::Frontend(osstrs(&frontend_opts)),
     ];
     services
 }
 
 /// TODO: Refactor into utils.
-fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
+fn osstrs(s: &[&str]) -> Vec<OsString> {
     s.iter().map(OsString::from).collect()
 }
 
-pub async fn all_in_one() -> Result<()> {
+pub async fn all_in_one(opts: AllInOneOpts) -> Result<()> {
     tracing::info!("launching Risingwave in all-in-one mode");
 
-    let services = get_services();
+    let services = get_services(&opts);
 
     for service in services {
         match service {
@@ -137,12 +91,8 @@ pub async fn all_in_one() -> Result<()> {
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
             }
-            RisingWaveService::Compactor(mut opts) => {
-                opts.insert(0, "compactor".into());
-                tracing::info!("starting compactor thread with cli args: {:?}", opts);
-                let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
-                let _compactor_handle =
-                    tokio::spawn(async move { risingwave_compactor::start(opts).await });
+            RisingWaveService::Compactor(_) => {
+                panic!("Compactor node unsupported in Risingwave all-in-one mode.");
             }
             RisingWaveService::ConnectorNode(_) => {
                 panic!("Connector node unsupported in Risingwave all-in-one mode.");
