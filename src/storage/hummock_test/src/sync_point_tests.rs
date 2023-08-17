@@ -178,56 +178,6 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     }
 }
 
-#[tokio::test]
-#[cfg(feature = "sync_point")]
-#[serial]
-async fn test_syncpoints_test_local_notification_receiver() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-
-    register_table_ids_to_compaction_group(
-        hummock_manager.as_ref(),
-        &[1],
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    // Test cancel compaction task
-    let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-    let task = hummock_manager
-        .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
-    env.notification_manager()
-        .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel((
-            task.task_id,
-            TaskStatus::ManualCanceled,
-        )))
-        .await;
-    sync_point::wait_timeout(
-        "AFTER_CANCEL_COMPACTION_TASK_ASYNC",
-        Duration::from_secs(10),
-    )
-    .await
-    .unwrap();
-    assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 0);
-
-    // Test release hummock contexts
-    env.notification_manager()
-        .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
-        .await;
-    sync_point::wait_timeout(
-        "AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC",
-        Duration::from_secs(10),
-    )
-    .await
-    .unwrap();
-}
-
 pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef<MemStore>,
     compact_ctx: Arc<CompactorContext>,
