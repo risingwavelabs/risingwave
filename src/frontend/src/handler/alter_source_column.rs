@@ -81,10 +81,10 @@ pub async fn handle_alter_source_column(
             let new_column_name = column_def.name.real_value();
             if columns
                 .iter()
-                .any(|c| c.column_desc.name.to_lowercase() == new_column_name)
+                .any(|c| c.column_desc.name == new_column_name)
             {
                 Err(ErrorCode::InvalidInputSyntax(format!(
-                    "column \"{new_column_name}\" of table \"{source_name}\" already exists"
+                    "column \"{new_column_name}\" of source \"{source_name}\" already exists"
                 )))?
             }
             let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
