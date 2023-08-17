@@ -36,7 +36,7 @@ sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit 
 echo "--- Kill cluster Streaming"
 cargo make ci-kill
 sleep 1
-rm -rf /hummock_001
+rm -rf hummock_001/
 
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \

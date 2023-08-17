@@ -50,9 +50,9 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+oss://risingwave-oss-wcy@123"
+      - "hummock+oss://<bucket_name>@<data_path>"
       - "--data-directory"
-      - "rw_817"
+      - "hummock_001"
       - "--config-path"
       - /risingwave.toml
     depends_on:
