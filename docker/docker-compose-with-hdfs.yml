@@ -109,7 +109,6 @@ services:
     depends_on: []
     volumes:
       - "etcd-0:/etcd-data"
-      - "<HADOOP_HOME>:/opt/hadoop/"
     environment:
       - HADOOP_HOME=/opt/hadoop/
     container_name: etcd-0
