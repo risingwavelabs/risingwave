@@ -26,7 +26,7 @@ use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{FunctionalDependencySet, Order};
+use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
 /// [`Scan`] returns contents of a table or other equivalent object
@@ -49,6 +49,8 @@ pub struct Scan {
     pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
     pub for_system_time_as_of_proctime: bool,
+    /// The cardinality of the table **without** applying the predicate.
+    pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
@@ -223,6 +225,7 @@ impl Scan {
             self.ctx.clone(),
             new_predicate,
             self.for_system_time_as_of_proctime,
+            self.table_cardinality,
         )
     }
 
@@ -238,6 +241,7 @@ impl Scan {
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         for_system_time_as_of_proctime: bool,
+        table_cardinality: Cardinality,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -267,6 +271,7 @@ impl Scan {
             chunk_size: None,
             for_system_time_as_of_proctime,
             ctx,
+            table_cardinality,
         }
     }
 

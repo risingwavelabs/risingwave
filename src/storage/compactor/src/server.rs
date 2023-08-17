@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,7 +30,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::parse_remote_object_store_with_config;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -61,7 +62,7 @@ pub async fn compactor_serve(
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
     type CompactorMemoryCollector = HummockMemoryCollector;
 
-    let config = load_config(&opts.config_path, Some(opts.override_config));
+    let config = load_config(&opts.config_path, &opts);
     info!("Starting compactor node",);
     info!("> config: {:?}", config);
     info!(
@@ -104,8 +105,10 @@ pub async fn compactor_serve(
         &system_params_reader,
         &storage_memory_config,
     )));
+
     let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64 * 0.8) as usize;
+        (resource_util::memory::total_memory_available_bytes() as f64
+            * config.storage.compactor_memory_available_proportion) as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
@@ -130,12 +133,13 @@ pub async fn compactor_serve(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = parse_remote_object_store(
+    let mut object_store = parse_remote_object_store_with_config(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
+        Some(Arc::new(config.storage.clone())),
     )
     .await;
     object_store.set_opts(
@@ -168,16 +172,14 @@ pub async fn compactor_serve(
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
     let observer_join_handle = observer_manager.start().await;
-    let input_limit_bytes = compactor_memory_limit_bytes / 2;
 
-    // In a compact operation, the size of the output files will not be larger than the input files.
-    // So we can limit the input memory with the output memory limit
-    let output_memory_limiter = Arc::new(MemoryLimiter::new(input_limit_bytes));
+    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
-        output_memory_limiter.clone(),
+        memory_limiter.clone(),
         storage_memory_config,
     ));
+
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
@@ -202,10 +204,11 @@ pub async fn compactor_serve(
             opts.compaction_worker_threads_number,
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
-        output_memory_limiter,
+        memory_limiter,
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
+        running_task_count: Arc::new(AtomicU32::new(0)),
     });
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -215,7 +218,6 @@ pub async fn compactor_serve(
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             compactor_context.clone(),
-            hummock_meta_client,
         ),
     ];
 

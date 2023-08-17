@@ -16,9 +16,9 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "36"
-arrow-buffer = "36"
-arrow-schema = "36"
+arrow-array = "45"
+arrow-buffer = "45"
+arrow-schema = "45"
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
@@ -28,31 +28,32 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-chrono-tz = { version = "0.7", features = ["case-insensitive"] }
+chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
-comfy-table = "6"
+comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
 educe = "0.4"
 either = "1"
-enum-as-inner = "0.5"
+enum-as-inner = "0.6"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
+fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
 hytra = { workspace = true }
-itertools = "0.10"
+itertools = "0.11"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
-opentelemetry = { version = "0.19", default-features = false }
+opentelemetry = { version = "0.20", default-features = false }
 parking_lot = "0.12"
-parse-display = "0.6"
+parse-display = "0.8"
 paste = "1"
 postgres-types = { version = "0.2.5", features = [
     "derive",
@@ -65,20 +66,20 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common_proc_macro = { path = "./proc_macro" }
-risingwave_pb = { path = "../prost" }
+risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_default = "0.1"
 serde_json = "1"
-serde_with = "2"
-smallbitset = "0.6.1"
-speedate = "0.7.0"
+serde_with = "3"
+smallbitset = "0.7.1"
+speedate = "0.11.0"
 static_assertions = "1"
-strum = "0.24"
+strum = "0.25"
 strum_macros = "0.24"
-sysinfo = { version = "0.26", default-features = false }
+sysinfo = { version = "0.29", default-features = false }
 thiserror = "1"
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -90,24 +91,24 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 toml = "0.7"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = "0.19"
-tracing-subscriber = "0.3.16"
+tracing-opentelemetry = "0.20"
+tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
-uuid = "1.2.2"
+uuid = "1.4.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.14", default-features = false }
+procfs = { version = "0.15", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.72"
+libc = "0.2.147"
 mach2 = "0.4"
 
 [dev-dependencies]

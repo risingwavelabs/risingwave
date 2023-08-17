@@ -617,7 +617,7 @@
     └─StreamProject { exprs: [t1.a] }
       └─StreamTopN { order: [t1.a ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t1.a ASC], limit: 1, offset: 0, group_key: [1] }
+          └─StreamGroupTopN { order: [t1.a ASC], limit: 1, offset: 0, group_key: [$expr1] }
             └─StreamProject { exprs: [t1.a, Vnode(t1.a) as $expr1] }
               └─StreamTableScan { table: t1, columns: [t1.a], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
 - sql: |
@@ -688,10 +688,11 @@
     select * from t2 inner join tumble(t1,  c3, interval '10 minute')  on t2.d1 = t1.c2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t2.d1, t2.d2, idx_t1.c1, idx_t1.c2, idx_t1.c3, TumbleStart(idx_t1.c3, '00:10:00':Interval) as $expr1, (TumbleStart(idx_t1.c3, '00:10:00':Interval) + '00:10:00':Interval) as $expr2] }
-      └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2, output: all }
-        └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
-          └─BatchScan { table: t2, columns: [t2.d1, t2.d2], distribution: SomeShard }
+    └─BatchProject { exprs: [t2.d1, t2.d2, idx_t1.c1, idx_t1.c2, idx_t1.c3, $expr1, ($expr1 + '00:10:00':Interval) as $expr2] }
+      └─BatchProject { exprs: [t2.d1, t2.d2, idx_t1.c1, idx_t1.c2, idx_t1.c3, TumbleStart(idx_t1.c3, '00:10:00':Interval) as $expr1] }
+        └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2, output: all }
+          └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
+            └─BatchScan { table: t2, columns: [t2.d1, t2.d2], distribution: SomeShard }
 - sql: |
     create table t (j jsonb, v1 int, v2 int);
     create index idx1 on t(j->>'k1');

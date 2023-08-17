@@ -22,6 +22,7 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -128,6 +129,10 @@ impl BuildingFragment {
                 table.database_id = job.database_id();
                 table.schema_id = job.schema_id();
                 table.fragment_id = fragment_id;
+                #[cfg(not(debug_assertions))]
+                {
+                    table.definition = job.name();
+                }
 
                 has_table = true;
             }
@@ -339,6 +344,43 @@ impl StreamFragmentGraph {
             }
         }
         tables
+    }
+
+    /// Set internal tables' `table_id`s according to a list of internal tables
+    pub fn fit_internal_table_ids(&mut self, mut old_tables: Vec<Table>) -> MetaResult<()> {
+        let mut new_ids = Vec::new();
+        for fragment in self.fragments.values() {
+            for table in &fragment.internal_tables {
+                new_ids.push(table.id);
+            }
+        }
+        if new_ids.len() != old_tables.len() {
+            bail!(
+                "Different number of internal tables. New: {}, Old: {}",
+                new_ids.len(),
+                old_tables.len()
+            );
+        }
+        old_tables.sort_by(|a, b| a.id.cmp(&b.id));
+        new_ids.sort();
+        let id_map = new_ids
+            .into_iter()
+            .zip_eq_fast(old_tables.into_iter())
+            .collect::<HashMap<_, _>>();
+        for fragment in self.fragments.values_mut() {
+            for table in &mut fragment.internal_tables {
+                let old_table = id_map.get(&table.id).unwrap();
+                if old_table.get_columns() != table.get_columns() {
+                    bail!(
+                        "Mismatch of internal tables.\nOld table: {:?}\nNew table: {:?}\n",
+                        old_table,
+                        table
+                    );
+                }
+                table.id = old_table.get_id();
+            }
+        }
+        Ok(())
     }
 
     /// Returns the fragment id where the table is materialized.

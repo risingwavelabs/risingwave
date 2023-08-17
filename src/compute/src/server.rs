@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,9 +48,7 @@ use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceR
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -60,10 +59,11 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tower::Layer;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+    reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -85,7 +85,7 @@ pub async fn compute_node_serve(
     registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
+    let config = load_config(&opts.config_path, &opts);
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -96,7 +96,8 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config = Arc::new(config.streaming.clone());
+    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
+        Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
@@ -151,7 +152,6 @@ pub async fn compute_node_serve(
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
     let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
-    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -193,7 +193,6 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        TieredCacheMetricsBuilder::new(registry.clone()),
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -212,7 +211,7 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let output_memory_limiter = Arc::new(MemoryLimiter::new(
+            let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
@@ -223,20 +222,20 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
-                output_memory_limiter,
+                memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
+                running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
-            let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+            let (handle, shutdown_sender) = Compactor::start_compactor(compactor_context);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let memory_limiter = storage.get_memory_limiter();
+        let flush_limiter = storage.get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            memory_limiter,
+            flush_limiter,
             storage_memory_config,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
@@ -280,7 +279,11 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), memory_control_policy);
+    let memory_mgr = GlobalMemoryManager::new(
+        streaming_metrics.clone(),
+        total_memory_bytes,
+        config.server.auto_dump_heap_profile.clone(),
+    );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(
         batch_mgr_clone,
@@ -349,6 +352,7 @@ pub async fn compute_node_serve(
         dml_mgr,
         system_params_manager.clone(),
         source_metrics,
+        meta_client.clone(),
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
@@ -394,11 +398,24 @@ pub async fn compute_node_serve(
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
-            .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
             .layer(TracingExtractLayer::new())
-            .add_service(TaskServiceServer::new(batch_srv))
-            .add_service(ExchangeServiceServer::new(exchange_srv))
-            .add_service(StreamServiceServer::new(stream_srv))
+            // XXX: unlimit the max message size to allow arbitrary large SQL input.
+            .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
+            .add_service(
+                ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
+            )
+            .add_service({
+                let srv =
+                    StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
+                #[cfg(madsim)]
+                {
+                    srv
+                }
+                #[cfg(not(madsim))]
+                {
+                    AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(srv)
+                }
+            })
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
@@ -474,7 +491,8 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.file_cache_total_buffer_capacity_mb
+        + storage_memory_config.data_file_cache_buffer_pool_capacity_mb
+        + storage_memory_config.meta_file_cache_buffer_pool_capacity_mb
         + storage_memory_config.compactor_memory_limit_mb;
     total_storage_memory_mb << 20
 }
@@ -505,7 +523,8 @@ fn print_memory_config(
         >         block_cache_capacity: {}\n\
         >         meta_cache_capacity: {}\n\
         >         shared_buffer_capacity: {}\n\
-        >         file_cache_total_buffer_capacity: {}\n\
+        >         data_file_cache_buffer_pool_capacity: {}\n\
+        >         meta_file_cache_buffer_pool_capacity: {}\n\
         >         compactor_memory_limit: {}\n\
         >     compute_memory: {}\n\
         >     reserved_memory: {}",
@@ -514,7 +533,8 @@ fn print_memory_config(
         convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _),
+        convert((storage_memory_config.data_file_cache_buffer_pool_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_file_cache_buffer_pool_capacity_mb << 20) as _),
         if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
         } else {

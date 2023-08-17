@@ -500,12 +500,14 @@ where
     /// be ignored because the recovery process will take over it in cleaning part. Check
     /// [`Command::DropStreamingJobs`] for details.
     pub async fn drop_streaming_jobs(&self, streaming_job_ids: Vec<TableId>) {
-        let _ = self
-            .drop_streaming_jobs_impl(streaming_job_ids)
-            .await
-            .inspect_err(|err| {
-                tracing::error!(error = ?err, "Failed to drop streaming jobs");
-            });
+        if !streaming_job_ids.is_empty() {
+            let _ = self
+                .drop_streaming_jobs_impl(streaming_job_ids)
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
+                });
+        }
     }
 
     pub async fn drop_streaming_jobs_impl(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
@@ -576,11 +578,13 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
+    use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
-        StreamingClusterInfo,
+        RelationIdEnum, StreamingClusterInfo,
     };
     use crate::model::{ActorId, FragmentId};
+    use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
@@ -653,6 +657,10 @@ mod tests {
             &self,
             _request: Request<ForceStopActorsRequest>,
         ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            self.inner.actor_streams.lock().unwrap().clear();
+            self.inner.actor_ids.lock().unwrap().clear();
+            self.inner.actor_infos.lock().unwrap().clear();
+
             Ok(Response::new(ForceStopActorsResponse::default()))
         }
 
@@ -674,7 +682,7 @@ mod tests {
             &self,
             _request: Request<WaitEpochCommitRequest>,
         ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
-            unimplemented!()
+            Ok(Response::new(WaitEpochCommitResponse::default()))
         }
     }
 
@@ -741,6 +749,8 @@ mod tests {
             let compactor_manager =
                 Arc::new(CompactorManager::with_meta(env.clone()).await.unwrap());
 
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
             let hummock_manager = HummockManager::new(
                 env.clone(),
                 cluster_manager.clone(),
@@ -748,6 +758,7 @@ mod tests {
                 meta_metrics.clone(),
                 compactor_manager.clone(),
                 catalog_manager.clone(),
+                tx,
             )
             .await?;
 
@@ -768,6 +779,8 @@ mod tests {
                 .await?,
             );
 
+            let (sink_manager, _) = SinkCoordinatorManager::start_worker(None);
+
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
@@ -776,6 +789,7 @@ mod tests {
                 fragment_manager.clone(),
                 hummock_manager.clone(),
                 source_manager.clone(),
+                sink_manager,
                 meta_metrics.clone(),
             ));
 
@@ -853,7 +867,7 @@ mod tests {
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
-                .finish_create_table_procedure(vec![], &table)
+                .finish_create_table_procedure(vec![], table)
                 .await?;
             Ok(())
         }
@@ -861,7 +875,11 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![], self.fragment_manager.clone())
+                    .drop_relation(
+                        RelationIdEnum::Table(table_id.table_id),
+                        self.fragment_manager.clone(),
+                        DropMode::Restrict,
+                    )
                     .await?;
             }
             self.global_stream_manager
@@ -1019,6 +1037,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
+        tokio::time::sleep(Duration::from_secs(2)).await;
         services
             .drop_materialized_views(vec![table_id])
             .await

@@ -41,15 +41,20 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .try_collect()?;
 
         let watermark_derivations = MultiMap::from_iter(
-            node.get_watermark_input_key()
+            node.get_watermark_input_cols()
                 .iter()
-                .map(|key| *key as usize)
+                .map(|idx| *idx as usize)
                 .zip_eq_fast(
-                    node.get_watermark_output_key()
+                    node.get_watermark_output_cols()
                         .iter()
-                        .map(|key| *key as usize),
+                        .map(|idx| *idx as usize),
                 ),
         );
+        let nondecreasing_expr_indices = node
+            .get_nondecreasing_exprs()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
         let extremely_light = node.get_select_list().iter().all(|expr| {
             matches!(
                 expr.get_rex_node().unwrap(),
@@ -64,6 +69,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             project_exprs,
             params.executor_id,
             watermark_derivations,
+            nondecreasing_expr_indices,
             materialize_selectivity_threshold,
         )
         .boxed())

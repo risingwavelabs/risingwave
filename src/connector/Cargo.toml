@@ -21,8 +21,10 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0de
     "bzip",
     "xz",
 ] }
+arrow-array = "45"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
+auto_impl = "1"
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
@@ -37,26 +39,29 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "622501c1c98c80baaf578c716d6903dde947804e", features = ["time"] }
 csv = "1.2"
-duration-str = "0.5.0"
-enum-as-inner = "0.5"
+duration-str = "0.5.1"
+enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 glob = "0.3"
-google-cloud-pubsub = "0.14"
-itertools = "0.10"
+google-cloud-pubsub = "0.17"
+icelake = { workspace = true }
+itertools = "0.11"
 maplit = "1.0.2"
-moka = { version = "0.10", features = ["future"] }
+moka = { version = "0.11", features = ["future"] }
 mysql_async = { version = "0.31", default-features = false, features = ["default"] }
 mysql_common = { version = "0.29.2", default-features = false, features = ["chrono"] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
+opendal = "0.39"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11.0", features = ["no-recursion-limit"] }
-prost-reflect = "0.9.2"
+prost = { version = "0.11.9", features = ["no-recursion-limit"] }
+prost-reflect = "0.11.4"
 protobuf-native = "0.2.1"
-pulsar = { version = "4.2", default-features = false, features = [
+pulsar = { version = "6.0", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
@@ -71,15 +76,15 @@ rdkafka = { workspace = true, features = [
     "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
-risingwave_common = { path = "../common" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_common = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
-serde_with = { version = "2", features = ["json"] }
-simd-json = "0.9.1"
+serde_with = { version = "3", features = ["json"] }
+simd-json = "0.10.5"
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -94,7 +99,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"

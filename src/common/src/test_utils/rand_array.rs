@@ -192,9 +192,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::interval_array::IntervalArray;
-    use crate::array::*;
-    use crate::for_all_variants;
+    use crate::for_all_array_variants;
 
     #[test]
     fn test_create_array() {
@@ -209,6 +207,6 @@ mod tests {
         };
     }
 
-        for_all_variants! { gen_rand_array }
+        for_all_array_variants! { gen_rand_array }
     }
 }

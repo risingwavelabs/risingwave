@@ -981,14 +981,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         OwnedRow::new(new_row)
     }
 
-    /// Used to forward `eq_join_oneside` to show join side in stack.  
+    /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_left(
         args: EqJoinArgs<'_, K, S>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
         Self::eq_join_oneside::<{ SideType::Left }>(args)
     }
 
-    /// Used to forward `eq_join_oneside` to show join side in stack.  
+    /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_right(
         args: EqJoinArgs<'_, K, S>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {

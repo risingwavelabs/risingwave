@@ -35,7 +35,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -69,6 +69,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
+        table_cardinality: Cardinality,
     ) -> Self {
         generic::Scan::new(
             table_name,
@@ -80,6 +81,7 @@ impl LogicalScan {
             ctx,
             Condition::true_cond(),
             for_system_time_as_of_proctime,
+            table_cardinality,
         )
         .into()
     }
@@ -98,6 +100,11 @@ impl LogicalScan {
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
         self.core.for_system_time_as_of_proctime
+    }
+
+    /// The cardinality of the table **without** applying the predicate.
+    pub fn table_cardinality(&self) -> Cardinality {
+        self.core.table_cardinality
     }
 
     /// Get a reference to the logical scan's table desc.
@@ -231,10 +238,12 @@ impl LogicalScan {
             return (self.core.clone(), Condition::true_cond(), None);
         }
 
-        let mut mapping =
-            ColIndexMapping::new(self.required_col_idx().iter().map(|i| Some(*i)).collect())
-                .inverse()
-                .expect("must be invertible");
+        let mut mapping = ColIndexMapping::with_target_size(
+            self.required_col_idx().iter().map(|i| Some(*i)).collect(),
+            self.table_desc().columns.len(),
+        )
+        .inverse()
+        .expect("must be invertible");
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let scan_without_predicate = generic::Scan::new(
@@ -247,6 +256,7 @@ impl LogicalScan {
             self.ctx(),
             Condition::true_cond(),
             self.for_system_time_as_of_proctime(),
+            self.table_cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -267,6 +277,7 @@ impl LogicalScan {
             self.base.ctx.clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
+            self.table_cardinality(),
         )
         .into()
     }
@@ -282,6 +293,7 @@ impl LogicalScan {
             self.base.ctx.clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
+            self.table_cardinality(),
         )
         .into()
     }
@@ -340,6 +352,10 @@ impl Distill for LogicalScan {
             ))
         }
 
+        if self.table_cardinality() != Cardinality::unknown() {
+            vec.push(("cardinality", Pretty::display(&self.table_cardinality())));
+        }
+
         childless_record("LogicalScan", vec)
     }
 }
@@ -396,8 +412,9 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
+            self.table_desc().columns.len(),
         ));
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))

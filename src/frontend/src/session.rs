@@ -24,7 +24,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
-use pgwire::types::Format;
+use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
@@ -41,6 +41,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -126,6 +127,7 @@ pub struct FrontendEnv {
     compute_runtime: Arc<BackgroundShutdownRuntime>,
 }
 
+/// Session map identified by `(process_id, secret_key)`
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
@@ -174,7 +176,7 @@ impl FrontendEnv {
     }
 
     pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
-        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        let config = load_config(&opts.config_path, &opts);
         info!("Starting frontend node");
         info!("> config: {:?}", config);
         info!(
@@ -458,7 +460,7 @@ pub struct SessionImpl {
     // Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: RwLock<ConfigMap>,
+    config_map: Arc<RwLock<ConfigMap>>,
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
@@ -551,18 +553,16 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
+    pub fn shared_config(&self) -> Arc<RwLock<ConfigMap>> {
+        Arc::clone(&self.config_map)
+    }
+
     pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
         self.config_map.read()
     }
 
     pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        struct Nop;
-
-        impl ConfigReporter for Nop {
-            fn report_status(&mut self, _key: &str, _new_val: String) {}
-        }
-
-        self.config_map.write().set(key, value, Nop)
+        self.config_map.write().set(key, value, ())
     }
 
     pub fn set_config_report(
@@ -669,10 +669,12 @@ impl SessionImpl {
         let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
         let connection = schema
             .get_connection_by_name(connection_name)
-            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
-                "connection {} not found",
-                connection_name
-            ))))?;
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "connection {} not found",
+                    connection_name
+                )))
+            })?;
         Ok(connection.clone())
     }
 
@@ -908,13 +910,27 @@ impl SessionManagerImpl {
     }
 
     fn insert_session(&self, session: Arc<SessionImpl>) {
-        let mut write_guard = self.env.sessions_map.lock();
-        write_guard.insert(session.id(), session);
+        let active_sessions = {
+            let mut write_guard = self.env.sessions_map.lock();
+            write_guard.insert(session.id(), session);
+            write_guard.len()
+        };
+        self.env
+            .frontend_metrics
+            .active_sessions
+            .set(active_sessions as i64);
     }
 
     fn delete_session(&self, session_id: &SessionId) {
-        let mut write_guard = self.env.sessions_map.lock();
-        write_guard.remove(session_id);
+        let active_sessions = {
+            let mut write_guard = self.env.sessions_map.lock();
+            write_guard.remove(session_id);
+            write_guard.len()
+        };
+        self.env
+            .frontend_metrics
+            .active_sessions
+            .set(active_sessions as i64);
     }
 }
 
@@ -964,7 +980,7 @@ impl Session for SessionImpl {
     fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
-        params_types: Vec<DataType>,
+        params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types)?
@@ -976,7 +992,7 @@ impl Session for SessionImpl {
     fn bind(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> std::result::Result<Portal, BoxedError> {
@@ -1036,7 +1052,16 @@ impl Session for SessionImpl {
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
             Portal::Empty => Ok(vec![]),
-            Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
+            Portal::Portal(portal) => {
+                let mut columns = infer(Some(portal.bound_result.bound), portal.statement)?;
+                let formats = FormatIterator::new(&portal.result_formats, columns.len())?;
+                columns.iter_mut().zip_eq_fast(formats).for_each(|(c, f)| {
+                    if f == Format::Binary {
+                        c.set_to_binary()
+                    }
+                });
+                Ok(columns)
+            }
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
     }

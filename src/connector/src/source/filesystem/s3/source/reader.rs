@@ -18,7 +18,9 @@ use std::pin::pin;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
+use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_smithy_http::byte_stream::ByteStream;
+use aws_smithy_http::result::SdkError;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use io::StreamReader;
@@ -65,9 +67,30 @@ impl S3FileReader {
         let split_id = split.id();
 
         let object_name = split.name.clone();
-        let byte_stream =
-            S3FileReader::get_object(&client_for_s3, &bucket_name, &object_name, split.offset)
-                .await?;
+
+        let byte_stream = match S3FileReader::get_object(
+            &client_for_s3,
+            &bucket_name,
+            &object_name,
+            split.offset,
+        )
+        .await
+        .map_err(|sdk_err| sdk_err.into_service_error())
+        {
+            Ok(s) => s,
+            Err(GetObjectError::NoSuchKey(_)) => {
+                tracing::warn!("S3 Object {} not found, ignoring", object_name);
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(anyhow!(
+                    "S3 GetObject from {} error: {}",
+                    bucket_name,
+                    e.to_string()
+                ));
+            }
+        };
+
         let stream_reader = StreamReader::new(
             byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
@@ -119,29 +142,22 @@ impl S3FileReader {
         bucket_name: &str,
         object_name: &str,
         start: usize,
-    ) -> anyhow::Result<ByteStream> {
+    ) -> std::result::Result<ByteStream, SdkError<GetObjectError>> {
         let range = if start == 0 {
             None
         } else {
             Some(format!("bytes={}-", start))
         };
         // TODO. set_range
-        let obj = client_for_s3
+
+        client_for_s3
             .get_object()
             .bucket(bucket_name)
             .key(object_name)
             .set_range(range)
             .send()
             .await
-            .map_err(|sdk_err| {
-                anyhow!(
-                    "S3 GetObject from {} error: {}",
-                    bucket_name,
-                    sdk_err.to_string()
-                )
-            })?
-            .body;
-        Ok(obj)
+            .map(|r| r.body)
     }
 }
 
@@ -232,8 +248,8 @@ mod tests {
 
     use super::*;
     use crate::parser::{
-        CommonParserConfig, CsvProperties, EncodingProperties, ParserProperties,
-        ProtocolProperties, SpecificParserConfig,
+        CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
+        SpecificParserConfig,
     };
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
     use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
@@ -271,11 +287,11 @@ mod tests {
 
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
-            specific: SpecificParserConfig::Plain(ParserProperties {
+            specific: SpecificParserConfig {
                 key_encoding_config: None,
                 encoding_config: EncodingProperties::Csv(csv_config),
                 protocol_config: ProtocolProperties::Plain,
-            }),
+            },
         };
 
         let reader = S3FileReader::new(props, splits, config, Default::default(), None)

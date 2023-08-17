@@ -127,8 +127,8 @@ impl Timestamptz {
     }
 }
 
-impl From<chrono::DateTime<Utc>> for Timestamptz {
-    fn from(dt: chrono::DateTime<Utc>) -> Self {
+impl<Tz: TimeZone> From<chrono::DateTime<Tz>> for Timestamptz {
+    fn from(dt: chrono::DateTime<Tz>) -> Self {
         Self(dt.timestamp_micros())
     }
 }

@@ -26,21 +26,28 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Prune Columns:
-
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Convert Window Function:
+    Convert Over Window:
 
     apply TrivialProjectToValuesRule 1 time(s)
 
     LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+
+    Prune Columns:
+
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+
+    Predicate Push Down:
+
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+
+    To Batch Plan:
+
+    BatchValues { rows: [[1:Int32]] }
 
     Inline Session Timezone:
 
@@ -63,7 +70,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 10031,
+            "plan_node_id": 10036,
             "plan_node_type": "BatchValues",
             "schema": [
               {
@@ -147,6 +154,13 @@
       ├─LogicalScan { table: t1, columns: [v1, _row_id] }
       └─LogicalScan { table: t2, columns: [v2, _row_id] }
 
+    Predicate Push Down:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
     Prune Columns:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
@@ -161,7 +175,7 @@
       ├─LogicalScan { table: t1, columns: [v1] }
       └─LogicalScan { table: t2, columns: [v2] }
 
-    Convert Window Function:
+    Project Remove:
 
     apply ProjectEliminateRule 1 time(s)
 

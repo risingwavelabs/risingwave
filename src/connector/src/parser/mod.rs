@@ -20,23 +20,26 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::stream_chunk::{Offset, StreamChunkMeta};
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
+use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::catalog::{
+    SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
+};
+pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
 pub use self::common::mysql_row_to_datums;
-pub use self::csv_parser::CsvParserConfig;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
@@ -45,8 +48,8 @@ use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
-    BoxSourceStream, SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat, SourceMeta,
-    SourceWithStateStream, SplitId, StreamChunkWithState,
+    BoxSourceStream, SourceColumnDesc, SourceContext, SourceContextRef, SourceEncode, SourceFormat,
+    SourceMeta, SourceStruct, SourceWithStateStream, SplitId, StreamChunkWithState,
 };
 
 mod avro;
@@ -63,12 +66,12 @@ mod schema_registry;
 mod unified;
 mod upsert_parser;
 mod util;
+
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
-    // TOOD:
     offset_builder: Vec<Offset>,
 }
 
@@ -78,6 +81,7 @@ impl SourceStreamChunkBuilder {
             .iter()
             .map(|desc| desc.data_type.create_array_builder(cap))
             .collect();
+
         Self {
             descs,
             builders,
@@ -106,6 +110,7 @@ impl SourceStreamChunkBuilder {
         }
     }
 
+    /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
         let mut chunk = StreamChunk::new(
             self.op_builder,
@@ -121,8 +126,21 @@ impl SourceStreamChunkBuilder {
         chunk
     }
 
+    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
+    /// the builders of the next [`StreamChunk`].
+    #[must_use]
+    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish()
+    }
+
     pub fn op_num(&self) -> usize {
         self.op_builder.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.op_builder.is_empty()
     }
 }
 
@@ -341,6 +359,12 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+/// Transaction control message. Currently only used by Debezium messages.
+pub enum TransactionControl {
+    Begin { id: Box<str> },
+    Commit { id: Box<str> },
+}
+
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
 /// the input data stream and return a stream of parsed msgs.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
@@ -358,6 +382,20 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<WriteGuard>> + Send + 'a;
 
+    /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
+    /// as a transaction control message.
+    ///
+    /// The default implementation forwards to [`ByteStreamSourceParser::parse_one`] for
+    /// non-transactional sources.
+    fn parse_one_with_txn<'a>(
+        &'a mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> impl Future<Output = Result<Either<WriteGuard, TransactionControl>>> + Send + 'a {
+        self.parse_one(key, payload, writer).map_ok(Either::Left)
+    }
+
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
     ///
     /// # Arguments
@@ -372,18 +410,60 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
+/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
+/// committed to avoid potential OOM.
+const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
+
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+    let columns = parser.columns().to_vec();
+
+    let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut split_offset_mapping = HashMap::<SplitId, String>::new();
+
+    struct Transaction {
+        id: Box<str>,
+        len: usize,
+    }
+    let mut current_transaction = None;
+    let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
+
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
-        let mut builder =
-            SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), batch.len());
-        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+        let batch_len = batch.len();
 
-        for msg in batch {
+        if let Some(Transaction { len, id }) = &mut current_transaction {
+            // Dirty state. The last batch is not yielded due to uncommitted transaction.
+            if *len > MAX_ROWS_FOR_TRANSACTION {
+                // Large transaction. Force commit.
+                tracing::warn!(
+                    id,
+                    len,
+                    "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
+                );
+                *len = 0; // reset `len` while keeping `id`
+                yield_asap = false;
+                yield StreamChunkWithState {
+                    chunk: builder.take(batch_len),
+                    split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                };
+            } else {
+                // Normal transaction. After the transaction is committed, we should yield the last
+                // batch immediately, so set `yield_asap` to true.
+                yield_asap = true;
+            }
+        } else {
+            // Clean state. Reserve capacity for the builder.
+            assert!(builder.is_empty());
+            assert!(!yield_asap);
+            assert!(split_offset_mapping.is_empty());
+            let _ = builder.take(batch_len);
+        }
+
+        for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 continue;
             }
@@ -393,32 +473,32 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
             let old_op_num = builder.op_num();
 
-            if let Err(e) = parser
-                .parse_one(
+            match parser
+                .parse_one_with_txn(
                     msg.key,
                     msg.payload,
                     builder.row_writer_with_offset(Offset::new(msg_offset)),
                 )
                 .await
             {
-                tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                // This will throw an error for batch
-                parser.source_ctx().report_user_source_error(e)?;
-                continue;
-            }
+                Ok(Either::Left(WriteGuard(_))) => {
+                    // new_op_num - old_op_num is the number of rows added to the builder
+                    let new_op_num = builder.op_num();
 
-            let new_op_num = builder.op_num();
+                    // Aggregate the number of rows in the current transaction.
+                    if let Some(Transaction { len, .. }) = &mut current_transaction {
+                        *len += new_op_num - old_op_num;
+                    }
 
-            // new_op_num - old_op_num is the number of rows added to the builder
-            for _ in old_op_num..new_op_num {
-                // TODO: support more kinds of SourceMeta
-                if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                    let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                    for _ in old_op_num..new_op_num {
+                        // TODO: support more kinds of SourceMeta
+                        if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                            let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
                         if !desc.is_meta {
                             return None;
                         }
                         match desc.name.as_str() {
-                            "_rw_kafka_timestamp" => Some(kafka_meta.timestamp.map(|ts| {
+                            KAFKA_TIMESTAMP_COLUMN_NAME => Some(kafka_meta.timestamp.map(|ts| {
                                 risingwave_common::cast::i64_to_timestamptz(ts)
                                     .unwrap()
                                     .into()
@@ -428,15 +508,56 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             }
                         }
                     };
-                    builder.row_writer().fulfill_meta_column(f)?;
+                            builder.row_writer().fulfill_meta_column(f)?;
+                        }
+                    }
+                }
+
+                Ok(Either::Right(txn_ctl)) => {
+                    match txn_ctl {
+                        TransactionControl::Begin { id } => {
+                            if let Some(Transaction { id: current_id, .. }) = &current_transaction {
+                                tracing::warn!(current_id, id, "already in transaction");
+                            }
+                            current_transaction = Some(Transaction { id, len: 0 });
+                        }
+                        TransactionControl::Commit { id } => {
+                            let current_id = current_transaction.as_ref().map(|t| &t.id);
+                            if current_id != Some(&id) {
+                                tracing::warn!(?current_id, id, "transaction id mismatch");
+                            }
+                            current_transaction = None;
+                        }
+                    }
+
+                    // Not in a transaction anymore and `yield_asap` is set, so we should yield the
+                    // chunk now.
+                    if current_transaction.is_none() && yield_asap {
+                        yield_asap = false;
+                        yield StreamChunkWithState {
+                            chunk: builder.take(batch_len - (i + 1)),
+                            split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                        };
+                    }
+                }
+
+                Err(error) => {
+                    tracing::warn!(%error, "message parsing failed, skipping");
+                    // This will throw an error for batch
+                    parser.source_ctx().report_user_source_error(error)?;
+                    continue;
                 }
             }
         }
 
-        yield StreamChunkWithState {
-            chunk: builder.finish(),
-            split_offset_mapping: Some(split_offset_mapping),
-        };
+        // If we are not in a transaction, we should yield the chunk now.
+        if current_transaction.is_none() {
+            yield_asap = false;
+            yield StreamChunkWithState {
+                chunk: builder.take(0),
+                split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+            };
+        }
     }
 }
 
@@ -471,10 +592,11 @@ impl AccessBuilderImpl {
                 let config = ProtobufParserConfig::new(config).await?;
                 AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config)?)
             }
-            EncodingProperties::Bytes => AccessBuilderImpl::Bytes(BytesAccessBuilder::new()?),
+            EncodingProperties::Bytes(_) => {
+                AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
+            }
             EncodingProperties::Json(_) => AccessBuilderImpl::Json(JsonAccessBuilder::new()?),
-            EncodingProperties::Csv(_) => unreachable!(),
-            EncodingProperties::None => unreachable!(),
+            _ => unreachable!(),
         };
         Ok(accessor)
     }
@@ -527,36 +649,43 @@ impl ByteStreamSourceParserImpl {
 impl ByteStreamSourceParserImpl {
     pub async fn create(parser_config: ParserConfig, source_ctx: SourceContextRef) -> Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
-        match parser_config.specific {
-            SpecificParserConfig::Json => JsonParser::new(rw_columns, source_ctx).map(Self::Json),
-            SpecificParserConfig::Csv(config) => {
-                CsvParser::new(rw_columns, config, source_ctx).map(Self::Csv)
+        let protocol = &parser_config.specific.protocol_config;
+        let encode = &parser_config.specific.encoding_config;
+        match (protocol, encode) {
+            (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
+                JsonParser::new(rw_columns, source_ctx).map(Self::Json)
             }
-            SpecificParserConfig::CanalJson => {
-                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
+            (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
+                CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
-            SpecificParserConfig::DebeziumMongoJson => {
+            (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
             }
-            SpecificParserConfig::Native => {
-                unreachable!("Native parser should not be created")
+            (ProtocolProperties::Canal, EncodingProperties::Json(_)) => {
+                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
             }
-            SpecificParserConfig::Upsert(config) => {
-                let parser = UpsertParser::new(config, rw_columns, source_ctx).await?;
+            (ProtocolProperties::Native, _) => unreachable!("Native parser should not be created"),
+            (ProtocolProperties::Upsert, _) => {
+                let parser =
+                    UpsertParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Upsert(parser))
             }
-            SpecificParserConfig::Plain(config) => {
-                let parser = PlainParser::new(config, rw_columns, source_ctx).await?;
+            (ProtocolProperties::Plain, _) => {
+                let parser =
+                    PlainParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Plain(parser))
             }
-            SpecificParserConfig::Debezium(config) => {
-                let parser = DebeziumParser::new(config, rw_columns, source_ctx).await?;
+            (ProtocolProperties::Debezium, _) => {
+                let parser =
+                    DebeziumParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Debezium(parser))
             }
-            SpecificParserConfig::Maxwell(config) => {
-                let parser = MaxwellParser::new(config, rw_columns, source_ctx).await?;
+            (ProtocolProperties::Maxwell, _) => {
+                let parser =
+                    MaxwellParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Maxwell(parser))
             }
+            _ => unreachable!(),
         }
     }
 }
@@ -567,25 +696,22 @@ pub struct ParserConfig {
     pub specific: SpecificParserConfig,
 }
 
+impl ParserConfig {
+    pub fn get_config(self) -> (Vec<SourceColumnDesc>, SpecificParserConfig) {
+        (self.common.rw_columns, self.specific)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CommonParserConfig {
     pub rw_columns: Vec<SourceColumnDesc>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub enum SpecificParserConfig {
-    Upsert(ParserProperties),
-    Plain(ParserProperties),
-    Debezium(ParserProperties),
-    Maxwell(ParserProperties),
-    DebeziumMongoJson,
-    Csv(CsvParserConfig),
-    // Json and CanalJson are special since each of their payload generates
-    // multiple accessors.
-    Json,
-    CanalJson,
-    #[default]
-    Native,
+pub struct SpecificParserConfig {
+    pub key_encoding_config: Option<EncodingProperties>,
+    pub encoding_config: EncodingProperties,
+    pub protocol_config: ProtocolProperties,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -615,6 +741,9 @@ pub struct AvroProperties {
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
     pub enable_upsert: bool,
+    pub record_name: Option<String>,
+    pub key_record_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -624,10 +753,13 @@ pub struct ProtobufProperties {
     pub row_schema_location: String,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub client_config: SchemaRegistryAuth,
+    pub enable_upsert: bool,
     pub topic: String,
+    pub key_message_name: Option<String>,
+    pub name_strategy: PbSchemaRegistryNameStrategy,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct CsvProperties {
     pub delimiter: u8,
     pub has_header: bool,
@@ -637,65 +769,102 @@ pub struct CsvProperties {
 pub struct JsonProperties {}
 
 #[derive(Debug, Default, Clone)]
+pub struct BytesProperties {
+    pub column_name: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
 pub enum EncodingProperties {
     Avro(AvroProperties),
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    Bytes,
+    Bytes(BytesProperties),
+    Native,
     #[default]
-    None,
+    Unspecified,
 }
 
 #[derive(Debug, Default, Clone)]
 pub enum ProtocolProperties {
     Debezium,
+    DebeziumMongo,
     Maxwell,
     Canal,
-    #[default]
     Plain,
     Upsert,
+    Native,
+    #[default]
+    Unspecified,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct ParserProperties {
-    pub key_encoding_config: Option<EncodingProperties>,
-    pub encoding_config: EncodingProperties,
-    pub protocol_config: ProtocolProperties,
-}
+impl SpecificParserConfig {
+    pub fn get_source_struct(&self) -> SourceStruct {
+        let format = match self.protocol_config {
+            ProtocolProperties::Debezium => SourceFormat::Debezium,
+            ProtocolProperties::DebeziumMongo => SourceFormat::DebeziumMongo,
+            ProtocolProperties::Maxwell => SourceFormat::Maxwell,
+            ProtocolProperties::Canal => SourceFormat::Canal,
+            ProtocolProperties::Plain => SourceFormat::Plain,
+            ProtocolProperties::Upsert => SourceFormat::Upsert,
+            ProtocolProperties::Native => SourceFormat::Native,
+            ProtocolProperties::Unspecified => unreachable!(),
+        };
+        let encode = match self.encoding_config {
+            EncodingProperties::Avro(_) => SourceEncode::Avro,
+            EncodingProperties::Protobuf(_) => SourceEncode::Protobuf,
+            EncodingProperties::Csv(_) => SourceEncode::Csv,
+            EncodingProperties::Json(_) => SourceEncode::Json,
+            EncodingProperties::Bytes(_) => SourceEncode::Bytes,
+            EncodingProperties::Native => SourceEncode::Native,
+            EncodingProperties::Unspecified => unreachable!(),
+        };
+        SourceStruct { format, encode }
+    }
 
-/// Requirements of each parser currently
-/// 1. CSV: delimiter, has header
-/// 2. AVRO/AVRO UPSERT: row schema location, use schema registry
-///    client info, topic, aws config, optional primary key
-/// 3. PROTOBUF: message name, row schema location, use schema registry
-///    client info, topic, aws config
-/// 4. DEBEZIUM AVRO: row schema location, topic, client info
-/// 5. Other: none
-
-impl ParserProperties {
+    // The validity of (format, encode) is ensured by `extract_format_encode`
     pub fn new(
-        format: SourceFormat,
-        props: &HashMap<String, String>,
+        source_struct: SourceStruct,
         info: &StreamSourceInfo,
+        props: &HashMap<String, String>,
     ) -> Result<Self> {
-        let (encoding_config, protocol_config) = match format {
-            SourceFormat::Csv => (
-                EncodingProperties::Csv(CsvProperties {
-                    delimiter: info.csv_delimiter as u8,
-                    has_header: info.csv_has_header,
-                }),
-                ProtocolProperties::Plain,
-            ),
-            SourceFormat::Avro | SourceFormat::UpsertAvro => {
+        let format = source_struct.format;
+        let encode = source_struct.encode;
+        // this transformation is needed since there may be config for the protocol
+        // in the future
+        let protocol_config = match format {
+            SourceFormat::Native => ProtocolProperties::Native,
+            SourceFormat::Debezium => ProtocolProperties::Debezium,
+            SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,
+            SourceFormat::Maxwell => ProtocolProperties::Maxwell,
+            SourceFormat::Canal => ProtocolProperties::Canal,
+            SourceFormat::Upsert => ProtocolProperties::Upsert,
+            SourceFormat::Plain => ProtocolProperties::Plain,
+            _ => unreachable!(),
+        };
+
+        let encoding_config = match (format, encode) {
+            (SourceFormat::Plain, SourceEncode::Csv) => EncodingProperties::Csv(CsvProperties {
+                delimiter: info.csv_delimiter as u8,
+                has_header: info.csv_has_header,
+            }),
+            (SourceFormat::Plain, SourceEncode::Avro)
+            | (SourceFormat::Upsert, SourceEncode::Avro) => {
                 let mut config = AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    key_record_name: info.key_message_name.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     upsert_primary_key: info.upsert_avro_primary_key.clone(),
                     ..Default::default()
                 };
-                // TODO:
-                if let SourceFormat::UpsertAvro = format {
+                if format == SourceFormat::Upsert {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
@@ -706,22 +875,27 @@ impl ParserProperties {
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
                     ));
                 }
-                (
-                    EncodingProperties::Avro(config),
-                    match format {
-                        SourceFormat::Avro => ProtocolProperties::Plain,
-                        SourceFormat::UpsertAvro => ProtocolProperties::Upsert,
-                        _ => unreachable!(),
-                    },
-                )
+                EncodingProperties::Avro(config)
             }
-            SourceFormat::Protobuf => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
+            | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
+                if info.row_schema_location.is_empty() {
+                    return Err(
+                        ProtocolError("protobuf file location not provided".to_string()).into(),
+                    );
+                }
                 let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
+                    key_message_name: info.key_message_name.clone(),
                     ..Default::default()
                 };
+                if format == SourceFormat::Upsert {
+                    config.enable_upsert = true;
+                }
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
@@ -730,51 +904,45 @@ impl ParserProperties {
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
                     ));
                 }
-                (
-                    EncodingProperties::Protobuf(config),
-                    ProtocolProperties::Plain,
-                )
+                EncodingProperties::Protobuf(config)
             }
-            SourceFormat::DebeziumAvro => (
+            (SourceFormat::Debezium, SourceEncode::Avro) => {
                 EncodingProperties::Avro(AvroProperties {
+                    record_name: if info.proto_message_name.is_empty() {
+                        None
+                    } else {
+                        Some(info.proto_message_name.clone())
+                    },
+                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                        .unwrap(),
+                    key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: SchemaRegistryAuth::from(props),
                     ..Default::default()
-                }),
-                ProtocolProperties::Debezium,
-            ),
-            SourceFormat::DebeziumJson => (
-                EncodingProperties::Json(JsonProperties {}),
-                ProtocolProperties::Debezium,
-            ),
-            SourceFormat::DebeziumMongoJson => (
-                EncodingProperties::Json(JsonProperties {}),
-                ProtocolProperties::Debezium,
-            ),
-            SourceFormat::Maxwell => (
-                EncodingProperties::Json(JsonProperties {}),
-                ProtocolProperties::Maxwell,
-            ),
-            SourceFormat::CanalJson => (
-                EncodingProperties::Json(JsonProperties {}),
-                ProtocolProperties::Canal,
-            ),
-            SourceFormat::Json => (
-                EncodingProperties::Json(JsonProperties {}),
-                ProtocolProperties::Plain,
-            ),
-            SourceFormat::UpsertJson => (
-                EncodingProperties::Json(JsonProperties {}),
-                ProtocolProperties::Upsert,
-            ),
-            SourceFormat::Bytes => (EncodingProperties::Bytes, ProtocolProperties::Plain),
-            SourceFormat::Native | SourceFormat::Invalid => {
-                (EncodingProperties::None, ProtocolProperties::Plain)
+                })
+            }
+            (
+                SourceFormat::Debezium
+                | SourceFormat::DebeziumMongo
+                | SourceFormat::Maxwell
+                | SourceFormat::Canal
+                | SourceFormat::Plain
+                | SourceFormat::Upsert,
+                SourceEncode::Json,
+            ) => EncodingProperties::Json(JsonProperties {}),
+            (SourceFormat::Plain, SourceEncode::Bytes) => {
+                EncodingProperties::Bytes(BytesProperties { column_name: None })
+            }
+            (SourceFormat::Native, SourceEncode::Native) => EncodingProperties::Native,
+            (format, encode) => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "Unsupported format {:?} encode {:?}",
+                    format, encode
+                ))));
             }
         };
-        // TODO: need to build correct key encoding config
-        Ok(ParserProperties {
+        Ok(Self {
             key_encoding_config: None,
             encoding_config,
             protocol_config,
@@ -782,77 +950,9 @@ impl ParserProperties {
     }
 }
 
-impl SpecificParserConfig {
-    // Need to be fixed when message key is introduced.
-    pub fn get_source_format(&self) -> SourceFormat {
-        match self {
-            SpecificParserConfig::Csv(_) => SourceFormat::Csv,
-            SpecificParserConfig::Json => SourceFormat::Json,
-            SpecificParserConfig::CanalJson => SourceFormat::CanalJson,
-            SpecificParserConfig::Native => SourceFormat::Native,
-            SpecificParserConfig::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
-
-            SpecificParserConfig::Upsert(config) => match config.encoding_config {
-                EncodingProperties::Avro(_) => SourceFormat::UpsertAvro,
-                EncodingProperties::Json(_) => SourceFormat::UpsertJson,
-                _ => unreachable!(),
-            },
-            SpecificParserConfig::Plain(config) => match config.encoding_config {
-                EncodingProperties::Avro(_) => SourceFormat::Avro,
-                EncodingProperties::Protobuf(_) => SourceFormat::Protobuf,
-                EncodingProperties::Csv(_) => SourceFormat::Csv,
-                EncodingProperties::Bytes => SourceFormat::Bytes,
-                _ => unreachable!(),
-            },
-            SpecificParserConfig::Maxwell(_) => SourceFormat::Maxwell,
-            SpecificParserConfig::Debezium(config) => match config.encoding_config {
-                EncodingProperties::Avro(_) => SourceFormat::DebeziumAvro,
-                EncodingProperties::Json(_) => SourceFormat::DebeziumJson,
-                _ => unreachable!(),
-            },
-        }
-    }
-
-    pub fn new(
-        format: SourceFormat,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-    ) -> Result<Self> {
-        let parser_properties = ParserProperties::new(format, props, info)?;
-        let conf = match format {
-            SourceFormat::Csv => {
-                SpecificParserConfig::Csv(CsvParserConfig::new(parser_properties.encoding_config)?)
-            }
-            SourceFormat::Json => SpecificParserConfig::Json,
-            SourceFormat::DebeziumMongoJson => SpecificParserConfig::DebeziumMongoJson,
-            SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
-            SourceFormat::Native => SpecificParserConfig::Native,
-
-            SourceFormat::DebeziumJson => SpecificParserConfig::Debezium(parser_properties),
-            SourceFormat::DebeziumAvro => SpecificParserConfig::Debezium(parser_properties),
-
-            SourceFormat::Maxwell => SpecificParserConfig::Maxwell(parser_properties),
-
-            SourceFormat::Avro => SpecificParserConfig::Plain(parser_properties),
-            SourceFormat::Bytes => SpecificParserConfig::Plain(parser_properties),
-            SourceFormat::Protobuf => SpecificParserConfig::Plain(parser_properties),
-
-            SourceFormat::UpsertAvro => SpecificParserConfig::Upsert(parser_properties),
-            SourceFormat::UpsertJson => SpecificParserConfig::Upsert(parser_properties),
-
-            SourceFormat::Invalid => {
-                return Err(RwError::from(ProtocolError(
-                    "invalid source format".to_string(),
-                )));
-            }
-        };
-        Ok(conf)
-    }
-}
-
 impl ParserConfig {
     pub fn new(
-        format: SourceFormat,
+        source_struct: SourceStruct,
         info: &StreamSourceInfo,
         props: &HashMap<String, String>,
         rw_columns: &Vec<SourceColumnDesc>,
@@ -860,7 +960,7 @@ impl ParserConfig {
         let common = CommonParserConfig {
             rw_columns: rw_columns.to_owned(),
         };
-        let specific = SpecificParserConfig::new(format, info, props)?;
+        let specific = SpecificParserConfig::new(source_struct, info, props)?;
 
         Ok(Self { common, specific })
     }

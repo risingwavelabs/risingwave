@@ -35,7 +35,7 @@ use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{CheckRelationError, SessionImpl};
@@ -193,6 +193,7 @@ pub(crate) fn gen_create_index_plan(
         } else {
             distributed_columns_expr.len()
         },
+        table.cardinality,
     )?;
 
     let (index_database_id, index_schema_id) =
@@ -239,6 +240,8 @@ pub(crate) fn gen_create_index_plan(
         primary_table_id: table.id.table_id,
         index_item,
         original_columns,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
     };
 
     let plan: PlanRef = materialize.into();
@@ -309,6 +312,7 @@ fn assemble_materialize(
     index_columns: &[(ExprImpl, OrderType)],
     include_columns: &[ExprImpl],
     distributed_by_columns_len: usize,
+    cardinality: Cardinality,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
@@ -325,6 +329,7 @@ fn assemble_materialize(
         vec![],
         context,
         false,
+        cardinality,
     );
 
     let exprs = index_columns

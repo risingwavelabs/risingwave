@@ -60,22 +60,25 @@ impl MySqlCdcSplit {
         Self { inner: split }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        // deserialize the start_offset
-        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
-
-        let snapshot_done = match dbz_offset.source_offset.snapshot {
-            Some(val) => !val,
-            None => true,
-        };
-
-        let split = CdcSplitBase {
-            split_id: self.inner.split_id,
-            start_offset: Some(start_offset),
-            snapshot_done,
-        };
-        Self { inner: split }
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let mut snapshot_done = self.inner.snapshot_done;
+        if !snapshot_done {
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    "invalid mysql offset: {}, error: {}, split: {}",
+                    start_offset,
+                    e,
+                    self.inner.split_id
+                )
+            })?;
+            snapshot_done = match dbz_offset.source_offset.snapshot {
+                Some(val) => !val,
+                None => true,
+            };
+        }
+        self.inner.start_offset = Some(start_offset);
+        self.inner.snapshot_done = snapshot_done;
+        Ok(())
     }
 }
 
@@ -92,27 +95,26 @@ impl PostgresCdcSplit {
         }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        // deserialize the start_offset
-        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
-
-        let snapshot_done = dbz_offset
-            .source_offset
-            .last_snapshot_record
-            .unwrap_or(false);
-
-        let split = CdcSplitBase {
-            split_id: self.inner.split_id,
-            start_offset: Some(start_offset),
-            snapshot_done,
-        };
-
-        let server_addr = self.server_addr.clone();
-        Self {
-            inner: split,
-            server_addr,
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let mut snapshot_done = self.inner.snapshot_done;
+        if !snapshot_done {
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    "invalid postgres offset: {}, error: {}, split: {}",
+                    start_offset,
+                    e,
+                    self.inner.split_id
+                )
+            })?;
+            snapshot_done = dbz_offset
+                .source_offset
+                .last_snapshot_record
+                .unwrap_or(false);
         }
+        self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it won't be updated
+        self.inner.snapshot_done = snapshot_done;
+        Ok(())
     }
 }
 
@@ -188,22 +190,13 @@ impl DebeziumCdcSplit {
         unreachable!("invalid debezium split")
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
-        if let Some(split) = &self.mysql_split {
-            let mysql_split = Some(split.copy_with_offset(start_offset));
-            return Self {
-                mysql_split,
-                pg_split: None,
-            };
+        if let Some(split) = &mut self.mysql_split {
+            split.update_with_offset(start_offset)?
+        } else if let Some(split) = &mut self.pg_split {
+            split.update_with_offset(start_offset)?
         }
-        if let Some(split) = &self.pg_split {
-            let pg_split = Some(split.copy_with_offset(start_offset));
-            return Self {
-                mysql_split: None,
-                pg_split,
-            };
-        }
-        unreachable!("invalid debezium split")
+        Ok(())
     }
 }

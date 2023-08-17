@@ -64,7 +64,7 @@ enum CompatibilityVersion {
 
 message GroupConstruct {
   CompactionConfig group_config = 1;
-  // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
+  // If parent_group_id is not 0, it means parent_group_id splits into parent_group_id and this group, so this group is not empty initially.
   uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
   uint64 group_id = 4;
@@ -231,7 +231,7 @@ message UnpinSnapshotBeforeResponse {
   common.Status status = 1;
 }
 
-// When `right_exclusive=false`, it represents [left, right], of which both boundary are open. When `right_exclusive=true`,
+// When right_exclusive=false, it represents [left, right], of which both boundary are open. When right_exclusive=true,
 // it represents [left, right), of which right is exclusive.
 message KeyRange {
   bytes left = 1;
@@ -261,16 +261,16 @@ message CompactTask {
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
-  // In ideal case, the compaction will generate `splits.len()` tables which have key range
-  // corresponding to that in [`splits`], respectively
+  // In ideal case, the compaction will generate splits.len() tables which have key range
+  // corresponding to that in [splits], respectively
   repeated KeyRange splits = 2;
   // low watermark in 'ts-aware compaction'
   uint64 watermark = 3;
-  // compaction output, which will be added to [`target_level`] of LSM after compaction
+  // compaction output, which will be added to [target_level] of LSM after compaction
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
   uint64 task_id = 5;
-  // compaction output will be added to [`target_level`] of LSM after compaction
+  // compaction output will be added to [target_level] of LSM after compaction
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
   // Lbase in LSM
@@ -326,7 +326,7 @@ message CompactionGroup {
 }
 
 // Complete info of compaction group.
-// The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
+// The info is the aggregate of HummockVersion and CompactionGroupConfig
 message CompactionGroupInfo {
   uint64 id = 1;
   uint64 parent_id = 2;
@@ -337,23 +337,6 @@ message CompactionGroupInfo {
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
   uint32 context_id = 2;
-}
-
-message GetCompactionTasksRequest {}
-
-message GetCompactionTasksResponse {
-  common.Status status = 1;
-  CompactTask compact_task = 2;
-}
-
-message ReportCompactionTasksRequest {
-  uint32 context_id = 1;
-  CompactTask compact_task = 2;
-  map<uint32, TableStats> table_stats_change = 3;
-}
-
-message ReportCompactionTasksResponse {
-  common.Status status = 1;
 }
 
 message HummockPinnedVersion {
@@ -379,8 +362,8 @@ message GetNewSstIdsResponse {
 }
 
 // This is a heartbeat message. Task will be considered dead if
-// `CompactTaskProgress` is not received for a timeout
-// or `num_ssts_sealed`/`num_ssts_uploaded` do not increase for a timeout.
+// CompactTaskProgress is not received for a timeout
+// or num_ssts_sealed/num_ssts_uploaded do not increase for a timeout.
 message CompactTaskProgress {
   uint64 task_id = 1;
   uint32 num_ssts_sealed = 2;
@@ -395,37 +378,67 @@ message CompactorWorkload {
   uint32 cpu = 1;
 }
 
-message CompactorHeartbeatRequest {
-  uint32 context_id = 1;
-  repeated CompactTaskProgress progress = 2;
-  CompactorWorkload workload = 3;
+message SubscribeCompactionEventRequest {
+  // Register provides the context_id of the corresponding Compactor.
+  message Register {
+    uint32 context_id = 1;
+  }
+
+  // PullTask provides the number of tasks needed for the Compactor.
+  message PullTask {
+    uint32 pull_task_count = 4;
+  }
+
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+  }
+
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+
+  oneof event {
+    // Compactor will register its own context_id with Meta via Register and establish a bi-directional streaming rpc.
+    Register register = 1;
+
+    // Compactor will recalculate the number of tasks needed locally after receiving the PullTaskAck and get the next batch of tasks from Meta via PullTask.
+    PullTask pull_task = 2;
+
+    // When the execution of each task completes/fails, Compactor returns the task to the meta via ReportTask.
+    ReportTask report_task = 3;
+
+    // Periodically, HeartBeat carries the progress of all tasks on the Compactor, and the meta will cancel the task when it expires.
+    HeartBeat heart_beat = 4;
+  }
+
+  uint64 create_at = 7;
 }
 
-message CompactorHeartbeatResponse {
-  common.Status status = 1;
-}
+message SubscribeCompactionEventResponse {
+  // PullTaskAck is a response, the meta will return a PullTaskAck after distributing the task requested by the PullTask.
+  // The Compactor receives the PullTaskAck and remakes its state and tries to initiate the next PullTask.
+  message PullTaskAck {}
 
-message SubscribeCompactTasksRequest {
-  uint32 context_id = 1;
-  reserved 2;
-  reserved "max_concurrent_task_number";
-  uint32 cpu_core_num = 3;
+  oneof event {
+    CompactTask compact_task = 1;
+    VacuumTask vacuum_task = 2;
+    FullScanTask full_scan_task = 3;
+    ValidationTask validation_task = 4;
+    CancelCompactTask cancel_compact_task = 5;
+
+    PullTaskAck pull_task_ack = 6;
+  }
+
+  uint64 create_at = 7;
 }
 
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
   uint64 epoch = 3;
-}
-
-message SubscribeCompactTasksResponse {
-  oneof task {
-    CompactTask compact_task = 1;
-    VacuumTask vacuum_task = 2;
-    FullScanTask full_scan_task = 3;
-    ValidationTask validation_task = 4;
-    CancelCompactTask cancel_compact_task = 5;
-  }
 }
 
 // Delete SSTs in object store
@@ -465,7 +478,12 @@ message TriggerManualCompactionResponse {
 }
 
 message ReportFullScanTaskRequest {
+  // Object ids that satisfying conditions specified by FullScanTask.
   repeated uint64 object_ids = 1;
+  // Total count of objects before filtered by conditions specified by FullScanTask.
+  uint64 total_object_count = 2;
+  // Total size of objects before filtered by conditions specified by FullScanTask.
+  uint64 total_object_size = 3;
 }
 
 message ReportFullScanTaskResponse {
@@ -621,15 +639,12 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
-  rpc CompactorHeartbeat(CompactorHeartbeatRequest) returns (CompactorHeartbeatResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
-  rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
@@ -645,6 +660,7 @@ service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
+  rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
 }
 
 message CompactionConfig {

@@ -1,10 +1,13 @@
-FROM ubuntu:22.04 as base
+FROM ubuntu:22.04 AS base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven unzip wget openjdk-11-jdk libsasl2-dev
+RUN apt-get update \
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
 
-FROM base as builder
+FROM base AS builder
+
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld maven unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -15,6 +18,7 @@ RUN mkdir -p /risingwave
 WORKDIR /risingwave
 
 COPY ./ /risingwave
+COPY ./docker/hdfs_env.sh /risingwave/hdfs_env.sh
 
 ENV PATH /root/.cargo/bin/:$PATH
 
@@ -29,7 +33,7 @@ RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
-  && rustup default $(cat "/risingwave/rust-toolchain") \
+  && rustup show \
   && rustup component add rustfmt
 
 RUN cargo fetch
@@ -39,8 +43,11 @@ ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 
-RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
+RUN cargo fetch && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+  chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
 RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
@@ -56,6 +63,8 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=builder /risingwave/ui /risingwave/ui
+COPY --from=builder /risingwave/hdfs_env.sh /risingwave/hdfs_env.sh
+RUN chmod +x /risingwave/hdfs_env.sh
 
 # hadoop
 RUN wget https://rw-yufan.s3.ap-southeast-1.amazonaws.com/hadoop-2.7.3.tar.gz -P /root/
@@ -72,10 +81,13 @@ ENV PATH $PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
 ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
-
+ENV HADOOP_CONF_DIR /opt/hadoop/etc/hadoop/
+ENV CLASSPATH ${CLASSPATH}
+ENV CLASSPATH ${HADOOP_CONF_DIR}:${CLASSPATH}
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
-ENTRYPOINT [ "/risingwave/bin/risingwave" ]
+
+ENTRYPOINT [ "/risingwave/hdfs_env.sh" ]
 CMD [ "playground" ]

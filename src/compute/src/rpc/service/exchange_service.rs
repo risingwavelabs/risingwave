@@ -81,7 +81,7 @@ impl ExchangeService for ExchangeServiceImpl {
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
 
-        let mut request_stream = request.into_inner();
+        let mut request_stream: Streaming<GetStreamRequest> = request.into_inner();
 
         // Extract the first `Get` request from the stream.
         let get_req = {

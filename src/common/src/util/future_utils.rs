@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::Stream;
+use std::future::pending;
+
+use futures::{Future, FutureExt, Stream};
 
 /// Convert a list of streams into a [`Stream`] of results from the streams.
 pub fn select_all<S: Stream + Unpin>(
@@ -21,4 +23,12 @@ pub fn select_all<S: Stream + Unpin>(
     // We simply forward the implementation to `futures` as it performs good enough.
     #[expect(clippy::disallowed_methods)]
     futures::stream::select_all(streams)
+}
+
+pub fn pending_on_none<I>(future: impl Future<Output = Option<I>>) -> impl Future<Output = I> {
+    use futures::TryFutureExt;
+    future
+        .map(|opt| opt.ok_or(()))
+        .or_else(|()| pending::<std::result::Result<I, ()>>())
+        .map(|result| result.expect("only err on pending, which is unlikely to reach here"))
 }

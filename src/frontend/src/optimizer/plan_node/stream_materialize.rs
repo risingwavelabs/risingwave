@@ -30,7 +30,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -63,6 +63,7 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         definition: String,
         table_type: TableType,
+        cardinality: Cardinality,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -80,6 +81,7 @@ impl StreamMaterialize {
             None,
             table_type,
             None,
+            cardinality,
         )?;
 
         Ok(Self::new(input, table))
@@ -116,6 +118,7 @@ impl StreamMaterialize {
             row_id_index,
             TableType::Table,
             version,
+            Cardinality::unknown(), // unknown cardinality for tables
         )?;
 
         Ok(Self::new(input, table))
@@ -169,6 +172,7 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
+        cardinality: Cardinality,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -214,6 +218,10 @@ impl StreamMaterialize {
             version,
             watermark_columns,
             dist_key_in_pk: vec![],
+            cardinality,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            cleaned_by_watermark: false,
         })
     }
 

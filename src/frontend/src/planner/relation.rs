@@ -28,6 +28,7 @@ use crate::optimizer::plan_node::{
     LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
     LogicalTableFunction, LogicalValues, PlanRef,
 };
+use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
 
 const ERROR_WINDOW_SIZE_ARG: &str =
@@ -58,6 +59,7 @@ impl Planner {
             vec![],
             self.ctx(),
             false,
+            Cardinality::unknown(), // TODO(card): cardinality of system table
         )
         .into())
     }
@@ -75,6 +77,7 @@ impl Planner {
                 .collect(),
             self.ctx(),
             base_table.for_system_time_as_of_proctime,
+            base_table.table_catalog.cardinality,
         )
         .into())
     }

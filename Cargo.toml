@@ -44,12 +44,14 @@ members = [
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/sync-point",
+  "src/utils/variables",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+resolver = "2"
 
 [workspace.package]
-version = "1.0.0-alpha"
+version = "1.1.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -69,11 +71,43 @@ aws-smithy-http = "0.55"
 aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
 aws-types = "0.55"
+etcd-client = { package = "madsim-etcd-client", version = "0.3" }
 futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
-hashbrown = { version = "0.13.2", features = ["ahash", "inline-more", "nightly"] }
-criterion = "0.5"
+hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"] }
+criterion = { version = "0.5", features = ["async_futures"] }
+tonic = { package = "madsim-tonic", version = "0.3.1" }
+tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "b1ef7d1ad74078275de6d1970d3a6503be36681e" }
+
+risingwave_backup = { path = "./src/storage/backup" }
+risingwave_batch = { path = "./src/batch" }
+risingwave_cmd = { path = "./src/cmd" }
+risingwave_common = { path = "./src/common" }
+risingwave_common_service = { path = "./src/common/common_service" }
+risingwave_compactor = { path = "./src/storage/compactor" }
+risingwave_compute = { path = "./src/compute" }
+risingwave_ctl = { path = "./src/ctl" }
+risingwave_connector = { path = "./src/connector" }
+risingwave_expr = { path = "./src/expr" }
+risingwave_frontend = { path = "./src/frontend" }
+risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
+risingwave_hummock_test = { path = "./src/storage/hummock_test" }
+risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
+risingwave_meta = { path = "./src/meta" }
+risingwave_object_store = { path = "./src/object_store" }
+risingwave_pb = { path = "./src/prost" }
+risingwave_rpc_client = { path = "./src/rpc_client" }
+risingwave_rt = { path = "./src/utils/runtime" }
+risingwave_source = { path = "./src/source" }
+risingwave_sqlparser = { path = "./src/sqlparser" }
+risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
+risingwave_storage = { path = "./src/storage" }
+risingwave_stream = { path = "./src/stream" }
+risingwave_test_runner = { path = "./src/test_runner" }
+risingwave_udf = { path = "./src/udf" }
+risingwave_variables = { path = "./src/utils/variables" }
 
 [profile.dev]
 lto = 'off'
@@ -115,13 +149,15 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
-debug = "line-tables-only"
+debug = 1
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad" }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }
+# patch: unlimit 4MB message size for grpc client
+etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }

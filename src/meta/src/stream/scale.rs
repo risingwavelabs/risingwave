@@ -412,6 +412,7 @@ where
             })
             .collect();
 
+        // FIXME: the same as anther place calling `list_table_fragments` in scaling.
         // Index for StreamActor
         let mut actor_map = HashMap::new();
         // Index for Fragment
@@ -1641,12 +1642,14 @@ where
 
         let all_table_fragments = self.fragment_manager.list_table_fragments().await;
 
+        // FIXME: only need actor id and dispatcher info, avoid clone it.
         let mut actor_map = HashMap::new();
         let mut actor_status = HashMap::new();
+        // FIXME: only need fragment distribution info, should avoid clone it.
         let mut fragment_map = HashMap::new();
 
-        for table_fragments in &all_table_fragments {
-            for (fragment_id, fragment) in &table_fragments.fragments {
+        for table_fragments in all_table_fragments {
+            for (fragment_id, fragment) in table_fragments.fragments {
                 fragment
                     .actors
                     .iter()
@@ -1655,10 +1658,10 @@ where
                         actor_map.insert(id as ActorId, actor.clone());
                     });
 
-                fragment_map.insert(*fragment_id, fragment.clone());
+                fragment_map.insert(fragment_id, fragment);
             }
 
-            actor_status.extend(table_fragments.actor_status.clone());
+            actor_status.extend(table_fragments.actor_status);
         }
 
         let mut no_shuffle_source_fragment_ids = HashSet::new();
@@ -1677,6 +1680,7 @@ where
         struct WorkerChanges {
             include_worker_ids: BTreeSet<WorkerId>,
             exclude_worker_ids: BTreeSet<WorkerId>,
+            target_parallelism: Option<usize>,
         }
 
         let mut fragment_worker_changes: HashMap<_, _> = fragment_worker_changes
@@ -1687,6 +1691,7 @@ where
                     WorkerChanges {
                         include_worker_ids: changes.include_worker_ids.into_iter().collect(),
                         exclude_worker_ids: changes.exclude_worker_ids.into_iter().collect(),
+                        target_parallelism: changes.target_parallelism.map(|p| p as usize),
                     },
                 )
             })
@@ -1704,6 +1709,7 @@ where
             WorkerChanges {
                 include_worker_ids,
                 exclude_worker_ids,
+                target_parallelism,
             },
         ) in fragment_worker_changes
         {
@@ -1805,6 +1811,17 @@ where
                             "No schedulable ParallelUnits available for fragment {}",
                             fragment_id
                         );
+                    }
+
+                    if let Some(target_parallelism) = target_parallelism {
+                        if target_parallel_unit_ids.len() < target_parallelism {
+                            bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                        }
+
+                        target_parallel_unit_ids = target_parallel_unit_ids
+                            .into_iter()
+                            .take(target_parallelism)
+                            .collect();
                     }
 
                     let to_expand_parallel_units = target_parallel_unit_ids

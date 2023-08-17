@@ -56,6 +56,40 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
+        let target_level = levels.get_level(self.target_level);
+        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let min_overlap_picker = MinOverlappingPicker::new(
+            0,
+            self.target_level,
+            self.config.sub_level_max_compaction_bytes,
+            false,
+            overlap_strategy.clone(),
+        );
+        let (select_tables, target_tables) = min_overlap_picker.pick_tables(
+            &l0.sub_levels[0].table_infos,
+            &target_level.table_infos,
+            level_handlers,
+        );
+        // only pick tables for trivial move
+        if !select_tables.is_empty() && target_tables.is_empty() {
+            return Some(CompactionInput {
+                input_levels: vec![
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: select_tables,
+                    },
+                    InputLevel {
+                        level_idx: self.target_level as u32,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: vec![],
+                    },
+                ],
+                target_level: self.target_level,
+                target_sub_level_id: 0,
+            });
+        }
+
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
         if let Some(ret) = self.pick_multi_level_to_base(
             l0,
@@ -97,6 +131,12 @@ impl LevelCompactionPicker {
             stats.skip_by_write_amp_limit += 1;
             return None;
         }
+
+        // no running base_compaction
+        let strict_check = level_handlers[0]
+            .get_pending_tasks()
+            .iter()
+            .any(|task| task.target_level != 0);
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
@@ -152,7 +192,7 @@ impl LevelCompactionPicker {
 
             // The size of target level may be too large, we shall skip this compact task and wait
             //  the data in base level compact to lower level.
-            if target_level_size > self.config.max_compaction_bytes {
+            if target_level_size > self.config.max_compaction_bytes && strict_check {
                 continue;
             }
 
@@ -170,19 +210,13 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        if !min_write_amp_meet {
-            let is_base_level_task_pending = level_handlers[0]
-                .get_pending_tasks()
-                .iter()
-                .any(|task| task.target_level != 0);
+        if !min_write_amp_meet && strict_check {
             // If the write-amplification of all candidate task are large, we may hope to wait base
             // level compact more data to lower level.  But if we skip all task, I'm
             // afraid the data will be blocked in level0 and will be never compacted to base level.
             // So we only allow one task exceed write-amplification-limit running in
             // level0 to base-level.
-            if is_base_level_task_pending {
-                return None;
-            }
+            return None;
         }
 
         for (input, target_file_size, target_level_files) in input_levels {
@@ -618,12 +652,8 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        ret.add_pending_task(0, &mut levels_handler);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        ret.add_pending_task(1, &mut levels_handler);
-
+        // trivial_move
+        ret.add_pending_task(0, &mut levels_handler); // pending only for test
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
@@ -802,6 +832,55 @@ pub mod tests {
     }
 
     #[test]
+    fn test_issue_11154() {
+        let mut local_stats = LocalPickerStatistic::default();
+        let mut l0 = generate_l0_overlapping_sublevels(vec![
+            vec![
+                generate_table(4, 1, 1, 200, 1),
+                generate_table(5, 1, 400, 600, 1),
+            ],
+            vec![
+                generate_table(6, 1, 1, 200, 1),
+                generate_table(7, 1, 400, 600, 1),
+            ],
+            vec![
+                generate_table(8, 1, 1, 200, 1),
+                generate_table(9, 1, 400, 600, 1),
+            ],
+            vec![generate_table(10, 1, 1, 600, 1)],
+        ]);
+        // We can set level_type only because the input above is valid.
+        for s in &mut l0.sub_levels {
+            s.level_type = LevelType::Nonoverlapping as i32;
+        }
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            member_table_ids: vec![1],
+            ..Default::default()
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        // Pick with large max_compaction_bytes results all sub levels included in input.
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(800)
+                .sub_level_max_compaction_bytes(50000)
+                .max_bytes_for_level_base(500000)
+                .level0_sub_level_compact_level_count(1)
+                .build(),
+        );
+        // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
+        // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
+        let mut picker = LevelCompactionPicker::new(1, config);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        // avoid add sst_10 and cause a big task
+        assert_eq!(3, ret.input_levels.len());
+    }
+
+    #[test]
     fn test_l0_to_l1_break_on_pending_sub_level() {
         let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
             vec![
@@ -849,6 +928,7 @@ pub mod tests {
         // But stopped by pending sub-level when trying to include more sub-levels.
         let mut picker = LevelCompactionPicker::new(1, config.clone());
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+
         assert!(ret.is_none());
 
         // Free the pending sub-level.
@@ -875,7 +955,7 @@ pub mod tests {
 
         let levels = Levels {
             l0: Some(l0),
-            levels: vec![generate_level(1, vec![generate_table(3, 1, 10, 90, 1)])],
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 1, 100, 1)])],
             member_table_ids: vec![1],
             ..Default::default()
         };
@@ -894,17 +974,19 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(3, ret.input_levels.len());
-        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
-
-        // trivial move do not be limited by level0_sub_level_compact_level_count
+        // println!("ret.input_levels: {:?}", ret.input_levels);
+        // 1. trivial_move
+        assert_eq!(2, ret.input_levels.len());
+        assert!(ret.input_levels[1].table_infos.is_empty());
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
         ret.add_pending_task(0, &mut levels_handler);
+
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(2, ret.input_levels.len());
-        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
-        assert!(ret.input_levels[1].table_infos.is_empty());
+        println!("ret.input_levels: {:?}", ret.input_levels);
+        assert_eq!(3, ret.input_levels.len());
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
     }
 
     #[test]

@@ -1,0 +1,30 @@
+- sql: |
+    SELECT format('Hello %s', 'World');
+  expected_outputs:
+  - batch_plan
+- sql: |
+    CREATE TABLE t1(v1 varchar, v2 varchar, v3 int);
+    SELECT format('Testing %s, %I, %s, %%', v1, v2, v3) FROM t1;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    CREATE TABLE t1(v1 varchar, v2 int, v3 int);
+    SELECT format('Testing %s, %I, %s, %%', v1, v2, v3) FROM t1;
+  expected_outputs:
+  - binder_error
+- sql: |
+    SELECT format('Testing %s, %s, %s, %%', 'one', 'two');
+  expected_outputs:
+  - binder_error
+- sql: |
+    SELECT format('Testing %s, %s, %s, %', 'one', 'two', 'three');
+  expected_outputs:
+  - binder_error
+- sql: |
+    SELECT format('Testing %s, %f, %d, %', 'one', 'two', 'three');
+  expected_outputs:
+  - binder_error
+- sql: |
+    SELECT format();
+  expected_outputs:
+  - binder_error

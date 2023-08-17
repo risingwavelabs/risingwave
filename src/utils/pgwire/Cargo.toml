@@ -19,11 +19,11 @@ anyhow = { version = "1.0", default-features = false }
 byteorder = "1.4"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.10"
-openssl = "0.10.48"
+itertools = "0.11"
+openssl = "0.10.56"
 panic-message = "0.3"
-risingwave_common = { path = "../../common" }
-risingwave_sqlparser = { path = "../../sqlparser" }
+risingwave_common = { workspace = true }
+risingwave_sqlparser = { workspace = true }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tokio-openssl = "0.6.3"

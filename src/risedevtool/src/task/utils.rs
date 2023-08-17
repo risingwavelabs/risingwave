@@ -50,7 +50,7 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
         [tempo] => {
             cmd.env(
                 "RW_TRACING_ENDPOINT",
-                format!("http://{}:{}", tempo.otlp_address, tempo.otlp_port),
+                format!("http://{}:{}", tempo.address, tempo.otlp_port),
             );
         }
         _ => {

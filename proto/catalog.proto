@@ -26,7 +26,14 @@ message WatermarkDesc {
   expr.ExprNode expr = 2;
 }
 
+enum SchemaRegistryNameStrategy {
+  TOPIC_NAME_STRATEGY_UNSPECIFIED = 0;
+  RECORD_NAME_STRATEGY = 1;
+  TOPIC_RECORD_NAME_STRATEGY = 2;
+}
+
 message StreamSourceInfo {
+  // deprecated
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
   bool use_schema_registry = 3;
@@ -34,7 +41,11 @@ message StreamSourceInfo {
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
   string upsert_avro_primary_key = 7;
-  plan_common.StorageTableDesc upstream_table = 8;
+  plan_common.FormatType format = 8;
+  plan_common.EncodeType row_encode = 9;
+  SchemaRegistryNameStrategy name_strategy = 10;
+  optional string key_message_name = 11;
+  plan_common.StorageTableDesc upstream_table = 12;
 }
 
 message Source {
@@ -65,6 +76,9 @@ message Source {
   }
   string definition = 13;
   optional uint32 connection_id = 14;
+
+  optional uint64 initialized_at_epoch = 15;
+  optional uint64 created_at_epoch = 16;
 }
 
 enum SinkType {
@@ -95,6 +109,8 @@ message Sink {
   map<string, string> properties = 12;
   string definition = 13;
   optional uint32 connection_id = 14;
+  optional uint64 initialized_at_epoch = 15;
+  optional uint64 created_at_epoch = 16;
 }
 
 message Connection {
@@ -133,6 +149,9 @@ message Index {
   // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
   repeated int32 original_columns = 9;
+
+  optional uint64 initialized_at_epoch = 10;
+  optional uint64 created_at_epoch = 11;
 }
 
 message Function {
@@ -214,6 +233,18 @@ message Table {
   repeated int32 dist_key_in_pk = 25;
   // A dml fragment id corresponds to the table, used to decide where the dml statement is executed.
   optional uint32 dml_fragment_id = 26;
+  // The range of row count of the table.
+  // This field is not always present due to backward compatibility. Use `Cardinality::unknown` in this case.
+  plan_common.Cardinality cardinality = 27;
+
+  optional uint64 initialized_at_epoch = 28;
+  optional uint64 created_at_epoch = 29;
+
+  // This field is introduced in v1.2.0. It is used to indicate whether the table should use
+  // watermark_cache to avoid state cleaning as a performance optimization.
+  // In older versions we can just initialize without it.
+  bool cleaned_by_watermark = 30;
+
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;

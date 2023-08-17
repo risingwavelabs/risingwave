@@ -15,19 +15,20 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
+use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
+use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-
 pub struct HummockServiceImpl<S>
 where
     S: MetaStore,
@@ -59,7 +60,7 @@ impl<S> HummockManagerService for HummockServiceImpl<S>
 where
     S: MetaStore,
 {
-    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
+    type SubscribeCompactionEventStream = RwReceiverStream<SubscribeCompactionEventResponse>;
 
     async fn unpin_version_before(
         &self,
@@ -134,31 +135,6 @@ where
         Ok(Response::new(resp))
     }
 
-    async fn report_compaction_tasks(
-        &self,
-        request: Request<ReportCompactionTasksRequest>,
-    ) -> Result<Response<ReportCompactionTasksResponse>, Status> {
-        let req = request.into_inner();
-        match req.compact_task {
-            None => Ok(Response::new(ReportCompactionTasksResponse {
-                status: None,
-            })),
-            Some(mut compact_task) => {
-                self.hummock_manager
-                    .report_compact_task(
-                        req.context_id,
-                        &mut compact_task,
-                        Some(req.table_stats_change),
-                    )
-                    .await?;
-
-                Ok(Response::new(ReportCompactionTasksResponse {
-                    status: None,
-                }))
-            }
-        }
-    }
-
     async fn pin_specific_snapshot(
         &self,
         request: Request<PinSpecificSnapshotRequest>,
@@ -221,54 +197,6 @@ where
         }))
     }
 
-    async fn subscribe_compact_tasks(
-        &self,
-        request: Request<SubscribeCompactTasksRequest>,
-    ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let req = request.into_inner();
-        let context_id = req.context_id;
-        // check_context and add_compactor as a whole is not atomic, but compactor_manager will
-        // remove invalid compactor eventually.
-        if !self.hummock_manager.check_context(context_id).await {
-            return Err(Status::new(
-                tonic::Code::Internal,
-                format!("invalid hummock context {}", context_id),
-            ));
-        }
-        let compactor_manager = self.hummock_manager.compactor_manager.clone();
-        let max_compactor_task_multiplier =
-            self.hummock_manager.env.opts.max_compactor_task_multiplier;
-
-        let rx: tokio::sync::mpsc::Receiver<
-            Result<SubscribeCompactTasksResponse, crate::MetaError>,
-        > = compactor_manager.add_compactor(
-            context_id,
-            (req.cpu_core_num * max_compactor_task_multiplier) as u64,
-            req.cpu_core_num,
-        );
-
-        // Trigger compaction on all compaction groups.
-        for cg_id in self.hummock_manager.compaction_group_ids().await {
-            self.hummock_manager
-                .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
-        }
-        Ok(Response::new(RwReceiverStream::new(rx)))
-    }
-
-    // TODO: convert this into a stream.
-    async fn compactor_heartbeat(
-        &self,
-        request: Request<CompactorHeartbeatRequest>,
-    ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
-        let req = request.into_inner();
-        let compactor_manager = self.hummock_manager.compactor_manager.clone();
-
-        compactor_manager.update_task_heartbeats(req.context_id, &req.progress);
-        compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
-
-        Ok(Response::new(CompactorHeartbeatResponse { status: None }))
-    }
-
     async fn report_vacuum_task(
         &self,
         request: Request<ReportVacuumTaskRequest>,
@@ -304,7 +232,7 @@ where
         }
 
         // get internal_table_id by fragment_manager
-        if request.table_id >= NON_RESERVED_PG_CATALOG_TABLE_ID as u32 {
+        if request.table_id >= NON_RESERVED_SYS_CATALOG_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
@@ -319,7 +247,7 @@ where
         assert!(option
             .internal_table_id
             .iter()
-            .all(|table_id| *table_id >= (NON_RESERVED_PG_CATALOG_TABLE_ID as u32)),);
+            .all(|table_id| *table_id >= (NON_RESERVED_SYS_CATALOG_ID as u32)),);
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
@@ -351,14 +279,20 @@ where
         &self,
         request: Request<ReportFullScanTaskRequest>,
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
-        let vacuum_manager = self.vacuum_manager.clone();
+        let req = request.into_inner();
+        let hummock_manager = self.hummock_manager.clone();
+        hummock_manager
+            .metrics
+            .total_object_count
+            .set(req.total_object_count as _);
+        hummock_manager
+            .metrics
+            .total_object_size
+            .set(req.total_object_size as _);
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match vacuum_manager
-                .complete_full_gc(request.into_inner().object_ids)
-                .await
-            {
+            match hummock_manager.complete_full_gc(req.object_ids).await {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }
@@ -374,11 +308,9 @@ where
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.vacuum_manager
-            .start_full_gc(Duration::from_secs(
-                request.into_inner().sst_retention_time_sec,
-            ))
-            .await?;
+        self.hummock_manager.start_full_gc(Duration::from_secs(
+            request.into_inner().sst_retention_time_sec,
+        ))?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -541,5 +473,54 @@ where
             task_assignment,
             task_progress,
         }))
+    }
+
+    async fn subscribe_compaction_event(
+        &self,
+        request: Request<Streaming<SubscribeCompactionEventRequest>>,
+    ) -> Result<Response<Self::SubscribeCompactionEventStream>, tonic::Status> {
+        let mut request_stream: Streaming<SubscribeCompactionEventRequest> = request.into_inner();
+        let register_req = {
+            let req = request_stream.next().await.ok_or_else(|| {
+                Status::invalid_argument("subscribe_compaction_event request is empty")
+            })??;
+
+            match req.event {
+                Some(RequestEvent::Register(register)) => register,
+                _ => {
+                    return Err(Status::invalid_argument(
+                        "the first message must be `Register`",
+                    ))
+                }
+            }
+        };
+
+        let context_id = register_req.context_id;
+
+        // check_context and add_compactor as a whole is not atomic, but compactor_manager will
+        // remove invalid compactor eventually.
+        if !self.hummock_manager.check_context(context_id).await {
+            return Err(Status::new(
+                tonic::Code::Internal,
+                format!("invalid hummock context {}", context_id),
+            ));
+        }
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        let rx: tokio::sync::mpsc::UnboundedReceiver<
+            Result<SubscribeCompactionEventResponse, crate::MetaError>,
+        > = compactor_manager.add_compactor(context_id);
+
+        // register request stream to hummock
+        self.hummock_manager
+            .add_compactor_stream(context_id, request_stream);
+
+        // Trigger compaction on all compaction groups.
+        for cg_id in self.hummock_manager.compaction_group_ids().await {
+            self.hummock_manager
+                .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
+        }
+
+        Ok(Response::new(RwReceiverStream::new(rx)))
     }
 }

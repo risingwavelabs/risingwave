@@ -24,15 +24,15 @@ clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
 const-str = "0.5"
 prometheus = { version = "0.13" }
-risingwave_cmd = { path = "../cmd" }
-risingwave_common = { path = "../common" }
-risingwave_compactor = { path = "../storage/compactor" }
-risingwave_compute = { path = "../compute" }
-risingwave_ctl = { path = "../ctl" }
-risingwave_frontend = { path = "../frontend" }
-risingwave_meta = { path = "../meta" }
-risingwave_rt = { path = "../utils/runtime" }
-strum = "0.24"
+risingwave_cmd = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_compactor = { workspace = true }
+risingwave_compute = { workspace = true }
+risingwave_ctl = { workspace = true }
+risingwave_frontend = { workspace = true }
+risingwave_meta = { workspace = true }
+risingwave_rt = { workspace = true }
+strum = "0.25"
 strum_macros = "0.24"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -55,7 +55,7 @@ vergen = { version = "8", default-features = false, features = ["build", "git", 
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"], rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
 
 [[bin]]
 name = "risingwave"

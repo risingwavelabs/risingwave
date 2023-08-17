@@ -60,7 +60,7 @@ pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Debug, Clone, Parser, OverrideConfig)]
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
@@ -69,7 +69,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
 
-    // TODO: rename to listen_address and separate out the port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
@@ -126,45 +125,38 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    pub override_opts: OverrideConfigOpts,
-}
-
-/// Command-line arguments for compute-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
 
     /// The interval of periodic barrier.
     #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
-    #[override_opts(path = system.barrier_interval_ms, optional_in_config)]
+    #[override_opts(path = system.barrier_interval_ms)]
     barrier_interval_ms: Option<u32>,
 
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    #[override_opts(path = system.sstable_size_mb, optional_in_config)]
+    #[override_opts(path = system.sstable_size_mb)]
     sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
     #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    #[override_opts(path = system.block_size_kb, optional_in_config)]
+    #[override_opts(path = system.block_size_kb)]
     block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    #[override_opts(path = system.bloom_false_positive, optional_in_config)]
+    #[override_opts(path = system.bloom_false_positive)]
     bloom_false_positive: Option<f64>,
 
     /// State store url
     #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = system.state_store, optional_in_config)]
+    #[override_opts(path = system.state_store)]
     state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
-    #[override_opts(path = system.data_directory, optional_in_config)]
+    #[override_opts(path = system.data_directory)]
     data_directory: Option<String>,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
@@ -174,12 +166,12 @@ pub struct OverrideConfigOpts {
 
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
-    #[override_opts(path = system.backup_storage_url, optional_in_config)]
+    #[override_opts(path = system.backup_storage_url)]
     backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
-    #[override_opts(path = system.backup_storage_directory, optional_in_config)]
+    #[override_opts(path = system.backup_storage_directory)]
     backup_storage_directory: Option<String>,
 
     #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
@@ -209,7 +201,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         info!("Starting meta node");
         info!("> options: {:?}", opts);
-        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        let config = load_config(&opts.config_path, &opts);
         info!("> config: {:?}", config);
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -266,6 +258,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -273,6 +266,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
+                full_gc_interval_sec: config.meta.full_gc_interval_sec,
                 collect_gc_watermark_spin_interval_sec: config
                     .meta
                     .collect_gc_watermark_spin_interval_sec,
@@ -294,7 +288,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_split_compact_group_interval_sec: config
                     .meta
                     .periodic_split_compact_group_interval_sec,
-                max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 min_table_split_size: config.meta.move_table_size_limit,
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
@@ -306,6 +299,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_heartbeat_interval_secs: config
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
+                compaction_config: Some(config.meta.compaction_config),
             },
             config.system.into_init_system_params(),
         )

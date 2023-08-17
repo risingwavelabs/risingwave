@@ -14,19 +14,18 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
-    VacuumTask,
+    HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, VacuumTask,
 };
+use tokio::sync::mpsc::UnboundedSender;
+
+pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventResponse, tonic::Status>;
 
 use crate::error::Result;
-
-pub type CompactTaskItem =
-    std::result::Result<risingwave_pb::hummock::SubscribeCompactTasksResponse, tonic::Status>;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
@@ -37,16 +36,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        table_stats_change: TableStatsMap,
-    ) -> Result<()>;
-    async fn compactor_heartbeat(
-        &self,
-        progress: Vec<CompactTaskProgress>,
-        workload: CompactorWorkload,
-    ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(
         &self,
@@ -54,18 +43,26 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()>;
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()>;
-
-    async fn subscribe_compact_tasks(
-        &self,
-        cpu_core_num: u32,
-    ) -> Result<BoxStream<'static, CompactTaskItem>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
         table_id: u32,
         level: u32,
+        sst_ids: Vec<u64>,
     ) -> Result<()>;
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()>;
+    async fn report_full_scan_task(
+        &self,
+        filtered_object_ids: Vec<HummockSstableObjectId>,
+        total_object_count: u64,
+        total_object_size: u64,
+    ) -> Result<()>;
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
+
+    async fn subscribe_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeCompactionEventRequest>,
+        BoxStream<'static, CompactionEventItem>,
+    )>;
 }

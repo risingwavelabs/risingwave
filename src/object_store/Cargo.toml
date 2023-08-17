@@ -22,10 +22,10 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 hyper-tls = "0.5.0"
-itertools = "0.10"
-opendal = "0.38"
+itertools = "0.11"
+opendal = "0.39"
 prometheus = { version = "0.13", features = ["process"] }
-risingwave_common = { path = "../common" }
+risingwave_common = { workspace = true }
 spin = "0.9"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }

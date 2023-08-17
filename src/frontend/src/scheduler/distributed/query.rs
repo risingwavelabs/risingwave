@@ -452,7 +452,7 @@ pub(crate) mod tests {
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
-    use crate::optimizer::property::{Distribution, Order};
+    use crate::optimizer::property::{Cardinality, Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
@@ -534,6 +534,7 @@ pub(crate) mod tests {
             vec![],
             ctx,
             false,
+            Cardinality::unknown(),
         )
         .to_batch()
         .unwrap()

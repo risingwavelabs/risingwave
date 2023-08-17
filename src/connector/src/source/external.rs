@@ -331,7 +331,7 @@ impl MySqlExternalTableReader {
         } else {
             // > where (L_ORDERKEY,L_LINENUMBER) >= (5999968,7) order by L_ORDERKEY, L_LINENUMBER;
             // FIXME: seems mysql cannot leverage the given key to narrow down the range of scan,
-            // we need to rewrite the order conditons by our own.
+            // we need to rewrite the order conditions by our own.
             let range_params = primary_keys.iter().map(|pk| format!(":{}", pk)).join(",");
             format!(
                 "SELECT * FROM {} WHERE ({}) > ({}) ORDER BY {}",

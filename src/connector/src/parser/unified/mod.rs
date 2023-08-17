@@ -14,6 +14,7 @@
 
 //! Unified parsers for both normal events or CDC events of multiple message formats
 
+use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
 
@@ -40,7 +41,7 @@ pub trait Access {
 
 pub enum AccessImpl<'a, 'b> {
     Avro(AvroAccess<'a, 'b>),
-    Bytes(BytesAccess),
+    Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
     Json(JsonAccess<'a, 'b>),
 }
@@ -63,6 +64,7 @@ pub enum ChangeEventOperation {
 }
 
 /// Methods to access a CDC event.
+#[auto_impl(&)]
 pub trait ChangeEvent {
     /// Access the operation type.
     fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError>;

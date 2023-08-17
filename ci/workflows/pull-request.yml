@@ -1,3 +1,9 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "check ci image rebuild"
     plugins:
@@ -19,6 +25,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
@@ -34,6 +41,7 @@ steps:
           environment:
             - GITHUB_TOKEN
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
@@ -44,6 +52,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
@@ -54,6 +63,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p ci-dev"
@@ -68,6 +78,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
@@ -81,6 +92,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
@@ -94,6 +106,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 14
+    retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
@@ -105,6 +118,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
+    retry: *auto-retry
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
@@ -118,6 +132,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 18
+    retry: *auto-retry
 
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
@@ -132,6 +147,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 18
     cancel_on_build_failing: true
+    retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
@@ -150,6 +166,7 @@ steps:
           - "11"
           - "17"
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
@@ -163,6 +180,21 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end iceberg sink v2 test"
+    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
 
   - label: "e2e java-binding test"
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
@@ -176,6 +208,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
@@ -187,6 +220,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
+    retry: *auto-retry
 
   # The timeout should be strictly less than timeout in `main-cron.yml`.
   # It should be as conservative as possible.
@@ -203,21 +237,8 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 14
-
-  - label: "fuzz test"
-    command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-simulation"
-    plugins:
-      - ./ci/plugins/swapfile
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 16
+    retry: *auto-retry
 
   - label: "check"
     command: "ci/scripts/check.sh"
@@ -238,6 +259,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
     timeout_in_minutes: 20
+    retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
@@ -248,6 +270,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
     cancel_on_build_failing: true
+    retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh scale::"
@@ -258,6 +281,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "recovery integration test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh recovery::"
@@ -268,6 +292,18 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "backfill integration test (deterministic simulation)"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh backfill_tests::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=16 ci/scripts/deterministic-e2e-test.sh"
@@ -285,6 +321,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 21
     cancel_on_build_failing: true
+    retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
@@ -303,6 +340,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     cancel_on_build_failing: true
+    retry: *auto-retry
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
@@ -313,12 +351,19 @@ steps:
       - shellcheck#v1.2.0:
           files: ./**/*.sh
     timeout_in_minutes: 5
+    retry: *auto-retry
+
+  # The following jobs are triggered only when PR has corresponding labels.
 
   # Generates cpu flamegraph env
   - label: "flamegraph-env-build"
     key: "flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
-    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "heap_flamegraph"
+    if: |
+      build.pull_request.labels includes "cpu_flamegraph"
+      || build.pull_request.labels includes "ci/run-cpu-flamegraph"
+      || build.pull_request.labels includes "heap_flamegraph"
+      || build.pull_request.labels includes "ci/run-heap-flamegraph"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -335,9 +380,7 @@ steps:
   - label: "Generate CPU flamegraph"
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh cpu"
     depends_on: "flamegraph-env-build"
-
-    if: build.pull_request.labels includes "cpu_flamegraph"
-
+    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "ci/run-cpu-flamegraph"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -359,7 +402,7 @@ steps:
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh heap"
     depends_on: "flamegraph-env-build"
 
-    if: build.pull_request.labels includes "heap_flamegraph"
+    if: build.pull_request.labels includes "heap_flamegraph" || build.pull_request.labels includes "ci/run-heap-flamegraph"
 
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -405,3 +448,16 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
+
+  - label: "Backfill tests"
+    command: "ci/scripts/backfill-test.sh -p ci-dev"
+    if: build.pull_request.labels includes "ci/run-backfill-tests"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5

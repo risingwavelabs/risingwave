@@ -29,6 +29,7 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(un
 
 # install python dependencies
 RUN pip3 install pyarrow pytest
+RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
@@ -37,11 +38,12 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 # install build tools
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make@0.36.10 cargo-cache cargo-audit \
+RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
+    cargo-make@0.36.10 \
     && cargo install sccache --locked \
-    && cargo install sqllogictest-bin@0.15.0 \
+    && cargo install sqllogictest-bin@0.15.2 --locked \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
-RUN cargo uninstall cargo-binstall
+RUN cargo uninstall cargo-binstall cargo-cache

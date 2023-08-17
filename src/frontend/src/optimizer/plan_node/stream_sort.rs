@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -25,21 +26,24 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamSort {
+pub struct StreamEowcSort {
     pub base: PlanBase,
 
     input: PlanRef,
     sort_column_index: usize,
 }
 
-impl Distill for StreamSort {
+impl Distill for StreamEowcSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let fields = vec![("sort_column_index", Pretty::debug(&self.sort_column_index))];
-        childless_record("StreamSort", fields)
+        let fields = vec![(
+            "sort_column",
+            Pretty::display(&FieldDisplay(&self.input.schema()[self.sort_column_index])),
+        )];
+        childless_record("StreamEowcSort", fields)
     }
 }
 
-impl StreamSort {
+impl StreamEowcSort {
     pub fn new(input: PlanRef, sort_column_index: usize) -> Self {
         assert!(input.watermark_columns().contains(sort_column_index));
 
@@ -100,7 +104,7 @@ impl StreamSort {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSort {
+impl PlanTreeNodeUnary for StreamEowcSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -110,9 +114,9 @@ impl PlanTreeNodeUnary for StreamSort {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSort }
+impl_plan_tree_node_for_unary! { StreamEowcSort }
 
-impl StreamNode for StreamSort {
+impl StreamNode for StreamEowcSort {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         PbNodeBody::Sort(SortNode {
@@ -126,4 +130,4 @@ impl StreamNode for StreamSort {
     }
 }
 
-impl ExprRewritable for StreamSort {}
+impl ExprRewritable for StreamEowcSort {}

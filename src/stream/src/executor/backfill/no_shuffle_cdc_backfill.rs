@@ -91,8 +91,6 @@ impl CdcBackfillExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        tracing::info!("cdc backfill started: actor {:?}", self.actor_ctx.id);
-
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
@@ -115,8 +113,6 @@ impl CdcBackfillExecutor {
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
 
-        tracing::info!("cdc backfill got first barrier: {:?}", first_barrier);
-
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
         let mut invalid_backfill = false;
@@ -137,8 +133,6 @@ impl CdcBackfillExecutor {
         }
 
         if invalid_backfill {
-            tracing::info!("invalid cdc backfill: actor {:?}", self.actor_ctx.id);
-
             // The first barrier message should be propagated.
             yield Message::Barrier(first_barrier);
             #[for_await]
@@ -368,7 +362,7 @@ impl CdcBackfillExecutor {
                                     current_pk_pos =
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
 
-                                    tracing::debug!(
+                                    tracing::trace!(
                                         "current backfill progress: {:?}",
                                         current_pk_pos
                                     );
@@ -387,7 +381,7 @@ impl CdcBackfillExecutor {
             }
         }
 
-        tracing::info!(
+        tracing::debug!(
             actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );

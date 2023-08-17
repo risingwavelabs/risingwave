@@ -22,8 +22,26 @@ use risingwave_storage::error::StorageError;
 
 use crate::executor::StreamExecutorError;
 
+/// A specialized Result type for streaming tasks.
+pub type StreamResult<T> = std::result::Result<T, StreamError>;
+
+/// The error type for streaming tasks.
+#[derive(thiserror::Error)]
+#[error("{inner}")]
+pub struct StreamError {
+    inner: Box<Inner>,
+}
+
 #[derive(thiserror::Error, Debug)]
-enum Inner {
+#[error("{kind}")]
+struct Inner {
+    #[from]
+    kind: ErrorKind,
+    backtrace: Backtrace,
+}
+
+#[derive(thiserror::Error, Debug)]
+enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
@@ -32,67 +50,66 @@ enum Inner {
     ),
 
     #[error("Expression error: {0}")]
-    Expression(ExprError),
+    Expression(#[source] ExprError),
 
     #[error("Array/Chunk error: {0}")]
-    Array(ArrayError),
+    Array(#[source] ArrayError),
 
     #[error("Executor error: {0:?}")]
-    Executor(Box<StreamExecutorError>),
+    Executor(#[source] StreamExecutorError),
 
     #[error(transparent)]
     Internal(anyhow::Error),
-}
-
-/// Error type for streaming tasks.
-#[derive(thiserror::Error)]
-#[error("{inner}")]
-pub struct StreamError {
-    #[from]
-    inner: Inner,
-    backtrace: Backtrace,
 }
 
 impl std::fmt::Debug for StreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;
 
-        write!(f, "{}", self.inner)?;
+        write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = (&self.inner.kind as &dyn Error).request_ref::<Backtrace>() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
-            write!(f, "  backtrace of `StreamError`:\n{}", self.backtrace)?;
+            write!(f, "  backtrace of `StreamError`:\n{}", self.inner.backtrace)?;
         }
         Ok(())
+    }
+}
+
+impl From<ErrorKind> for StreamError {
+    fn from(kind: ErrorKind) -> Self {
+        Self {
+            inner: Box::new(kind.into()),
+        }
     }
 }
 
 // Storage transaction error; ...
 impl From<StorageError> for StreamError {
     fn from(s: StorageError) -> Self {
-        Inner::Storage(s).into()
+        ErrorKind::Storage(s).into()
     }
 }
 
 // Build expression error; ...
 impl From<ExprError> for StreamError {
     fn from(error: ExprError) -> Self {
-        Inner::Expression(error).into()
+        ErrorKind::Expression(error).into()
     }
 }
 
 // Chunk compaction error; ProtoBuf ser/de error; ...
 impl From<ArrayError> for StreamError {
     fn from(error: ArrayError) -> Self {
-        Inner::Array(error).into()
+        ErrorKind::Array(error).into()
     }
 }
 
 // Executor runtime error; ...
 impl From<StreamExecutorError> for StreamError {
     fn from(error: StreamExecutorError) -> Self {
-        Inner::Executor(Box::new(error)).into()
+        ErrorKind::Executor(error).into()
     }
 }
 
@@ -114,7 +131,7 @@ impl From<ConnectorError> for StreamError {
 // Internal error.
 impl From<anyhow::Error> for StreamError {
     fn from(a: anyhow::Error) -> Self {
-        Inner::Internal(a).into()
+        ErrorKind::Internal(a).into()
     }
 }
 
@@ -125,4 +142,4 @@ impl From<StreamError> for tonic::Status {
     }
 }
 
-pub type StreamResult<T> = std::result::Result<T, StreamError>;
+static_assertions::const_assert_eq!(std::mem::size_of::<StreamError>(), 8);

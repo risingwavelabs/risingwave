@@ -25,14 +25,14 @@ clap = { version = "4", features = ["derive", "env"] }
 crepe = "0.1"
 easy-ext = "1"
 either = "1"
-enum-as-inner = "0.5"
-etcd-client = { version = "0.2", package = "madsim-etcd-client" }
+enum-as-inner = "0.6"
+etcd-client = { workspace = true }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
-itertools = "0.10"
+itertools = "0.11"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
@@ -44,16 +44,16 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 reqwest = "0.11"
-risingwave_backup = { path = "../storage/backup" }
-risingwave_common = { path = "../common" }
-risingwave_common_service = { path = "../common/common_service" }
-risingwave_connector = { path = "../connector" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_object_store = { path = "../object_store" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_sqlparser = { path = "../sqlparser" }
-scopeguard = "1.1.0"
+risingwave_backup = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_object_store = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_sqlparser = { workspace = true }
+scopeguard = "1.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sync-point = { path = "../utils/sync-point" }
@@ -68,7 +68,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
@@ -76,14 +76,14 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.6"
-tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
 maplit = "1.0.2"
 rand = "0.8"
-risingwave_test_runner = { path = "../test_runner" }
+risingwave_test_runner = { workspace = true }
 static_assertions = "1"
 tempfile = "3"
 

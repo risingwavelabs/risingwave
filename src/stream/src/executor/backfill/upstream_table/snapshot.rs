@@ -6,6 +6,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
@@ -66,7 +67,7 @@ impl SnapshotReadArgs {
 }
 
 /// A wrapper of upstream table for snapshot read
-/// becasue we need to customize the snapshot read for managed upsream table (e.g. mv, index)
+/// because we need to customize the snapshot read for managed upstream table (e.g. mv, index)
 /// and external upstream table.
 pub struct UpstreamTableReader<T> {
     inner: T,
@@ -115,8 +116,10 @@ impl<S: StateStore> UpstreamTableRead for UpstreamTableReader<StorageTable<S>> {
 
             pin_mut!(iter);
 
+            let mut builder =
+                DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
             #[for_await]
-            for chunk in iter_chunks(iter, self.inner.schema(), args.chunk_size) {
+            for chunk in iter_chunks(iter, args.chunk_size, &mut builder) {
                 yield chunk?;
             }
         }
@@ -158,7 +161,10 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             );
 
             pin_mut!(row_stream);
-            let chunk_stream = iter_chunks(row_stream, self.inner.schema(), args.chunk_size);
+
+            let mut builder =
+                DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
+            let chunk_stream = iter_chunks(row_stream, args.chunk_size, &mut builder);
             #[for_await]
             for chunk in chunk_stream {
                 yield chunk?;

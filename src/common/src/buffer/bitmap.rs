@@ -37,7 +37,6 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
-use std::mem::size_of;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
@@ -49,10 +48,26 @@ use crate::estimate_size::EstimateSize;
 pub struct BitmapBuilder {
     len: usize,
     data: Vec<usize>,
-    count_ones: usize,
 }
 
 const BITS: usize = usize::BITS as usize;
+
+impl From<Bitmap> for BitmapBuilder {
+    fn from(bitmap: Bitmap) -> Self {
+        let len = bitmap.len();
+        if let Some(bits) = bitmap.bits {
+            BitmapBuilder {
+                len,
+                data: bits.into_vec(),
+            }
+        } else if bitmap.count_ones == 0 {
+            Self::zeroed(bitmap.len())
+        } else {
+            debug_assert!(bitmap.len() == bitmap.count_ones());
+            Self::filled(bitmap.len())
+        }
+    }
+}
 
 impl BitmapBuilder {
     /// Creates a new empty bitmap with at least the specified capacity.
@@ -60,7 +75,6 @@ impl BitmapBuilder {
         BitmapBuilder {
             len: 0,
             data: Vec::with_capacity(Bitmap::vec_len(capacity)),
-            count_ones: 0,
         }
     }
 
@@ -69,8 +83,17 @@ impl BitmapBuilder {
         BitmapBuilder {
             len,
             data: vec![0; Bitmap::vec_len(len)],
-            count_ones: 0,
         }
+    }
+
+    /// Creates a new bitmap with all bits set to 1.
+    pub fn filled(len: usize) -> BitmapBuilder {
+        let vec_len = Bitmap::vec_len(len);
+        let mut data = vec![usize::MAX; vec_len];
+        if vec_len >= 1 && len % BITS != 0 {
+            data[vec_len - 1] = (1 << (len % BITS)) - 1;
+        }
+        BitmapBuilder { len, data }
     }
 
     /// Writes a new value into a single bit.
@@ -79,16 +102,10 @@ impl BitmapBuilder {
 
         let byte = &mut self.data[n / BITS];
         let mask = 1 << (n % BITS);
-        match (*byte & mask != 0, val) {
-            (true, false) => {
-                *byte &= !mask;
-                self.count_ones -= 1;
-            }
-            (false, true) => {
-                *byte |= mask;
-                self.count_ones += 1;
-            }
-            _ => {}
+        if val {
+            *byte |= mask;
+        } else {
+            *byte &= !mask;
         }
     }
 
@@ -106,7 +123,6 @@ impl BitmapBuilder {
             self.data.push(0);
         }
         self.data[self.len / BITS] |= (bit_set as usize) << (self.len % BITS);
-        self.count_ones += bit_set as usize;
         self.len += 1;
         self
     }
@@ -125,9 +141,6 @@ impl BitmapBuilder {
         if bit_set && self.len % BITS != 0 {
             // remove tailing 1s
             *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
-        }
-        if bit_set {
-            self.count_ones += n;
         }
         self
     }
@@ -148,11 +161,24 @@ impl BitmapBuilder {
     /// Appends a bitmap to the back.
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
         if self.len % BITS == 0 {
-            // self is aligned, so just append the bytes
+            // fast path: self is aligned
             self.len += other.len();
-            self.data.extend_from_slice(&other.bits);
-            self.count_ones += other.count_ones;
+            if let Some(bits) = &other.bits {
+                // append the bytes
+                self.data.extend_from_slice(bits);
+            } else if other.count_ones == 0 {
+                // append 0s
+                self.data.resize(Bitmap::vec_len(self.len), 0);
+            } else {
+                // append 1s
+                self.data.resize(Bitmap::vec_len(self.len), usize::MAX);
+                if self.len % BITS != 0 {
+                    // remove tailing 1s
+                    *self.data.last_mut().unwrap() = (1 << (self.len % BITS)) - 1;
+                }
+            }
         } else {
+            // slow path: append bits one by one
             for bit in other.iter() {
                 self.append(bit);
             }
@@ -160,11 +186,13 @@ impl BitmapBuilder {
         self
     }
 
+    /// Finishes building and returns the bitmap.
     pub fn finish(self) -> Bitmap {
+        let count_ones = self.data.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
         Bitmap {
             num_bits: self.len(),
-            bits: self.data.into(),
-            count_ones: self.count_ones,
+            count_ones,
+            bits: (count_ones != 0 && count_ones != self.len).then(|| self.data.into()),
         }
     }
 
@@ -191,12 +219,17 @@ pub struct Bitmap {
 
     /// Bits are stored in a compact form.
     /// They are packed into `usize`s.
-    bits: Box<[usize]>,
+    ///
+    /// Optimization: If all bits are set to 0 or 1, this field MUST be `None`.
+    bits: Option<Box<[usize]>>,
 }
 
 impl EstimateSize for Bitmap {
     fn estimated_heap_size(&self) -> usize {
-        self.bits.len() * size_of::<usize>()
+        match &self.bits {
+            Some(bits) => std::mem::size_of_val(bits.as_ref()),
+            None => 0,
+        }
     }
 }
 
@@ -211,19 +244,18 @@ impl std::fmt::Debug for Bitmap {
 
 impl Bitmap {
     /// Creates a new bitmap with all bits set to 0.
-    pub fn zeros(len: usize) -> Self {
-        BitmapBuilder::zeroed(len).finish()
+    pub fn zeros(num_bits: usize) -> Self {
+        Self {
+            bits: None,
+            num_bits,
+            count_ones: 0,
+        }
     }
 
     /// Creates a new bitmap with all bits set to 1.
     pub fn ones(num_bits: usize) -> Self {
-        let len = Self::vec_len(num_bits);
-        let mut bits = vec![usize::MAX; len];
-        if num_bits % BITS != 0 {
-            bits[len - 1] &= (1 << (num_bits % BITS)) - 1;
-        }
         Self {
-            bits: bits.into(),
+            bits: None,
             num_bits,
             count_ones: num_bits,
         }
@@ -235,15 +267,19 @@ impl Bitmap {
         let count_ones = buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
         debug_assert!(count_ones <= num_bits);
         Self {
+            bits: (count_ones != 0 && count_ones != num_bits).then(|| buf.into()),
             num_bits,
-            bits: buf.into(),
             count_ones,
         }
     }
 
     /// Creates a new bitmap from bytes.
     pub fn from_bytes(buf: &[u8]) -> Self {
-        let num_bits = buf.len() * 8;
+        Self::from_bytes_with_len(buf, buf.len() * 8)
+    }
+
+    /// Creates a new bitmap from bytes and length.
+    fn from_bytes_with_len(buf: &[u8], num_bits: usize) -> Self {
         let mut bits = Vec::with_capacity(Self::vec_len(num_bits));
         let slice = unsafe {
             bits.set_len(bits.capacity());
@@ -307,7 +343,10 @@ impl Bitmap {
     ///
     /// Index must be in range.
     pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
-        self.bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0
+        match &self.bits {
+            None => self.count_ones != 0,
+            Some(bits) => bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0,
+        }
     }
 
     /// Returns true if the bit at `idx` is set.
@@ -324,37 +363,28 @@ impl Bitmap {
     /// Produces an iterator over each bit.
     pub fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
-            bits: &self.bits,
+            bits: self.bits.as_ref().map(|s| &s[..]),
             idx: 0,
             num_bits: self.num_bits,
             current_usize: 0,
+            all_ones: self.count_ones == self.num_bits,
         }
-    }
-
-    /// Performs bitwise saturate subtract on two equal-length bitmaps.
-    ///
-    /// For example, lhs = [01110] and rhs = [00111], then
-    /// `bit_saturate_subtract(lhs, rhs)` results in [01000]
-    pub fn bit_saturate_subtract(&self, rhs: &Bitmap) -> Bitmap {
-        assert_eq!(self.num_bits, rhs.num_bits);
-        let bits = (self.bits.iter())
-            .zip(rhs.bits.iter())
-            .map(|(&a, &b)| (!(a & b)) & a)
-            .collect();
-        Bitmap::from_vec_with_len(bits, self.num_bits)
     }
 
     /// Enumerates the index of each bit set to 1.
     pub fn iter_ones(&self) -> BitmapOnesIter<'_> {
-        let cur_bits = if self.num_bits > 0 {
-            Some(self.bits[0])
+        if let Some(bits) = &self.bits {
+            BitmapOnesIter::Buffer {
+                bits: &bits[..],
+                cur_idx: 0,
+                cur_bits: bits.first().cloned(),
+            }
         } else {
-            None
-        };
-        BitmapOnesIter {
-            bitmap: self,
-            cur_idx: 0,
-            cur_bits,
+            // all zeros or all ones
+            BitmapOnesIter::Range {
+                start: 0,
+                end: self.count_ones,
+            }
         }
     }
 
@@ -394,8 +424,15 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
 
     fn bitand(self, rhs: &'b Bitmap) -> Bitmap {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let bits = (self.bits.iter())
-            .zip(rhs.bits.iter())
+        let (lbits, rbits) = match (&self.bits, &rhs.bits) {
+            _ if self.count_ones == 0 || rhs.count_ones == 0 => {
+                return Bitmap::zeros(self.num_bits)
+            }
+            (_, None) => return self.clone(),
+            (None, _) => return rhs.clone(),
+            (Some(lbits), Some(rbits)) => (lbits, rbits),
+        };
+        let bits = (lbits.iter().zip(rbits.iter()))
             .map(|(&a, &b)| a & b)
             .collect();
         Bitmap::from_vec_with_len(bits, self.num_bits)
@@ -428,13 +465,7 @@ impl BitAnd for Bitmap {
 
 impl BitAndAssign<&Bitmap> for Bitmap {
     fn bitand_assign(&mut self, rhs: &Bitmap) {
-        assert_eq!(self.num_bits, rhs.num_bits);
-        let mut count_ones = 0;
-        for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
-            *a &= b;
-            count_ones += a.count_ones();
-        }
-        self.count_ones = count_ones as usize;
+        *self = &*self & rhs;
     }
 }
 
@@ -443,8 +474,15 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
 
     fn bitor(self, rhs: &'b Bitmap) -> Bitmap {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let bits = (self.bits.iter())
-            .zip(rhs.bits.iter())
+        let (lbits, rbits) = match (&self.bits, &rhs.bits) {
+            _ if self.count_ones == self.num_bits || rhs.count_ones == self.num_bits => {
+                return Bitmap::ones(self.num_bits);
+            }
+            (_, None) => return self.clone(),
+            (None, _) => return rhs.clone(),
+            (Some(lbits), Some(rbits)) => (lbits, rbits),
+        };
+        let bits = (lbits.iter().zip(rbits.iter()))
             .map(|(&a, &b)| a | b)
             .collect();
         Bitmap::from_vec_with_len(bits, self.num_bits)
@@ -467,15 +505,17 @@ impl<'b> BitOr<&'b Bitmap> for Bitmap {
     }
 }
 
+impl BitOr for Bitmap {
+    type Output = Bitmap;
+
+    fn bitor(self, rhs: Bitmap) -> Self::Output {
+        (&self).bitor(&rhs)
+    }
+}
+
 impl BitOrAssign<&Bitmap> for Bitmap {
     fn bitor_assign(&mut self, rhs: &Bitmap) {
-        assert_eq!(self.num_bits, rhs.num_bits);
-        let mut count_ones = 0;
-        for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
-            *a |= b;
-            count_ones += a.count_ones();
-        }
-        self.count_ones = count_ones as usize;
+        *self = &*self | rhs;
     }
 }
 
@@ -485,21 +525,19 @@ impl BitOrAssign<Bitmap> for Bitmap {
     }
 }
 
-impl BitOr for Bitmap {
-    type Output = Bitmap;
-
-    fn bitor(self, rhs: Bitmap) -> Self::Output {
-        (&self).bitor(&rhs)
-    }
-}
-
 impl BitXor for &Bitmap {
     type Output = Bitmap;
 
     fn bitxor(self, rhs: &Bitmap) -> Self::Output {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let bits = (self.bits.iter())
-            .zip(rhs.bits.iter())
+        let (lbits, rbits) = match (&self.bits, &rhs.bits) {
+            (_, None) if rhs.count_ones == 0 => return self.clone(),
+            (_, None) => return !self,
+            (None, _) if self.count_ones == 0 => return rhs.clone(),
+            (None, _) => return !rhs,
+            (Some(lbits), Some(rbits)) => (lbits, rbits),
+        };
+        let bits = (lbits.iter().zip(rbits.iter()))
             .map(|(&a, &b)| a ^ b)
             .collect();
         Bitmap::from_vec_with_len(bits, self.num_bits)
@@ -510,14 +548,19 @@ impl<'a> Not for &'a Bitmap {
     type Output = Bitmap;
 
     fn not(self) -> Self::Output {
-        let mut bits: Vec<usize> = self.bits.iter().map(|b| !b).collect();
+        let bits = match &self.bits {
+            None if self.count_ones == 0 => return Bitmap::ones(self.num_bits),
+            None => return Bitmap::zeros(self.num_bits),
+            Some(bits) => bits,
+        };
+        let mut bits: Box<[usize]> = bits.iter().map(|b| !b).collect();
         if self.num_bits % BITS != 0 {
             bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
         }
         Bitmap {
             num_bits: self.num_bits,
             count_ones: self.num_bits - self.count_ones,
-            bits: bits.into(),
+            bits: Some(bits),
         }
     }
 }
@@ -526,9 +569,14 @@ impl Not for Bitmap {
     type Output = Bitmap;
 
     fn not(mut self) -> Self::Output {
-        self.bits.iter_mut().for_each(|x| *x = !*x);
+        let bits = match &mut self.bits {
+            None if self.count_ones == 0 => return Bitmap::ones(self.num_bits),
+            None => return Bitmap::zeros(self.num_bits),
+            Some(bits) => bits,
+        };
+        bits.iter_mut().for_each(|x| *x = !*x);
         if self.num_bits % BITS != 0 {
-            self.bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
+            bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
         }
         self.count_ones = self.num_bits - self.count_ones;
         self
@@ -550,11 +598,23 @@ impl FromIterator<Option<bool>> for Bitmap {
 
 impl Bitmap {
     pub fn to_protobuf(&self) -> PbBuffer {
-        let mut body = Vec::with_capacity((self.num_bits + 7) % 8 + 1);
+        let body_len = (self.num_bits + 7) / 8 + 1;
+        let mut body = Vec::with_capacity(body_len);
         body.push((self.num_bits % 8) as u8);
-        body.extend_from_slice(unsafe {
-            std::slice::from_raw_parts(self.bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
-        });
+        match &self.bits {
+            None if self.count_ones == 0 => body.resize(body_len, 0),
+            None => {
+                body.resize(body_len, u8::MAX);
+                if self.num_bits % 8 != 0 {
+                    body[body_len - 1] = (1 << (self.num_bits % 8)) - 1;
+                }
+            }
+            Some(bits) => {
+                body.extend_from_slice(unsafe {
+                    std::slice::from_raw_parts(bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
+                });
+            }
+        }
         PbBuffer {
             body,
             compression: CompressionType::None as i32,
@@ -566,21 +626,17 @@ impl From<&PbBuffer> for Bitmap {
     fn from(buf: &PbBuffer) -> Self {
         let last_byte_num_bits = buf.body[0];
         let num_bits = ((buf.body.len() - 1) * 8) - ((8 - last_byte_num_bits) % 8) as usize;
-
-        let mut bitmap = Self::from_bytes(&buf.body[1..]);
-        bitmap.num_bits = num_bits;
-        bitmap
+        Self::from_bytes_with_len(&buf.body[1..], num_bits)
     }
 }
 
 /// Bitmap iterator.
-///
-/// TODO: add `count_ones` to make it [`ExactSizeIterator`]?
 pub struct BitmapIter<'a> {
-    bits: &'a [usize],
+    bits: Option<&'a [usize]>,
     idx: usize,
     num_bits: usize,
     current_usize: usize,
+    all_ones: bool,
 }
 
 impl<'a> BitmapIter<'a> {
@@ -588,13 +644,17 @@ impl<'a> BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
+        let Some(bits) = &self.bits else {
+            self.idx += 1;
+            return Some(self.all_ones);
+        };
 
         // Offset of the bit within the usize.
         let usize_offset = self.idx % BITS;
 
         // Get the index of usize which the bit is located in
         let usize_index = self.idx / BITS;
-        self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+        self.current_usize = unsafe { *bits.get_unchecked(usize_index) };
 
         let bit_mask = 1 << usize_offset;
         let bit_flag = self.current_usize & bit_mask != 0;
@@ -610,6 +670,10 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
+        let Some(bits) = &self.bits else {
+            self.idx += 1;
+            return Some(self.all_ones);
+        };
 
         // Offset of the bit within the usize.
         let usize_offset = self.idx % BITS;
@@ -617,7 +681,7 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if usize_offset == 0 {
             // Get the index of usize which the bit is located in
             let usize_index = self.idx / BITS;
-            self.current_usize = unsafe { *self.bits.get_unchecked(usize_index) };
+            self.current_usize = unsafe { *bits.get_unchecked(usize_index) };
         }
 
         let bit_mask = 1 << usize_offset;
@@ -641,30 +705,53 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
 impl ExactSizeIterator for BitmapIter<'_> {}
 unsafe impl TrustedLen for BitmapIter<'_> {}
 
-pub struct BitmapOnesIter<'a> {
-    bitmap: &'a Bitmap,
-    cur_idx: usize,
-    cur_bits: Option<usize>,
+pub enum BitmapOnesIter<'a> {
+    Range {
+        start: usize,
+        end: usize,
+    },
+    Buffer {
+        bits: &'a [usize],
+        cur_idx: usize,
+        cur_bits: Option<usize>,
+    },
 }
 
 impl<'a> iter::Iterator for BitmapOnesIter<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.cur_bits == Some(0) {
-            self.cur_idx += 1;
-            self.cur_bits = if self.cur_idx >= self.bitmap.bits.len() {
-                None
-            } else {
-                Some(self.bitmap.bits[self.cur_idx])
+        match self {
+            BitmapOnesIter::Range { start, end } => {
+                let i = *start;
+                if i >= *end {
+                    None
+                } else {
+                    *start += 1;
+                    Some(i)
+                }
+            }
+            BitmapOnesIter::Buffer {
+                bits,
+                cur_idx,
+                cur_bits,
+            } => {
+                while *cur_bits == Some(0) {
+                    *cur_idx += 1;
+                    *cur_bits = if *cur_idx >= bits.len() {
+                        None
+                    } else {
+                        Some(bits[*cur_idx])
+                    };
+                }
+                cur_bits.map(|bits| {
+                    let low_bit = bits & bits.wrapping_neg();
+                    let low_bit_idx = bits.trailing_zeros();
+                    *cur_bits = Some(bits ^ low_bit);
+                    *cur_idx * BITS + low_bit_idx as usize
+                })
             }
         }
-        self.cur_bits.map(|bits| {
-            let low_bit = bits & bits.wrapping_neg();
-            let low_bit_idx = bits.trailing_zeros();
-            self.cur_bits = Some(bits ^ low_bit);
-            self.cur_idx * BITS + low_bit_idx as usize
-        })
     }
 }
 
@@ -711,6 +798,24 @@ mod tests {
         let byte1 = 0b0101_0110_u8;
         let expected = Bitmap::from_bytes(&[byte1]);
         assert_eq!(bitmap2, expected);
+    }
+
+    #[test]
+    fn test_builder_append_bitmap() {
+        let mut builder = BitmapBuilder::default();
+        builder.append_bitmap(&Bitmap::zeros(64));
+        builder.append_bitmap(&Bitmap::ones(64));
+        builder.append_bitmap(&Bitmap::from_bytes(&[0b1010_1010]));
+        builder.append_bitmap(&Bitmap::zeros(8));
+        builder.append_bitmap(&Bitmap::ones(8));
+        let bitmap = builder.finish();
+        assert_eq!(
+            bitmap,
+            Bitmap::from_vec_with_len(
+                vec![0, usize::MAX, 0b1111_1111_0000_0000_1010_1010],
+                64 + 64 + 8 + 8 + 8
+            ),
+        );
     }
 
     #[test]
@@ -805,16 +910,6 @@ mod tests {
     }
 
     #[test]
-    fn test_bitwise_saturate_subtract() {
-        let bitmap1 = Bitmap::from_bytes(&[0b01101010]);
-        let bitmap2 = Bitmap::from_bytes(&[0b01001110]);
-        assert_eq!(
-            Bitmap::from_bytes(&[0b00100000]),
-            Bitmap::bit_saturate_subtract(&bitmap1, &bitmap2)
-        );
-    }
-
-    #[test]
     fn test_bitmap_is_set() {
         let bitmap = Bitmap::from_bytes(&[0b01001010]);
         assert!(!bitmap.is_set(0));
@@ -906,24 +1001,21 @@ mod tests {
     #[test]
     fn test_bitmap_set() {
         let mut b = BitmapBuilder::zeroed(10);
-        assert_eq!(b.count_ones, 0);
 
         b.set(0, true);
         b.set(7, true);
         b.set(8, true);
         b.set(9, true);
-        assert_eq!(b.count_ones, 4);
 
         b.set(7, false);
         b.set(8, false);
-        assert_eq!(b.count_ones, 2);
 
         b.append(true);
-        assert_eq!(b.len, 11);
-        assert_eq!(b.count_ones, 3);
+        assert_eq!(b.len(), 11);
 
         let b = b.finish();
-        assert_eq!(&b.bits[..], &[0b0110_0000_0001]);
+        assert_eq!(b.count_ones(), 3);
+        assert_eq!(&b.bits.unwrap()[..], &[0b0110_0000_0001]);
     }
 
     #[test]

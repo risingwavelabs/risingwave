@@ -27,12 +27,12 @@ use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
 use crate::expr::{
-    build_from_prost, BoxedExpression, ExpectExt, ExpressionRef, LiteralExpression, Token,
+    build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
 };
 use crate::Result;
 
 /// Represents an aggregation function.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct AggCall {
     /// Aggregation kind for constructing agg state.
     pub kind: AggKind,
@@ -45,7 +45,7 @@ pub struct AggCall {
     pub column_orders: Vec<ColumnOrder>,
 
     /// Filter of aggregation.
-    pub filter: Option<ExpressionRef>,
+    pub filter: Option<Arc<dyn Expression>>,
 
     /// Should deduplicate the input before aggregation.
     pub distinct: bool,
@@ -68,7 +68,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(Arc::from(build_from_prost(pb_filter)?)),
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()),
             None => None,
         };
         let direct_args = agg_call
@@ -236,6 +236,7 @@ pub enum AggKind {
     PercentileCont,
     PercentileDisc,
     Mode,
+    Grouping,
 }
 
 impl AggKind {
@@ -266,6 +267,7 @@ impl AggKind {
             PbType::PercentileCont => Ok(AggKind::PercentileCont),
             PbType::PercentileDisc => Ok(AggKind::PercentileDisc),
             PbType::Mode => Ok(AggKind::Mode),
+            PbType::Grouping => Ok(AggKind::Grouping),
             PbType::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -296,6 +298,7 @@ impl AggKind {
             Self::VarSamp => PbType::VarSamp,
             Self::PercentileCont => PbType::PercentileCont,
             Self::PercentileDisc => PbType::PercentileDisc,
+            Self::Grouping => PbType::Grouping,
             Self::Mode => PbType::Mode,
         }
     }
@@ -332,6 +335,7 @@ pub mod agg_kinds {
                 | AggKind::StddevSamp
                 | AggKind::VarPop
                 | AggKind::VarSamp
+                | AggKind::Grouping
         };
     }
     pub use rewritten;
@@ -414,7 +418,11 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! single_value_state {
         () => {
-            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
+            AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::BitXor
+                | AggKind::ApproxCountDistinct
         };
     }
     pub use single_value_state;

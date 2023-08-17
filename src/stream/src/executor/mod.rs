@@ -218,7 +218,7 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 
 /// See [`PbMutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq, EnumAsInner)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     Update {

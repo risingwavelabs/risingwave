@@ -120,25 +120,31 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
-    fn check_split_is_migration(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
+    fn check_split_assignment_is_migration(
+        &self,
+        actor_splits: &HashMap<ActorId, Vec<SplitImpl>>,
+    ) -> bool {
         let core = self.stream_source_core.as_ref().unwrap();
 
-        let mut revert_index = HashMap::new();
+        let mut split_to_actors_index = HashMap::new();
 
         for (actor_id, splits) in actor_splits {
             for split in splits {
-                assert!(revert_index.insert(split.id(), actor_id).is_none());
+                split_to_actors_index
+                    .entry(split.id())
+                    .or_insert(vec![])
+                    .push(*actor_id);
             }
         }
 
         for split_id in core.state_cache.keys() {
-            if let Some(actor_id) = revert_index.remove(split_id) {
-                if self.actor_ctx.id != *actor_id {
+            if let Some(actor_ids) = split_to_actors_index.remove(split_id) {
+                if !actor_ids.contains(&self.actor_ctx.id) {
                     tracing::warn!(
-                        "split {} migration detected, from {} to {}",
+                        "split {} migration from {} detected, target might be {:?}",
                         split_id,
                         self.actor_ctx.id,
-                        actor_id
+                        actor_ids
                     );
                     return true;
                 }
@@ -340,11 +346,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id
-                ))
+                )
             })?;
 
         let mut core = self.stream_source_core.unwrap();
@@ -378,12 +384,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         core.split_state_store.init_epoch(barrier.epoch);
 
-        core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
-
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -393,6 +393,9 @@ impl<S: StateStore> SourceExecutor<S> {
                 *ele = recover_state;
             }
         }
+
+        // init in-memory split states with persisted state if any
+        core.init_split_state(boot_state.clone());
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
@@ -450,11 +453,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
                                 Mutation::SourceChangeSplit(actor_splits) => {
+                                    tracing::info!(
+                                        actor_id = self.actor_ctx.id,
+                                        actor_splits = ?actor_splits,
+                                        "source change split received"
+                                    );
+
                                     // In the context of split changes, we do not allow split
                                     // migration because it can lead to inconsistent states.
                                     // Therefore, all split migration must be done via update
                                     // mutation and pause/resume
-                                    assert!(!self.check_split_is_migration(actor_splits));
+                                    assert!(!self.check_split_assignment_is_migration(actor_splits));
 
                                     target_state = self
                                         .apply_split_change(&source_desc, &mut stream, actor_splits)
@@ -525,16 +534,17 @@ impl<S: StateStore> SourceExecutor<S> {
                             .flat_map(|(split_id, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_core
-                                    .as_ref()
+                                    .as_mut()
                                     .unwrap()
                                     .stream_source_splits
-                                    .get(split_id);
+                                    .get_mut(split_id);
 
                                 origin_split_impl.map(|split_impl| {
-                                    (split_id.clone(), split_impl.update(offset.clone()))
+                                    split_impl.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((split_id.clone(), split_impl.clone()))
                                 })
                             })
-                            .collect();
+                            .try_collect()?;
 
                         self.stream_source_core
                             .as_mut()
@@ -576,10 +586,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
                     self.actor_ctx.id
-                ))
+                )
             })?;
         yield Message::Barrier(barrier);
 

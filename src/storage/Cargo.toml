@@ -14,23 +14,25 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
-crossbeam = "0.8.1"
+crossbeam = "0.8.2"
 dashmap = { version = "5", default-features = false }
 dyn-clone = "1.0.12"
 either = "1"
-enum-as-inner = "0.5"
+enum-as-inner = "0.6"
 fail = "0.5"
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "6bd19cb" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
-itertools = "0.10"
+itertools = "0.11"
 libc = "0.2"
-lz4 = "1.23.1"
+lz4 = "1.24.0"
 memcomparable = "0.2"
 more-asserts = "0.3"
 num-integer = "0.1"
@@ -38,20 +40,20 @@ parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
-risingwave_backup = { path = "../storage/backup" }
-risingwave_common = { path = "../common" }
-risingwave_common_service = { path = "../common/common_service" }
-risingwave_expr = { path = "../expr" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_hummock_trace = { path = "../storage/hummock_trace" }
-risingwave_object_store = { path = "../object_store" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_backup = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_service = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_trace = { workspace = true }
+risingwave_object_store = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
 scopeguard = "1"
 sled = "0.34.7"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
-sysinfo = { version = "0.26", default-features = false }
+sysinfo = { version = "0.29", default-features = false }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
@@ -68,17 +70,17 @@ tokio-retry = "0.3"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
-xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
+xxhash-rust = { version = "0.8.6", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.12", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.14", default-features = false }
+procfs = { version = "0.15", default-features = false }
 libc = "0.2"
 nix = { version = "0.25", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.72"
+libc = "0.2.147"
 mach2 = "0.4"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -86,8 +88,8 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
-moka = { version = "0.10", features = ["future"] }
-risingwave_test_runner = { path = "../test_runner" }
+moka = { version = "0.11", features = ["future"] }
+risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
     connection, Connection, Database, Function, Schema, Source, Table, View,
@@ -25,14 +28,15 @@ use risingwave_pb::catalog::{
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use tokio::sync::Semaphore;
 use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId,
-    StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -44,6 +48,21 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
+pub enum DropMode {
+    Restrict,
+    Cascade,
+}
+
+impl DropMode {
+    pub fn from_request_setting(cascade: bool) -> DropMode {
+        if cascade {
+            DropMode::Cascade
+        } else {
+            DropMode::Restrict
+        }
+    }
+}
+
 pub enum StreamingJobId {
     MaterializedView(TableId),
     Sink(SinkId),
@@ -52,6 +71,7 @@ pub enum StreamingJobId {
 }
 
 impl StreamingJobId {
+    #[allow(dead_code)]
     fn id(&self) -> TableId {
         match self {
             StreamingJobId::MaterializedView(id)
@@ -68,13 +88,13 @@ pub enum DdlCommand {
     CreateSchema(Schema),
     DropSchema(SchemaId),
     CreateSource(Source),
-    DropSource(SourceId),
+    DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
     CreateView(View),
-    DropView(ViewId),
+    DropView(ViewId, DropMode),
     CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
-    DropStreamingJob(StreamingJobId),
+    DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     CreateConnection(Connection),
@@ -93,13 +113,81 @@ pub struct DdlController<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,
 
     aws_client: Arc<Option<AwsEc2Client>>,
+    // The semaphore is used to limit the number of concurrent streaming job creation.
+    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit<S>>,
+}
+
+#[derive(Clone)]
+pub struct CreatingStreamingJobPermit<S: MetaStore> {
+    semaphore: Arc<Semaphore>,
+    _phantom: std::marker::PhantomData<S>,
+}
+
+impl<S> CreatingStreamingJobPermit<S>
+where
+    S: MetaStore,
+{
+    async fn new(env: &MetaSrvEnv<S>) -> Self {
+        let mut permits = env
+            .system_params_manager()
+            .get_params()
+            .await
+            .max_concurrent_creating_streaming_jobs() as usize;
+        if permits == 0 {
+            // if the system parameter is set to zero, use the max permitted value.
+            permits = Semaphore::MAX_PERMITS;
+        }
+        let semaphore = Arc::new(Semaphore::new(permits));
+
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
+        let semaphore_clone = semaphore.clone();
+        tokio::spawn(async move {
+            while let Some(notification) = local_notification_rx.recv().await {
+                let LocalNotification::SystemParamsChange(p) = &notification else {
+                    continue;
+                };
+                let mut new_permits = p.max_concurrent_creating_streaming_jobs() as usize;
+                if new_permits == 0 {
+                    new_permits = Semaphore::MAX_PERMITS;
+                }
+                match permits.cmp(&new_permits) {
+                    Ordering::Less => {
+                        semaphore_clone.add_permits(new_permits - permits);
+                    }
+                    Ordering::Equal => continue,
+                    Ordering::Greater => {
+                        semaphore_clone
+                            .acquire_many((permits - new_permits) as u32)
+                            .await
+                            .unwrap()
+                            .forget();
+                    }
+                }
+                tracing::info!(
+                    "max_concurrent_creating_streaming_jobs changed from {} to {}",
+                    permits,
+                    new_permits
+                );
+                permits = new_permits;
+            }
+        });
+
+        Self {
+            semaphore,
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<S> DdlController<S>
 where
     S: MetaStore,
 {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
@@ -109,6 +197,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
+        let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
             env,
             catalog_manager,
@@ -118,6 +207,7 @@ where
             fragment_manager,
             barrier_manager,
             aws_client,
+            creating_streaming_job_permits,
         }
     }
 
@@ -146,15 +236,21 @@ where
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
                 DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
                 DdlCommand::CreateSource(source) => ctrl.create_source(source).await,
-                DdlCommand::DropSource(source_id) => ctrl.drop_source(source_id).await,
+                DdlCommand::DropSource(source_id, drop_mode) => {
+                    ctrl.drop_source(source_id, drop_mode).await
+                }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
                 DdlCommand::CreateView(view) => ctrl.create_view(view).await,
-                DdlCommand::DropView(view_id) => ctrl.drop_view(view_id).await,
+                DdlCommand::DropView(view_id, drop_mode) => {
+                    ctrl.drop_view(view_id, drop_mode).await
+                }
                 DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
-                DdlCommand::DropStreamingJob(job_id) => ctrl.drop_streaming_job(job_id).await,
+                DdlCommand::DropStreamingJob(job_id, drop_mode) => {
+                    ctrl.drop_streaming_job(job_id, drop_mode).await
+                }
                 DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
@@ -208,7 +304,10 @@ where
         self.catalog_manager.drop_schema(schema_id).await
     }
 
-    async fn create_source(&self, source: Source) -> MetaResult<NotificationVersion> {
+    async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
+        // set the initialized_at_epoch to the current epoch.
+        source.initialized_at_epoch = Some(Epoch::now().0);
+
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await?;
@@ -221,13 +320,25 @@ where
         }
 
         self.catalog_manager
-            .finish_create_source_procedure(&source)
+            .finish_create_source_procedure(source)
             .await
     }
 
-    async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
+    async fn drop_source(
+        &self,
+        source_id: SourceId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let version = self.catalog_manager.drop_source(source_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_relation(
+                RelationIdEnum::Source(source_id),
+                self.fragment_manager.clone(),
+                drop_mode,
+            )
+            .await?
+            .0;
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
@@ -248,8 +359,23 @@ where
         self.catalog_manager.create_view(&view).await
     }
 
-    async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.drop_view(view_id).await
+    async fn drop_view(
+        &self,
+        view_id: ViewId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        let (version, streaming_job_ids) = self
+            .catalog_manager
+            .drop_relation(
+                RelationIdEnum::View(view_id),
+                self.fragment_manager.clone(),
+                drop_mode,
+            )
+            .await?;
+        self.stream_manager
+            .drop_streaming_jobs(streaming_job_ids)
+            .await;
+        Ok(version)
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
@@ -283,12 +409,21 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
+        let _permit = self
+            .creating_streaming_job_permits
+            .semaphore
+            .acquire()
+            .await
+            .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
+
+        // Update the corresponding 'initiated_at' field.
+        stream_job.mark_initialized();
 
         let mut internal_tables = vec![];
         let result = try {
@@ -316,7 +451,7 @@ where
         };
 
         match result {
-            Ok(_) => self.finish_stream_job(&stream_job, internal_tables).await,
+            Ok(_) => self.finish_stream_job(stream_job, internal_tables).await,
             Err(err) => {
                 self.cancel_stream_job(&stream_job, internal_tables).await;
                 Err(err)
@@ -324,42 +459,48 @@ where
         }
     }
 
-    async fn drop_streaming_job(&self, job_id: StreamingJobId) -> MetaResult<NotificationVersion> {
+    async fn drop_streaming_job(
+        &self,
+        job_id: StreamingJobId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
-        let table_fragments = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&job_id.id().into())
-            .await?;
-        let internal_table_ids = table_fragments.internal_table_ids();
         let (version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 self.catalog_manager
-                    .drop_table(table_id, internal_table_ids, self.fragment_manager.clone())
+                    .drop_relation(
+                        RelationIdEnum::Table(table_id),
+                        self.fragment_manager.clone(),
+                        drop_mode,
+                    )
                     .await?
             }
             StreamingJobId::Sink(sink_id) => {
-                let version = self
-                    .catalog_manager
-                    .drop_sink(sink_id, internal_table_ids)
-                    .await?;
-                (version, vec![sink_id.into()])
+                self.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Sink(sink_id),
+                        self.fragment_manager.clone(),
+                        drop_mode,
+                    )
+                    .await?
             }
             StreamingJobId::Table(source_id, table_id) => {
                 self.drop_table_inner(
                     source_id,
                     table_id,
-                    internal_table_ids,
                     self.fragment_manager.clone(),
+                    drop_mode,
                 )
                 .await?
             }
             StreamingJobId::Index(index_id) => {
-                let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-                let version = self
-                    .catalog_manager
-                    .drop_index(index_id, index_table_id, internal_table_ids)
-                    .await?;
-                (version, vec![index_table_id.into()])
+                self.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Index(index_id),
+                        self.fragment_manager.clone(),
+                        drop_mode,
+                    )
+                    .await?
             }
         };
 
@@ -408,7 +549,17 @@ where
             NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
         // Use configured parallel units if no default parallelism is specified.
         let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
-            DefaultParallelism::Full => available_parallel_units,
+            DefaultParallelism::Full => {
+                if available_parallel_units.get() > VirtualNode::COUNT {
+                    tracing::warn!(
+                        "Too many parallel units, use {} instead",
+                        VirtualNode::COUNT
+                    );
+                    NonZeroUsize::new(VirtualNode::COUNT).unwrap()
+                } else {
+                    available_parallel_units
+                }
+            }
             DefaultParallelism::Default(num) => *num,
         });
 
@@ -547,11 +698,15 @@ where
     /// `finish_stream_job` finishes a stream job and clean some states.
     async fn finish_stream_job(
         &self,
-        stream_job: &StreamingJob,
+        mut stream_job: StreamingJob,
         internal_tables: Vec<Table>,
     ) -> MetaResult<u64> {
         // 1. finish procedure.
         let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+
+        // Update the corresponding 'created_at' field.
+        stream_job.mark_created();
+
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
@@ -596,8 +751,8 @@ where
         &self,
         source_id: Option<SourceId>,
         table_id: TableId,
-        internal_table_ids: Vec<TableId>,
         fragment_manager: FragmentManagerRef<S>,
+        drop_mode: DropMode,
     ) -> MetaResult<(
         NotificationVersion,
         Vec<risingwave_common::catalog::TableId>,
@@ -607,11 +762,10 @@ where
             // `associated_source_id`. Indexes also need to be dropped atomically.
             let (version, delete_jobs) = self
                 .catalog_manager
-                .drop_table_with_source(
-                    source_id,
-                    table_id,
-                    internal_table_ids,
+                .drop_relation(
+                    RelationIdEnum::Table(table_id),
                     fragment_manager.clone(),
+                    drop_mode,
                 )
                 .await?;
             // Unregister source connector worker.
@@ -621,7 +775,7 @@ where
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
-                .drop_table(table_id, internal_table_ids, fragment_manager)
+                .drop_relation(RelationIdEnum::Table(table_id), fragment_manager, drop_mode)
                 .await
         }
     }
@@ -678,8 +832,6 @@ where
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
-        assert!(fragment_graph.internal_tables().is_empty());
-        assert!(fragment_graph.dependent_table_ids().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -700,11 +852,23 @@ where
         &self,
         env: StreamEnvironment,
         stream_job: &StreamingJob,
-        fragment_graph: StreamFragmentGraph,
+        mut fragment_graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
+
+        let old_table_fragments = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&id.into())
+            .await?;
+        let old_internal_table_ids = old_table_fragments.internal_table_ids();
+        let old_internal_tables = self
+            .catalog_manager
+            .get_tables(&old_internal_table_ids)
+            .await;
+
+        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -769,11 +933,6 @@ where
             &building_locations.actor_locations,
             env,
         );
-
-        let old_table_fragments = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&id.into())
-            .await?;
 
         let ctx = ReplaceTableContext {
             old_table_fragments,

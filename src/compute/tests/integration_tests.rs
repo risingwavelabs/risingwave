@@ -169,8 +169,8 @@ impl MockOffsetGenExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     let mut offsets = vec![];
-                    let (ops, columns, bitmap) = chunk.into_inner();
-                    assert!(bitmap.is_none());
+                    let (ops, columns, vis) = chunk.into_inner();
+                    assert!(vis.as_visibility().is_none());
 
                     for _ in 0..ops.len() {
                         offsets.push(Offset::new(self.next_offset()?));
@@ -178,7 +178,7 @@ impl MockOffsetGenExecutor {
                     yield Message::Chunk(StreamChunk::new_with_meta(
                         ops,
                         columns,
-                        bitmap,
+                        vis.into_visibility(),
                         Some(StreamChunkMeta { offsets }),
                     ));
                 }

@@ -17,6 +17,7 @@ services:
 
   mysql:
     image: mysql:8.0
+    command: --character-set-server=utf8 --collation-server=utf8_general_ci
     ports:
       - 3306
     environment:
@@ -32,7 +33,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-  
+
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:
@@ -70,7 +71,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230712
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230815
     depends_on:
       - mysql
       - db
@@ -79,7 +80,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230712
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230815
     depends_on:
       - mysql
       - db
@@ -88,12 +89,12 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230712
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230815
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230712
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230815
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -104,7 +105,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230712
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230815
     depends_on:
       db:
         condition: service_healthy

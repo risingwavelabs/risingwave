@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::SinkWriterParam;
-use risingwave_pb::stream_plan::SinkNode;
+use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
+use risingwave_storage::dispatch_state_store;
 
 use super::*;
 use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
+use crate::common::log_store::kv_log_store::KvLogStoreFactory;
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
@@ -51,27 +55,63 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(ColumnCatalog::from)
             .collect_vec();
 
-        // TODO: For sink executor with a state table, a kv log store should be created.
-        let factory = BoundedInMemLogStoreFactory::new(1);
+        match node.log_store_type() {
+            // Default value is the normal in memory log store to be backward compatible with the
+            // previously unset value
+            SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
+                let factory = BoundedInMemLogStoreFactory::new(1);
+                Ok(Box::new(
+                    SinkExecutor::new(
+                        input_executor,
+                        stream.streaming_metrics.clone(),
+                        SinkWriterParam {
+                            connector_params: params.env.connector_params(),
+                            executor_id: params.executor_id,
+                            vnode_bitmap: params.vnode_bitmap,
+                            meta_client: params.env.meta_client(),
+                        },
+                        columns,
+                        properties,
+                        pk_indices,
+                        sink_type,
+                        sink_id,
+                        params.actor_context,
+                        factory,
+                    )
+                    .await?,
+                ))
+            }
+            SinkLogStoreType::KvLogStore => {
+                dispatch_state_store!(params.env.state_store(), state_store, {
+                    let factory = KvLogStoreFactory::new(
+                        state_store,
+                        node.table.as_ref().unwrap().clone(),
+                        params.vnode_bitmap.clone().map(Arc::new),
+                        0,
+                    );
 
-        Ok(Box::new(
-            SinkExecutor::new(
-                input_executor,
-                stream.streaming_metrics.clone(),
-                SinkWriterParam {
-                    connector_params: params.env.connector_params(),
-                    executor_id: params.executor_id,
-                    vnode_bitmap: params.vnode_bitmap,
-                },
-                columns,
-                properties,
-                pk_indices,
-                sink_type,
-                sink_id,
-                params.actor_context,
-                factory,
-            )
-            .await?,
-        ))
+                    Ok(Box::new(
+                        SinkExecutor::new(
+                            input_executor,
+                            stream.streaming_metrics.clone(),
+                            SinkWriterParam {
+                                connector_params: params.env.connector_params(),
+                                executor_id: params.executor_id,
+                                vnode_bitmap: params.vnode_bitmap,
+                                meta_client: params.env.meta_client(),
+                            },
+                            columns,
+                            properties,
+                            pk_indices,
+                            sink_type,
+                            sink_id,
+                            params.actor_context,
+                            factory,
+                        )
+                        .await?,
+                    ))
+                })
+            }
+        }
     }
 }

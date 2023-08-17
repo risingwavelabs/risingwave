@@ -117,7 +117,6 @@ pub struct CompactorConfig {
     pub provide_tempo: Option<Vec<TempoConfig>>,
 
     pub user_managed: bool,
-    pub max_concurrent_task_number: u64,
     pub compaction_worker_threads_number: Option<usize>,
 }
 
@@ -218,9 +217,8 @@ pub struct TempoConfig {
     pub id: String,
 
     pub listen_address: String,
+    pub address: String,
     pub port: u16,
-
-    pub otlp_address: String,
     pub otlp_port: u16,
 }
 

@@ -17,11 +17,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
 use function_name::named;
-use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
-use risingwave_hummock_sdk::version_checkpoint_dir;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
@@ -39,27 +37,28 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub(crate) async fn read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
-        // We `list` then `read`. Because from `read`'s error, we cannot tell whether it's "object
-        // not found" or other kind of error.
+    /// # Panics
+    /// if checkpoint is not found.
+    pub(crate) async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
         use prost::Message;
-        let metadata = self
-            .object_store
-            .list(&version_checkpoint_dir(&self.version_checkpoint_path))
-            .await?
-            .into_iter()
-            .filter(|o| o.key == self.version_checkpoint_path)
-            .collect_vec();
-        assert!(metadata.len() <= 1);
-        if metadata.is_empty() {
-            return Ok(None);
-        }
-        let data = self
+        let data = match self
             .object_store
             .read(&self.version_checkpoint_path, None)
-            .await?;
+            .await
+        {
+            Ok(data) => data,
+            Err(e) => {
+                if e.is_object_not_found_error() {
+                    panic!(
+                        "Hummock version checkpoints do not exist in object store, path: {}",
+                        self.version_checkpoint_path
+                    );
+                }
+                return Err(e.into());
+            }
+        };
         let ckpt = HummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(Some(ckpt))
+        Ok(ckpt)
     }
 
     pub(super) async fn write_checkpoint(
