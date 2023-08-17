@@ -338,7 +338,7 @@ impl StatsWindow {
         self.p99_99.with_label_values(&labels).set(stats.p99_99);
         self.out_of_range
             .with_label_values(&labels)
-            .set(stats.out_of_range);
+            .set(stats.outofrange);
     }
 }
 
