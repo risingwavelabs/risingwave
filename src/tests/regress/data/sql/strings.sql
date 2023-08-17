@@ -369,18 +369,18 @@ SELECT 'indio' NOT LIKE 'in_o' AS "true";
 -- Be sure to form every test as an ILIKE/NOT ILIKE pair.
 --
 
---@ SELECT 'hawkeye' ILIKE 'h%' AS "true";
---@ SELECT 'hawkeye' NOT ILIKE 'h%' AS "false";
---@ 
---@ SELECT 'hawkeye' ILIKE 'H%' AS "true";
---@ SELECT 'hawkeye' NOT ILIKE 'H%' AS "false";
---@ 
---@ SELECT 'hawkeye' ILIKE 'H%Eye' AS "true";
---@ SELECT 'hawkeye' NOT ILIKE 'H%Eye' AS "false";
---@ 
---@ SELECT 'Hawkeye' ILIKE 'h%' AS "true";
---@ SELECT 'Hawkeye' NOT ILIKE 'h%' AS "false";
---@ 
+SELECT 'hawkeye' ILIKE 'h%' AS "true";
+SELECT 'hawkeye' NOT ILIKE 'h%' AS "false";
+
+SELECT 'hawkeye' ILIKE 'H%' AS "true";
+SELECT 'hawkeye' NOT ILIKE 'H%' AS "false";
+
+SELECT 'hawkeye' ILIKE 'H%Eye' AS "true";
+SELECT 'hawkeye' NOT ILIKE 'H%Eye' AS "false";
+
+SELECT 'Hawkeye' ILIKE 'h%' AS "true";
+SELECT 'Hawkeye' NOT ILIKE 'h%' AS "false";
+
 --@ SELECT 'ABC'::name ILIKE '_b_' AS "true";
 --@ SELECT 'ABC'::name NOT ILIKE '_b_' AS "false";
 

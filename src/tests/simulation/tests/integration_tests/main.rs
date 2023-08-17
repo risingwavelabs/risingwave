@@ -26,3 +26,4 @@ mod backfill_tests;
 mod batch;
 mod recovery;
 mod scale;
+mod storage;
