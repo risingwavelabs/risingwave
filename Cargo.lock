@@ -3104,6 +3104,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "google-cloud-googleapis"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5453af21ac0cc1f3b2cfb5b687c174e701c10ec2d5c286aff7ca8cbbf08d31b4"
+dependencies = [
+ "prost",
+ "prost-types",
+ "tonic",
+]
+
+[[package]]
 name = "google-cloud-metadata"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3124,7 +3135,7 @@ dependencies = [
  "async-stream",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.10.0",
  "google-cloud-token",
  "prost-types",
  "thiserror",
@@ -5389,7 +5400,7 @@ name = "prepare_ci_pubsub"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.11.0",
  "google-cloud-pubsub",
  "madsim-tokio",
 ]
