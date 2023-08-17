@@ -15,7 +15,7 @@
 use super::DataType;
 use crate::error::ErrorCode;
 
-/// DataType information extracted from PostgreSQL `pg_type`
+/// `DataType` information extracted from PostgreSQL `pg_type`
 ///
 /// ```sql
 /// select oid, typarray, typname, typlen from pg_type
@@ -23,8 +23,8 @@ use crate::error::ErrorCode;
 /// ```
 ///
 /// See also:
-/// * https://www.postgresql.org/docs/15/catalog-pg-type.html
-/// * https://github.com/postgres/postgres/blob/REL_15_4/src/include/catalog/pg_type.dat
+/// * <https://www.postgresql.org/docs/15/catalog-pg-type.html>
+/// * <https://github.com/postgres/postgres/blob/REL_15_4/src/include/catalog/pg_type.dat>
 #[macro_export]
 macro_rules! for_all_base_types {
     ($macro:ident $(, $x:tt)*) => {
