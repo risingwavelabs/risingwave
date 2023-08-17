@@ -1333,6 +1333,10 @@ impl Parser {
             Token::TildeAsterisk => Some(BinaryOperator::PGRegexIMatch),
             Token::ExclamationMarkTilde => Some(BinaryOperator::PGRegexNotMatch),
             Token::ExclamationMarkTildeAsterisk => Some(BinaryOperator::PGRegexNotIMatch),
+            Token::DoubleTilde => Some(BinaryOperator::Like),
+            Token::DoubleTildeAsterisk => Some(BinaryOperator::ILike),
+            Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::NotLike),
+            Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::NotILike),
             Token::Arrow => Some(BinaryOperator::Arrow),
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
@@ -1625,6 +1629,10 @@ impl Parser {
             | Token::TildeAsterisk
             | Token::ExclamationMarkTilde
             | Token::ExclamationMarkTildeAsterisk
+            | Token::DoubleTilde
+            | Token::DoubleTildeAsterisk
+            | Token::ExclamationMarkDoubleTilde
+            | Token::ExclamationMarkDoubleTildeAsterisk
             | Token::Concat
             | Token::Prefix
             | Token::Arrow
