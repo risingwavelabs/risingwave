@@ -15,19 +15,25 @@
 pub mod count_map;
 pub mod range_map;
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use count_map::CountMap;
+use futures::future::join_all;
 use futures::{Future, FutureExt};
+use itertools::Itertools;
+use parking_lot::Mutex;
 use range_map::{Entry, OrdRange, RangeExt, RangeMap};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
+use twox_hash::XxHash64;
 
-use crate::object::{ObjectError, ObjectResult};
+use crate::object::{BlockLocation, ObjectError, ObjectResult, ObjectStore};
 
 pub type Sequence = u64;
 
@@ -71,6 +77,7 @@ pub struct SchedulerTask {
 }
 
 impl SchedulerTask {
+    // TODO(MrCroxx): Impl `Future` instead.
     pub async fn finish(self) {
         // TODO(MrCroxx): Use `AggregatedBytes` after `Block` can be built from `Buf` to avoid
         // buffer copy.
@@ -131,7 +138,7 @@ pub struct Launch {
 
 /// [`Scheduler`] guarantees there is no overlapping object io.
 #[derive(Debug, Default)]
-pub struct Scheduler {
+pub struct TaskManager {
     sequence: Sequence,
 
     queue: BTreeMap<Sequence, SchedulerTaskRef>,
@@ -144,7 +151,7 @@ pub struct Scheduler {
     waits: BTreeMap<String, CountMap<Sequence, SchedulerTask>>,
 }
 
-impl Scheduler {
+impl TaskManager {
     pub fn submit(&mut self, path: &str, range: Range<usize>) -> TaskHandle {
         let sequence = self.sequence;
         self.sequence += 1;
@@ -200,6 +207,10 @@ impl Scheduler {
         self.queue.insert(sequence, task);
 
         handle
+    }
+
+    pub fn peek(&self) -> Option<Ref<'_, SchedulerTask>> {
+        self.queue.first_key_value().map(|(_k, v)| v.borrow())
     }
 
     pub fn launch(&mut self) -> Option<Launch> {
@@ -303,8 +314,134 @@ impl Scheduler {
     }
 }
 
-unsafe impl Send for Scheduler {}
-unsafe impl Sync for Scheduler {}
+unsafe impl Send for TaskManager {}
+unsafe impl Sync for TaskManager {}
+
+#[derive(Debug)]
+pub struct Scheduler {
+    bits: usize,
+    task_managers: Vec<Arc<Mutex<TaskManager>>>,
+    notifies: Vec<Arc<Notify>>,
+}
+
+impl Scheduler {
+    pub fn new<OS>(bits: usize, store: Arc<OS>) -> Self
+    where
+        OS: ObjectStore,
+    {
+        let len = 1 << bits;
+        let mut task_managers = Vec::with_capacity(len);
+        let mut notifies = Vec::with_capacity(len);
+        let mut runners = Vec::with_capacity(len);
+
+        for _ in 0..len {
+            let task_manager = Arc::new(Mutex::new(TaskManager::default()));
+            let notify = Arc::new(Notify::new());
+
+            task_managers.push(task_manager.clone());
+            notifies.push(notify.clone());
+            runners.push(Runner {
+                task_manager,
+                notify,
+                store: store.clone(),
+            });
+        }
+
+        // TODO(MrCroxx): Gracefully shutdown.
+        let _handles = runners
+            .into_iter()
+            .map(|runner| tokio::spawn(async move { runner.run().await }))
+            .collect_vec();
+
+        Self {
+            bits,
+            task_managers,
+            notifies,
+        }
+    }
+
+    pub fn submit(&self, path: &str, range: Range<usize>) -> TaskHandle {
+        let shard = self.hash(path) as usize & ((1 << self.bits) - 1);
+        let mut task_manager = self.task_managers[shard].lock();
+        let handle = task_manager.submit(path, range);
+        self.notifies[shard].notify_one();
+        handle
+    }
+
+    pub fn finish(
+        &self,
+        path: &str,
+        range: Range<usize>,
+        result: ObjectResult<Bytes>,
+    ) -> Vec<SchedulerTask> {
+        let shard = self.hash(path) as usize & ((1 << self.bits) - 1);
+        let mut task_manager = self.task_managers[shard].lock();
+        task_manager.finish(path, range, result)
+    }
+
+    fn hash(&self, path: &str) -> u64 {
+        let mut hasher = XxHash64::default();
+        path.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct Runner<OS>
+where
+    OS: ObjectStore,
+{
+    task_manager: Arc<Mutex<TaskManager>>,
+    notify: Arc<Notify>,
+    store: Arc<OS>,
+}
+
+impl<OS> Runner<OS>
+where
+    OS: ObjectStore,
+{
+    pub async fn run(self) {
+        loop {
+            let enqueue = self.task_manager.lock().peek().map(|task| task.enqueue);
+
+            match enqueue {
+                None => self.notify.notified().await,
+                Some(enqueue) => {
+                    let elapsed = enqueue.elapsed();
+                    if elapsed < Duration::from_millis(5) {
+                        tokio::time::sleep(Duration::from_millis(5) - elapsed).await;
+                    }
+                    let launch = self.task_manager.lock().launch().unwrap();
+                    self.launch(launch).await;
+                }
+            }
+        }
+    }
+
+    async fn launch(&self, Launch { path, ranges }: Launch) {
+        for range in ranges {
+            tokio::spawn({
+                let path = path.clone();
+                let store = self.store.clone();
+                let task_manager = self.task_manager.clone();
+
+                async move {
+                    let result = store
+                        .read(
+                            &path,
+                            Some(BlockLocation {
+                                offset: range.start,
+                                size: range.len(),
+                            }),
+                        )
+                        .await;
+                    let tasks = task_manager.lock().finish(&path, range, result);
+                    join_all(tasks.into_iter().map(|task| task.finish())).await;
+                }
+            });
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -339,39 +476,39 @@ mod tests {
 
     #[test]
     fn test_send_sync() {
-        ensure_send_sync::<Scheduler>();
+        ensure_send_sync::<TaskManager>();
     }
 
     #[tokio::test]
-    async fn test_scheduler_simple() {
-        let mut s = Scheduler::default();
+    async fn test_task_manager() {
+        let mut tm = TaskManager::default();
 
-        let mut h1 = pin!(s.submit("1", 0..10));
-        let mut h2 = pin!(s.submit("2", 0..10));
-        let mut h3 = pin!(s.submit("1", 5..20));
-        let mut h4 = pin!(s.submit("2", 20..30));
+        let mut h1 = pin!(tm.submit("1", 0..10));
+        let mut h2 = pin!(tm.submit("2", 0..10));
+        let mut h3 = pin!(tm.submit("1", 5..20));
+        let mut h4 = pin!(tm.submit("2", 20..30));
 
-        let Launch { path, ranges } = s.launch().unwrap();
+        let Launch { path, ranges } = tm.launch().unwrap();
         assert_eq!(&path, "1");
         assert_eq!(ranges, vec![0..20]);
 
-        let Launch { path, ranges } = s.launch().unwrap();
+        let Launch { path, ranges } = tm.launch().unwrap();
         assert_eq!(&path, "2");
         assert_eq!(ranges, vec![0..10]);
 
-        let Launch { path, ranges } = s.launch().unwrap();
+        let Launch { path, ranges } = tm.launch().unwrap();
         assert_eq!(&path, "2");
         assert_eq!(ranges, vec![20..30]);
 
-        assert!(s.launch().is_none());
+        assert!(tm.launch().is_none());
 
-        let mut h5 = pin!(s.submit("2", 15..35));
+        let mut h5 = pin!(tm.submit("2", 15..35));
 
-        let Launch { path, ranges } = s.launch().unwrap();
+        let Launch { path, ranges } = tm.launch().unwrap();
         assert_eq!(&path, "2");
         assert_eq!(ranges, vec![15..20, 30..35]);
 
-        let tasks = s.finish("1", 0..20, Ok(vec![b'x'; 20].into()));
+        let tasks = tm.finish("1", 0..20, Ok(vec![b'x'; 20].into()));
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].range, 0..20);
 
@@ -381,11 +518,11 @@ mod tests {
         assert_ready(&mut h1, vec![b'x'; 10]).await;
         assert_ready(&mut h3, vec![b'x'; 15]).await;
 
-        let tasks = s.finish("2", 15..20, Ok(vec![b'x'; 5].into()));
+        let tasks = tm.finish("2", 15..20, Ok(vec![b'x'; 5].into()));
         assert_eq!(tasks.len(), 0);
-        let tasks = s.finish("2", 30..35, Ok(vec![b'x'; 5].into()));
+        let tasks = tm.finish("2", 30..35, Ok(vec![b'x'; 5].into()));
         assert_eq!(tasks.len(), 0);
-        let tasks = s.finish("2", 20..30, Ok(vec![b'x'; 10].into()));
+        let tasks = tm.finish("2", 20..30, Ok(vec![b'x'; 10].into()));
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].range, 20..30);
         assert_eq!(tasks[1].range, 15..35);
@@ -396,7 +533,7 @@ mod tests {
         assert_ready(&mut h4, vec![b'x'; 10]).await;
         assert_ready(&mut h5, vec![b'x'; 20]).await;
 
-        let tasks = s.finish("2", 0..10, Ok(vec![b'x'; 10].into()));
+        let tasks = tm.finish("2", 0..10, Ok(vec![b'x'; 10].into()));
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].range, 0..10);
 

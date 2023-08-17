@@ -12,17 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 use tokio::io::AsyncRead;
 
 use super::{BoxedStreamingUploader, ObjectMetadata, ObjectMetadataIter};
 use crate::object::{BlockLocation, ObjectResult, ObjectStore};
+use crate::scheduler::Scheduler;
 
 pub struct ScheduledObjectStore<OS>
 where
     OS: ObjectStore,
 {
-    store: OS,
+    scheduler: Scheduler,
+    store: Arc<OS>,
+}
+
+impl<OS> ScheduledObjectStore<OS>
+where
+    OS: ObjectStore,
+{
+    pub fn new(store: OS) -> Self {
+        let store = Arc::new(store);
+        let scheduler = Scheduler::new(5, store.clone());
+        Self { scheduler, store }
+    }
+
+    pub fn inner(&self) -> &OS {
+        &self.store
+    }
 }
 
 #[async_trait::async_trait]
@@ -43,7 +62,13 @@ where
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        self.store.read(path, block_loc).await
+        if let Some(loc) = block_loc {
+            self.scheduler
+                .submit(path, loc.offset..loc.offset + loc.size)
+                .await
+        } else {
+            self.store.read(path, block_loc).await
+        }
     }
 
     async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
@@ -76,5 +101,12 @@ where
 
     fn store_media_type(&self) -> &'static str {
         self.store.store_media_type()
+    }
+
+    fn scheduled(self) -> ScheduledObjectStore<Self>
+    where
+        Self: Sized,
+    {
+        unreachable!()
     }
 }

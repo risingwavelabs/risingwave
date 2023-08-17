@@ -96,7 +96,7 @@ pub trait StreamingUploader: Send {
 
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
-pub trait ObjectStore: Send + Sync {
+pub trait ObjectStore: Send + Sync + 'static {
     /// Get the key prefix for object
     fn get_object_prefix(&self, obj_id: u64) -> String;
 
@@ -139,6 +139,13 @@ pub trait ObjectStore: Send + Sync {
         MonitoredObjectStore::new(self, metrics)
     }
 
+    fn scheduled(self) -> ScheduledObjectStore<Self>
+    where
+        Self: Sized,
+    {
+        ScheduledObjectStore::new(self)
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
@@ -147,7 +154,8 @@ pub trait ObjectStore: Send + Sync {
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
-    S3(MonitoredObjectStore<S3ObjectStore>),
+    // S3(MonitoredObjectStore<S3ObjectStore>),
+    S3(MonitoredObjectStore<ScheduledObjectStore<S3ObjectStore>>),
 }
 
 macro_rules! dispatch_async {
@@ -861,6 +869,7 @@ pub async fn parse_remote_object_store_with_config(
                 metrics.clone(),
             )
             .await
+            .scheduled()
             .monitored(metrics),
         ),
         #[cfg(feature = "hdfs-backend")]
@@ -949,12 +958,14 @@ pub async fn parse_remote_object_store_with_config(
                     s3_object_store_config,
                 )
                 .await
+                .scheduled()
                 .monitored(metrics),
             )
         }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
+                .scheduled()
                 .monitored(metrics),
         ),
         "memory" => {

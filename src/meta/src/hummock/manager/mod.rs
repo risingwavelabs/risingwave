@@ -354,7 +354,7 @@ where
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                s3.inner().configure_bucket_lifecycle().await;
+                s3.inner().inner().configure_bucket_lifecycle().await;
             }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);

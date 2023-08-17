@@ -6865,6 +6865,7 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tracing",
+ "twox-hash",
 ]
 
 [[package]]
