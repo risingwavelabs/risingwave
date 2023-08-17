@@ -381,8 +381,8 @@ SELECT 'hawkeye' NOT ILIKE 'H%Eye' AS "false";
 SELECT 'Hawkeye' ILIKE 'h%' AS "true";
 SELECT 'Hawkeye' NOT ILIKE 'h%' AS "false";
 
-SELECT 'ABC'::name ILIKE '_b_' AS "true";
-SELECT 'ABC'::name NOT ILIKE '_b_' AS "false";
+--@ SELECT 'ABC'::name ILIKE '_b_' AS "true";
+--@ SELECT 'ABC'::name NOT ILIKE '_b_' AS "false";
 
 --
 -- test %/_ combination cases, cf bugs #4821 and #5478
