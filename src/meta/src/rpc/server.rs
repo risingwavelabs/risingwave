@@ -553,7 +553,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
-    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager, aws_cli);
+    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager.clone(), aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -581,6 +581,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     sub_tasks.push(
         start_fragment_info_monitor(
             cluster_manager.clone(),
+            catalog_manager,
             fragment_manager.clone(),
             meta_metrics.clone(),
         )

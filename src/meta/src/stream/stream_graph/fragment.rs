@@ -128,6 +128,10 @@ impl BuildingFragment {
                 table.database_id = job.database_id();
                 table.schema_id = job.schema_id();
                 table.fragment_id = fragment_id;
+                #[cfg(not(debug_assertions))]
+                {
+                    table.definition = job.name();
+                }
 
                 has_table = true;
             }
