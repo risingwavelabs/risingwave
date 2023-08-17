@@ -335,6 +335,10 @@ impl StatsWindow {
         self.p50.with_label_values(&labels).set(stats.p50);
         self.p75.with_label_values(&labels).set(stats.p75);
         self.p90.with_label_values(&labels).set(stats.p90);
+        self.p99_99.with_label_values(&labels).set(stats.p99_99);
+        self.out_of_range
+            .with_label_values(&labels)
+            .set(stats.out_of_range);
     }
 }
 
