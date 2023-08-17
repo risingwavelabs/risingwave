@@ -14,8 +14,8 @@
 
 use anyhow::Result;
 use clap::Parser;
-use tokio::signal;
 use shell_words::split;
+use tokio::signal;
 
 use crate::common::{osstrs, RisingWaveService};
 
@@ -111,8 +111,10 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
 #[cfg(test)]
 mod test {
     use std::fmt::Debug;
-    use super::*;
+
     use expect_test::{expect, Expect};
+
+    use super::*;
 
     fn check(actual: impl Debug, expect: Expect) {
         let actual = format!("{:#?}", actual);
@@ -127,7 +129,9 @@ mod test {
             frontend_opts: "--some-option".into(),
         };
         let actual = parse_opt_args(&opts);
-        check(actual, expect![[r#"
+        check(
+            actual,
+            expect![[r#"
             (
                 [
                     "--data-dir",
@@ -144,6 +148,7 @@ mod test {
                 [
                     "--some-option",
                 ],
-            )"#]]);
+            )"#]],
+        );
     }
 }
