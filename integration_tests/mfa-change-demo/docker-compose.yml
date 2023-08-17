@@ -63,13 +63,15 @@ services:
       - "./server/udf.py:/udf.py"
       - "./mfa-start.sql:/mfa-start.sql"
       - "./mfa-mock.sql:/mfa-mock.sql"
-  feature-store: 
+  feature-store:
     image: rust:1.67
     build:
       context: .
       target: feature-store-server
     depends_on:
       [kafka,meta-node-0,frontend-node-0]
+    volumes:
+      - ".log:/opt/feature-store/.log"
   etcd-0:
     extends:
       file: ../../docker/docker-compose-nightly.yml
@@ -83,7 +85,7 @@ services:
       file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
-    build: 
+    build:
       context: .
       target: meta-last
     extends:

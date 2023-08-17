@@ -16,7 +16,7 @@ MODEL_PID=$!
 ./feature-store-server > /opt/feature-store/.log/server_log &
 RECOMMENDER_PID=$!
 sleep 2
-./feature-store-simulator > /opt/feature-store/.log/simulator_log & 
+./feature-store-simulator > /opt/feature-store/.log/simulator_log &
 SIMULATOR_PID=$!
 
 trap 'kill $SIMULATOR_PID; kill $RECOMMENDER_PID; kill $MODEL_PID' SIGINT
