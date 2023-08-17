@@ -389,6 +389,7 @@ pub fn bind_pk_on_relation(
         .try_collect()?;
 
     // Add `_row_id` column if `pk_column_ids` is empty.
+    // TODO(siyuan): row_id column generated in here
     let row_id_index = pk_column_ids.is_empty().then(|| {
         let column = ColumnCatalog::row_id_column();
         let index = columns.len();
@@ -474,6 +475,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let table_type = ExternalTableType::from_properties(&properties);
     if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+        // TODO: Add a column for storing the event offset
+        // let offset_column =
+
         const CDC_SNAPSHOT_MODE: &str = "debezium.snapshot.mode";
         // TODO(siyuan): setup connector with latest binlog offset
         // configure debezium connector only emit changelogs

@@ -362,6 +362,11 @@ impl CdcBackfillExecutor {
                                     current_pk_pos =
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
 
+                                    tracing::debug!(
+                                        "snapshot chunk length: {:?}",
+                                        chunk.cardinality()
+                                    );
+
                                     tracing::trace!(
                                         "current backfill progress: {:?}",
                                         current_pk_pos
