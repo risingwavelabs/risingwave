@@ -98,6 +98,7 @@ enum Component {
     Compactor,
     Ctl,
     Playground,
+    AllInOne,
 }
 
 impl Component {
@@ -116,6 +117,7 @@ impl Component {
             Self::Compactor => compactor(parse_opts(matches), registry),
             Self::Ctl => ctl(parse_opts(matches), registry),
             Self::Playground => playground(parse_opts(matches), registry),
+            Self::AllInOne => all_in_one(parse_opts(matches), registry),
         }
     }
 
@@ -128,6 +130,7 @@ impl Component {
             Component::Compactor => vec!["compactor-node", "compactor_node"],
             Component::Ctl => vec!["risectl"],
             Component::Playground => vec!["play"],
+            Component::AllInOne => vec!["all-in-one"],
         }
     }
 
@@ -140,6 +143,7 @@ impl Component {
             Component::Compactor => CompactorOpts::augment_args(cmd),
             Component::Ctl => CtlOpts::augment_args(cmd),
             Component::Playground => PlaygroundOpts::augment_args(cmd),
+            Component::AllInOne => PlaygroundOpts::augment_args(cmd),
         }
     }
 
@@ -193,4 +197,11 @@ fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
         .with_target("risingwave_storage", Level::WARN);
     risingwave_rt::init_risingwave_logger(settings, registry);
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
+}
+
+fn all_in_one(_opts: PlaygroundOpts, registry: prometheus::Registry) {
+    let settings = risingwave_rt::LoggerSettings::new("all-in-one")
+        .with_target("risingwave_storage", Level::WARN);
+    risingwave_rt::init_risingwave_logger(settings, registry);
+    risingwave_rt::main_okk(risingwave_cmd_all::all_in_one()).unwrap();
 }

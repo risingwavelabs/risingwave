@@ -16,3 +16,5 @@
 
 pub mod playground;
 pub use playground::*;
+pub mod all_in_one;
+pub use all_in_one::*;
