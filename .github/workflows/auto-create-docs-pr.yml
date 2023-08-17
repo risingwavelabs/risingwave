@@ -61,7 +61,6 @@ jobs:
           echo "PR ID: ${{ steps.PR.outputs.number }}"
           echo "PR URL: ${{ steps.PR.outputs.pr_url }}"
           echo "PR Title: ${{ steps.PR.outputs.pr_title }}"
-          echo "PR Body: ${{ steps.PR.outputs.pr_body }}"
           echo "PR Created At: ${{ steps.PR.outputs.pr_created_at }}"
           echo "PR Merged At: ${{ steps.PR.outputs.pr_merged_at }}"
           echo "PR Closed At: ${{ steps.PR.outputs.pr_closed_at }}"
