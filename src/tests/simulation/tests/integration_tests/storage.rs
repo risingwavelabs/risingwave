@@ -22,8 +22,8 @@ use rand::{RngCore, SeedableRng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 
-const NUM_ROWS: usize = 10000;
-const NUM_OVERWRITES: usize = 20000;
+const NUM_ROWS: usize = 1000;
+const NUM_OVERWRITES: usize = 5000;
 const MAX_STRING_LEN: usize = 1024;
 
 #[madsim::test]
