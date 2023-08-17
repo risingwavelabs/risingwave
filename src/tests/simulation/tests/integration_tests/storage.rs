@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
+use madsim::rand::thread_rng;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
@@ -66,7 +67,7 @@ async fn test_storage_with_random_writes() -> Result<()> {
     });
 
     // Overwrite random rows
-    let mut rng = SmallRng::seed_from_u64(0);
+    let mut rng = thread_rng();
     for _ in 0..NUM_OVERWRITES {
         let id = (rng.next_u32() as usize) % NUM_ROWS;
         let rand_len: usize = (rng.next_u32() as usize) % MAX_STRING_LEN;
