@@ -594,6 +594,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             catalog_manager,
             fragment_manager.clone(),
+            hummock_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -736,7 +737,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        dashboard_task.await.unwrap().unwrap();
+        // Join the task while ignoring the cancellation error.
+        let _ = dashboard_task.await;
     }
     Ok(())
 }

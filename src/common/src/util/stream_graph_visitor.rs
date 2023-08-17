@@ -98,10 +98,7 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.result_table, "HashAggResult");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
-                        agg_call_state::Inner::ResultValueState(_) => {}
-                        agg_call_state::Inner::TableState(s) => {
-                            always!(s.table, &format!("HashAggCall{}", call_idx));
-                        }
+                        agg_call_state::Inner::ValueState(_) => {}
                         agg_call_state::Inner::MaterializedInputState(s) => {
                             always!(s.table, &format!("HashAggCall{}", call_idx));
                         }
@@ -116,10 +113,7 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.result_table, "SimpleAggResult");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
-                        agg_call_state::Inner::ResultValueState(_) => {}
-                        agg_call_state::Inner::TableState(s) => {
-                            always!(s.table, &format!("SimpleAggCall{}", call_idx));
-                        }
+                        agg_call_state::Inner::ValueState(_) => {}
                         agg_call_state::Inner::MaterializedInputState(s) => {
                             always!(s.table, &format!("SimpleAggCall{}", call_idx));
                         }

@@ -410,7 +410,7 @@ impl SinkImpl {
                 param.pk_indices,
                 param.sink_type.is_append_only(),
             )?),
-            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema())?),
+            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),
         })
     }
 }
@@ -428,7 +428,7 @@ pub enum SinkError {
     #[error("Json parse error: {0}")]
     JsonParse(String),
     #[error("Iceberg error: {0}")]
-    Iceberg(String),
+    Iceberg(anyhow::Error),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]
