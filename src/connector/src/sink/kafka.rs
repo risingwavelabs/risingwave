@@ -21,7 +21,7 @@ use anyhow::anyhow;
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
-use rdkafka::producer::{FutureProducer, FutureRecord, DeliveryFuture};
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
@@ -349,10 +349,9 @@ impl KafkaSinkWriter {
             // KafkaConfig configuration
             config.common.set_security_properties(&mut c);
             config.set_client(&mut c);
-            
+
             // ClientConfig configuration
-            c
-                .set("bootstrap.servers", &config.common.brokers)
+            c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
             // Note that we will not use transaction during sinking, thus set it to false
             config.use_transaction = false;
@@ -367,10 +366,8 @@ impl KafkaSinkWriter {
 
         Ok(KafkaSinkWriter {
             config: config.clone(),
-            // conductor: KafkaTransactionConductor::new(config, &identifier).await?,
             inner,
             identifier,
-            // in_transaction_epoch: None,
             state: KafkaSinkState::Init,
             schema,
             pk_indices,
@@ -380,6 +377,7 @@ impl KafkaSinkWriter {
 
     /// The wrapper function for the actual `FutureProducer::send_result`
     /// Just for better error handling purpose
+    #[expect(clippy::unused_async)]
     async fn send_result_inner<'a, K, P>(
         &'a self,
         record: FutureRecord<'a, K, P>,
@@ -391,7 +389,8 @@ impl KafkaSinkWriter {
         self.inner.send_result(record)
     }
 
-    /// The actual `send_result` function, will be called when the KafkaSinkWriter needs to sink messages
+    /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
+    /// messages
     async fn send_result<'a, K, P>(&'a self, mut record: FutureRecord<'a, K, P>) -> KafkaResult<()>
     where
         K: ToBytes + ?Sized,
@@ -408,16 +407,18 @@ impl KafkaSinkWriter {
                         // Will return the partition and offset of the message (i32, i64)
                         Ok(_) => return Ok(()),
                         // If the message failed to be delivered. (i.e., flush)
-                        // The error & the copy of the original message will be returned (KafkaError, OwnedMessage)
-                        // We will just stop the loop and return the error
+                        // The error & the copy of the original message will be returned
+                        // i.e., (KafkaError, OwnedMessage)
+                        // We will just stop the loop, and return the error
                         // The sink executor will back to the latest checkpoint
                         Err((k_err, _msg)) => {
                             err = k_err;
                             break;
                         }
                     },
-                    // Nothing to do here, since the err has already been set to KafkaError::Canceled
-                    // This represents the producer is dropped before the delivery status is received
+                    // Nothing to do here, since the err has already been set to
+                    // KafkaError::Canceled. This represents the producer is dropped
+                    // before the delivery status is received
                     Err(_) => break,
                 },
                 // The enqueue buffer is full, `send_result` will immediately return
@@ -436,11 +437,6 @@ impl KafkaSinkWriter {
         Err(err)
     }
 
-    fn gen_message_key(&self) -> String {
-        // format!("{}-{}", self.identifier, self.in_transaction_epoch.unwrap())
-        format!("{}-{}", self.identifier, 0)
-    }
-
     async fn write_json_objects(
         &self,
         event_key_object: Option<Value>,
@@ -449,8 +445,8 @@ impl KafkaSinkWriter {
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
         let key_str = event_key_object.unwrap().to_string();
-        let mut record =
-            FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str()).key(key_str.as_bytes());
+        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
+            .key(key_str.as_bytes());
         let payload;
         if let Some(value) = event_object {
             payload = value.to_string();
@@ -537,10 +533,10 @@ impl SinkWriterV1 for KafkaSinkWriter {
         }
     }
 
-    /// ----------------------------------------------------------------------------------------------
-    /// Note: The following functions are just to satisfy `SinkWriterV1` trait                       |
-    /// Since we do not need transaction-related functionality for sink executor, just return Ok(()) |
-    /// ----------------------------------------------------------------------------------------------
+    /// ---------------------------------------------------------------------------------------
+    /// Note: The following functions are just to satisfy `SinkWriterV1` trait                |
+    /// We do not need transaction-related functionality for sink executor, return Ok(())     |
+    /// ---------------------------------------------------------------------------------------
     // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
@@ -687,7 +683,8 @@ mod test {
         assert!(KafkaConfig::from_hashmap(properties).is_err());
     }
 
-    /// Note: Please enable the kafka by running ./risedev configure before commenting #[ignore] to run the test
+    /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
+    /// to run the test
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
@@ -739,7 +736,7 @@ mod test {
                     .send_result(
                         FutureRecord::to(kafka_config.common.topic.as_str())
                             .payload(format!("value-{}", j).as_bytes())
-                            .key(sink.gen_message_key().as_bytes()),
+                            .key(format!("dummy_key_for_epoch-{}", i).as_bytes()),
                     )
                     .await
                 {
