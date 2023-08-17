@@ -20,13 +20,11 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal oss engine.
-    pub fn new_oss_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_oss_engine(bucket: String) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
 
         builder.bucket(&bucket);
-
-        builder.root(&root);
 
         let endpoint = std::env::var("OSS_ENDPOINT")
             .unwrap_or_else(|_| panic!("OSS_ENDPOINT not found from environment variables"));
@@ -45,6 +43,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
+
             engine_type: EngineType::Oss,
         })
     }

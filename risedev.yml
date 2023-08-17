@@ -120,7 +120,6 @@ profile:
       - use: opendal
         engine: hdfs
         namenode: "127.0.0.1:9000"
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -134,7 +133,6 @@ profile:
       - use: opendal
         engine: webhdfs
         namenode: "127.0.0.1:9870"
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -149,7 +147,6 @@ profile:
       - use: opendal
         engine: gcs
         bucket: bucket-name
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -163,8 +160,7 @@ profile:
       # If you want to use oss as storage backend, configure bucket name and root path:
       - use: opendal
         engine: oss
-        bucket: test-bucket
-        root: risingwave
+        bucket: risingwave-oss-wcy
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -179,7 +175,6 @@ profile:
       - use: opendal
         engine: azblob
         bucket: test-bucket
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -546,7 +541,6 @@ profile:
       - use: opendal
         engine: fs
         bucket: ""
-        root: /tmp/rw_ci
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -1086,7 +1080,6 @@ template:
 
     bucket: risingwave-test
 
-    root: risingwave
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:
