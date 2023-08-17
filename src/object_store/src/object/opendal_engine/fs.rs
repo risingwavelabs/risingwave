@@ -20,11 +20,9 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal fs engine.
-    pub fn new_fs_engine(root: String) -> ObjectResult<Self> {
+    pub fn new_fs_engine() -> ObjectResult<Self> {
         // Create fs backend builder.
-        let mut builder = Fs::default();
-
-        builder.root(&root);
+        let builder = Fs::default();
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())

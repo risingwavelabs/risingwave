@@ -20,13 +20,11 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal gcs engine.
-    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_gcs_engine(bucket: String) -> ObjectResult<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
 
         builder.bucket(&bucket);
-
-        builder.root(&root);
 
         // if credential env is set, use it. Otherwise, ADC will be used.
         let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");

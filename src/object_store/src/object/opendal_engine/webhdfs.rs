@@ -21,14 +21,11 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal webhdfs engine.
-    pub fn new_webhdfs_engine(endpoint: String, root: String) -> ObjectResult<Self> {
+    pub fn new_webhdfs_engine(endpoint: String) -> ObjectResult<Self> {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
         // Set the name node for webhdfs.
         builder.endpoint(&endpoint);
-        // Set the root for hdfs, all operations will happen under this root.
-        // NOTE: the root must be absolute path.
-        builder.root(&root);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
