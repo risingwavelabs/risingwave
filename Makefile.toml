@@ -547,7 +547,7 @@ RUST_BACKTRACE=1 \
 cargo run -p risingwave_cmd_all \
           --profile "${RISINGWAVE_BUILD_PROFILE}" \
           ${RISINGWAVE_FEATURE_FLAGS} \
-          -- all-in-one $@
+          -- monolithic-mode $@
 '''
 
 # TODO(kwannoel): Support `tasks.all-in-one-dev` as well.
@@ -565,7 +565,7 @@ RUST_BACKTRACE=1 \
 cargo run -p risingwave_cmd_all \
           --profile "${RISINGWAVE_BUILD_PROFILE}" \
           ${RISINGWAVE_FEATURE_FLAGS} \
-          -- all-in-one \
+          -- monolithic-mode \
                --meta-opts=" \
                   --listen-addr 127.0.0.1:5690 \
                   --advertise-addr 127.0.0.1:5690 \
