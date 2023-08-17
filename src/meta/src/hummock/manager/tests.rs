@@ -944,9 +944,13 @@ async fn test_hummock_compaction_task_heartbeat() {
     }
 
     // Cancel the task immediately and succeed.
-    compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(hummock_manager
-        .report_compact_task(&compact_task, None)
+        .report_compact_task(
+            compact_task.task_id,
+            TaskStatus::ExecuteFailed,
+            vec![],
+            None
+        )
         .await
         .unwrap());
 
@@ -963,14 +967,18 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert_eq!(compact_task.get_task_id(), 3);
 
     // Cancel the task after heartbeat has triggered and fail.
-    compact_task.set_task_status(TaskStatus::ExecuteFailed);
 
     // do not send heartbeats to the task for 30s seconds (ttl = 1s, heartbeat check freq. = 1s)
     // default_interval = 30s
     tokio::time::sleep(std::time::Duration::from_secs(32)).await;
 
     assert!(!hummock_manager
-        .report_compact_task(&compact_task, None)
+        .report_compact_task(
+            compact_task.task_id,
+            TaskStatus::ExecuteFailed,
+            vec![],
+            None
+        )
         .await
         .unwrap());
     shutdown_tx.send(()).unwrap();

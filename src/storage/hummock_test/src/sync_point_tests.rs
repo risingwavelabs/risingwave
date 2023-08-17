@@ -193,7 +193,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
     .await;
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-    let mut task = hummock_manager
+    let task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_level_selector(),
@@ -204,7 +204,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
     assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
     env.notification_manager()
         .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel((
-            task.id,
+            task.task_id,
             TaskStatus::ManualCanceled,
         )))
         .await;
@@ -247,16 +247,23 @@ pub async fn compact_once(
         .unwrap()
         .unwrap();
     compact_task.gc_delete_keys = false;
+    hummock_manager_ref
+        .set_assignment_for_test(compact_task.clone())
+        .await;
 
     let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (mut result_task, task_stats) =
-        Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+    let (result_task, task_stats) = Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
 
     hummock_manager_ref
-        .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+        .report_compact_task(
+            result_task.task_id,
+            result_task.task_status(),
+            result_task.sorted_output_ssts,
+            Some(to_prost_table_stats_map(task_stats)),
+        )
         .await
         .unwrap();
 }
