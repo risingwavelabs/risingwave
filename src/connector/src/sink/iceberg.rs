@@ -14,10 +14,12 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use arrow_array::RecordBatch;
 use async_trait::async_trait;
+use icelake::config::{TableConfig, TableConfigRef};
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
 use icelake::Table;
@@ -63,7 +65,7 @@ pub struct IcebergConfig {
     pub region: Option<String>,
 
     #[serde(rename = "s3.endpoint")]
-    pub endpoint: String,
+    pub endpoint: Option<String>,
 
     #[serde(rename = "s3.access.key")]
     pub access_key: String,
@@ -76,12 +78,20 @@ pub struct IcebergConfig {
 
     #[serde(rename = "table.name")]
     pub table_name: String,
+
+    #[serde(skip)]
+    pub iceberg_table_config: TableConfigRef,
 }
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let iceberg_table_config =
+            Arc::new(TableConfig::try_from(&values).map_err(|e| SinkError::Iceberg(anyhow!(e)))?);
+        let mut config =
+            serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        config.iceberg_table_config = iceberg_table_config;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -91,6 +101,13 @@ impl IcebergConfig {
                 SINK_TYPE_UPSERT
             )));
         }
+
+        if config.endpoint.is_none() && config.region.is_none() {
+            return Err(SinkError::Config(anyhow!(
+                "You must fill either s3 region or s3 endpoint",
+            )));
+        }
+
         Ok(config)
     }
 }
@@ -120,7 +137,6 @@ impl IcebergSink {
         builder
             .root(&self.table_root)
             .bucket(&self.bucket_name)
-            .endpoint(&self.config.endpoint)
             .access_key_id(&self.config.access_key)
             .secret_access_key(&self.config.secret_key);
 
@@ -128,11 +144,15 @@ impl IcebergSink {
             builder.region(region);
         }
 
+        if let Some(endpoint) = &self.config.endpoint {
+            builder.endpoint(endpoint);
+        }
+
         let op = opendal::Operator::new(builder)
             .map_err(|err| SinkError::Config(anyhow!("{err}")))?
             .finish();
 
-        let table = Table::open_with_op(op)
+        let table = Table::open_with_config(op, self.config.iceberg_table_config.clone())
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!("Create table fail: {}", err)))?;
 
