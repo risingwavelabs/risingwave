@@ -1,5 +1,5 @@
-CREATE table user_behaviors (
-    user_id VARCHAR,
+CREATE TABLE user_behaviors (
+    user_id INT,
     target_id VARCHAR,
     target_type VARCHAR,
     event_timestamp TIMESTAMP,
@@ -8,12 +8,11 @@ CREATE table user_behaviors (
     parent_target_id VARCHAR,
     PRIMARY KEY(user_id)
 ) WITH (
-    connector = 'mysql-cdc',
-    hostname = 'mysql',
-    port = '3306',
-    username = 'root',
-    password = '123456',
-    database.name = 'mydb',
-    table.name = 'user_behaviors',
-    server.id = '1'
-);
+    connector = 'datagen',
+    fields.user_id.kind = 'sequence',
+    fields.user_id.start = '1',
+    fields.user_id.end = '100',
+    fields.user_name.kind = 'random',
+    fields.user_name.length = '10',
+    datagen.rows.per.second = '50'
+) FORMAT PLAIN ENCODE JSON;

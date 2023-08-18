@@ -13,42 +13,6 @@ services:
       - 9009
     volumes:
       - ./clickhouse-sql:/opt/clickhouse/clickhouse-sql
-  mysql:
-    image: mysql:8.0
-    ports:
-      - "3306:3306"
-    environment:
-      - MYSQL_ROOT_PASSWORD=123456
-      - MYSQL_USER=mysqluser
-      - MYSQL_PASSWORD=mysqlpw
-      - MYSQL_DATABASE=mydb
-    healthcheck:
-      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    container_name: mysql
-  prepare_mysql:
-    image: mysql:8.0
-    depends_on:
-      - mysql
-    command:
-      - /bin/sh
-      - -c
-      - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
-    volumes:
-      - "./mysql_prepare.sql:/mysql_prepare.sql"
-    container_name: prepare_mysql
-    restart: on-failure
-  datagen:
-    build: ../datagen
-    depends_on: [mysql]
-    command:
-      - /bin/sh
-      - -c
-      - /datagen --mode clickstream --qps 1 mysql --user mysqluser --password mysqlpw --host mysql --port 3306 --db mydb
-    container_name: datagen
-    restart: on-failure
   compactor-0:
     extends:
       file: ../../docker/docker-compose.yml
