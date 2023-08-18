@@ -7,9 +7,8 @@ psql -U root -h frontend-node-0 -p 4566 -d dev -a -f taxi-start.sql || {
 }
 sleep 2
 
-export GENERATOR_PATH=/opt/feature-store/generator
-python3 generator --num-users=15 \
-  --dump-users="$GENERATOR_PATH/users.json"
+python3 generator
+sleep 2
 
 python3 server/model &
 MODEL_PID=$!

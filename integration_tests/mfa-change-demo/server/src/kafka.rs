@@ -40,7 +40,6 @@ impl KafkaSink {
             .send(record, Duration::from_secs(1))
             .await
             .expect("Failed to create send message request");
-        println!("Sent payload {}", payload);
     }
 
     pub async fn mock_consume() {

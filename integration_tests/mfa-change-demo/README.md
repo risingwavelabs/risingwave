@@ -14,30 +14,14 @@ If we intend to modify our business logic, we simply need to update the material
 
 Run it in local.
 
-1. Start kafka and risingwave. Then create source and mv in risingwave. can run this script
+1. Build docker. Kafka RisingWave and Feature Store.
 
-```./run_local.sh```
+```docker compose up --build```
 
-We have the option to modify the mfa-start.sql file and the server/src/serving directory to accommodate new requirements or make modifications.
+2. Then we can get the simulation results for Feature store in `.log`.
 
-2. Start feature store serve demo. It can accept data writing to Kafka and provide feature query services
+```cat .log/simulator_log```
 
-```python3 server/model ```
-```cd server ```
-```cargo run -- --brokers localhost:9092 --output-topics taxi```
-
-We can adjust the configuration to utilize Python for executing SQL queries (which might be more convenient, especially if deep learning needs to be incorporated).
-
-3. Run data simulator.
-
-```cd simulator```
-```cargo run -- --types taxi```
-
-4. We also can run mfa demo.
-
-```cd server ```
-```cargo run -- --brokers localhost:9092 --output-topics mfa```
-```cd simulator```
-```cargo run -- --types mfa```
+3. We can modify the configuration in the `Dockerfile` to use MFA example.
 
 * Build Dependencies: librdkafka, pkg-config , openssl

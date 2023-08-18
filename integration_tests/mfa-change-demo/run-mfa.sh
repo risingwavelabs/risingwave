@@ -1,22 +1,27 @@
 #!/bin/bash
 set -ex
 
-docker compose exec kafka kafka-topics --create --topic mfa --partitions 1 --replication-factor 1 --bootstrap-server=127.0.0.1:29092
-sleep 5
-
-docker compose exec meta-node-0 pip install risingwave
-
-docker compose exec meta-node-0 python3 udf.py > /dev/null 2>&1 & lsof -i:8815  > /dev/null
-sleep 5
-
-psql -U root -h 127.0.0.1 -p 4566 -d dev -a -f mfa-start.sql || {
+psql -U root -h frontend-node-0 -p 4566 -d dev -a -f mfa-start.sql || {
   echo "failed to initialize db for mfa"
   exit 1
 }
 sleep 2
 
-pip3 install -r generator/requirements.txt
-
 export GENERATOR_PATH=generator
-python3 generator --num-users=15 \
+python3 generator --types user --num-users=15 \
   --dump-users="$GENERATOR_PATH/users.json"
+sleep 2
+
+./feature-store-server > /opt/feature-store/.log/server_log &
+RECOMMENDER_PID=$!
+sleep 2
+./feature-store-simulator > /opt/feature-store/.log/simulator_log &
+SIMULATOR_PID=$!
+
+trap 'kill $SIMULATOR_PID; kill $RECOMMENDER_PID; kill $MODEL_PID' SIGINT
+wait $SIMULATOR_PID
+echo "Simulator finished"
+wait $RECOMMENDER_PID
+echo "Recommender finished"
+wait $MODEL_PID
+echo "Model finished"

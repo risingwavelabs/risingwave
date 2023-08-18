@@ -26,12 +26,12 @@ create source if not exists taxiallfeature (
 )
 FORMAT PLAIN ENCODE JSON;
 
-create materialized view mv1 as select lpep_pickup_datetime ,lpep_dropoff_datetime ,do_location_id ,
+create materialized view userful_features as select lpep_pickup_datetime ,lpep_dropoff_datetime ,do_location_id ,
     passenger_count ,trip_distance ,fare_amount ,extra ,mta_tax ,
     tip_amount,tolls_amount ,improvement_surcharge ,total_amount,
     congestion_surcharge from taxiallfeature where payment_type in (1,2,4);
 
-create materialized view mv2 as select
+create materialized view converted_features as select
     do_location_id,
     avg(fare_amount) as avg_amount,
     window_start,
@@ -47,5 +47,5 @@ create materialized view mv2 as select
     avg(congestion_surcharge) as congestion_surcharge,
     avg(trip_distance) > 30 as long_distance
 from (
-    select * from tumble(mv1,lpep_pickup_datetime,INTERVAL '5' hour)
+    select * from tumble(userful_features,lpep_pickup_datetime,INTERVAL '5' hour)
 ) group by do_location_id,window_start;

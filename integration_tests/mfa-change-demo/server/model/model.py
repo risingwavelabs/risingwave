@@ -44,7 +44,6 @@ class TrainingModelService(ModelServicer):
             return TrainingResponse()
 
     def GetAmount(self, request, context):
-        print(f"get amount!")
         do_location_id = request.do_location_id
         try:
             with self.conn.cursor() as cur:

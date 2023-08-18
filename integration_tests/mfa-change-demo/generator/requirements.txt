@@ -1,2 +1,2 @@
 click==8.1.3
-numpy==1.21.4
+azureml-opendataset==1.52.0

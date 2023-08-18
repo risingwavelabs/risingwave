@@ -57,7 +57,6 @@ impl Server for FeatureStoreServer {
         request: tonic::Request<GetTaxiAmountRequest>,
     ) -> Result<tonic::Response<GetTaxiAmountResponse>, tonic::Status> {
         let do_location_id = request.into_inner().do_location_id;
-        println!("Get Taxi Amount do_location_id {:?}", do_location_id);
         let fare_amount = self.get_taxi_amount(do_location_id.clone()).await.unwrap();
         Ok(Response::new(GetTaxiAmountResponse {
             fare_amount: fare_amount as f64,
@@ -98,7 +97,6 @@ impl FeatureStoreServer {
         message: &ReportTaxiActionRequest,
     ) -> Result<Response<ReportTaxiActionResponse>, Status> {
         let json = Self::create_sink_taxi_json(message);
-        // println!("timestamp: {}, payload: {}", timestamp, json.clone());
         self.kafka.send("0".to_string(), json).await;
         Ok(Response::new(ReportTaxiActionResponse {}))
     }
