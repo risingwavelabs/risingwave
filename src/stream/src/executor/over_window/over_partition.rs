@@ -771,7 +771,8 @@ fn find_affected_ranges<'cache>(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::DataType;
+    use itertools::Itertools;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_expr::agg::{AggArgs, AggKind};
     use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
@@ -788,23 +789,47 @@ mod tests {
             }
         }
 
-        macro_rules! create_snapshot {
-            ($( $pk:expr ),* $(,)?) => {
+        macro_rules! create_cache {
+            (..., $( $pk:expr ),* , ...) => {
+                {
+                    let mut cache = create_cache!( $( $pk ),* );
+                    cache.insert(CacheKey::Smallest);
+                    cache.insert(CacheKey::Largest);
+                    cache
+                }
+            };
+            (..., $( $pk:expr ),*) => {
+                {
+                    let mut cache = create_cache!( $( $pk ),* );
+                    cache.insert(CacheKey::Smallest);
+                    cache
+                }
+            };
+            ($( $pk:expr ),* , ...) => {
+                {
+                    let mut cache = create_cache!( $( $pk ),* );
+                    cache.insert(CacheKey::Largest);
+                    cache
+                }
+            };
+            ($( $pk:expr ),*) => {
                 {
                     #[allow(unused_mut)]
-                    let mut snapshot = BTreeMap::new();
+                    let mut cache = BTreeMap::new();
                     $(
-                        snapshot.insert(
-                            StateKey {
-                                // order key doesn't matter here
-                                order_key: vec![].into(),
-                                pk: OwnedRow::new(vec![Some($pk.into())]).into(),
-                            },
+                        cache.insert(
+                            CacheKey::Normal(
+                                StateKey {
+                                    // order key doesn't matter here
+                                    order_key: vec![].into(),
+                                    pk: OwnedRow::new(vec![Some($pk.into())]).into(),
+                                },
+                            ),
                             // value row doesn't matter here
                             OwnedRow::empty(),
                         );
                     )*
-                    snapshot
+                    cache
                 }
             };
         }
@@ -825,11 +850,13 @@ mod tests {
                     let mut delta = BTreeMap::new();
                     $(
                         delta.insert(
-                            StateKey {
-                                // order key doesn't matter here
-                                order_key: vec![].into(),
-                                pk: OwnedRow::new(vec![Some($pk.into())]).into(),
-                            },
+                            CacheKey::Normal(
+                                StateKey {
+                                    // order key doesn't matter here
+                                    order_key: vec![].into(),
+                                    pk: OwnedRow::new(vec![Some($pk.into())]).into(),
+                                },
+                            ),
                             // value row doesn't matter here
                             create_change!( $change ),
                         );
@@ -839,57 +866,73 @@ mod tests {
             };
         }
 
+        fn assert_ranges_eq(
+            result: Vec<(&CacheKey, &CacheKey, &CacheKey, &CacheKey)>,
+            expected: impl IntoIterator<Item = (ScalarImpl, ScalarImpl, ScalarImpl, ScalarImpl)>,
+        ) {
+            result
+                .into_iter()
+                .zip_eq(expected.into_iter())
+                .for_each(|(result, expected)| {
+                    assert_eq!(
+                        result.0.as_normal_expect().pk.0,
+                        OwnedRow::new(vec![Some(expected.0)])
+                    );
+                    assert_eq!(
+                        result.1.as_normal_expect().pk.0,
+                        OwnedRow::new(vec![Some(expected.1)])
+                    );
+                    assert_eq!(
+                        result.2.as_normal_expect().pk.0,
+                        OwnedRow::new(vec![Some(expected.2)])
+                    );
+                    assert_eq!(
+                        result.3.as_normal_expect().pk.0,
+                        OwnedRow::new(vec![Some(expected.3)])
+                    );
+                })
+        }
+
         {
             // test all empty
-            let snapshot = create_snapshot!();
+            let cache = create_cache!();
             let delta = create_delta!();
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(2),
                 FrameBound::Preceding(1),
             ))];
-            assert!(find_affected_ranges(&calls, &part_with_delta).is_empty());
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [],
+            );
         }
 
         {
             // test insert delta only
-            let snapshot = create_snapshot!();
+            let cache = create_cache!();
             let delta = create_delta!((1, Insert), (2, Insert), (3, Insert));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(2),
                 FrameBound::Preceding(1),
             ))];
-            let affected_ranges = find_affected_ranges(&calls, &part_with_delta);
-            assert_eq!(affected_ranges.len(), 1);
-            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                affected_ranges.into_iter().next().unwrap();
-            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(1.into())]));
-            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(1.into())]));
-            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            let affected_ranges = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta));
+            assert_ranges_eq(affected_ranges, [(1.into(), 1.into(), 3.into(), 3.into())]);
         }
 
         {
             // test simple
-            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((2, Insert), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
 
             {
                 let calls = vec![create_call(Frame::rows(
                     FrameBound::Preceding(2),
                     FrameBound::Preceding(1),
                 ))];
-                let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                    find_affected_ranges(&calls, &part_with_delta)
-                        .into_iter()
-                        .next()
-                        .unwrap();
-                assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(1.into())]));
-                assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(2.into())]));
-                assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(5.into())]));
-                assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(5.into())]));
+                assert_ranges_eq(
+                    find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                    [(1.into(), 2.into(), 5.into(), 5.into())],
+                );
             }
 
             {
@@ -897,15 +940,10 @@ mod tests {
                     FrameBound::Preceding(1),
                     FrameBound::Following(2),
                 ))];
-                let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                    find_affected_ranges(&calls, &part_with_delta)
-                        .into_iter()
-                        .next()
-                        .unwrap();
-                assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(1.into())]));
-                assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(1.into())]));
-                assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
-                assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(6.into())]));
+                assert_ranges_eq(
+                    find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                    [(1.into(), 1.into(), 4.into(), 6.into())],
+                );
             }
 
             {
@@ -913,24 +951,17 @@ mod tests {
                     FrameBound::CurrentRow,
                     FrameBound::Following(2),
                 ))];
-                let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                    find_affected_ranges(&calls, &part_with_delta)
-                        .into_iter()
-                        .next()
-                        .unwrap();
-                assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(1.into())]));
-                assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(1.into())]));
-                assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(2.into())]));
-                assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(5.into())]));
+                assert_ranges_eq(
+                    find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                    [(1.into(), 1.into(), 2.into(), 5.into())],
+                );
             }
         }
 
         {
             // test multiple calls
-            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((2, Insert), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
-
             let calls = vec![
                 create_call(Frame::rows(
                     FrameBound::Preceding(1),
@@ -941,91 +972,66 @@ mod tests {
                     FrameBound::Following(1),
                 )),
             ];
-            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                find_affected_ranges(&calls, &part_with_delta)
-                    .into_iter()
-                    .next()
-                    .unwrap();
-            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(1.into())]));
-            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(1.into())]));
-            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
-            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(5.into())]));
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [(1.into(), 1.into(), 4.into(), 5.into())],
+            );
         }
 
         {
             // test lag corner case
-            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((1, Delete), (2, Delete), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
-
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(1),
                 FrameBound::Preceding(1),
             ))];
-            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                find_affected_ranges(&calls, &part_with_delta)
-                    .into_iter()
-                    .next()
-                    .unwrap();
-            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(4.into())]));
-            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
-            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
-            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(4.into())]));
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [(4.into(), 4.into(), 4.into(), 4.into())],
+            );
         }
 
         {
             // test lead corner case
-            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let cache = create_cache!(1, 2, 3, 4, 5, 6);
             let delta = create_delta!((4, Delete), (5, Delete), (6, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
-
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Following(1),
                 FrameBound::Following(1),
             ))];
-            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                find_affected_ranges(&calls, &part_with_delta)
-                    .into_iter()
-                    .next()
-                    .unwrap();
-            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [(3.into(), 3.into(), 3.into(), 3.into())],
+            );
         }
 
         {
             // test lag/lead(x, 0) corner case
-            let snapshot = create_snapshot!(1, 2, 3, 4);
+            let cache = create_cache!(1, 2, 3, 4);
             let delta = create_delta!((2, Delete), (3, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
-
             let calls = vec![create_call(Frame::rows(
                 FrameBound::CurrentRow,
                 FrameBound::CurrentRow,
             ))];
-            assert!(find_affected_ranges(&calls, &part_with_delta).is_empty());
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [],
+            );
         }
 
         {
             // test lag/lead(x, 0) corner case 2
-            let snapshot = create_snapshot!(1, 2, 3, 4, 5);
+            let cache = create_cache!(1, 2, 3, 4, 5);
             let delta = create_delta!((2, Delete), (3, Insert), (4, Delete));
-            let part_with_delta = DeltaBTreeMap::new(&snapshot, &delta);
-
             let calls = vec![create_call(Frame::rows(
                 FrameBound::CurrentRow,
                 FrameBound::CurrentRow,
             ))];
-            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                find_affected_ranges(&calls, &part_with_delta)
-                    .into_iter()
-                    .next()
-                    .unwrap();
-            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
-            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [(3.into(), 3.into(), 3.into(), 3.into())],
+            );
         }
     }
 }
