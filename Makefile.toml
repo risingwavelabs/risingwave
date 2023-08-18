@@ -536,7 +536,7 @@ cargo run -p risingwave_cmd_all \
 
 [tasks.standalone]
 category = "RiseDev - Start/Stop"
-description = "🌟 Start a RisingWave monolithic instance"
+description = "🌟 Start a RisingWave standalone instance"
 dependencies = ["build"]
 script = '''
 #!/usr/bin/env bash

@@ -15,8 +15,8 @@
 #![feature(lazy_cell)]
 
 mod common;
-mod monolithic_mode;
+mod standalone;
 pub mod playground;
 
-pub use monolithic_mode::*;
+pub use standalone::*;
 pub use playground::*;
