@@ -112,15 +112,11 @@ def run_clickhouse_demo():
     # wait for two minutes ingestion
     sleep(120)
 
-    query_sql = open(os.path.join(demo_dir, "clickhouse-query.sql")).read()
-
-    print("querying iceberg with presto sql: %s" % query_sql)
-
     query_output_file_name = "query_outout.txt"
 
     query_output_file = open(query_output_file_name, "wb")
 
-    subprocess.run(["docker", "compose", "exec", "clickhouse-server", "bash", "/opt/clickhouse/clickhouse-sql/run-sql-file.sh", query_sql],
+    subprocess.run(["docker", "compose", "exec", "clickhouse-server", "bash", "/opt/clickhouse/clickhouse-sql/run-sql-file.sh", "clickhouse_query"],
                    cwd=demo_dir, check=True, stdout=query_output_file)
     query_output_file.close()
 
