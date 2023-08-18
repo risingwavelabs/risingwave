@@ -541,7 +541,6 @@ profile:
       - use: opendal
         engine: fs
         bucket: ""
-        root: ""
       - use: compute-node
         port: 5687
         exporter-port: 1222
