@@ -160,7 +160,7 @@ profile:
       # If you want to use oss as storage backend, configure bucket name:
       - use: opendal
         engine: oss
-        bucket: risingwave-oss-wcy
+        bucket: bucket-name
       - use: compactor
       # - use: prometheus
       # - use: grafana
