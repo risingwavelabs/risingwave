@@ -444,16 +444,11 @@ message DispatchCompactionTaskRequest {
     ValidationTask validation_task = 4;
     CancelCompactTask cancel_compact_task = 5;
   }
-
-  uint32 block_size_kb = 6;
-  uint64 compactor_max_task_multiplier = 7;
-  // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress write op.
-  uint64 start_sst_id = 8;
   // Used to build filter_key_extract.
-  repeated catalog.Table tables = 9;
+  repeated catalog.Table tables = 6;
   // We can generate output object ids for each compactor, which equal to the number of input SSTs.
   // If all the output object ids are used up, this compaction task fails, and the next allocation will be twice the previous amount of output object ids.
-  repeated uint64 output_object_ids = 10;
+  repeated uint64 output_object_ids = 7;
 }
 
 message DispatchCompactionTaskResponse {
