@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::monitor::connection::{monitored_hyper_https_connector, ConnectionMetrics};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::*;
@@ -31,17 +32,22 @@ pub struct StreamClient(StreamServiceClient<Channel>);
 
 #[async_trait]
 impl RpcClient for StreamClient {
-    async fn new_client(host_addr: HostAddr) -> Result<Self> {
-        Self::new(host_addr).await
+    async fn new_client(host_addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self> {
+        Self::new(host_addr, metrics).await
     }
 }
 
 impl StreamClient {
-    async fn new(host_addr: HostAddr) -> Result<Self> {
+    async fn new(host_addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
-            .connect()
+            .connect_with_connector(monitored_hyper_https_connector(
+                "stream-client",
+                metrics,
+                false,
+                None,
+            ))
             .await?
             .tracing_injected();
 

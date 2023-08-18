@@ -35,6 +35,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
+use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::Mutex;
@@ -169,6 +170,7 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
+        compute_client_pool: ComputeClientPool,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -176,6 +178,7 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             await_tree_config,
+            compute_client_pool,
         ))
     }
 
@@ -382,8 +385,9 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
+        compute_client_pool: ComputeClientPool,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone(), &config);
+        let context = SharedContext::new(addr, state_store.clone(), &config, compute_client_pool);
         Self::new_inner(
             state_store,
             context,

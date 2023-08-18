@@ -21,13 +21,16 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use prometheus::Registry;
 use regex::Regex;
+use risingwave_common::monitor::connection::ConnectionMetrics;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
@@ -296,9 +299,19 @@ pub async fn start_service_as_election_follower(
         Some(election_client) => Either::Left(election_client),
     });
 
+    let registry = Registry::new();
+    let connection_metrics = ConnectionMetrics::new(registry.clone());
+    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(
+        registry.clone(),
+        connection_metrics,
+    ));
+
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
-        .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new(
+            registry,
+            object_store_metrics,
+        ))))
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
@@ -341,11 +354,22 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, init_system_params, meta_store.clone()).await?;
+    let registry = Registry::new();
+    let connection_metrics = ConnectionMetrics::new(registry.clone());
+    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(
+        registry.clone(),
+        connection_metrics.clone(),
+    ));
+    let env = MetaSrvEnv::<S>::new(
+        opts,
+        init_system_params,
+        meta_store.clone(),
+        connection_metrics.clone(),
+    )
+    .await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-    let meta_metrics = Arc::new(MetaMetrics::new());
-    let registry = meta_metrics.registry();
-    monitor_process(registry).unwrap();
+    let meta_metrics = Arc::new(MetaMetrics::new(registry.clone(), object_store_metrics));
+    monitor_process(&registry).unwrap();
 
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
@@ -414,7 +438,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             }),
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
-            compute_clients: ComputeClientPool::default(),
+            compute_clients: ComputeClientPool::new(1, connection_metrics),
             meta_store: env.meta_store_ref(),
         };
         let task = tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -567,10 +591,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager.clone(), aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
-        MetricsManager::boot_metrics_service(
-            prometheus_addr.to_string(),
-            meta_metrics.registry().clone(),
-        )
+        MetricsManager::boot_metrics_service(prometheus_addr.to_string(), registry.clone())
     }
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all

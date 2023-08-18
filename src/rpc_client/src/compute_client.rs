@@ -18,6 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::monitor::connection::{monitored_hyper_https_connector, ConnectionMetrics};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
@@ -54,13 +55,17 @@ pub struct ComputeClient {
 }
 
 impl ComputeClient {
-    pub async fn new(addr: HostAddr) -> Result<Self> {
+    pub async fn new(addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5))
-            .connect()
+            .connect_with_connector(monitored_hyper_https_connector(
+                "compute-client",
+                metrics,
+                true,
+                None,
+            ))
             .await?;
         Ok(Self::with_channel(addr, channel))
     }
@@ -217,8 +222,8 @@ impl ComputeClient {
 
 #[async_trait]
 impl RpcClient for ComputeClient {
-    async fn new_client(host_addr: HostAddr) -> Result<Self> {
-        Self::new(host_addr).await
+    async fn new_client(host_addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self> {
+        Self::new(host_addr, metrics).await
     }
 }
 

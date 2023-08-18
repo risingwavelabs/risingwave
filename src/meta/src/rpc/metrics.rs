@@ -172,8 +172,7 @@ pub struct MetaMetrics {
 }
 
 impl MetaMetrics {
-    pub fn new() -> Self {
-        let registry = prometheus::Registry::new();
+    pub fn new(registry: Registry, object_store_metric: Arc<ObjectStoreMetrics>) -> Self {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
@@ -483,7 +482,6 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
 
         let recovery_failure_cnt = register_int_counter_with_registry!(
             "recovery_failure_cnt",
@@ -677,13 +675,8 @@ impl MetaMetrics {
         }
     }
 
-    pub fn registry(&self) -> &Registry {
-        &self.registry
-    }
-}
-impl Default for MetaMetrics {
-    fn default() -> Self {
-        Self::new()
+    pub fn unused() -> Self {
+        Self::new(Registry::new(), Arc::new(ObjectStoreMetrics::unused()))
     }
 }
 

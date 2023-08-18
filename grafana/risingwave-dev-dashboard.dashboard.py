@@ -2869,6 +2869,36 @@ def section_connector_node(outer_panels):
         )
     ]
 
+def section_network_connection(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Network connection",
+            [
+                panels.timeseries_bytesps(
+                    "Network read bytes per second",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('connection_read_rate')}[$__rate_interval])) by (connection_type, uri, job, instance)",
+                            "{{job}} @ {{instance}} {{connection_type}} {{uri}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Network write bytes per second",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('connection_write_rate')}[$__rate_interval])) by (connection_type, uri, job, instance)",
+                            "{{job}} @ {{instance}} {{connection_type}} {{uri}}",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
 
 templating_list = []
 if dynamic_source_enabled:
@@ -3059,5 +3089,6 @@ dashboard = Dashboard(
         *section_frontend(panels),
         *section_memory_manager(panels),
         *section_connector_node(panels),
+        *section_network_connection(panels)
     ],
 ).auto_panel_ids()

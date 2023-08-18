@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_common::monitor::connection::ConnectionMetrics;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 
@@ -207,10 +208,11 @@ where
         opts: MetaOpts,
         init_system_params: SystemParams,
         meta_store: Arc<S>,
+        connection_metrics: ConnectionMetrics,
     ) -> MetaResult<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let stream_client_pool = Arc::new(StreamClientPool::default());
+        let stream_client_pool = Arc::new(StreamClientPool::new(1, connection_metrics));
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let (cluster_id, cluster_first_launch) =
@@ -318,7 +320,7 @@ impl MetaSrvEnv<MemStore> {
         let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
-        let stream_client_pool = Arc::new(StreamClientPool::default());
+        let stream_client_pool = Arc::new(StreamClientPool::new(1, ConnectionMetrics::unused()));
         let idle_manager = Arc::new(IdleManager::disabled());
         let (cluster_id, cluster_first_launch) = (ClusterId::new(), true);
         let system_params_manager = Arc::new(

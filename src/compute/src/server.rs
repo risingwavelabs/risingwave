@@ -24,6 +24,7 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
     STREAM_WINDOW_SIZE,
 };
+use risingwave_common::monitor::connection::ConnectionMetrics;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -175,8 +176,12 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
+    let connection_metrics = ConnectionMetrics::new(registry.clone());
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
-    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(
+        registry.clone(),
+        connection_metrics.clone(),
+    ));
     let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
@@ -262,6 +267,9 @@ pub async fn compute_node_serve(
             .ok(),
     };
 
+    // TODO: may want to set to a larger size for streaming compute client
+    let stream_compute_client_pool = ComputeClientPool::new(1, connection_metrics.clone());
+
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
@@ -273,6 +281,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         await_tree_config.clone(),
+        stream_compute_client_pool,
     ));
 
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
@@ -307,7 +316,10 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+    let client_pool = Arc::new(ComputeClientPool::new(
+        config.server.connection_pool_size,
+        connection_metrics.clone(),
+    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),

@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 
+use risingwave_common::monitor::connection::ConnectionMetrics;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
@@ -29,7 +30,7 @@ pub async fn trace(context: &CtlContext) -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::default();
+    let clients = ComputeClientPool::new(1, ConnectionMetrics::unused());
 
     let mut all_actor_traces = BTreeMap::new();
     let mut all_rpc_traces = BTreeMap::new();

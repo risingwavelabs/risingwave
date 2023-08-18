@@ -32,7 +32,6 @@ use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
-use std::iter::repeat;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -68,15 +67,20 @@ pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef}
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
+use risingwave_common::monitor::connection::ConnectionMetrics;
 pub use sink_coordinate_client::CoordinatorStreamHandle;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
-    async fn new_client(host_addr: HostAddr) -> Result<Self>;
+    async fn new_client(host_addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self>;
 
-    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client)).await
+    async fn new_clients(
+        host_addr: HostAddr,
+        size: usize,
+        metrics: ConnectionMetrics,
+    ) -> Result<Vec<Self>> {
+        try_join_all((0..size).map(|_| Self::new_client(host_addr.clone(), metrics.clone()))).await
     }
 }
 
@@ -90,29 +94,27 @@ pub struct RpcClientPool<S> {
     // moka::Cache internally uses system thread, so we can't use it in simulation
     #[cfg(madsim)]
     clients: Arc<Mutex<HashMap<HostAddr, S>>>,
-}
 
-impl<S> Default for RpcClientPool<S>
-where
-    S: RpcClient,
-{
-    fn default() -> Self {
-        Self::new(1)
-    }
+    connection_metrics: ConnectionMetrics,
 }
 
 impl<S> RpcClientPool<S>
 where
     S: RpcClient,
 {
-    pub fn new(connection_pool_size: u16) -> Self {
+    pub fn new(connection_pool_size: u16, connection_metrics: ConnectionMetrics) -> Self {
         Self {
             connection_pool_size,
             #[cfg(not(madsim))]
             clients: Cache::new(u64::MAX),
             #[cfg(madsim)]
             clients: Arc::new(Mutex::new(HashMap::new())),
+            connection_metrics,
         }
+    }
+
+    pub fn for_test() -> Self {
+        Self::new(1, ConnectionMetrics::unused())
     }
 
     /// Gets the RPC client for the given node. If the connection is not established, a
@@ -130,7 +132,11 @@ where
             .clients
             .try_get_with(
                 addr.clone(),
-                S::new_clients(addr.clone(), self.connection_pool_size as usize),
+                S::new_clients(
+                    addr.clone(),
+                    self.connection_pool_size as usize,
+                    self.connection_metrics.clone(),
+                ),
             )
             .await
             .map_err(|e| -> RpcError {

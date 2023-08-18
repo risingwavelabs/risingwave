@@ -171,7 +171,7 @@ impl<S: MetaStore> BackupManager<S> {
         Self::with_store(
             env,
             hummock_manager,
-            Arc::new(MetaMetrics::new()),
+            Arc::new(MetaMetrics::unused()),
             (
                 Box::<risingwave_backup::storage::DummyMetaSnapshotStorage>::default(),
                 StoreConfig::default(),
