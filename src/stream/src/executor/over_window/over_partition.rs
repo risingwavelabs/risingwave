@@ -293,7 +293,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 cache_first=?cache_real_first_key,
                 cache_last=?cache_real_last_key,
                 range=?range,
-                "newly-modified range is completely not overlapping with the cache, re-init the cache"
+                "modified range is completely non-overlapping with the cached range, re-init the cache"
             );
             *self.range_cache = new_empty_partition_cache();
         }
@@ -338,8 +338,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await;
         }
 
-        // TODO(rc): uncomment the following to enable prefetching rows before the start of the
-        // range;
+        // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
+        // range once we have state table reverse iterator.
         // self.extend_cache_leftward_by_n(table, range.start()).await?;
 
         // prefetch rows after the end of the range
@@ -632,6 +632,11 @@ fn find_affected_ranges<'cache>(
     &'cache CacheKey,
     &'cache CacheKey,
 )> {
+    // XXX(rc): NOTE FOR DEVS
+    // Must carefully consider the sentinel keys in the cache when extending this function to
+    // support `RANGE` and `GROUPS` frames later. May introduce a return value variant to clearly
+    // tell the caller that there exists at least one affected range that touches the sentinel.
+
     let delta = part_with_delta.delta();
 
     if part_with_delta.first_key().is_none() {
