@@ -22,14 +22,14 @@ use crate::common::{osstrs, RisingWaveService};
 #[derive(Debug, Clone, Parser)]
 pub struct MonolithicModeOpts {
     /// Compute node options
-    #[clap(short, long, env = "ALL_IN_ONE_COMPUTE_OPTS", default_value = "")]
+    #[clap(short, long, env = "MONOLITHIC_MODE_COMPUTE_OPTS", default_value = "")]
     compute_opts: String,
 
-    #[clap(short, long, env = "ALL_IN_ONE_META_OPTS", default_value = "")]
+    #[clap(short, long, env = "MONOLITHIC_MODE_META_OPTS", default_value = "")]
     /// Meta node options
     meta_opts: String,
 
-    #[clap(short, long, env = "ALL_IN_ONE_FRONTEND_OPTS", default_value = "")]
+    #[clap(short, long, env = "MONOLITHIC_MODE_FRONTEND_OPTS", default_value = "")]
     /// Frontend node options
     frontend_opts: String,
 }
@@ -52,7 +52,7 @@ fn get_services(opts: &MonolithicModeOpts) -> Vec<RisingWaveService> {
 }
 
 pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
-    tracing::info!("launching Risingwave in all-in-one mode");
+    tracing::info!("launching Risingwave in monolithic mode");
 
     let services = get_services(&opts);
 
@@ -85,10 +85,10 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
             }
             RisingWaveService::Compactor(_) => {
-                panic!("Compactor node unsupported in Risingwave all-in-one mode.");
+                panic!("Compactor node unsupported in Risingwave monolithic mode.");
             }
             RisingWaveService::ConnectorNode(_) => {
-                panic!("Connector node unsupported in Risingwave all-in-one mode.");
+                panic!("Connector node unsupported in Risingwave monolithic mode.");
             }
         }
     }
@@ -96,7 +96,7 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     eprintln!("-------------------------------");
-    eprintln!("RisingWave all-in-one mode is ready.");
+    eprintln!("RisingWave monolithic mode is ready.");
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
