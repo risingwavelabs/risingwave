@@ -15,7 +15,7 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
@@ -76,6 +76,7 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     order_key_order_types: &'a [OrderType],
     order_key_indices: &'a [usize],
     input_pk_indices: &'a [usize],
+    state_key_to_table_pk_proj: Vec<usize>,
     _phantom: PhantomData<S>,
 }
 
@@ -91,6 +92,21 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         order_key_indices: &'a [usize],
         input_pk_indices: &'a [usize],
     ) -> Self {
+        let mut projection = Vec::with_capacity(
+            partition_key_indices.len() + order_key_indices.len() + input_pk_indices.len(),
+        );
+        let mut col_dedup = HashSet::new();
+        for (proj_idx, key_idx) in partition_key_indices
+            .iter()
+            .chain(order_key_indices.iter())
+            .chain(input_pk_indices.iter())
+            .enumerate()
+        {
+            if col_dedup.insert(*key_idx) {
+                projection.push(proj_idx);
+            }
+        }
+
         Self {
             this_partition_key,
             partition_key_indices,
@@ -99,6 +115,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             order_key_order_types,
             order_key_indices,
             input_pk_indices,
+            state_key_to_table_pk_proj: projection,
             _phantom: PhantomData,
         }
     }
@@ -564,6 +581,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 self.order_key_order_types,
             )?)
             .chain(key.pk.as_inner())
+            .project(&self.state_key_to_table_pk_proj)
             .into_owned_row())
     }
 
