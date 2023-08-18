@@ -27,3 +27,4 @@ mod batch;
 mod recovery;
 mod scale;
 mod sink;
+mod storage;
