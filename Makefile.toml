@@ -575,8 +575,7 @@ cargo run -p risingwave_cmd_all \
                   --backend mem \
                   --state-store hummock+memory \
                   --data-directory hummock_001 \
-                  --config-path src/config/monolithic-mode-example.toml \
-                  --dashboard-ui-path /Users/noelkwan/projects/risingwave/.risingwave/ui" \
+                  --config-path src/config/monolithic-mode-example.toml" \
                --compute-opts=" \
                   --config-path src/config/monolithic-mode-example.toml \
                   --listen-addr 127.0.0.1:5688 \
