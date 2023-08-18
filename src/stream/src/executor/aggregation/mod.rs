@@ -32,7 +32,6 @@ mod agg_state;
 mod agg_state_cache;
 mod distinct;
 mod minput;
-mod table;
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
@@ -100,8 +99,7 @@ where
     state_storages
         .iter_mut()
         .filter_map(|storage| match storage {
-            AggStateStorage::ResultValue => None,
-            AggStateStorage::Table { table } => Some(table),
+            AggStateStorage::Value => None,
             AggStateStorage::MaterializedInput { table, .. } => Some(table),
         })
 }

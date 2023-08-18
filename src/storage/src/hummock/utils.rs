@@ -380,8 +380,6 @@ pub(crate) async fn do_insert_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        ignore_range_tombstone: false,
-        read_version_from_backup: false,
         cache_policy: CachePolicy::Fill(CachePriority::High),
         ..Default::default()
     };
@@ -410,8 +408,6 @@ pub(crate) async fn do_delete_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        ignore_range_tombstone: false,
-        read_version_from_backup: false,
         cache_policy: CachePolicy::Fill(CachePriority::High),
         ..Default::default()
     };
@@ -448,10 +444,8 @@ pub(crate) async fn do_update_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        ignore_range_tombstone: false,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        read_version_from_backup: false,
         cache_policy: CachePolicy::Fill(CachePriority::High),
         ..Default::default()
     };

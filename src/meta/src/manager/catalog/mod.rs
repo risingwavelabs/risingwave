@@ -2131,8 +2131,20 @@ where
         self.core.lock().await.database.get_all_table_options()
     }
 
-    pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
-        self.core.lock().await.database.list_table_ids(schema_id)
+    pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_readonly_table_ids(schema_id)
+    }
+
+    pub async fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_dml_table_ids(schema_id)
     }
 
     pub async fn list_sources(&self) -> Vec<Source> {

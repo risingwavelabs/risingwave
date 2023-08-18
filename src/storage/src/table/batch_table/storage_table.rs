@@ -334,7 +334,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            ignore_range_tombstone: false,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
             cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -467,7 +466,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             async move {
                 let read_options = ReadOptions {
                     prefix_hint,
-                    ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,

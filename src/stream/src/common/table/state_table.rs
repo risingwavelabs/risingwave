@@ -649,11 +649,8 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            ignore_range_tombstone: false,
-            read_version_from_backup: false,
-            prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
-            read_epoch: None,
+            ..Default::default()
         };
 
         self.local_store

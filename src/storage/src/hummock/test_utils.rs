@@ -27,8 +27,8 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
-    SstableWriterOptions, DEFAULT_BLOCK_SIZE, DEFAULT_RESTART_INTERVAL,
+    create_monotonic_events, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
+    DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
@@ -127,9 +127,7 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         block_capacity: 4096,      // 4KB
         restart_interval: DEFAULT_RESTART_INTERVAL,
         bloom_false_positive: 0.1,
-        compression_algorithm: CompressionAlgorithm::None,
-        max_key_count: DEFAULT_MAX_KEY_COUNT,
-        max_sst_size: DEFAULT_MAX_SST_SIZE,
+        ..Default::default()
     }
 }
 
@@ -396,23 +394,4 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
     Arc::new(LruCache::new(1, 4, 0))
-}
-
-pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
-pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
-pub const DEFAULT_MAX_KEY_COUNT: u64 = 2 * 1024 * 1024;
-pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
-
-impl Default for SstableBuilderOptions {
-    fn default() -> Self {
-        Self {
-            capacity: DEFAULT_SSTABLE_SIZE,
-            block_capacity: DEFAULT_BLOCK_SIZE,
-            restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
-            max_sst_size: DEFAULT_MAX_SST_SIZE,
-        }
-    }
 }
