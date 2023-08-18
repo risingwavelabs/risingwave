@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
-use risingwave_common::session_config::VisibilityMode::Default;
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
