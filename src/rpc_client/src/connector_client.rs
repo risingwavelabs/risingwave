@@ -179,7 +179,7 @@ impl ConnectorClient {
             }
         };
         Ok(Self {
-            rpc_client: ConnectorServiceClient::new(channel),
+            rpc_client: ConnectorServiceClient::new(channel).max_decoding_message_size(usize::MAX),
             endpoint: connector_endpoint.to_string(),
         })
     }
