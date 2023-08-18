@@ -329,15 +329,11 @@ impl MySqlExternalTableReader {
                 order_key
             )
         } else {
-            // > where (L_ORDERKEY,L_LINENUMBER) >= (5999968,7) order by L_ORDERKEY, L_LINENUMBER;
-            // FIXME: seems mysql cannot leverage the given key to narrow down the range of scan,
-            // we need to rewrite the order conditions by our own.
-            let range_params = primary_keys.iter().map(|pk| format!(":{}", pk)).join(",");
+            let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT * FROM {} WHERE ({}) > ({}) ORDER BY {}",
+                "SELECT * FROM {} WHERE {} ORDER BY {}",
                 self.get_normalized_table_name(&table_name),
-                order_key,
-                range_params,
+                filter_expr,
                 order_key
             )
         };
@@ -419,6 +415,36 @@ impl MySqlExternalTableReader {
                 yield row;
             }
         };
+    }
+
+    // mysql cannot leverage the given key to narrow down the range of scan,
+    // we need to rewrite the comparison conditions by our own.
+    // (a, b) > (x, y) => ('a' > x) OR (('a' = x) AND ('b' > y))
+    fn filter_expression(columns: &[String]) -> String {
+        let expr;
+        let mut conditions = vec![];
+        // push the first condition
+        conditions.push(format!("({} > :{})", columns[0], columns[0]));
+        for i in 2..=columns.len() {
+            // '=' condition
+            let mut condition = String::new();
+            for j in 0..(i - 1) {
+                if j == 0 {
+                    condition.push_str(&format!("{} = :{}", columns[j], columns[j]));
+                } else {
+                    condition.push_str(&format!(" AND {} = :{}", columns[j], columns[j]));
+                }
+            }
+            // '>' condition
+            condition.push_str(&format!(" AND {} > :{}", columns[i - 1], columns[i - 1]));
+            conditions.push(format!("({})", condition));
+        }
+        if columns.len() > 1 {
+            expr = conditions.join(" OR ");
+        } else {
+            expr = conditions.join("");
+        }
+        expr
     }
 }
 

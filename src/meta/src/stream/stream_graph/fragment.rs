@@ -492,7 +492,6 @@ impl CompleteStreamFragmentGraph {
         // the new materialized view.
         for (&id, fragment) in &graph.fragments {
             for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                // todo: 这里是通过table id查找到上游的mview fragment
                 let mview_fragment = upstream_mview_fragments
                     .get(&upstream_table_id)
                     .context("upstream materialized view fragment not found")?;

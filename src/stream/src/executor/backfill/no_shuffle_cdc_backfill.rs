@@ -367,7 +367,7 @@ impl CdcBackfillExecutor {
                                         chunk.cardinality()
                                     );
 
-                                    tracing::trace!(
+                                    tracing::debug!(
                                         "current backfill progress: {:?}",
                                         current_pk_pos
                                     );
