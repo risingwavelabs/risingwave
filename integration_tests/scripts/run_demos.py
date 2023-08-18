@@ -152,6 +152,6 @@ if args.case == "iceberg-sink":
     else:
         run_iceberg_demo()
 elif args.case == "clickhouse-sink":
-    run_clickhouse_demo(args.case, args.format)
+    run_clickhouse_demo()
 else:
     run_demo(args.case, args.format)

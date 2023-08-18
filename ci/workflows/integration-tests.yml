@@ -29,8 +29,7 @@ steps:
           # - "postgres-cdc"
           # - "mysql-sink"
           # - "postgres-sink"
-          # - "iceberg-sink"
-          - "clickhouse-sink"
+          - "iceberg-sink"
           # - "debezium-mysql"
         format:
           - "json"
@@ -81,10 +80,6 @@ steps:
             format: "protobuf"
           skip: true
         - with:
-            testcase: "clickhouse-sink"
-            format: "protobuf"
-          skip: true
-        - with:
             testcase: "debezium-mysql"
             format: "protobuf"
           skip: true
@@ -104,14 +99,15 @@ steps:
     matrix:
       setup:
         testcase:
-          - "twitter"
-          - "twitter-pulsar"
-          # - "debezium-mongo"
-          - "debezium-postgres"
-          - "tidb-cdc-sink"
-          - "debezium-sqlserver"
-          - "citus-cdc"
-          - "kinesis-s3-source"
+          # - "twitter"
+          # - "twitter-pulsar"
+          # # - "debezium-mongo"
+          # - "debezium-postgres"
+          # - "tidb-cdc-sink"
+          # - "debezium-sqlserver"
+          # - "citus-cdc"
+          # - "kinesis-s3-source"
+          - "clickhouse-sink"
         format:
           - "json"
           - "protobuf"
@@ -142,5 +138,9 @@ steps:
           skip: true
         - with:
             testcase: "kinesis-s3-source"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "clickhouse-sink"
             format: "protobuf"
           skip: true
