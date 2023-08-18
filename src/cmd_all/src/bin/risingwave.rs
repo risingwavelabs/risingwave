@@ -200,7 +200,7 @@ fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
 }
 
 fn monolithic_mode(opts: MonolithicModeOpts, registry: prometheus::Registry) {
-    let settings = risingwave_rt::LoggerSettings::new("all-in-one")
+    let settings = risingwave_rt::LoggerSettings::new("monolithic-mode")
         .with_target("risingwave_storage", Level::WARN);
     risingwave_rt::init_risingwave_logger(settings, registry);
     risingwave_rt::main_okk(risingwave_cmd_all::monolithic_mode(opts)).unwrap();

@@ -278,7 +278,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compactor"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/all-in-one"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/monolithic-mode"
 '''
 
 [tasks.link-user-bin]
@@ -534,9 +534,9 @@ cargo run -p risingwave_cmd_all \
           -- playground
 '''
 
-[tasks.all-in-one]
+[tasks.monolithic-mode]
 category = "RiseDev - Start/Stop"
-description = "🌟 Start a RisingWave all-in-one instance"
+description = "🌟 Start a RisingWave monolithic instance"
 dependencies = ["build"]
 script = '''
 #!/usr/bin/env bash
@@ -550,11 +550,11 @@ cargo run -p risingwave_cmd_all \
           -- monolithic-mode $@
 '''
 
-# TODO(kwannoel): Support `tasks.all-in-one-dev` as well.
-# Then we can reuse risedev to start all-in-one peripheral services, e.g. compactor, etcd, kafka, etc...
-[tasks.all-in-one-demo]
+# TODO(kwannoel): Support `tasks.monolithic-mode-dev` as well.
+# Then we can reuse risedev to start peripheral services, e.g. compactor, etcd, kafka, etc...
+[tasks.monolithic-mode-demo]
 category = "RiseDev - Start/Stop"
-description = "🌟 Start a RisingWave all-in-one instance in development mode, with demo parameters"
+description = "🌟 Start a RisingWave monolithic-mode demo."
 dependencies = ["build"]
 script = '''
 #!/usr/bin/env bash
@@ -575,10 +575,10 @@ cargo run -p risingwave_cmd_all \
                   --backend mem \
                   --state-store hummock+memory \
                   --data-directory hummock_001 \
-                  --config-path src/config/all-in-one-example.toml \
+                  --config-path src/config/monolithic-mode-example.toml \
                   --dashboard-ui-path /Users/noelkwan/projects/risingwave/.risingwave/ui" \
                --compute-opts=" \
-                  --config-path src/config/all-in-one-example.toml \
+                  --config-path src/config/monolithic-mode-example.toml \
                   --listen-addr 127.0.0.1:5688 \
                   --prometheus-listener-addr 127.0.0.1:1222 \
                   --advertise-addr 127.0.0.1:5688 \
@@ -590,7 +590,7 @@ cargo run -p risingwave_cmd_all \
                   --role both \
                   --meta-address http://127.0.0.1:5690" \
                --frontend-opts=" \
-                 --config-path src/config/all-in-one-example.toml \
+                 --config-path src/config/monolithic-mode-example.toml \
                  --listen-addr 127.0.0.1:4566 \
                  --advertise-addr 127.0.0.1:4566 \
                  --prometheus-listener-addr 127.0.0.1:2222 \
