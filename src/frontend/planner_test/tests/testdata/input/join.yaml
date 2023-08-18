@@ -134,7 +134,7 @@
     create table b(b1 int);
     select * from a cross join lateral (select * from b where a1 = b1);
   expected_outputs:
-  - binder_error
+  - logical_plan
 - name: Ensure that natural joins bind the correct columns
   sql: |
     create table a(x int);
