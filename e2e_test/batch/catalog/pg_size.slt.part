@@ -18,6 +18,37 @@ SELECT pg_indexes_size('t') = 0;
 ----
 t
 
+skipif in-memory
+query T
+SELECT pg_relation_size('t') != 0;
+----
+t
+
+skipif in-memory
+query T
+SELECT pg_relation_size('t', 'main') != 0;
+----
+t
+
+skipif in-memory
+query T
+SELECT pg_relation_size('t', 'fsm') = 0;
+----
+t
+
+skipif in-memory
+query T
+SELECT pg_relation_size('t', 'vm') = 0;
+----
+t
+
+skipif in-memory
+query T
+SELECT pg_relation_size('t', 'init') = 0;
+----
+t
+
+
 statement ok
 create index t_idx on t (v1);
 
