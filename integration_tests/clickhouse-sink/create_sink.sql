@@ -1,4 +1,4 @@
-CREATE SINK bhv_iceberg_sink
+CREATE SINK bhv_clickhouse_sink
 FROM
     bhv_mv WITH (
     connector = 'clickhouse',
