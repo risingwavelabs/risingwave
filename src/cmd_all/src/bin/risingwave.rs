@@ -19,7 +19,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
-use risingwave_cmd_all::{StandaloneOpts, PlaygroundOpts};
+use risingwave_cmd_all::{PlaygroundOpts, StandaloneOpts};
 use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
