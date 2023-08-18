@@ -954,7 +954,7 @@ pub mod default {
         }
 
         pub fn storage_metric_level() -> u8 {
-            4
+            1
         }
     }
 
