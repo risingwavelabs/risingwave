@@ -99,7 +99,7 @@ impl From<Vec<(VirtualNode, BackfillProgressPerVnode)>> for BackfillState {
 pub enum BackfillProgressPerVnode {
     NotStarted,
     InProgress(OwnedRow),
-    Completed,
+    Completed(OwnedRow),
 }
 
 pub(crate) fn mark_chunk(
@@ -131,8 +131,11 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let v = match backfill_state.get_progress(&vnode)? {
-            BackfillProgressPerVnode::Completed => true,
+            // We want to just forward the row, if the vnode has finished backfill.
+            BackfillProgressPerVnode::Completed(current_pos) => true,
+            // If not started, no need to forward.
             BackfillProgressPerVnode::NotStarted => false,
+            // If in progress, we need to check row <= current_pos.
             BackfillProgressPerVnode::InProgress(current_pos) => {
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos.project(pk_in_output_indices);
@@ -440,10 +443,11 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
         let current_pos = match backfill_progress {
             // TODO: Completed should always have a `pos`.
-            BackfillProgressPerVnode::Completed | BackfillProgressPerVnode::NotStarted => {
+            BackfillProgressPerVnode::NotStarted => {
                 continue;
             }
-            BackfillProgressPerVnode::InProgress(current_pos) => current_pos,
+            BackfillProgressPerVnode::Completed(current_pos)
+            | BackfillProgressPerVnode::InProgress(current_pos) => current_pos,
         };
         build_temporary_state_with_vnode(temporary_state, *vnode, is_finished, current_pos);
 

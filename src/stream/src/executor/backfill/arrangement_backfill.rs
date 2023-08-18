@@ -32,8 +32,8 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
@@ -151,6 +151,7 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         // TODO(kwannoel): This initial committed progress should also be read from state table,
         // Perhaps via `progress_per_vnode`.
+        // We can do it later when testing recovery + scaling mechanism.
         let mut committed_progress = HashMap::new();
 
         let output_data_types = upstream_table.get_output_data_types();
@@ -479,7 +480,7 @@ where
                     if is_snapshot_empty {
                         let finished_state = construct_initial_finished_state(pk_indices.len());
                         for vnode in upstream_table.vnodes().iter_vnodes() {
-                            backfill_state.update_progress(vnode, BackfillProgressPerVnode::InProgress(finished_state.clone()));
+                            backfill_state.update_progress(vnode, BackfillProgressPerVnode::Completed(finished_state.clone()));
                         }
                     }
 
@@ -569,7 +570,12 @@ where
             println!("range_bounds: {:?}", range_bounds);
 
             let vnode_row_iter = upstream_table
-                .iter_with_pk_range_and_output_indices(&range_bounds, vnode, PrefetchOptions::new_with_epoch(snapshot_read_epoch), snapshot_read_epoch)
+                .iter_with_pk_range_and_output_indices(
+                    &range_bounds,
+                    vnode,
+                    PrefetchOptions::new_with_epoch(snapshot_read_epoch),
+                    snapshot_read_epoch,
+                )
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?
