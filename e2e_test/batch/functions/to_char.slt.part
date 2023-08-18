@@ -48,11 +48,11 @@ statement ok
 set timezone to 'US/Pacific';
 
 query T
-select to_char(tsz, 'Mon DD, YYYY HH12:MI:SS am TZH') from t order by tsz;
+select to_char(tsz, 'Mon DD, YYYY HH12:MI:SS am TZH:TZM') from t order by tsz;
 ----
-Mar 31, 2021 05:00:00 pm -07
-Apr 08, 2022 07:30:00 am -07
-Jul 11, 2023 08:01:00 pm -07
+Mar 31, 2021 05:00:00 pm -07:00
+Apr 08, 2022 07:30:00 am -07:00
+Jul 11, 2023 08:01:00 pm -07:00
 
 statement ok
 set timezone to 'UTC';

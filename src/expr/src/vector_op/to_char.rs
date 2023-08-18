@@ -83,8 +83,8 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
         ("tzh:tzm", "%:z"),
         ("TZHTZM", "%z"),
         ("tzhtzm", "%z"),
-        ("TZH", "%:::z"),
-        ("tzh", "%:::z"),
+        ("TZH", "%#z"),
+        ("tzh", "%#z"),
     ];
     // build an Aho-Corasick automaton for fast matching
     static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
