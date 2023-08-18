@@ -73,3 +73,5 @@ simulation-it-test.tar.zst
 
 # hummock-trace
 .trace
+
+**/poetry.lock
