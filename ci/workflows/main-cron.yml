@@ -124,15 +124,26 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "integration test (deterministic simulation) - scale & recovery"
-    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale:: recovery::"
+  - label: "integration test (deterministic simulation) - scale"
+    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 80
+    timeout_in_minutes: 70
+    retry: *auto-retry
+
+  - label: "integration test (deterministic simulation) - recovery"
+    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh recovery::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 70
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation) - others"
@@ -143,7 +154,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 40
+    timeout_in_minutes: 70
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
