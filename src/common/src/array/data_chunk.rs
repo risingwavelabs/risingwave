@@ -427,6 +427,18 @@ impl DataChunk {
         }
     }
 
+    /// Reorder (and possibly remove) columns.
+    ///
+    /// e.g. if `indices` is `[2, 1, 0]`, and the chunk contains column `[a, b, c]`, then the output
+    /// will be `[c, b, a]`. If `indices` is [2, 0], then the output will be `[c, a]`.
+    /// If the input mapping is identity mapping, no reorder will be performed.
+    pub fn project(&self, indices: &[usize]) -> Self {
+        Self {
+            columns: indices.iter().map(|i| self.columns[*i].clone()).collect(),
+            vis2: self.vis2.clone(),
+        }
+    }
+
     /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
     /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
