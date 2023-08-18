@@ -48,7 +48,8 @@ pub(crate) mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
         FullKeyFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::compactor_runner::compact;
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
@@ -277,7 +278,7 @@ pub(crate) mod tests {
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
             let (mut result_task, task_stats) =
-                Compactor::compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
+                compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
 
             hummock_manager_ref
                 .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -431,7 +432,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -746,7 +747,7 @@ pub(crate) mod tests {
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -919,7 +920,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -1092,7 +1093,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -1242,7 +1243,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))

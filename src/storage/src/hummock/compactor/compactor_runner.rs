@@ -12,29 +12,60 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use std::sync::Arc;
-use tokio::sync::oneshot::{Receiver, Sender};
-use bytes::Bytes;
-use itertools::Itertools;
-use risingwave_hummock_sdk::{key::FullKey, table_stats::TableStats};
-use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+use std::collections::{HashMap, HashSet};
+use std::ops::Div;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
-use super::compaction_utils::estimate_task_output_capacity;
+use await_tree::InstrumentAwait;
+use bytes::Bytes;
+use futures::{pin_mut, stream, FutureExt, StreamExt};
+use itertools::Itertools;
+use more_asserts::assert_ge;
+use risingwave_hummock_sdk::compact::{
+    compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
+};
+use risingwave_hummock_sdk::key::{FullKey, PointRange};
+use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::table_stats::{
+    add_table_stats_map, to_prost_table_stats_map, TableStats, TableStatsMap,
+};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::subscribe_compaction_event_request::{
+    Event as RequestEvent, HeartBeat, PullTask, ReportTask,
+};
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
+use risingwave_pb::hummock::{
+    CompactTask, CompactTaskProgress, CompactorWorkload, LevelType, SstableInfo,
+    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
+};
+use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
+use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+
 use super::task_progress::TaskProgress;
-use super::TaskConfig;
-use crate::{filter_key_extractor::FilterKeyExtractorImpl, hummock::compactor::compaction_utils::build_multi_compaction_filter};
+use super::{CompactionStatistics, TaskConfig};
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::hummock::compactor::compaction_utils::{
+    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
+};
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
+use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
+use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
+use crate::hummock::vacuum::Vacuum;
+use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-    HummockResult, SstableBuilderOptions, SstableStoreRef,
+    validate_ssts, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges,
+    CompressionAlgorithm, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
+    SstableStoreRef,
 };
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 pub struct CompactorRunner {
     compact_task: CompactTask,
@@ -322,7 +353,7 @@ pub async fn compact(
         Err(e) => {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
             let task_status = TaskStatus::ExecuteFailed;
-            return Self::compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
         Ok(extractor) => extractor,
     };
@@ -336,7 +367,7 @@ pub async fn compact(
         if !removed_tables.is_empty() {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
             let task_status = TaskStatus::ExecuteFailed;
-            return Self::compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
     }
 
@@ -370,7 +401,7 @@ pub async fn compact(
         Err(e) => {
             tracing::warn!("Failed to generate_splits {:#?}", e);
             task_status = TaskStatus::ExecuteFailed;
-            return Self::compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
     }
 
@@ -394,7 +425,7 @@ pub async fn compact(
         Err(err) => {
             tracing::warn!("Failed to build delete range aggregator {:#?}", err);
             task_status = TaskStatus::ExecuteFailed;
-            return Self::compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
     };
 
@@ -437,7 +468,7 @@ pub async fn compact(
                 context.memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailResourceCanceled;
-        return Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
+        return compact_done(compact_task, context.clone(), output_ssts, task_status);
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
@@ -524,7 +555,7 @@ pub async fn compact(
 
     // After a compaction is done, mutate the compaction task.
     let (compact_task, table_stats) =
-        Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
+        compact_done(compact_task, context.clone(), output_ssts, task_status);
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
@@ -793,7 +824,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats) = Compactor::compact(context, compact_task, rx).await;
+                                        let (compact_task, table_stats) = compact(context, compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
                                         running_task_count.fetch_sub(1, Ordering::SeqCst);
 
