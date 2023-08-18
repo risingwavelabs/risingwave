@@ -844,7 +844,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 }
 
-pub async fn parse_remote_object_store_with_config(
+pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
@@ -954,14 +954,6 @@ pub async fn parse_remote_object_store_with_config(
             )
         }
     }
-}
-
-pub async fn parse_remote_object_store(
-    url: &str,
-    metrics: Arc<ObjectStoreMetrics>,
-    ident: &str,
-) -> ObjectStoreImpl {
-    parse_remote_object_store_with_config(url, metrics, ident).await
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
