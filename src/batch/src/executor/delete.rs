@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
 };
@@ -100,6 +101,15 @@ impl DeleteExecutor {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
+        assert_eq!(
+            table_dml_handle
+                .column_descs()
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then_some(c.data_type.clone()))
+                .collect_vec(),
+            self.child.schema().data_types(),
+            "bad delete schema"
+        );
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
         write_handle.begin()?;
