@@ -130,7 +130,7 @@ impl Component {
             Component::Compactor => vec!["compactor-node", "compactor_node"],
             Component::Ctl => vec!["risectl"],
             Component::Playground => vec!["play"],
-            Component::Standalone => vec!["standalone"],
+            Component::Standalone => vec![],
         }
     }
 
