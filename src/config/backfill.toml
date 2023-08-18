@@ -1,3 +1,6 @@
+[server]
+telemetry_enabled = false
+
 [streaming.developer]
 stream_chunk_size = 1
 
