@@ -1,4 +1,7 @@
 statement ok
+set streaming_parallelism=4;
+
+statement ok
 CREATE TABLE t6 (
 id bigint primary key,
 v_int int,
