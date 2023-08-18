@@ -243,7 +243,6 @@ pub struct OpendalConfig {
     pub engine: String,
     pub namenode: String,
     pub bucket: String,
-    pub root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

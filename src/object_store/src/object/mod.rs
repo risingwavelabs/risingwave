@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use prometheus::HistogramTimer;
-use risingwave_common::config::StorageConfig;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub mod mem;
@@ -849,7 +848,6 @@ pub async fn parse_remote_object_store_with_config(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
-    config: Option<Arc<StorageConfig>>,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
@@ -863,7 +861,10 @@ pub async fn parse_remote_object_store_with_config(
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
-            let (namenode, root) = hdfs.split_once('@').unwrap();
+            let (namenode, root) = match hdfs.contains('@') {
+                true => hdfs.split_once('@').unwrap(),
+                false => (hdfs, ""),
+            };
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
@@ -872,7 +873,10 @@ pub async fn parse_remote_object_store_with_config(
         }
         gcs if gcs.starts_with("gcs://") => {
             let gcs = gcs.strip_prefix("gcs://").unwrap();
-            let (bucket, root) = gcs.split_once('@').unwrap();
+            let (bucket, root) = match gcs.contains('@') {
+                true => gcs.split_once('@').unwrap(),
+                false => (gcs, ""),
+            };
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
@@ -882,7 +886,10 @@ pub async fn parse_remote_object_store_with_config(
 
         oss if oss.starts_with("oss://") => {
             let oss = oss.strip_prefix("oss://").unwrap();
-            let (bucket, root) = oss.split_once('@').unwrap();
+            let (bucket, root) = match oss.contains('@') {
+                true => oss.split_once('@').unwrap(),
+                false => (oss, ""),
+            };
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
@@ -891,7 +898,10 @@ pub async fn parse_remote_object_store_with_config(
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
-            let (endpoint, root) = webhdfs.split_once('@').unwrap();
+            let (endpoint, root) = match webhdfs.contains('@') {
+                true => webhdfs.split_once('@').unwrap(),
+                false => (webhdfs, ""),
+            };
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_webhdfs_engine(endpoint.to_string(), root.to_string())
                     .unwrap()
@@ -900,55 +910,22 @@ pub async fn parse_remote_object_store_with_config(
         }
         azblob if azblob.starts_with("azblob://") => {
             let azblob = azblob.strip_prefix("azblob://").unwrap();
-            let (container_name, root) = azblob.split_once('@').unwrap();
+            let (container_name, root) = match azblob.contains('@') {
+                true => azblob.split_once('@').unwrap(),
+                false => (azblob, ""),
+            };
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )
         }
-        fs if fs.starts_with("fs://") => {
-            let fs = fs.strip_prefix("fs://").unwrap();
-            let (_, root) = fs.split_once('@').unwrap();
-            ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(root.to_string())
-                    .unwrap()
-                    .monitored(metrics),
-            )
-        }
-
-        s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
-            let s3_object_store_config = config
-                .map(|storage_config| S3ObjectStoreConfig {
-                    keepalive_ms: storage_config.object_store_keepalive_ms,
-                    recv_buffer_size: storage_config.object_store_recv_buffer_size,
-                    send_buffer_size: storage_config.object_store_send_buffer_size,
-                    nodelay: storage_config.object_store_nodelay,
-                    req_retry_interval_ms: Some(storage_config.object_store_req_retry_interval_ms),
-                    req_retry_max_delay_ms: Some(
-                        storage_config.object_store_req_retry_max_delay_ms,
-                    ),
-                    req_retry_max_attempts: Some(
-                        storage_config.object_store_req_retry_max_attempts,
-                    ),
-                })
-                .unwrap_or(S3ObjectStoreConfig::default());
-
-            ObjectStoreImpl::S3(
-                // For backward compatibility, s3-compatible is still reserved.
-                // todo: remove this after this change has been applied for downstream projects.
-                S3ObjectStore::new_with_config(
-                    s3_compatible
-                        .strip_prefix("s3-compatible://")
-                        .unwrap()
-                        .to_string(),
-                    metrics.clone(),
-                    s3_object_store_config,
-                )
-                .await
+        fs if fs.starts_with("fs://") => ObjectStoreImpl::Opendal(
+            OpendalObjectStore::new_fs_engine()
+                .unwrap()
                 .monitored(metrics),
-            )
-        }
+        ),
+
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
@@ -984,7 +961,7 @@ pub async fn parse_remote_object_store(
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
 ) -> ObjectStoreImpl {
-    parse_remote_object_store_with_config(url, metrics, ident, None).await
+    parse_remote_object_store_with_config(url, metrics, ident).await
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
