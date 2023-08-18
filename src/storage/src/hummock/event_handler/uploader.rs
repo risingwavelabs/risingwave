@@ -950,20 +950,19 @@ impl HummockUploader {
         let poll_ret = self.sealed_data.poll_success_merge_imm(cx);
         if let Poll::Ready(Some(output)) = &poll_ret {
             let table_id_label = output.table_id.to_string();
-            let shard_id_label = output.instance_id.to_string();
 
             // monitor finished task
             self.context
                 .stats
                 .merge_imm_task_counts
-                .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
+                .with_label_values(&[table_id_label.as_str()])
                 .inc();
             // monitor merge imm memory size
             // we should also add up the size of EPOCH stored in each entry
             self.context
                 .stats
                 .merge_imm_batch_memory_sz
-                .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
+                .with_label_values(&[table_id_label.as_str()])
                 .inc_by((output.merged_imm.size() + output.merged_imm.kv_count() * EPOCH_LEN) as _);
         }
         poll_ret
