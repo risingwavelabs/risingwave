@@ -6,7 +6,7 @@ create table t (
 ) append only;
 
 statement ok
-create materialized view mv as select * from t emit on window close;
+create materialized view mv emit on window close as select * from t;
 
 statement ok
 insert into t values ('2023-05-06 16:51:00', 1);
