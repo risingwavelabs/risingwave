@@ -332,14 +332,9 @@ async fn test_storage_basic() {
             ),
             epoch2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
-
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -398,14 +393,9 @@ async fn test_storage_basic() {
             ),
             epoch3,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
-
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -602,14 +592,9 @@ async fn test_state_store_sync() {
                     k,
                     epoch1,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-
-                        prefix_hint: None,
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -664,14 +649,9 @@ async fn test_state_store_sync() {
                     k,
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-
-                        prefix_hint: None,
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -754,14 +734,9 @@ async fn test_state_store_sync() {
                 ),
                 epoch2,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     table_id: TEST_TABLE_ID,
-                    retention_seconds: None,
-
-                    prefix_hint: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -864,14 +839,9 @@ async fn test_delete_get() {
             Bytes::from("bb"),
             epoch2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: None,
-
-                table_id: TEST_TABLE_ID,
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             }
         )
         .await
@@ -954,14 +924,9 @@ async fn test_multiple_epoch_sync() {
                         Bytes::from("bb"),
                         epoch1,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-
-                            prefix_hint: None,
-                            read_version_from_backup: false,
-                            prefetch_options: Default::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                     )
                     .await
@@ -989,14 +954,9 @@ async fn test_multiple_epoch_sync() {
                         Bytes::from("bb"),
                         epoch3,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-
-                            prefix_hint: None,
-                            read_version_from_backup: false,
-                            prefetch_options: Default::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                     )
                     .await
@@ -1101,13 +1061,10 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch1,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1126,13 +1083,10 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1149,13 +1103,11 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1192,13 +1144,10 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch1,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1217,13 +1166,10 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1242,13 +1188,11 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1366,13 +1310,10 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch1,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1397,13 +1338,10 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1428,13 +1366,11 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1500,13 +1436,10 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch1,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1544,13 +1477,10 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1583,13 +1513,11 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1622,13 +1550,10 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch3,
                         ReadOptions {
-                            ignore_range_tombstone: false,
                             table_id: TEST_TABLE_ID,
-                            retention_seconds: None,
-                            prefix_hint: None,
-                            read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
+                            ..Default::default()
                         },
                         read_snapshot,
                     )
@@ -1667,13 +1592,10 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch2,
                             ReadOptions {
-                                ignore_range_tombstone: false,
                                 table_id: TEST_TABLE_ID,
-                                retention_seconds: None,
-                                prefix_hint: None,
-                                read_version_from_backup: false,
                                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                                ..Default::default()
                             },
                             read_snapshot,
                         )
@@ -1706,13 +1628,10 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch3,
                             ReadOptions {
-                                ignore_range_tombstone: false,
                                 table_id: TEST_TABLE_ID,
-                                retention_seconds: None,
-                                prefix_hint: None,
-                                read_version_from_backup: false,
                                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                                ..Default::default()
                             },
                             read_snapshot,
                         )
@@ -1808,13 +1727,10 @@ async fn test_get_with_min_epoch() {
                     k.clone(),
                     epoch1,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
-                        prefix_hint: None,
-                        read_version_from_backup: false,
                         prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1829,13 +1745,10 @@ async fn test_get_with_min_epoch() {
                     k.clone(),
                     epoch1,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1850,13 +1763,10 @@ async fn test_get_with_min_epoch() {
                     k.clone(),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1871,13 +1781,12 @@ async fn test_get_with_min_epoch() {
                     k.clone(),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        read_version_from_backup: false,
                         prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1917,14 +1826,9 @@ async fn test_get_with_min_epoch() {
                 k.clone(),
                 epoch1,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     table_id: TEST_TABLE_ID,
-                    retention_seconds: None,
-
-                    prefix_hint: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1939,14 +1843,11 @@ async fn test_get_with_min_epoch() {
                 k.clone(),
                 epoch1,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     table_id: TEST_TABLE_ID,
-                    retention_seconds: None,
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1963,14 +1864,10 @@ async fn test_get_with_min_epoch() {
                 k.clone(),
                 epoch2,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     table_id: TEST_TABLE_ID,
-                    retention_seconds: None,
-
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1986,14 +1883,12 @@ async fn test_get_with_min_epoch() {
                 k.clone(),
                 epoch2,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     table_id: TEST_TABLE_ID,
                     retention_seconds: Some(0),
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
