@@ -2539,7 +2539,6 @@ where
                         };
 
                         {
-                            const MAX_CONSUMED_LATENCY_MS: u64 = 500;
                             let consumed_latency_ms = SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .expect("Clock may have gone backwards")
@@ -2549,14 +2548,6 @@ where
                             hummock_manager.metrics
                                 .compaction_event_consumed_latency
                                 .observe(consumed_latency_ms as _);
-                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
-                                tracing::warn!(
-                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
-                                    event,
-                                    create_at,
-                                    consumed_latency_ms
-                                );
-                            }
                         }
 
                         match event {
