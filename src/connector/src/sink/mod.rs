@@ -23,11 +23,13 @@ pub mod remote;
 pub mod utils;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
+use prometheus::{HistogramVec, Registry};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -57,6 +59,36 @@ pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
+
+#[derive(Debug, Clone)]
+pub struct SinkContext {
+    pub metrics: SinkMetrics,
+    pub info: SinkInfo,
+}
+pub type SinkContextRef = Arc<SinkContext>;
+
+impl SinkContext {
+    pub fn get_id(&self) -> String {
+        format!(
+            "frag {}-sink {:?}-actor {}",
+            self.info.fragment_id, self.info.sink_param.sink_id, self.info.actor_id
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SinkMetrics {
+    registry: Registry,
+
+    pub sink_commit_duration: HistogramVec,
+}
+
+#[derive(Debug, Clone)]
+pub struct SinkInfo {
+    pub sink_param: SinkParam,
+    pub actor_id: u32,
+    pub fragment_id: u32,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {

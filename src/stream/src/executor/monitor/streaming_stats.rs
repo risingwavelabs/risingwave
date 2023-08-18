@@ -20,6 +20,7 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntGauge, Registry,
 };
+use risingwave_connector::sink::SinkMetrics;
 
 pub struct StreamingMetrics {
     pub registry: Registry,
@@ -103,8 +104,6 @@ pub struct StreamingMetrics {
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
 
-    pub sink_commit_duration: HistogramVec,
-
     // Memory management
     // FIXME(yuhao): use u64 here
     pub lru_current_watermark_time_ms: IntGauge,
@@ -124,6 +123,9 @@ pub struct StreamingMetrics {
 
     // Memory
     pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
+
+    // Sink
+    pub sink_metrics: SinkMetrics,
 }
 
 impl StreamingMetrics {
@@ -597,13 +599,6 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
-        let sink_commit_duration = register_histogram_vec_with_registry!(
-            "sink_commit_duration",
-            "Duration of commit op in sink",
-            &["executor_id", "connector"],
-            registry
-        )
-        .unwrap();
 
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
@@ -686,6 +681,7 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+        let sink_metrics = SinkMetrics::new(registry.clone());
 
         Self {
             registry,
@@ -747,7 +743,6 @@ impl StreamingMetrics {
             arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
-            sink_commit_duration,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
@@ -759,6 +754,7 @@ impl StreamingMetrics {
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,
+            sink_metrics,
         }
     }
 

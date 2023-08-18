@@ -16,6 +16,7 @@ use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
 use futures_async_stream::try_stream;
+use prometheus::{register_histogram_vec_with_registry, Registry};
 use risingwave_common::array::stream_chunk::Op;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -25,10 +26,26 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use crate::sink::{Result, SinkError};
+use crate::sink::{Result, SinkError, SinkMetrics};
 
 pub struct DebeziumAdapterOpts {
     gen_tombstone: bool,
+}
+
+impl SinkMetrics {
+    pub fn new(registry: Registry) -> Self {
+        let sink_commit_duration = register_histogram_vec_with_registry!(
+            "sink_commit_duration",
+            "Duration of commit op in sink",
+            &["id", "connector"],
+            registry
+        )
+        .unwrap();
+        Self {
+            registry,
+            sink_commit_duration,
+        }
+    }
 }
 
 impl Default for DebeziumAdapterOpts {

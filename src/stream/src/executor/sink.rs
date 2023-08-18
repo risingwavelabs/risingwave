@@ -29,31 +29,26 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
-    build_sink, Sink, SinkImpl, SinkParam, SinkWriter, SinkWriterParam,
+    build_sink, Sink, SinkContext, SinkContextRef, SinkImpl, SinkInfo, SinkParam, SinkWriter,
+    SinkWriterParam,
 };
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
-    metrics: Arc<StreamingMetrics>,
+    sink_context_ref: SinkContextRef,
     sink: SinkImpl,
     identity: String,
     input_columns: Vec<ColumnCatalog>,
     input_schema: Schema,
-    sink_param: SinkParam,
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
     sink_writer_param: SinkWriterParam,
-}
-
-struct SinkMetrics {
-    sink_commit_duration_metrics: Histogram,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -75,7 +70,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         input: BoxedExecutor,
-        metrics: Arc<StreamingMetrics>,
         sink_writer_param: SinkWriterParam,
         columns: Vec<ColumnCatalog>,
         properties: HashMap<String, String>,
@@ -98,19 +92,26 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             pk_indices,
             sink_type,
         };
-        let sink = build_sink(sink_param.clone())?;
+        let sink_context_ref = Arc::new(SinkContext {
+            info: SinkInfo {
+                sink_param: sink_param.clone(),
+                actor_id: actor_context.id,
+                fragment_id: actor_context.fragment_id,
+            },
+            metrics: actor_context.streaming_metrics.sink_metrics.clone(),
+        });
+        let sink = build_sink(sink_param)?;
         let input_schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
             .collect();
         Ok(Self {
             input,
-            metrics,
+            identity: sink_context_ref.get_id(),
+            sink_context_ref,
             sink,
-            identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
             input_columns: columns,
             input_schema,
-            sink_param,
             actor_context,
             log_reader,
             log_writer,
@@ -120,19 +121,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
     fn execute_inner(self) -> BoxedMessageStream {
         let sink_commit_duration_metrics = self
+            .sink_context_ref
             .metrics
             .sink_commit_duration
             .with_label_values(&[self.identity.as_str(), self.sink.get_connector()]);
-
-        let sink_metrics = SinkMetrics {
-            sink_commit_duration_metrics,
-        };
 
         let write_log_stream = Self::execute_write_log(
             self.input,
             self.log_writer,
             self.input_columns.clone(),
-            self.sink_param.sink_type,
+            self.sink_context_ref.info.sink_param.sink_type,
             self.actor_context,
         );
 
@@ -141,8 +139,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 sink,
                 self.log_reader,
                 self.input_columns,
-                sink_metrics,
                 self.sink_writer_param,
+                sink_commit_duration_metrics,
             );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
@@ -210,8 +208,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         mut log_reader: R,
         columns: Vec<ColumnCatalog>,
-        sink_metrics: SinkMetrics,
         sink_writer_param: SinkWriterParam,
+        sink_commit_duration_metrics: Histogram,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
         let mut sink_writer = sink.new_writer(sink_writer_param).await?;
@@ -281,8 +279,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if is_checkpoint {
                         let start_time = Instant::now();
                         sink_writer.barrier(true).await?;
-                        sink_metrics
-                            .sink_commit_duration_metrics
+                        sink_commit_duration_metrics
                             .observe(start_time.elapsed().as_millis() as f64);
                         log_reader.truncate().await?;
                     } else {
@@ -309,7 +306,7 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.sink_param.pk_indices
+        &self.sink_context_ref.info.sink_param.pk_indices
     }
 
     fn identity(&self) -> &str {
@@ -387,7 +384,6 @@ mod test {
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::default(),
             columns.clone(),
             properties,
@@ -473,7 +469,6 @@ mod test {
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::default(),
             columns,
             properties,
