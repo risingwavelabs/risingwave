@@ -372,8 +372,8 @@ pub fn handle_show_object(
     let rows = names
         .into_iter()
         .filter(|arg| match &filter {
-            Some(ShowStatementFilter::Like(pattern)) => like_default(arg, &pattern),
-            Some(ShowStatementFilter::ILike(pattern)) => i_like_default(arg, &pattern),
+            Some(ShowStatementFilter::Like(pattern)) => like_default(arg, pattern),
+            Some(ShowStatementFilter::ILike(pattern)) => i_like_default(arg, pattern),
             Some(ShowStatementFilter::Where(..)) => unreachable!(),
             None => true,
         })
