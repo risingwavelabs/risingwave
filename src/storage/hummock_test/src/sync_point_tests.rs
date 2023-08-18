@@ -21,6 +21,7 @@ use bytes::Bytes;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
+use risingwave_common::session_config::VisibilityMode;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
@@ -388,14 +389,9 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
-        ignore_range_tombstone: false,
-
-        prefix_hint: None,
         table_id: TableId::from(existing_table_id),
-        retention_seconds: None,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     let get_result = storage
         .get(Bytes::from("\0\0hhh"), 120, read_options.clone())
