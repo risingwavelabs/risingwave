@@ -125,7 +125,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation)"
-    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale::"
+    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
