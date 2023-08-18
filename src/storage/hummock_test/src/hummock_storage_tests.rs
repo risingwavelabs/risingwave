@@ -114,14 +114,10 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
             epoch1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
 
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -134,14 +130,9 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
             epoch1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
-
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -156,14 +147,9 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"ab"].concat()),
             epoch1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
-
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -191,14 +177,10 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
             epoch2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
 
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -228,14 +210,9 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
             epoch3,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
-
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -249,14 +226,10 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"ff"].concat()),
             epoch3,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
 
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -275,14 +248,10 @@ async fn test_storage_basic() {
             ),
             epoch1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
 
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -323,14 +292,10 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
             epoch1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
 
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -345,14 +310,10 @@ async fn test_storage_basic() {
             Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
             epoch2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 table_id: TEST_TABLE_ID,
-                retention_seconds: None,
 
-                prefix_hint: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -733,14 +694,9 @@ async fn test_state_store_sync() {
                 ),
                 epoch1,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     table_id: TEST_TABLE_ID,
-                    retention_seconds: None,
-
-                    prefix_hint: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1018,14 +974,10 @@ async fn test_multiple_epoch_sync() {
                     Bytes::from("bb"),
                     epoch2,
                     ReadOptions {
-                        ignore_range_tombstone: false,
                         table_id: TEST_TABLE_ID,
-                        retention_seconds: None,
 
-                        prefix_hint: None,
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
