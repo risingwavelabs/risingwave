@@ -126,6 +126,25 @@ profile:
         persist-data: true
       - use: connector-node
 
+  standalone-full-peripherals:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+      - use: zookeeper
+        persist-data: true
+      - use: kafka
+        persist-data: true
+      - use: connector-node
+
   hdfs:
     steps:
       # - use: etcd
