@@ -58,22 +58,19 @@ impl StreamOverWindow {
 
         let mut order_cols = HashSet::new();
         for idx in self.logical.partition_key_indices() {
-            if !order_cols.contains(&idx) {
+            if order_cols.insert(idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
-                order_cols.insert(idx);
             }
         }
         let read_prefix_len_hint = tbl_builder.get_current_pk_len();
         for o in self.logical.order_key() {
-            if !order_cols.contains(&o.column_index) {
+            if order_cols.insert(o.column_index) {
                 tbl_builder.add_order_column(o.column_index, o.order_type);
-                order_cols.insert(o.column_index);
             }
         }
-        for idx in self.logical.input.logical_pk() {
-            if !order_cols.contains(idx) {
-                tbl_builder.add_order_column(*idx, OrderType::ascending());
-                order_cols.insert(*idx);
+        for &idx in self.logical.input.logical_pk() {
+            if order_cols.insert(idx) {
+                tbl_builder.add_order_column(idx, OrderType::ascending());
             }
         }
 
