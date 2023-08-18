@@ -757,6 +757,7 @@ profile:
       - use: compactor
 
   full-iceberg-bench:
+    config-path: src/config/example.toml
     steps:
       - use: aws-s3
         bucket: renjie-iceberg-bench
