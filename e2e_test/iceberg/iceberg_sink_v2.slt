@@ -1,5 +1,5 @@
 statement ok
-set streaming_parallelism=10;
+set streaming_parallelism=4;
 
 statement ok
 CREATE TABLE t6 (
