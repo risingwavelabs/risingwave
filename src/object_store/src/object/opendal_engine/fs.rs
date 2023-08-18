@@ -22,7 +22,10 @@ impl OpendalObjectStore {
     /// create opendal fs engine.
     pub fn new_fs_engine() -> ObjectResult<Self> {
         // Create fs backend builder.
-        let builder = Fs::default();
+        let mut builder = Fs::default();
+
+        // Now fs engine is only used in CI, so we can hardcode root.
+        builder.root("/tmp/rw_ci");
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
