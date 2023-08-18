@@ -412,13 +412,10 @@ impl NormalState {
             .get(
                 Bytes::copy_from_slice(key),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -439,13 +436,11 @@ impl NormalState {
                     Bound::Excluded(Bytes::copy_from_slice(right)),
                 ),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -471,13 +466,11 @@ impl CheckState for NormalState {
                         Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
                         table_id: self.table_id,
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await

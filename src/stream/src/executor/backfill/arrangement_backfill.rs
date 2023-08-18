@@ -140,7 +140,7 @@ where
 
         let is_completely_finished = progress_per_vnode
             .iter()
-            .all(|(_, p)| *p == BackfillProgressPerVnode::Completed);
+            .all(|(_, p)| matches!(p, BackfillProgressPerVnode::Completed(_)));
         if is_completely_finished {
             assert!(!first_barrier.is_newly_added(self.actor_id));
         }
@@ -555,11 +555,9 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             println!("backfill_progress: {:?}", backfill_progress);
             let current_pos = match backfill_progress {
-                BackfillProgressPerVnode::Completed => {
-                    continue;
-                }
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
+                BackfillProgressPerVnode::Completed(current_pos)
+                | BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());

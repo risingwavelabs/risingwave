@@ -226,7 +226,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
             Some(row) => {
                 let vnode_is_finished = row.last().unwrap();
                 if vnode_is_finished.into_bool() {
-                    BackfillProgressPerVnode::Completed
+                    BackfillProgressPerVnode::Completed(row)
                 } else {
                     BackfillProgressPerVnode::InProgress(row)
                 }

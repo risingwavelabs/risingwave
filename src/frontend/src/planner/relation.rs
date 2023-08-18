@@ -68,7 +68,7 @@ impl Planner {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
             Rc::new(base_table.table_catalog.table_desc()),
-            Some(base_table.table_catalog.into()),
+            Some(base_table.table_catalog.clone().into()),
             base_table
                 .table_indexes
                 .iter()

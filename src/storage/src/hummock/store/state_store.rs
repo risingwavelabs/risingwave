@@ -153,7 +153,6 @@ impl LocalHummockStorage {
                     return Err(HummockError::wait_epoch("tx dropped").into());
                 }
                 Ok(Ok(_)) => {
-
                     let max_committed_epoch = *receiver.borrow();
                     tracing::warn!(
                         "wait_epoch {:?} OK, max_committed_epoch {:?}, wait_epoch {:?}",

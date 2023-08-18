@@ -42,13 +42,9 @@ macro_rules! assert_count_range_scan {
                 bounds,
                 $epoch,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await

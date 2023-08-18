@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
-use std::default::Default;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -287,7 +287,10 @@ impl PrefetchOptions {
     }
 
     pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self { exhaust_iter, ..Default::default() }
+        Self {
+            exhaust_iter,
+            ..Default::default()
+        }
     }
 
     pub fn new_with_epoch(epoch_option: Option<u64>) -> Self {

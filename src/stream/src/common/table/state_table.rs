@@ -1180,12 +1180,16 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
-        // TODO(kwannoel): Refactor `PrefetchOptions` -> `StorageIterOptions`, so we can include epoch?
+        // TODO(kwannoel): Refactor `PrefetchOptions` -> `StorageIterOptions`, so we can include
+        // epoch?
         prefetch_options: PrefetchOptions,
-        snapshot_read_epoch: Option<u64>
+        snapshot_read_epoch: Option<u64>,
     ) -> StreamExecutorResult<ProjectedRowStream<'_, S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>>
     {
-        assert!(IS_REPLICATED, "Only replicated tables can use this function");
+        assert!(
+            IS_REPLICATED,
+            "Only replicated tables can use this function"
+        );
         Ok(self
             .iter_with_pk_range(pk_range, vnode, prefetch_options)
             .await?

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::default::Default;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
@@ -36,7 +37,6 @@ use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
-use std::default::Default;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
