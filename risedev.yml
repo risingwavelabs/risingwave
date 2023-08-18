@@ -757,7 +757,7 @@ profile:
       - use: compactor
 
   full-iceberg-bench:
-    config-path: src/config/example.toml
+    config-path: src/config/full-iceberg-bench.toml
     steps:
       - use: aws-s3
         bucket: renjie-iceberg-bench
@@ -768,10 +768,6 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
 
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"

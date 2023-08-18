@@ -33,7 +33,7 @@ def init_risingwave_mv(args):
 
     rw_config = args['risingwave']
     sqls = [
-        "set streaming_parallelism = 10",
+        "set streaming_parallelism = 4",
         """
         CREATE SOURCE bid (
             "id" BIGINT,
@@ -41,6 +41,8 @@ def init_risingwave_mv(args):
             "distance" BIGINT,
         ) with (
             connector = 'datagen',
+            datagen.split.num = '4',
+
 
             fields.id.kind = 'random',
             fields.id.min = '0',
