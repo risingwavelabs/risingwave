@@ -102,6 +102,7 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    REGEXP_REPLACE = 320;
     POW = 233;
     EXP = 234;
     CHR = 235;

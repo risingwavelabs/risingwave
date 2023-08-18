@@ -27,6 +27,7 @@ use super::expr_field::FieldExpression;
 use super::expr_in::InExpression;
 use super::expr_nested_construct::NestedConstructExpression;
 use super::expr_regexp::RegexpMatchExpression;
+use super::expr_regexp::RegexpReplaceExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
@@ -63,6 +64,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::Array => NestedConstructExpression::try_from_boxed(prost),
         E::Row => NestedConstructExpression::try_from_boxed(prost),
         E::RegexpMatch => RegexpMatchExpression::try_from_boxed(prost),
+        E::RegexpReplace => RegexpReplaceExpression::try_from_boxed(prost),
         E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
             // Now we implement these three functions as a single expression for the
             // sake of simplicity. If performance matters at some time, we can split

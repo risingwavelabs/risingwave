@@ -461,6 +461,11 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::List(Box::new(DataType::Varchar))))
         }
+        ExprType::RegexpReplace => {
+            // regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
+            ensure_arity!("regexp_replace", 3 <= | inputs | <= 6);
+            Ok(Some(DataType::Varchar))
+        }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());

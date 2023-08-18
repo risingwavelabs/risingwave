@@ -89,8 +89,11 @@ impl FromStr for RegexpOptions {
         let mut opts = Self::default();
         for c in s.chars() {
             match c {
+                // Case sensitive matching here
                 'c' => opts.case_insensitive = false,
+                // Case insensitive matching here
                 'i' => opts.case_insensitive = true,
+                // Not yet support
                 'g' => {}
                 _ => {
                     bail!("invalid regular expression option: \"{c}\"");
@@ -138,7 +141,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                     Some(ScalarImpl::Utf8(pattern)) => pattern.to_string(),
                     // NULL pattern
                     None => NULL_PATTERN.to_string(),
-                    _ => bail!("Expected pattern to be an String"),
+                    _ => bail!("Expected pattern to be a String"),
                 }
             }
             _ => {
@@ -164,7 +167,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
                             pattern = NULL_PATTERN.to_string();
                             "".to_string()
                         }
-                        _ => bail!("Expected flags to be an String"),
+                        _ => bail!("Expected flags to be a String"),
                     }
                 }
                 _ => {
@@ -246,5 +249,337 @@ impl Expression for RegexpMatchExpression {
         } else {
             None
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct RegexpReplaceExpression {
+    /// The source to be matched and replaced
+    pub source: Box<dyn Expression>,
+    /// The regex context, used to match the given pattern
+    pub ctx: RegexpContext,
+    /// The replacement string
+    pub replacement: String,
+    /// The actual return type by evaluating this expression
+    pub return_type: DataType,
+    /// The start position to replace the source
+    /// The starting index should be `0`
+    pub start: i32,
+    /// The N, used to specified the N-th position to be replaced
+    /// Note that this field is only available if `start` > 0
+    pub n: i32,
+    /// Indicates if the `-g` flag is specified
+    pub global_flag: bool,
+}
+
+/// This trait provides the transformation from `ExprNode` to `RegexpReplaceExpression`
+impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
+    type Error = ExprError;
+
+    /// Try to convert the given `ExprNode` to the replace expression
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        // The function type must be of Type::RegexpReplace
+        ensure!(prost.get_function_type().unwrap() == Type::RegexpReplace);
+
+        // Get the return type first
+        let return_type = DataType::from(prost.get_return_type().unwrap());
+
+        // Get the top node, which must be the function call node in this case
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
+
+        // The children node, must contain `source`, `pattern`, `replacement`
+        // `start, N`, `flags` are optional
+        let mut children = func_call_node.children.iter();
+
+        // Get the source expression, will be used as the `child` in replace expr
+        let Some(source_node) = children.next() else {
+            bail!("Expected argument text");
+        };
+        let source = expr_build_from_prost(source_node)?;
+
+        // Get the regex pattern of this call
+        let Some(pattern_node) = children.next() else {
+            bail!("Expected argument pattern");
+        };
+        // Store the pattern as the string, to pass in the regex context
+        let pattern = match &pattern_node.get_rex_node()? {
+            RexNode::Constant(pattern_value) => {
+                let pattern_datum = deserialize_datum(
+                    pattern_value.get_body().as_slice(),
+                    &DataType::from(pattern_node.get_return_type().unwrap()),
+                )
+                .map_err(|e| ExprError::Internal(e.into()))?;
+
+                match pattern_datum {
+                    Some(ScalarImpl::Utf8(pattern)) => pattern.to_string(),
+                    // NULL pattern
+                    None => NULL_PATTERN.to_string(),
+                    _ => bail!("Expected pattern to be a String"),
+                }
+            }
+            _ => {
+                return Err(ExprError::UnsupportedFunction(
+                    "non-constant pattern in regexp_replace".to_string()
+                ))
+            }
+        };
+
+        // Get the replacement string of this call
+        let Some(replacement_node) = children.next() else {
+            bail!("Expected argument replacement");
+        };
+        // Same as the pattern above, store as the string
+        let replacement = match &replacement_node.get_rex_node()? {
+            RexNode::Constant(replacement_value) => {
+                let replacement_datum = deserialize_datum(
+                    replacement_value.get_body().as_slice(),
+                    &DataType::from(replacement_node.get_return_type().unwrap()),
+                )
+                .map_err(|e| ExprError::Internal(e.into()))?;
+
+                match replacement_datum {
+                    Some(ScalarImpl::Utf8(replacement)) => replacement.to_string(),
+                    // NULL replacement
+                    // FIXME: Do we need the NULL match arm here?
+                    _ => bail!("Expected replacement to be a String"),
+                }
+            }
+            _ => {
+                return Err(ExprError::UnsupportedFunction(
+                    "non-constant in regexp_replace".to_string()
+                ))
+            }
+        };
+
+        // TODO: [, start [, N ]] [, flags ] nodes support
+        let mut flags = String::from("");
+        let mut start = -1;
+        let mut n = -1;
+        let mut n_flag = false;
+        let mut f_flag = false;
+
+        // Try to get the next possible node, see if any of the options are specified
+        if let Some(placeholder_node) = children.next() {
+            // Get the placeholder text first
+            let _placeholder = match &placeholder_node.get_rex_node()? {
+                RexNode::Constant(placeholder_value) => {
+                    let placeholder_datum = deserialize_datum(
+                        placeholder_value.get_body().as_slice(),
+                        &DataType::from(placeholder_node.get_return_type().unwrap()),
+                    )
+                    .map_err(|e| ExprError::Internal(e.into()))?;
+    
+                    match placeholder_datum {
+                        Some(ScalarImpl::Int32(v)) => {
+                            start = v;
+                            "".to_string()
+                        }
+                        Some(ScalarImpl::Utf8(v)) => {
+                            // If the `start` is not specified
+                            // Then this must be the `flags`
+                            f_flag = true;
+                            flags = v.to_string();
+                            "".to_string()
+                        }
+                        // NULL replacement
+                        // FIXME: Do we need the NULL match arm here?
+                        _ => bail!("Expected extra option to be a String/Int32"),
+                    }
+                }
+                _ => {
+                    return Err(ExprError::UnsupportedFunction(
+                        "non-constant in regexp_replace".to_string()
+                    ))
+                }
+            };
+
+            // Get the next node
+            if !f_flag {
+                if let Some(placeholder_node) = children.next() {
+                    // Get the text as above
+                    let placeholder = match &placeholder_node.get_rex_node()? {
+                        RexNode::Constant(placeholder_value) => {
+                            let placeholder_datum = deserialize_datum(
+                                placeholder_value.get_body().as_slice(),
+                                &DataType::from(placeholder_node.get_return_type().unwrap()),
+                            )
+                            .map_err(|e| ExprError::Internal(e.into()))?;
+            
+                            match placeholder_datum {
+                                Some(ScalarImpl::Int32(v)) => {
+                                    n_flag = true;
+                                    n = v;
+                                    "".to_string()
+                                }
+                                Some(ScalarImpl::Utf8(v)) => v.to_string(),
+                                // NULL replacement
+                                // FIXME: Do we need the NULL match arm here?
+                                _ => bail!("Expected extra option to be a String/Int32"),
+                            }
+                        }
+                        _ => {
+                            return Err(ExprError::UnsupportedFunction(
+                                "non-constant in regexp_replace".to_string()
+                            ))
+                        }
+                    };
+
+                    if n_flag {
+                        // Check if any flag is specified
+                        if let Some(flag_node) = children.next() {
+                            // Get the flag
+                            flags = match &flag_node.get_rex_node()? {
+                                RexNode::Constant(flag_value) => {
+                                    let flag_datum = deserialize_datum(
+                                        flag_value.get_body().as_slice(),
+                                        &DataType::from(flag_node.get_return_type().unwrap()),
+                                    )
+                                    .map_err(|e| ExprError::Internal(e.into()))?;
+                    
+                                    match flag_datum {
+                                        Some(ScalarImpl::Utf8(v)) => v.to_string(),
+                                        // NULL replacement
+                                        // FIXME: Do we need the NULL match arm here?
+                                        _ => bail!("Expected flag to be a String"),
+                                    }
+                                }
+                                _ => {
+                                    return Err(ExprError::UnsupportedFunction(
+                                        "non-constant in regexp_replace".to_string()
+                                    ))
+                                }
+                            };
+                        }
+                    } else {
+                        flags = placeholder;
+                    }
+                }
+            }
+        }
+
+        // TODO: Any other error handling?
+        if let Some(_other) = children.next() {
+            // There should not any other option after the `flags`
+            bail!("invalid parameters specified in regexp_replace");
+        }
+
+        // Construct the final `RegexpReplaceExpression`
+        let ctx = RegexpContext::new(&pattern, &flags)?;
+
+        let mut global_flag = false;
+        if flags.chars().nth(0).unwrap() == 'g' {
+            // Set the `global_flag` to true
+            global_flag = true;
+        }
+
+        Ok(Self {
+            source,
+            ctx,
+            replacement,
+            return_type,
+            start,
+            n,
+            global_flag,
+        })
+    }
+}
+
+impl RegexpReplaceExpression {
+    /// Match and replace one row, return the replaced string
+    fn match_row(&self, text: Option<&str>) -> Option<String> {
+        if let Some(text) = text {
+            // The start position to begin the search
+            let start = if self.start != -1 { self.start - 1 } else { 0 };
+
+            // `-g` enabled, we need to replace all the occurrence of the matched pattern
+            if self.global_flag {
+                let mut offset = start as usize;
+                // The default capacity is hard-coded to `10`
+                let mut capture_group = Vec::with_capacity(10);
+                while let Some(capture) = self.ctx.0.captures(&text[offset..]) {
+                    // Note that `captures[0]` represents the whole match
+                    capture_group.push(capture[0].to_string());
+
+                    let start = capture.get(0).unwrap().start();
+                    let end = capture.get(0).unwrap().end();
+
+                    // Update the offset according to the `start` & `end`
+                    if start == end {
+                        // This is a zero-width match
+                        offset += 1;
+                    } else {
+                        offset += end - start;
+                    }
+
+                    // println!("start: {} end: {}", capture.get(0).unwrap().start(), capture.get(0).unwrap().end());
+
+                    // println!("current offset: {} current capture: {}", offset, &capture[0]);
+                }
+
+                // Then replace the string all at once
+                let mut replaced = text.to_string();
+
+                for c in capture_group {
+                    // FIXME: Now the `replace` will execute on all the matches,
+                    // we only need to substitute the first match
+                    replaced = replaced.replace(&c, &self.replacement);
+                }
+
+                return Some(replaced);
+            }
+
+            if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
+                let replaced = text.replace(&capture[0], &self.replacement);
+                Some(replaced)
+            } else {
+                // There exists no match
+                // Return the original string
+                Some(text.into())
+            }
+        } else {
+            // The input string is None
+            None
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Expression for RegexpReplaceExpression {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    async fn eval(&self, _input: &DataChunk) -> Result<ArrayRef> {
+        // let text_arr = self.source.eval_checked(input).await?;
+        // let text_arr = text_arr.as_utf8();
+        unimplemented!() 
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        println!("Current Expr: {:?}", self);
+        // Get the source text to match and replace
+        let source = self.source.eval_row(input).await?;
+        let source = match source {
+            Some(ScalarImpl::Utf8(s)) => s,
+            // The input source is invalid, directly return None
+            _ => return Ok(None),
+        };
+
+        Ok(if let Some(replaced) = self.match_row(Some(&source)) {
+            Some(replaced.into())
+        } else {
+            // Invalid
+            None
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn dummy_test() {
+        println!("dummy test");
     }
 }
