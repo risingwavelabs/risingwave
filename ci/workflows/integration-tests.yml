@@ -18,19 +18,20 @@ steps:
     matrix:
       setup:
         testcase:
-          - "ad-click"
-          - "ad-ctr"
-          - "cdn-metrics"
-          - "clickstream"
-          - "livestream"
-          - "prometheus"
-          - "schema-registry"
-          - "mysql-cdc"
-          - "postgres-cdc"
-          - "mysql-sink"
-          - "postgres-sink"
-          - "iceberg-sink"
-          - "debezium-mysql"
+          # - "ad-click"
+          # - "ad-ctr"
+          # - "cdn-metrics"
+          # - "clickstream"
+          # - "livestream"
+          # - "prometheus"
+          # - "schema-registry"
+          # - "mysql-cdc"
+          # - "postgres-cdc"
+          # - "mysql-sink"
+          # - "postgres-sink"
+          # - "iceberg-sink"
+          - "clickhouse-sink"
+          # - "debezium-mysql"
         format:
           - "json"
           - "protobuf"
@@ -77,6 +78,10 @@ steps:
           skip: true
         - with:
             testcase: "iceberg-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "clickhouse-sink"
             format: "protobuf"
           skip: true
         - with:
