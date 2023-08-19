@@ -212,7 +212,7 @@ where
     ) -> MetaResult<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let stream_client_pool = Arc::new(StreamClientPool::new(1, connection_metrics));
+        let stream_client_pool = Arc::new(StreamClientPool::new(1, connection_metrics.clone()));
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let (cluster_id, cluster_first_launch) =
@@ -231,7 +231,9 @@ where
             .await?,
         );
 
-        let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
+        let connector_client =
+            ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref(), connection_metrics)
+                .await;
 
         Ok(Self {
             id_gen_manager,

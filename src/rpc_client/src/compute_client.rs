@@ -18,7 +18,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
-use risingwave_common::monitor::connection::{monitored_hyper_https_connector, ConnectionMetrics};
+use risingwave_common::monitor::connection::{
+    monitored_hyper_https_connector, ConnectionMetrics, TcpConfig,
+};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
@@ -63,8 +65,10 @@ impl ComputeClient {
             .connect_with_connector(monitored_hyper_https_connector(
                 "compute-client",
                 metrics,
-                true,
-                None,
+                TcpConfig {
+                    tcp_nodelay: true,
+                    keepalive_duration: None,
+                },
             ))
             .await?;
         Ok(Self::with_channel(addr, channel))

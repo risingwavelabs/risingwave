@@ -24,7 +24,9 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
     STREAM_WINDOW_SIZE,
 };
-use risingwave_common::monitor::connection::ConnectionMetrics;
+use risingwave_common::monitor::connection::{
+    monitored_tcp_incoming, ConnectionMetrics, TcpConfig,
+};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -338,7 +340,11 @@ pub async fn compute_node_serve(
         opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
     );
 
-    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
+    let connector_client = ConnectorClient::try_new(
+        opts.connector_rpc_endpoint.as_ref(),
+        connection_metrics.clone(),
+    )
+    .await;
 
     let connector_params = risingwave_connector::ConnectorParams {
         connector_client,
@@ -409,7 +415,6 @@ pub async fn compute_node_serve(
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
@@ -431,22 +436,34 @@ pub async fn compute_node_serve(
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
-            .serve_with_shutdown(listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
-                            }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
-                        }
+            .serve_with_incoming_shutdown(
+                monitored_tcp_incoming(
+                    listen_addr,
+                    "compute-node-service",
+                    connection_metrics.clone(),
+                    TcpConfig {
+                        tcp_nodelay: true,
+                        keepalive_duration: None,
                     },
-                }
-            })
+                )
+                .unwrap(),
+                async move {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = &mut shutdown_recv => {
+                            for (join_handle, shutdown_sender) in sub_tasks {
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                }
+                            }
+                        },
+                    }
+                },
+            )
             .await
             .unwrap();
     });

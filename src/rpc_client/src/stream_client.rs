@@ -17,7 +17,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::monitor::connection::{monitored_hyper_https_connector, ConnectionMetrics};
+use risingwave_common::monitor::connection::{
+    monitored_hyper_https_connector, ConnectionMetrics, TcpConfig,
+};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::*;
@@ -45,8 +47,10 @@ impl StreamClient {
             .connect_with_connector(monitored_hyper_https_connector(
                 "stream-client",
                 metrics,
-                false,
-                None,
+                TcpConfig {
+                    tcp_nodelay: false,
+                    keepalive_duration: None,
+                },
             ))
             .await?
             .tracing_injected();

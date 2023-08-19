@@ -2880,7 +2880,7 @@ def section_network_connection(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('connection_read_rate')}[$__rate_interval])) by (connection_type, uri, job, instance)",
+                            f"sum(rate({metric('connection_read_rate')}[$__rate_interval])) by (connection_type, uri, job, instance) / (1024*1024)",
                             "{{job}} @ {{instance}} {{connection_type}} {{uri}}",
                         ),
                     ],
@@ -2890,7 +2890,7 @@ def section_network_connection(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('connection_write_rate')}[$__rate_interval])) by (connection_type, uri, job, instance)",
+                            f"sum(rate({metric('connection_write_rate')}[$__rate_interval])) by (connection_type, uri, job, instance) / (1024*1024)",
                             "{{job}} @ {{instance}} {{connection_type}} {{uri}}",
                         ),
                     ],

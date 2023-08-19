@@ -16,16 +16,17 @@ use std::any::type_name;
 use std::cmp::Ordering;
 use std::future::Future;
 use std::io::{Error, IoSlice};
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures::FutureExt;
+use futures::{FutureExt, Stream};
 use http::Uri;
-use hyper::client::connect::{Connected, Connection};
+use hyper::client::connect::Connection;
 use hyper::client::HttpConnector;
 use hyper::service::Service;
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use prometheus::core::{
     AtomicI64, AtomicU64, GenericCounter, GenericCounterVec, GenericGauge, GenericGaugeVec,
 };
@@ -33,6 +34,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tonic::transport::server::{Connected, TcpConnectInfo, TcpIncoming};
 use tracing::{info, warn};
 
 pub trait MonitorAsyncReadWrite {
@@ -46,12 +48,13 @@ pub trait MonitorAsyncReadWrite {
     fn on_write_err(&mut self, _err: &std::io::Error) {}
 }
 
-#[pin_project]
-#[derive(Clone)]
-pub struct MonitoredConnection<C, M> {
-    #[pin]
-    inner: C,
-    monitor: M,
+pin_project! {
+    #[derive(Clone)]
+    pub struct MonitoredConnection<C, M> {
+        #[pin]
+        inner: C,
+        monitor: M,
+    }
 }
 
 impl<C, M> MonitoredConnection<C, M> {
@@ -179,16 +182,24 @@ impl<C: AsyncWrite, M: MonitorAsyncReadWrite> AsyncWrite for MonitoredConnection
 }
 
 impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
-    fn connected(&self) -> Connected {
+    fn connected(&self) -> hyper::client::connect::Connected {
         self.inner.connected()
+    }
+}
+
+impl<C: Connected, M> Connected for MonitoredConnection<C, M> {
+    type ConnectInfo = C::ConnectInfo;
+
+    fn connect_info(&self) -> Self::ConnectInfo {
+        self.inner.connect_info()
     }
 }
 
 pub trait MonitorNewConnection {
     type ConnectionMonitor: MonitorAsyncReadWrite;
 
-    fn new_connection_monitor(&self, req: Uri) -> Self::ConnectionMonitor;
-    fn on_err(&self, req: Uri);
+    fn new_connection_monitor(&self, endpoint: String) -> Self::ConnectionMonitor;
+    fn on_err(&self, endpoint: String);
 }
 
 impl<C: Service<Uri>, M: MonitorNewConnection + Clone + 'static> Service<Uri>
@@ -206,20 +217,47 @@ where
     }
 
     fn call(&mut self, uri: Uri) -> Self::Future {
-        let uri_clone = uri.clone();
+        let endpoint = format!("{:?}:{:?}", uri.host(), uri.port());
         let monitor = self.monitor.clone();
         self.inner
             .call(uri)
             .map(move |result: Result<_, _>| match result {
                 Ok(resp) => Ok(MonitoredConnection::new(
                     resp,
-                    monitor.new_connection_monitor(uri_clone),
+                    monitor.new_connection_monitor(endpoint),
                 )),
                 Err(e) => {
-                    monitor.on_err(uri_clone);
+                    monitor.on_err(endpoint);
                     Err(e)
                 }
             })
+    }
+}
+
+impl<Con, E, C: Stream<Item = Result<Con, E>>, M: MonitorNewConnection> Stream
+    for MonitoredConnection<C, M>
+where
+    Con: Connected<ConnectInfo = TcpConnectInfo>,
+{
+    type Item = Result<MonitoredConnection<Con, M::ConnectionMonitor>, E>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let (inner, monitor) = MonitoredConnection::project_into(self);
+        inner.poll_next(cx).map(|opt| {
+            opt.map(|result| {
+                result.map(|conn| {
+                    let remote_addr = conn.connect_info().remote_addr();
+                    let endpoint = remote_addr
+                        .map(|remote_addr| format!("{}:{}", remote_addr.ip(), remote_addr.port()))
+                        .unwrap_or("unknown".to_string());
+                    MonitoredConnection::new(conn, monitor.new_connection_monitor(endpoint))
+                })
+            })
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
     }
 }
 
@@ -321,16 +359,20 @@ impl ConnectionMetrics {
     }
 }
 
+pub struct TcpConfig {
+    pub tcp_nodelay: bool,
+    pub keepalive_duration: Option<Duration>,
+}
+
 pub fn monitored_hyper_https_connector(
     connection_type: impl Into<String>,
     metrics: ConnectionMetrics,
-    tcp_nodelay: bool,
-    keepalive_duration: Option<Duration>,
+    config: TcpConfig,
 ) -> MonitoredConnection<HttpConnector, MonitorNewConnectionImpl> {
     let mut http = HttpConnector::new();
     http.enforce_http(false);
-    http.set_nodelay(tcp_nodelay);
-    http.set_keepalive(keepalive_duration);
+    http.set_nodelay(config.tcp_nodelay);
+    http.set_keepalive(config.keepalive_duration);
 
     monitor_connector(http, connection_type, metrics)
 }
@@ -355,6 +397,25 @@ pub fn monitor_connector<C>(
     )
 }
 
+pub fn monitored_tcp_incoming(
+    listen_addr: SocketAddr,
+    connection_type: impl Into<String>,
+    metrics: ConnectionMetrics,
+    config: TcpConfig,
+) -> Result<
+    MonitoredConnection<TcpIncoming, MonitorNewConnectionImpl>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let incoming = TcpIncoming::new(listen_addr, config.tcp_nodelay, config.keepalive_duration)?;
+    Ok(MonitoredConnection::new(
+        incoming,
+        MonitorNewConnectionImpl {
+            connection_type: connection_type.into(),
+            metrics,
+        },
+    ))
+}
+
 #[derive(Clone)]
 pub struct MonitorNewConnectionImpl {
     connection_type: String,
@@ -364,9 +425,8 @@ pub struct MonitorNewConnectionImpl {
 impl MonitorNewConnection for MonitorNewConnectionImpl {
     type ConnectionMonitor = MonitorAsyncReadWriteImpl;
 
-    fn new_connection_monitor(&self, uri: Uri) -> Self::ConnectionMonitor {
-        let uri_string = uri.to_string();
-        let labels = [self.connection_type.as_str(), uri_string.as_str()];
+    fn new_connection_monitor(&self, endpoint: String) -> Self::ConnectionMonitor {
+        let labels = [self.connection_type.as_str(), endpoint.as_str()];
         let read_rate = self.metrics.read_rate.with_label_values(&labels);
         let read_err_rate = self.metrics.read_err_rate.clone();
         let reader_count = self.metrics.reader_count.with_label_values(&labels);
@@ -376,7 +436,7 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
         let connection_count = self.metrics.connection_count.with_label_values(&labels);
 
         MonitorAsyncReadWriteImpl::new(
-            uri_string,
+            endpoint,
             self.connection_type.clone(),
             read_rate,
             read_err_rate,
@@ -388,16 +448,16 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
         )
     }
 
-    fn on_err(&self, uri: Uri) {
+    fn on_err(&self, endpoint: String) {
         self.metrics
             .connection_err_rate
-            .with_label_values(&[self.connection_type.as_str(), uri.to_string().as_str()])
+            .with_label_values(&[self.connection_type.as_str(), endpoint.as_str()])
             .inc();
     }
 }
 
 pub struct MonitorAsyncReadWriteImpl {
-    uri: String,
+    endpoint: String,
     connection_type: String,
 
     read_rate: GenericCounter<AtomicU64>,
@@ -415,7 +475,7 @@ pub struct MonitorAsyncReadWriteImpl {
 
 impl MonitorAsyncReadWriteImpl {
     pub fn new(
-        uri: String,
+        endpoint: String,
         connection_type: String,
         read_rate: GenericCounter<AtomicU64>,
         read_err_rate: GenericCounterVec<AtomicU64>,
@@ -429,7 +489,7 @@ impl MonitorAsyncReadWriteImpl {
         writer_count.inc();
         connection_count.inc();
         Self {
-            uri,
+            endpoint,
             connection_type,
             read_rate,
             read_err_rate,
@@ -472,7 +532,7 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
 
     fn on_read_err(&mut self, err: &Error) {
         self.read_err_rate
-            .with_label_values(&[self.uri.as_str(), err.kind().to_string().as_str()])
+            .with_label_values(&[self.endpoint.as_str(), err.kind().to_string().as_str()])
             .inc();
     }
 
@@ -493,7 +553,7 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
         self.write_err_rate
             .with_label_values(&[
                 self.connection_type.as_str(),
-                self.uri.as_str(),
+                self.endpoint.as_str(),
                 err.kind().to_string().as_str(),
             ])
             .inc();

@@ -18,6 +18,9 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::monitor::connection::{
+    monitored_hyper_https_connector, ConnectionMetrics, TcpConfig,
+};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_coordinator_stream_request::{
     CommitMetadata, StartCoordinator,
@@ -132,24 +135,32 @@ impl SinkCoordinatorStreamHandle {
 }
 
 impl ConnectorClient {
-    pub async fn try_new(connector_endpoint: Option<&String>) -> Option<Self> {
+    pub async fn try_new(
+        connector_endpoint: Option<&String>,
+        connection_metrics: ConnectionMetrics,
+    ) -> Option<Self> {
         match connector_endpoint {
             None => None,
-            Some(connector_endpoint) => match ConnectorClient::new(connector_endpoint).await {
-                Ok(client) => Some(client),
-                Err(e) => {
-                    error!(
-                        "invalid connector endpoint {:?}: {:?}",
-                        connector_endpoint, e
-                    );
-                    None
+            Some(connector_endpoint) => {
+                match ConnectorClient::new(connector_endpoint, connection_metrics).await {
+                    Ok(client) => Some(client),
+                    Err(e) => {
+                        error!(
+                            "invalid connector endpoint {:?}: {:?}",
+                            connector_endpoint, e
+                        );
+                        None
+                    }
                 }
-            },
+            }
         }
     }
 
     #[allow(clippy::unused_async)]
-    pub async fn new(connector_endpoint: &String) -> Result<Self> {
+    pub async fn new(
+        connector_endpoint: &String,
+        connection_metrics: ConnectionMetrics,
+    ) -> Result<Self> {
         let endpoint = Endpoint::from_shared(format!("http://{}", connector_endpoint))
             .map_err(|e| {
                 RpcError::Internal(anyhow!(format!(
@@ -159,7 +170,6 @@ impl ConnectorClient {
             })?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5));
 
         let channel = {
@@ -169,7 +179,14 @@ impl ConnectorClient {
             }
             #[cfg(not(madsim))]
             {
-                endpoint.connect_lazy()
+                endpoint.connect_with_connector_lazy(monitored_hyper_https_connector(
+                    "connector-client",
+                    connection_metrics,
+                    TcpConfig {
+                        tcp_nodelay: true,
+                        keepalive_duration: None,
+                    },
+                ))
             }
         };
         Ok(Self {
