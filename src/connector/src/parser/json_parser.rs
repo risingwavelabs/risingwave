@@ -147,8 +147,8 @@ mod tests {
 
     use crate::parser::upsert_parser::UpsertParser;
     use crate::parser::{
-        EncodingProperties, JsonParser, JsonProperties, ParserProperties, ProtocolProperties,
-        SourceColumnDesc, SourceStreamChunkBuilder,
+        EncodingProperties, JsonParser, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -391,6 +391,46 @@ mod tests {
         ];
         assert_eq!(row, expected.into());
     }
+
+    #[tokio::test]
+    async fn test_json_parse_struct_from_string() {
+        let descs = vec![ColumnDesc::new_struct(
+            "struct",
+            0,
+            "",
+            vec![
+                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
+                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
+            ],
+        )]
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
+        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let payload = br#"
+        {
+            "struct": "{\"varchar\": \"varchar\", \"boolean\": true}"
+        }
+        "#
+        .to_vec();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.into_owned_row().into_inner();
+
+        let expected = vec![Some(ScalarImpl::Struct(StructValue::new(vec![
+            Some(ScalarImpl::Utf8("varchar".into())),
+            Some(ScalarImpl::Bool(true)),
+        ])))];
+        assert_eq!(row, expected.into());
+    }
+
     #[tokio::test]
     async fn test_json_upsert_parser() {
         let items = [
@@ -404,7 +444,7 @@ mod tests {
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
         ];
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Upsert,

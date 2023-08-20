@@ -39,6 +39,8 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 
+pub use compact::*;
+
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;

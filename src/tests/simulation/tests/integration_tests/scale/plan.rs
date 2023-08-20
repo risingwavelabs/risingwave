@@ -65,6 +65,7 @@ async fn test_resize_normal() -> Result<()> {
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: removed_workers,
+                    target_parallelism: None,
                 },
             )]),
         }))
@@ -147,6 +148,7 @@ async fn test_resize_single() -> Result<()> {
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: vec![prev_worker.id],
+                    target_parallelism: None,
                 },
             )]),
         }))
@@ -221,6 +223,7 @@ async fn test_resize_single_failed() -> Result<()> {
                     WorkerChanges {
                         include_worker_ids: vec![],
                         exclude_worker_ids: vec![worker_a.id],
+                        target_parallelism: None,
                     },
                 ),
                 (
@@ -228,6 +231,7 @@ async fn test_resize_single_failed() -> Result<()> {
                     WorkerChanges {
                         include_worker_ids: vec![],
                         exclude_worker_ids: vec![worker_b.id],
+                        target_parallelism: None,
                     },
                 ),
             ]),
@@ -298,6 +302,7 @@ join mv5 on mv1.v = mv5.v;",
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: removed_worker_ids,
+                    target_parallelism: None,
                 },
             )]),
         }))

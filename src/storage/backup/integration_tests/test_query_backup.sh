@@ -57,6 +57,7 @@ do
 done
 # safe epoch equals to 0 because no compaction has been done
 safe_epoch=$(get_safe_epoch)
+echo "safe epoch after unpin: ${safe_epoch}"
 [ "${safe_epoch}" -eq 0 ]
 # trigger a compaction to increase safe_epoch
 manual_compaction -c 3 -l 0

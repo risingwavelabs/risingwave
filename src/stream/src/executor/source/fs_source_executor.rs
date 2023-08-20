@@ -265,11 +265,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.source_id
-                ))
+                )
             })?;
 
         let source_desc_builder: SourceDescBuilder =
@@ -315,12 +315,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .filter(|split| !all_completed.contains(&split.id()))
             .collect_vec();
 
-        self.stream_source_core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
-
         // restore the newest split info
         for ele in &mut boot_state {
             if let Some(recover_state) = self
@@ -333,6 +327,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             }
         }
 
+        // init in-memory split states with persisted state if any
+        self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
 
@@ -435,11 +431,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .iter()
                             .flat_map(|(id, offset)| {
                                 let origin_split =
-                                    self.stream_source_core.stream_source_splits.get(id);
+                                    self.stream_source_core.stream_source_splits.get_mut(id);
 
-                                origin_split.map(|split| (id.clone(), split.update(offset.clone())))
+                                origin_split.map(|split| {
+                                    split.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((id.clone(), split.clone()))
+                                })
                             })
-                            .collect_vec();
+                            .try_collect()?;
 
                         self.stream_source_core.state_cache.extend(state);
                     }

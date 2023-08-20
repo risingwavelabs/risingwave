@@ -569,9 +569,16 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Precedence::UnaryNot)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY => {
+                Keyword::ARRAY if self.peek_token() == Token::LBracket => {
                     self.expect_token(&Token::LBracket)?;
                     self.parse_array_expr(true)
+                }
+                Keyword::ARRAY if self.peek_token() == Token::LParen => {
+                    // similar to `exists(subquery)`
+                    self.expect_token(&Token::LParen)?;
+                    let exists_node = Expr::ArraySubquery(Box::new(self.parse_query()?));
+                    self.expect_token(&Token::RParen)?;
+                    Ok(exists_node)
                 }
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
@@ -1970,14 +1977,14 @@ impl Parser {
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        self.expect_keyword(Keyword::AS)?;
+        let query = Box::new(self.parse_query()?);
         let emit_mode = if materialized {
             self.parse_emit_mode()?
         } else {
             None
         };
-        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
-        self.expect_keyword(Keyword::AS)?;
-        let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
         Ok(Statement::CreateView {
             if_not_exists,
@@ -2967,7 +2974,7 @@ impl Parser {
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
             Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone())),
-            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
+            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapedString(s.clone())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected.with_location(token.location)),

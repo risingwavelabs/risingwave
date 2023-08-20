@@ -415,7 +415,7 @@ impl From<&DecimalArray> for arrow_array::Decimal128Array {
     fn from(array: &DecimalArray) -> Self {
         let max_scale = array
             .iter()
-            .filter_map(|o| o.map(|v| v.scale()))
+            .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
             .max()
             .unwrap_or(0) as u32;
         let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
@@ -578,7 +578,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Decimal(a) => {
                 let max_scale = a
                     .iter()
-                    .filter_map(|o| o.map(|v| v.scale()))
+                    .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
                     .max()
                     .unwrap_or(0) as u32;
                 build(

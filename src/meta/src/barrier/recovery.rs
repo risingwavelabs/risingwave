@@ -67,14 +67,12 @@ where
     /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
-        let table_fragments = self.fragment_manager.list_table_fragments().await;
-        let to_drop_table_fragments = table_fragments
-            .into_iter()
-            .filter(|table_fragment| {
-                !stream_job_ids.contains(&table_fragment.table_id().table_id)
-                    || !table_fragment.is_created()
+        let to_drop_table_fragments = self
+            .fragment_manager
+            .list_dirty_table_fragments(|tf| {
+                !stream_job_ids.contains(&tf.table_id().table_id) || !tf.is_created()
             })
-            .collect_vec();
+            .await;
 
         let to_drop_streaming_ids = to_drop_table_fragments
             .iter()
@@ -110,16 +108,16 @@ where
     ///
     /// Returns the new epoch after recovery.
     pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
-        // pause discovery of all connector split changes and trigger config change.
-        let _source_pause_guard = self.source_manager.paused.lock().await;
-
-        // Abort buffered schedules, they might be dirty already.
-        self.scheduled_barriers.abort().await;
+        // Mark blocked and abort buffered schedules, they might be dirty already.
+        self.scheduled_barriers
+            .abort_and_mark_blocked("cluster is under recovering")
+            .await;
 
         tracing::info!("recovery start!");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
+        self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
 
         // We take retry into consideration because this is the latency user sees for a cluster to
@@ -223,6 +221,7 @@ where
         .await
         .expect("Retry until recovery success.");
         recovery_timer.observe_duration();
+        self.scheduled_barriers.mark_ready().await;
         tracing::info!("recovery success");
 
         new_epoch
@@ -387,7 +386,7 @@ where
             }));
         }
 
-        let node_actors = self.fragment_manager.all_node_actors(false).await;
+        let mut node_actors = self.fragment_manager.all_node_actors(false).await;
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
@@ -403,7 +402,7 @@ where
             client
                 .update_actors(UpdateActorsRequest {
                     request_id,
-                    actors: node_actors.get(node_id).cloned().unwrap_or_default(),
+                    actors: node_actors.remove(node_id).unwrap_or_default(),
                 })
                 .await?;
         }

@@ -32,7 +32,7 @@ function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
-itertools = "0.10"
+itertools = "0.11"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
@@ -76,7 +76,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.6"
-tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]

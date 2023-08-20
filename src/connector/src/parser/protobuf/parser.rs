@@ -29,7 +29,7 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties};
@@ -84,12 +84,20 @@ impl ProtobufParserConfig {
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = if protobuf_config.use_schema_registry {
+            let (schema_key, schema_value) = get_subject_by_strategy(
+                &protobuf_config.name_strategy,
+                protobuf_config.topic.as_str(),
+                protobuf_config.key_message_name.as_deref(),
+                Some(message_name.as_ref()),
+                protobuf_config.enable_upsert,
+            )?;
+            tracing::debug!(
+                "infer key subject {}, value subject {}",
+                schema_key,
+                schema_value,
+            );
             let client = Client::new(url, &protobuf_config.client_config)?;
-            compile_file_descriptor_from_schema_registry(
-                format!("{}-value", &protobuf_config.topic).as_str(),
-                &client,
-            )
-            .await?
+            compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
@@ -342,8 +350,8 @@ mod test {
     use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
-    use crate::parser::ParserProperties;
-    use crate::source::SourceFormat;
+    use crate::parser::SpecificParserConfig;
+    use crate::source::{SourceEncode, SourceFormat, SourceStruct};
 
     fn schema_dir() -> String {
         let dir = PathBuf::from("src/test_data");
@@ -372,7 +380,11 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -415,7 +427,11 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -462,8 +478,12 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config =
-            ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )
+        .unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -488,8 +508,12 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config =
-            ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )
+        .unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();

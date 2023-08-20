@@ -420,22 +420,21 @@ impl ExprVisitor<usize> for CountNow {
 
 /// analyze if the expression can derive a watermark from some input watermark. If it can
 /// derive, return the input watermark column index
-pub fn try_derive_watermark(expr: &ExprImpl) -> Option<usize> {
+pub fn try_derive_watermark(expr: &ExprImpl) -> WatermarkDerivation {
     let a = WatermarkAnalyzer {};
-    if let WatermarkDerivation::Watermark(idx) = a.visit_expr(expr) {
-        return Some(idx);
-    }
-    None
+    a.visit_expr(expr)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum WatermarkDerivation {
-    /// the expression will return a constant and not depends on its input.
+pub enum WatermarkDerivation {
+    /// The expression will return a constant and not depends on its input.
     Constant,
-    /// can derive a watermark if an input column has watermark, the usize field is the input
-    /// column index
+    /// Can derive a watermark if an input column has watermark, the usize field is the input
+    /// column index.
     Watermark(usize),
-    /// can not derive a watermark in any cases.
+    /// For nondecreasing functions, we can always produce watermarks from where they are called.
+    Nondecreasing,
+    /// Can not derive a watermark in any cases.
     None,
 }
 
@@ -486,29 +485,35 @@ impl WatermarkAnalyzer {
     }
 
     fn visit_function_call(&self, func_call: &FunctionCall) -> WatermarkDerivation {
+        use WatermarkDerivation::{Constant, Nondecreasing, Watermark};
         match func_call.func_type() {
             ExprType::Unspecified => unreachable!(),
-            ExprType::Add | ExprType::Multiply => match self.visit_binary_op(func_call.inputs()) {
-                (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Constant
-                }
-                (WatermarkDerivation::Constant, WatermarkDerivation::Watermark(idx))
-                | (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Watermark(idx)
-                }
+            ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
+                (Constant, Constant) => Constant,
+                (Constant, Watermark(idx)) | (Watermark(idx), Constant) => Watermark(idx),
+                (Constant, Nondecreasing) | (Nondecreasing, Constant) => Nondecreasing,
                 _ => WatermarkDerivation::None,
             },
-            ty @ (ExprType::Subtract
-            | ExprType::Divide
-            | ExprType::TumbleStart
-            | ExprType::AtTimeZone) => match self.visit_binary_op(func_call.inputs()) {
-                (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Constant
+            ExprType::Subtract | ExprType::TumbleStart => {
+                match self.visit_binary_op(func_call.inputs()) {
+                    (Constant, Constant) => Constant,
+                    (Watermark(idx), Constant) => Watermark(idx),
+                    (Nondecreasing, Constant) => Nondecreasing,
+                    _ => WatermarkDerivation::None,
                 }
-                (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
-                    if ty == ExprType::AtTimeZone
-                        && !(func_call.return_type() == DataType::Timestamptz
-                            && func_call.inputs()[0].return_type() == DataType::Timestamp)
+            }
+            ExprType::Multiply | ExprType::Divide | ExprType::Modulus => {
+                match self.visit_binary_op(func_call.inputs()) {
+                    (Constant, Constant) => Constant,
+                    // not meaningful to derive watermark for other situations
+                    _ => WatermarkDerivation::None,
+                }
+            }
+            ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
+                (Constant, Constant) => Constant,
+                (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                    if !(func_call.return_type() == DataType::Timestamptz
+                        && func_call.inputs()[0].return_type() == DataType::Timestamp)
                         && func_call.inputs()[1]
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
@@ -518,7 +523,7 @@ impl WatermarkAnalyzer {
                     {
                         WatermarkDerivation::None
                     } else {
-                        WatermarkDerivation::Watermark(idx)
+                        derivation
                     }
                 }
                 _ => WatermarkDerivation::None,
@@ -540,36 +545,31 @@ impl WatermarkAnalyzer {
                     v.months() == 0 && (v.days() == 0 || zone_without_dst)
                 });
                 match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
-                    (WatermarkDerivation::Constant, _) => WatermarkDerivation::Constant,
-                    (WatermarkDerivation::Watermark(idx), true) => {
-                        WatermarkDerivation::Watermark(idx)
-                    }
-                    (WatermarkDerivation::Watermark(_), false) => WatermarkDerivation::None,
+                    (Constant, _) => Constant,
+                    (Watermark(idx), true) => Watermark(idx),
+                    (Nondecreasing, true) => Nondecreasing,
+                    (Watermark(_) | Nondecreasing, false) => WatermarkDerivation::None,
                     (WatermarkDerivation::None, _) => WatermarkDerivation::None,
                 }
             }
-            ExprType::Modulus => WatermarkDerivation::None,
             ExprType::DateTrunc => match func_call.inputs().len() {
                 2 => match self.visit_binary_op(func_call.inputs()) {
-                    (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
-                        WatermarkDerivation::Constant
-                    }
-                    (WatermarkDerivation::Constant, WatermarkDerivation::Watermark(idx)) => {
-                        WatermarkDerivation::Watermark(idx)
-                    }
+                    (Constant, any_derivation) => any_derivation,
                     _ => WatermarkDerivation::None,
                 },
                 3 => match self.visit_ternary_op(func_call.inputs()) {
-                    (
-                        WatermarkDerivation::Constant,
-                        WatermarkDerivation::Constant,
-                        WatermarkDerivation::Constant,
-                    ) => WatermarkDerivation::Constant,
-                    (
-                        WatermarkDerivation::Constant,
-                        WatermarkDerivation::Watermark(idx),
-                        WatermarkDerivation::Constant,
-                    ) => WatermarkDerivation::Watermark(idx),
+                    (Constant, Constant, Constant) => Constant,
+                    (Constant, derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                        let zone_without_dst = func_call.inputs()[2]
+                            .as_literal()
+                            .and_then(|literal| literal.get_data().as_ref())
+                            .map_or(false, |s| s.as_utf8().eq_ignore_ascii_case("UTC"));
+                        if zone_without_dst {
+                            derivation
+                        } else {
+                            WatermarkDerivation::None
+                        }
+                    }
                     _ => WatermarkDerivation::None,
                 },
                 _ => unreachable!(),
@@ -584,6 +584,7 @@ impl WatermarkAnalyzer {
                 // TODO: do we need derive watermark when every case can derive a common watermark?
                 WatermarkDerivation::None
             }
+            ExprType::Proctime => Nondecreasing,
             _ => WatermarkDerivation::None,
         }
     }

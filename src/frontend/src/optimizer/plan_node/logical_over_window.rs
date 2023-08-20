@@ -361,7 +361,7 @@ pub struct LogicalOverWindow {
 }
 
 impl LogicalOverWindow {
-    fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
+    pub fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
         let core = OverWindow::new(calls, input);
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
@@ -605,6 +605,10 @@ impl LogicalOverWindow {
         } else {
             LogicalProject::with_out_col_idx(cur_node.into(), out_fields.into_iter()).into()
         }
+    }
+
+    pub fn decompose(self) -> (PlanRef, Vec<PlanWindowFunction>) {
+        self.core.decompose()
     }
 }
 

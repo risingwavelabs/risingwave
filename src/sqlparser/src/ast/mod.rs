@@ -42,7 +42,9 @@ pub use self::query::{
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use self::value::{
+    CstyleEscapedString, DateTimeField, DollarQuotedString, TrimWhereField, Value,
+};
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
@@ -409,12 +411,13 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
-    /// e.g. {1, 2, 3},
+    /// An array constructor `ARRAY[[2,3,4],[5,6,7]]`
     Array(Array),
-    /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
+    /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
+    ArraySubquery(Box<Query>),
+    /// A subscript expression `arr[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
-    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
+    /// A slice expression `arr[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
@@ -634,6 +637,7 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
+            Expr::ArraySubquery(s) => write!(f, "ARRAY ({})", s),
         }
     }
 }
@@ -1416,16 +1420,17 @@ impl fmt::Display for Statement {
                     if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
-                if let Some(emit_mode) = emit_mode {
-                    write!(f, " EMIT {}", emit_mode)?;
-                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if !columns.is_empty() {
                     write!(f, " ({})", display_comma_separated(columns))?;
                 }
-                write!(f, " AS {}", query)
+                write!(f, " AS {}", query)?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
+                Ok(())
             }
             Statement::CreateTable {
                 name,

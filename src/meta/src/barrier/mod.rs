@@ -50,6 +50,7 @@ use self::progress::TrackingCommand;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
     WorkerId,
@@ -143,6 +144,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     hummock_manager: HummockManagerRef<S>,
 
     source_manager: SourceManagerRef<S>,
+
+    sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
 
@@ -493,6 +496,7 @@ where
         fragment_manager: FragmentManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         source_manager: SourceManagerRef<S>,
+        sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
@@ -509,6 +513,7 @@ where
             fragment_manager,
             hummock_manager,
             source_manager,
+            sink_manager,
             metrics,
             env,
             tracker: Mutex::new(tracker),

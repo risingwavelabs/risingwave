@@ -16,9 +16,8 @@ pub use agg_group::*;
 pub use agg_state::*;
 pub use distinct::*;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
@@ -29,14 +28,10 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;
 
 mod agg_group;
-pub mod agg_impl;
 mod agg_state;
 mod agg_state_cache;
 mod distinct;
 mod minput;
-mod minput_agg_impl;
-mod table;
-mod value;
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
@@ -67,42 +62,32 @@ pub async fn agg_call_filter_res(
     ctx: &ActorContextRef,
     identity: &str,
     agg_call: &AggCall,
-    columns: &[ArrayRef],
-    base_visibility: Option<&Bitmap>,
-    capacity: usize,
-) -> StreamExecutorResult<Option<Bitmap>> {
-    let agg_col_vis = if matches!(
+    chunk: &DataChunk,
+) -> StreamExecutorResult<Vis> {
+    let mut vis = chunk.vis().clone();
+    if matches!(
         agg_call.kind,
         AggKind::Min | AggKind::Max | AggKind::StringAgg
     ) {
         // should skip NULL value for these kinds of agg function
         let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds
-        let agg_col_bitmap = columns[agg_col_idx].null_bitmap();
-        Some(agg_col_bitmap)
-    } else {
-        None
-    };
+        let agg_col_bitmap = chunk.column_at(agg_col_idx).null_bitmap();
+        vis &= agg_col_bitmap;
+    }
 
-    let filter_vis = if let Some(ref filter) = agg_call.filter {
-        let data_chunk = DataChunk::new(columns.to_vec(), capacity);
+    if let Some(ref filter) = agg_call.filter {
         if let Bool(filter_res) = filter
-            .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, identity))
+            .eval_infallible(chunk, |err| ctx.on_compute_error(err, identity))
             .await
             .as_ref()
         {
-            Some(filter_res.to_bitmap())
+            vis &= filter_res.to_bitmap();
         } else {
             bail!("Filter can only receive bool array");
         }
-    } else {
-        None
-    };
+    }
 
-    Ok([base_visibility, agg_col_vis, filter_vis.as_ref()]
-        .into_iter()
-        .flatten()
-        .cloned()
-        .reduce(|x, y| &x & &y))
+    Ok(vis)
 }
 
 pub fn iter_table_storage<S>(
@@ -114,8 +99,7 @@ where
     state_storages
         .iter_mut()
         .filter_map(|storage| match storage {
-            AggStateStorage::ResultValue => None,
-            AggStateStorage::Table { table } => Some(table),
+            AggStateStorage::Value => None,
             AggStateStorage::MaterializedInput { table, .. } => Some(table),
         })
 }

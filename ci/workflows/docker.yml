@@ -1,3 +1,9 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "docker-build-push: amd64"
     command: "ci/scripts/docker.sh"
@@ -9,6 +15,7 @@ steps:
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
             GITHUB_TOKEN: github-token
+    retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
@@ -22,6 +29,7 @@ steps:
             GITHUB_TOKEN: github-token
     agents:
       queue: "linux-arm64"
+    retry: *auto-retry
 
   - label: "multi-arch-image-create-push"
     command: "ci/scripts/multi-arch-docker.sh"
@@ -34,6 +42,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+    retry: *auto-retry
 
   - label: "pre build binary"
     command: "ci/scripts/release.sh"
@@ -50,3 +59,4 @@ steps:
             - GITHUB_TOKEN
             - BUILDKITE_COMMIT
             - BUILDKITE_TAG
+    retry: *auto-retry

@@ -241,7 +241,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
                     .truncated_epoch_rx
                     .recv()
                     .await
-                    .ok_or(anyhow!("cannot get truncated epoch"))?;
+                    .ok_or_else(|| anyhow!("cannot get truncated epoch"))?;
                 assert_eq!(truncated_epoch, prev_epoch);
             }
 

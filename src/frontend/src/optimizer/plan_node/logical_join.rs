@@ -184,6 +184,10 @@ impl LogicalJoin {
         self.core.is_full_out()
     }
 
+    pub fn output_indices_is_trivial(&self) -> bool {
+        self.output_indices() == &(0..self.internal_column_num()).collect_vec()
+    }
+
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
     /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///

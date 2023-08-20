@@ -16,17 +16,17 @@ use core::fmt::Debug;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use bytes::{BufMut, BytesMut};
-use clickhouse::update::Field;
 use clickhouse::{Client, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DatumRef, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::ConnectorClient;
+use serde::ser::{SerializeSeq, SerializeStruct};
+use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 
@@ -35,7 +35,6 @@ use crate::common::ClickHouseCommon;
 use crate::sink::{
     Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::source::DataType;
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 const BUFFER_SIZE: usize = 1024;
@@ -91,22 +90,22 @@ impl ClickHouseSink {
 
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
-        let fields = self.schema.fields().clone();
-        assert_eq!(
-            fields.len(),
-            clickhouse_column.len(),
-            "Schema len not match"
-        );
-        fields
+        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?;
+        if !ck_fields_name.len().eq(&clickhouse_column.len()) {
+            return Err(SinkError::ClickHouse("Schema len not match".to_string()));
+        }
+
+        ck_fields_name
             .iter()
             .zip_eq_fast(clickhouse_column)
             .try_for_each(|(key, value)| {
-                assert_eq!(
-                    key.name, value.name,
-                    "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
-                    key.name, value.name
-                );
-                Self::check_and_correct_column_type(&key.data_type, &value)
+                if !key.0.eq(&value.name) {
+                    return Err(SinkError::ClickHouse(format!(
+                        "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
+                        key.0, value.name
+                    )));
+                }
+                Self::check_and_correct_column_type(&key.1, &value)
             })?;
         Ok(())
     }
@@ -129,7 +128,9 @@ impl ClickHouseSink {
             }
             risingwave_common::types::DataType::Float32 => Ok(ck_column.r#type.contains("Float32")),
             risingwave_common::types::DataType::Float64 => Ok(ck_column.r#type.contains("Float64")),
-            risingwave_common::types::DataType::Decimal => todo!(),
+            risingwave_common::types::DataType::Decimal => {
+                Err(SinkError::ClickHouse("can not support Decimal".to_string()))
+            }
             risingwave_common::types::DataType::Date => Ok(ck_column.r#type.contains("Date32")),
             risingwave_common::types::DataType::Varchar => Ok(ck_column.r#type.contains("String")),
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
@@ -144,7 +145,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Interval => Err(SinkError::ClickHouse(
                 "clickhouse can not support Interval".to_string(),
             )),
-            risingwave_common::types::DataType::Struct(_) => todo!(),
+            risingwave_common::types::DataType::Struct(_) => Err(SinkError::ClickHouse(
+                "struct needs to be converted into a list".to_string(),
+            )),
             risingwave_common::types::DataType::List(list) => {
                 Self::check_and_correct_column_type(list.as_ref(), ck_column)?;
                 Ok(ck_column.r#type.contains("Array"))
@@ -152,7 +155,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "clickhouse can not support Bytea".to_string(),
             )),
-            risingwave_common::types::DataType::Jsonb => todo!(),
+            risingwave_common::types::DataType::Jsonb => Err(SinkError::ClickHouse(
+                "clickhouse rust can not support Json".to_string(),
+            )),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -192,12 +197,12 @@ impl Sink for ClickHouseSink {
             .bind("position")
             .fetch_all::<SystemColumn>()
             .await?;
-        assert!(
-            !clickhouse_column.is_empty(),
-            "table {:?}.{:?} is not find in clickhouse",
-            self.config.common.database,
-            self.config.common.table
-        );
+        if clickhouse_column.is_empty() {
+            return Err(SinkError::ClickHouse(format!(
+                "table {:?}.{:?} is not find in clickhouse",
+                self.config.common.database, self.config.common.table
+            )));
+        }
         self.check_column_name_and_type(clickhouse_column)?;
         Ok(())
     }
@@ -219,7 +224,14 @@ pub struct ClickHouseSinkWriter {
     client: Client,
     is_append_only: bool,
     // Save some features of the clickhouse column type
-    column_correct_vec: Vec<(bool, u8)>,
+    column_correct_vec: Vec<ClickHouseSchemaFeature>,
+    clickhouse_fields_name: Vec<String>,
+}
+#[derive(Debug)]
+struct ClickHouseSchemaFeature {
+    can_null: bool,
+    // Time accuracy in clickhouse for rw and ck conversions
+    accuracy_time: u8,
 }
 
 impl ClickHouseSinkWriter {
@@ -240,10 +252,14 @@ impl ClickHouseSinkWriter {
             .bind(config.common.table.clone())
             .fetch_all::<SystemColumn>()
             .await?;
-        let column_correct_vec: Result<Vec<(bool, u8)>> = clickhouse_column
+        let column_correct_vec: Result<Vec<ClickHouseSchemaFeature>> = clickhouse_column
             .iter()
             .map(Self::build_column_correct_vec)
             .collect();
+        let clickhouse_fields_name = build_fields_name_type_from_schema(&schema)?
+            .iter()
+            .map(|(a, _)| a.clone())
+            .collect_vec();
         Ok(Self {
             config,
             schema,
@@ -251,326 +267,160 @@ impl ClickHouseSinkWriter {
             client,
             is_append_only,
             column_correct_vec: column_correct_vec?,
+            clickhouse_fields_name,
         })
     }
 
     /// Check if clickhouse's column is 'Nullable', valid bits of `DateTime64`. And save it in
     /// `column_correct_vec`
-    fn build_column_correct_vec(ck_column: &SystemColumn) -> Result<(bool, u8)> {
+    fn build_column_correct_vec(ck_column: &SystemColumn) -> Result<ClickHouseSchemaFeature> {
         let can_null = ck_column.r#type.contains("Nullable");
         let accuracy_time = if ck_column.r#type.contains("DateTime64(") {
             ck_column
                 .r#type
                 .split("DateTime64(")
                 .last()
-                .ok_or(SinkError::ClickHouse("must have last".to_string()))?
+                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
                 .split(')')
                 .next()
-                .ok_or(SinkError::ClickHouse("must have next".to_string()))?
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
                 .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?
         } else {
             0_u8
         };
-        Ok((can_null, accuracy_time))
+        Ok(ClickHouseSchemaFeature {
+            can_null,
+            accuracy_time,
+        })
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let file_name = self
-            .schema
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect_vec();
-        let mut inter = self
-            .client
-            .insert_with_filed::<Rows>(&self.config.common.table, Some(file_name))?;
+        let mut insert = self.client.insert_with_fields_name(
+            &self.config.common.table,
+            self.clickhouse_fields_name.clone(),
+        )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 continue;
             }
-            let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
-            self.build_row_binary(row, &mut buffer)?;
-            inter.write_row_binary(buffer).await?;
+            let mut clickhouse_filed_vec = vec![];
+            for (index, data) in row.iter().enumerate() {
+                clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
+                    data,
+                    &self.column_correct_vec,
+                    index,
+                    true,
+                )?);
+            }
+            let clickhouse_column = ClickHouseColumn {
+                row: clickhouse_filed_vec,
+            };
+            insert.write(&clickhouse_column).await?;
         }
-        inter.end().await?;
+        insert.end().await?;
         Ok(())
-    }
-
-    /// Write row data in 'buffer'
-    fn build_row_binary(&mut self, row: RowRef<'_>, buffer: &mut BytesMut) -> Result<()> {
-        for (index, row) in row.iter().enumerate() {
-            self.build_data_binary(index, row, buffer)?
-        }
-        Ok(())
-    }
-
-    fn build_data_binary(
-        &mut self,
-        index: usize,
-        data: Option<ScalarRefImpl<'_>>,
-        buffer: &mut BytesMut,
-    ) -> Result<()> {
-        let &(can_null, accuracy_time) = self.column_correct_vec.get(index).unwrap();
-        match data {
-            Some(ScalarRefImpl::Int16(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_i16_le(v)
-            }
-            Some(ScalarRefImpl::Int32(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_i32_le(v)
-            }
-            Some(ScalarRefImpl::Int64(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_i64_le(v)
-            }
-            Some(ScalarRefImpl::Int256(_v)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Int256".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Serial(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_i64_le(v.into_inner())
-            }
-            Some(ScalarRefImpl::Float32(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_f32_le(v.into_inner())
-            }
-            Some(ScalarRefImpl::Float64(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_f64_le(v.into_inner())
-            }
-            Some(ScalarRefImpl::Utf8(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                Self::put_unsigned_leb128(buffer, v.len() as u64);
-                buffer.put_slice(v.as_bytes());
-            }
-            Some(ScalarRefImpl::Bool(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                buffer.put_u8(v as _)
-            }
-            Some(ScalarRefImpl::Decimal(_v)) => todo!(),
-            Some(ScalarRefImpl::Interval(_v)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Interval".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Date(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-
-                let days = v.get_nums_days_unix_epoch();
-                buffer.put_i32_le(days);
-            }
-            Some(ScalarRefImpl::Time(_v)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Time".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Timestamp(v)) => {
-                if can_null {
-                    buffer.put_u8(0);
-                }
-                let time = v.get_timestamp_nanos() / 10_i32.pow((9 - accuracy_time).into()) as i64;
-                buffer.put_i64_le(time);
-            }
-            Some(ScalarRefImpl::Timestamptz(_v)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Timestamptz".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Jsonb(_v)) => todo!(),
-            Some(ScalarRefImpl::Struct(_v)) => todo!(),
-            Some(ScalarRefImpl::List(v)) => {
-                Self::put_unsigned_leb128(buffer, v.len() as u64);
-                for data in v.iter() {
-                    self.build_data_binary(index, data, buffer)?;
-                }
-            }
-            Some(ScalarRefImpl::Bytea(_v)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Bytea".to_string(),
-                ))
-            }
-            None => {
-                if can_null {
-                    buffer.put_u8(1);
-                } else {
-                    return Err(SinkError::ClickHouse(
-                        "clickhouse column can not insert null".to_string(),
-                    ));
-                }
-            }
-        };
-        Ok(())
-    }
-
-    fn put_unsigned_leb128(buffer: &mut BytesMut, mut value: u64) {
-        while {
-            let mut byte = value as u8 & 0x7f;
-            value >>= 7;
-
-            if value != 0 {
-                byte |= 0x80;
-            }
-
-            buffer.put_u8(byte);
-
-            value != 0
-        } {}
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        // Get field names from schema.
-        let field_names = self
-            .schema
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect_vec();
-        let pk_index = *self.pk_indices.first().unwrap();
-        let pk_name_0 = field_names.get(pk_index).unwrap();
+        let get_pk_names_and_data = |row: RowRef<'_>, index: usize| {
+            let pk_names = self
+                .schema
+                .names()
+                .iter()
+                .cloned()
+                .enumerate()
+                .filter(|(index, _)| self.pk_indices.contains(index))
+                .map(|(_, b)| b)
+                .collect_vec();
+            let mut pk_data = vec![];
+            for pk_index in &self.pk_indices {
+                if let ClickHouseFieldWithNull::WithoutSome(v) =
+                    ClickHouseFieldWithNull::from_scalar_ref(
+                        row.datum_at(*pk_index),
+                        &self.column_correct_vec,
+                        index,
+                        false,
+                    )?
+                    .pop()
+                    .unwrap()
+                {
+                    pk_data.push(v)
+                } else {
+                    return Err(SinkError::ClickHouse("pk can not be null".to_string()));
+                }
+            }
+            Ok((pk_names, pk_data))
+        };
 
-        // Get the names of the columns excluding pk, and use them to update.
-        let field_names_update = field_names
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !self.pk_indices.contains(index))
-            .map(|(_, value)| value.clone())
-            .collect_vec();
         for (index, (op, row)) in chunk.rows().enumerate() {
-            let &(_, accuracy_time) = self.column_correct_vec.get(index).unwrap();
             match op {
                 Op::Insert => {
-                    let mut inter = self.client.insert_with_filed::<Rows>(
+                    let mut insert = self.client.insert_with_fields_name(
                         &self.config.common.table,
-                        Some(field_names.clone()),
+                        self.clickhouse_fields_name.clone(),
                     )?;
-                    let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
-                    self.build_row_binary(row, &mut buffer)?;
-                    inter.write_row_binary(buffer).await?;
-                    inter.end().await?;
-                }
-                Op::Delete => match Self::build_ck_fields(row.datum_at(index), accuracy_time)? {
-                    Some(f) => {
-                        self.client
-                            .delete(&self.config.common.table, pk_name_0, vec![f])
-                            .delete()
-                            .await?;
+                    let mut clickhouse_filed_vec = vec![];
+                    for (index, data) in row.iter().enumerate() {
+                        clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
+                            data,
+                            &self.column_correct_vec,
+                            index,
+                            true,
+                        )?);
                     }
-                    None => return Err(SinkError::ClickHouse("pk can not be null".to_string())),
-                },
+                    let clickhouse_column = ClickHouseColumn {
+                        row: clickhouse_filed_vec,
+                    };
+                    insert.write(&clickhouse_column).await?;
+                    insert.end().await?;
+                }
+                Op::Delete => {
+                    let (delete_pk_names, delete_pk_data) = get_pk_names_and_data(row, index)?;
+                    self.client
+                        .delete(&self.config.common.table, delete_pk_names)
+                        .delete(delete_pk_data)
+                        .await?;
+                }
                 Op::UpdateDelete => continue,
                 Op::UpdateInsert => {
-                    let pk = Self::build_ck_fields(row.datum_at(pk_index), accuracy_time)?
-                        .ok_or(SinkError::ClickHouse("pk can not be none".to_string()))?;
-                    let fields_vec = self.build_update_fields(row, accuracy_time)?;
-                    self.client
-                        .update(
-                            &self.config.common.table,
-                            pk_name_0,
-                            field_names_update.clone(),
-                        )
-                        .update_fields(fields_vec, pk)
+                    let (update_pk_names, update_pk_data) = get_pk_names_and_data(row, index)?;
+                    let mut clickhouse_update_filed_vec = vec![];
+                    for (index, data) in row.iter().enumerate() {
+                        if !self.pk_indices.contains(&index) {
+                            clickhouse_update_filed_vec.extend(
+                                ClickHouseFieldWithNull::from_scalar_ref(
+                                    data,
+                                    &self.column_correct_vec,
+                                    index,
+                                    false,
+                                )?,
+                            );
+                        }
+                    }
+                    // Get the names of the columns excluding pk, and use them to update.
+                    let fields_name_update = self
+                        .clickhouse_fields_name
+                        .iter()
+                        .filter(|n| !update_pk_names.contains(n))
+                        .map(|s| s.to_string())
+                        .collect_vec();
+
+                    let update = self.client.update(
+                        &self.config.common.table,
+                        update_pk_names,
+                        fields_name_update.clone(),
+                    );
+                    update
+                        .update_fields(clickhouse_update_filed_vec, update_pk_data)
                         .await?;
                 }
             }
         }
         Ok(())
     }
-
-    /// Get the data excluding pk.
-    fn build_update_fields(&self, row: RowRef<'_>, accuracy_time: u8) -> Result<Vec<Field>> {
-        let mut vec = vec![];
-        for (index, data) in row.iter().enumerate() {
-            if self.pk_indices.contains(&index) {
-                continue;
-            }
-            match Self::build_ck_fields(data, accuracy_time)? {
-                Some(f) => {
-                    vec.push(f);
-                }
-                None => todo!(),
-            }
-        }
-        Ok(vec)
-    }
-
-    /// Convert data to the type provided by the clickhouse interface. It is not possible to convert
-    /// risingwave's list to Vec<Field>, so to use Customize, we need to serialize it ourselves
-    fn build_ck_fields(data: DatumRef<'_>, accuracy_time: u8) -> Result<Option<Field>> {
-        let date = match data {
-            Some(ScalarRefImpl::Int16(v)) => Some(Field::I16(v)),
-            Some(ScalarRefImpl::Int32(v)) => Some(Field::I32(v)),
-            Some(ScalarRefImpl::Int64(v)) => Some(Field::I64(v)),
-            Some(ScalarRefImpl::Int256(_)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Int256".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Serial(v)) => Some(Field::I64(v.into_inner())),
-            Some(ScalarRefImpl::Float32(v)) => Some(Field::F32(v.into_inner())),
-            Some(ScalarRefImpl::Float64(v)) => Some(Field::F64(v.into_inner())),
-            Some(ScalarRefImpl::Utf8(v)) => Some(Field::String(v.to_string())),
-            Some(ScalarRefImpl::Bool(v)) => Some(Field::Bool(v)),
-            Some(ScalarRefImpl::Decimal(_)) => todo!(),
-            Some(ScalarRefImpl::Interval(_)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Interval".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Date(v)) => {
-                let days = v.get_nums_days_unix_epoch();
-                Some(Field::Date32(days))
-            }
-            Some(ScalarRefImpl::Time(_)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Time".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Timestamp(v)) => {
-                let time = v.get_timestamp_nanos() / 10_i32.pow((9 - accuracy_time).into()) as i64;
-                Some(Field::DateTime64(time))
-            }
-            Some(ScalarRefImpl::Timestamptz(_)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Timestamptz".to_string(),
-                ))
-            }
-            Some(ScalarRefImpl::Jsonb(_)) => todo!(),
-            Some(ScalarRefImpl::Struct(_)) => todo!(),
-            Some(ScalarRefImpl::List(v)) => Some(Field::Customize(
-                v.to_text().replace('{', "[").replace('}', "]"),
-            )),
-            Some(ScalarRefImpl::Bytea(_)) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Bytea".to_string(),
-                ))
-            }
-            None => None,
-        };
-        Ok(date)
-    }
 }
+
 #[async_trait::async_trait]
 impl SinkWriter for ClickHouseSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -598,11 +448,227 @@ impl SinkWriter for ClickHouseSinkWriter {
         Ok(())
     }
 }
-#[derive(ClickHouseRow)]
-struct Rows {}
 
 #[derive(ClickHouseRow, Deserialize)]
 struct SystemColumn {
     name: String,
     r#type: String,
+}
+
+/// Serialize this structure to simulate the `struct` call clickhouse interface
+#[derive(ClickHouseRow, Debug)]
+struct ClickHouseColumn {
+    row: Vec<ClickHouseFieldWithNull>,
+}
+
+/// Basic data types for use with the clickhouse interface
+#[derive(Debug)]
+enum ClickHouseField {
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Serial(Serial),
+    Float32(f32),
+    Float64(f64),
+    String(String),
+    Bool(bool),
+    List(Vec<ClickHouseFieldWithNull>),
+}
+
+/// Enum that support clickhouse nullable
+#[derive(Debug)]
+enum ClickHouseFieldWithNull {
+    WithSome(ClickHouseField),
+    WithoutSome(ClickHouseField),
+    None,
+}
+
+impl ClickHouseFieldWithNull {
+    pub fn from_scalar_ref(
+        data: Option<ScalarRefImpl<'_>>,
+        clickhouse_schema_feature_vec: &Vec<ClickHouseSchemaFeature>,
+        clickhouse_schema_feature_index: usize,
+        is_insert: bool,
+    ) -> Result<Vec<ClickHouseFieldWithNull>> {
+        let clickhouse_schema_feature = clickhouse_schema_feature_vec
+            .get(clickhouse_schema_feature_index)
+            .unwrap();
+        if data.is_none() {
+            if !clickhouse_schema_feature.can_null {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse column can not insert null".to_string(),
+                ));
+            } else {
+                return Ok(vec![ClickHouseFieldWithNull::None]);
+            }
+        }
+        let data = match data.unwrap() {
+            ScalarRefImpl::Int16(v) => ClickHouseField::Int16(v),
+            ScalarRefImpl::Int32(v) => ClickHouseField::Int32(v),
+            ScalarRefImpl::Int64(v) => ClickHouseField::Int64(v),
+            ScalarRefImpl::Int256(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Int256".to_string(),
+                ))
+            }
+            ScalarRefImpl::Serial(v) => ClickHouseField::Serial(v),
+            ScalarRefImpl::Float32(v) => ClickHouseField::Float32(v.into_inner()),
+            ScalarRefImpl::Float64(v) => ClickHouseField::Float64(v.into_inner()),
+            ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_string()),
+            ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
+            ScalarRefImpl::Decimal(_) => {
+                return Err(SinkError::ClickHouse("can not support Decimal".to_string()))
+            }
+            ScalarRefImpl::Interval(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Interval".to_string(),
+                ))
+            }
+            ScalarRefImpl::Date(v) => {
+                let days = v.get_nums_days_unix_epoch();
+                ClickHouseField::Int32(days)
+            }
+            ScalarRefImpl::Time(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Time".to_string(),
+                ))
+            }
+            ScalarRefImpl::Timestamp(v) => {
+                if is_insert {
+                    let time = v.get_timestamp_nanos()
+                        / 10_i32.pow((9 - clickhouse_schema_feature.accuracy_time).into()) as i64;
+                    ClickHouseField::Int64(time)
+                } else {
+                    let time = v.truncate_micros().to_string();
+                    ClickHouseField::String(time)
+                }
+            }
+            ScalarRefImpl::Timestamptz(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Timestamptz".to_string(),
+                ))
+            }
+            ScalarRefImpl::Jsonb(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse rust interface can not support Json".to_string(),
+                ))
+            }
+            ScalarRefImpl::Struct(v) => {
+                let mut struct_vec = vec![];
+                for (index, field) in v.iter_fields_ref().enumerate() {
+                    let a = Self::from_scalar_ref(
+                        field,
+                        clickhouse_schema_feature_vec,
+                        clickhouse_schema_feature_index + index,
+                        is_insert,
+                    )?;
+                    struct_vec.push(ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(
+                        a,
+                    )));
+                }
+                return Ok(struct_vec);
+            }
+            ScalarRefImpl::List(v) => {
+                let mut vec = vec![];
+                for i in v.iter() {
+                    vec.extend(Self::from_scalar_ref(
+                        i,
+                        clickhouse_schema_feature_vec,
+                        clickhouse_schema_feature_index,
+                        is_insert,
+                    )?)
+                }
+                return Ok(vec![ClickHouseFieldWithNull::WithoutSome(
+                    ClickHouseField::List(vec),
+                )]);
+            }
+            ScalarRefImpl::Bytea(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Bytea".to_string(),
+                ))
+            }
+        };
+        // Insert needs to be serialized with `Some`, update doesn't need to be serialized with
+        // `Some`
+        let data = if is_insert && clickhouse_schema_feature.can_null {
+            vec![ClickHouseFieldWithNull::WithSome(data)]
+        } else {
+            vec![ClickHouseFieldWithNull::WithoutSome(data)]
+        };
+        Ok(data)
+    }
+}
+
+impl Serialize for ClickHouseField {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            ClickHouseField::Int16(v) => serializer.serialize_i16(*v),
+            ClickHouseField::Int32(v) => serializer.serialize_i32(*v),
+            ClickHouseField::Int64(v) => serializer.serialize_i64(*v),
+            ClickHouseField::Serial(v) => v.serialize(serializer),
+            ClickHouseField::Float32(v) => serializer.serialize_f32(*v),
+            ClickHouseField::Float64(v) => serializer.serialize_f64(*v),
+            ClickHouseField::String(v) => serializer.serialize_str(v),
+            ClickHouseField::Bool(v) => serializer.serialize_bool(*v),
+            ClickHouseField::List(v) => {
+                let mut s = serializer.serialize_seq(Some(v.len()))?;
+                for i in v.iter() {
+                    s.serialize_element(i)?;
+                }
+                s.end()
+            }
+        }
+    }
+}
+impl Serialize for ClickHouseFieldWithNull {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            ClickHouseFieldWithNull::WithSome(v) => serializer.serialize_some(v),
+            ClickHouseFieldWithNull::WithoutSome(v) => v.serialize(serializer),
+            ClickHouseFieldWithNull::None => serializer.serialize_none(),
+        }
+    }
+}
+impl Serialize for ClickHouseColumn {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("useless", self.row.len())?;
+        for data in &self.row {
+            s.serialize_field("useless", &data)?
+        }
+        s.end()
+    }
+}
+
+/// 'Struct'(clickhouse type name is nested) will be converted into some arrays by clickhouse. So we
+/// need to make some conversions
+pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String, DataType)>> {
+    let mut vec = vec![];
+    for field in schema.fields() {
+        if matches!(field.data_type, DataType::Struct(_)) {
+            for i in &field.sub_fields {
+                if matches!(i.data_type, DataType::Struct(_)) {
+                    return Err(SinkError::ClickHouse(
+                        "Only one level of nesting is supported for sturct".to_string(),
+                    ));
+                } else {
+                    vec.push((
+                        format!("{}.{}", field.name, i.name),
+                        DataType::List(Box::new(i.data_type())),
+                    ))
+                }
+            }
+        } else {
+            vec.push((field.name.clone(), field.data_type()));
+        }
+    }
+    Ok(vec)
 }
