@@ -1,5 +1,4 @@
 [workspace]
-resolver = "2"
 members = [
   "scripts/source/prepare_ci_pubsub",
   "src/batch",
