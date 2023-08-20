@@ -570,11 +570,11 @@ where
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
+            println!("range_bounds: {:?}", range_bounds);
             if range_bounds.is_none() {
                 continue;
             }
             let range_bounds = range_bounds.unwrap();
-            println!("range_bounds: {:?}", range_bounds);
 
             let vnode_row_iter = upstream_table
                 .iter_with_pk_range_and_output_indices(
