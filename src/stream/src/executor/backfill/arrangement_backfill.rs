@@ -464,6 +464,8 @@ where
             "Arrangement Backfill has already finished and forward messages directly to the downstream"
         );
 
+        // Update our progress as finished in state table.
+
         // Wait for first barrier to come after backfill is finished.
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
@@ -477,17 +479,24 @@ where
                     // This is because we can't update state table in first epoch,
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
-                    if is_snapshot_empty {
-                        let finished_state = construct_initial_finished_state(pk_indices.len());
-                        for vnode in upstream_table.vnodes().iter_vnodes() {
-                            backfill_state.update_progress(vnode, BackfillProgressPerVnode::Completed(finished_state.clone()));
-                        }
-                    }
+                    // TODO: if we reach here, maybe some vnodes do not have their state finished.
+                    // We should update them to finished state.
+                    let finished_placeholder_state = construct_initial_finished_state(pk_indices.len());
+                    println!("need to to persist finished state");
+                    for vnode in upstream_table.vnodes().iter_vnodes() {
+                        let backfill_progress = backfill_state.get_progress(&vnode)?;
+                        let finished_state = match backfill_progress {
+                            BackfillProgressPerVnode::NotStarted => finished_placeholder_state.clone(),
+                            BackfillProgressPerVnode::InProgress(p) | BackfillProgressPerVnode::Completed(p) =>
+                              p.clone(),
+                        };
+                        backfill_state.update_progress(vnode, BackfillProgressPerVnode::Completed(finished_state.clone()));
+                     }
 
                     persist_state_per_vnode(
                         barrier.epoch,
                         &mut self.state_table,
-                        false,
+                        true,
                         &mut backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,

@@ -178,7 +178,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
-                    println!("Mview Received barrier: {:?}", b);
                     self.state_table.commit(b.epoch).await?;
 
                     // Update the vnode bitmap for the state table if asked.

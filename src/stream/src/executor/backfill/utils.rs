@@ -235,7 +235,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         };
         result.push((vnode, backfill_progress));
     }
-    assert_eq!(result.len(), state_table.vnodes().len());
+    assert_eq!(result.len(), state_table.vnodes().count_ones());
     Ok(result)
 }
 
@@ -434,15 +434,15 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
     // No progress -> No need to commit anything.
-    if backfill_state.has_no_progress() {
-        table.commit_no_data_expected(epoch);
-        return Ok(());
-    }
+    // if backfill_state.has_no_progress() {
+    //     table.commit_no_data_expected(epoch);
+    //     return Ok(());
+    // }
 
     let mut has_progress = false;
+    println!("Persisting state");
     for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
         let current_pos = match backfill_progress {
-            // TODO: Completed should always have a `pos`.
             BackfillProgressPerVnode::NotStarted => {
                 continue;
             }
@@ -456,8 +456,10 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         if let Some(old_state) = old_state {
             // No progress for vnode, means no data
             if old_state == current_pos.as_inner() {
+                println!("No progress for vnode {:?}", vnode);
                 continue;
             } else {
+                println!("Has progress persisted for vnode {:?}", vnode);
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
                     old_row: &old_state[..],
