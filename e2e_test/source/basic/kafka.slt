@@ -759,7 +759,7 @@ select count(*) from source_with_rdkafka_props
 query TFITT
 select * from s27
 ----
-(9.5,7,12) |  12.5 |         1 | An ice sculpture | {cold,ice}
+(9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
 
 statement ok
 drop materialized view source_mv1
