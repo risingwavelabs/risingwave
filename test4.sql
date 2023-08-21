@@ -4,6 +4,8 @@ create materialized view mv1 as select v1 from t;
 insert into t values (1), (2), (3), (4);
 flush;
 
+select * from mv1;
+
 -- Some weird bug... If I comment this out, it works, reproduces
 -- 4 rows in i1. If I uncomment it, it doesn't work, and i1 has 2 rows.
 explain create materialized view mv2 as select * from mv1;

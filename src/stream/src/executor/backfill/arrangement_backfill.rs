@@ -263,6 +263,7 @@ where
                         self.chunk_size,
                         &mut builders,
                         None,
+                        // Some(snapshot_read_epoch),
                     )
                     .map(Either::Right),);
 
