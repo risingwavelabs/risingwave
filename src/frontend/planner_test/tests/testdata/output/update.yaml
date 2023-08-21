@@ -85,7 +85,7 @@
 - sql: |
     create table t (v1 int primary key, v2 int);
     update t set (v2, v1) = (v1, v2);
-  binder_error: 'Bind error: update modifying the PK column is banned'
+  binder_error: 'Bind error: update modifying the PK column is unsupported'
 - sql: |
     create table t (v1 int default 1+1, v2 int);
     update t set v1 = default;
@@ -97,3 +97,17 @@
     └─BatchUpdate { table: t, exprs: [2:Int32, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: update table with generated columns
+  sql: |
+    create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
+    update t set v2 = 3;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchUpdate { table: t, exprs: [3:Int32, $3] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: update generated column
+  sql: |
+    create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
+    update t set v1 = 3;
+  binder_error: 'Bind error: update modifying the generated column is unsupported'

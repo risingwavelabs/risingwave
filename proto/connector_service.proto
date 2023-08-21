@@ -129,7 +129,9 @@ message SinkCoordinatorStreamRequest {
 message SinkCoordinatorStreamResponse {
   message StartResponse {}
 
-  message CommitResponse {}
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
 
   oneof response {
     StartResponse start = 1;

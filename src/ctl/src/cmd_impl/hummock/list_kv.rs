@@ -41,13 +41,10 @@ pub async fn list_kv(
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
                     table_id: TableId { table_id },
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::NotFill,
+                    ..Default::default()
                 },
             )
             .await?

@@ -108,7 +108,7 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "iceberg" || s == "deltalake" => {
+                    Some(s) if s == "deltalake" => {
                         // iceberg with multiple parallelism will fail easily with concurrent commit
                         // on metadata
                         // TODO: reset iceberg sink to have multiple parallelism
