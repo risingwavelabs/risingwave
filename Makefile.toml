@@ -1138,9 +1138,9 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.15.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
-] }
+], install_command = "binstall" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
