@@ -78,6 +78,11 @@ impl Binder {
                 func_types.push(ExprType::Not);
                 ExprType::Like
             }
+            BinaryOperator::ILike => ExprType::ILike,
+            BinaryOperator::NotILike => {
+                func_types.push(ExprType::Not);
+                ExprType::ILike
+            }
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::BitwiseXor => ExprType::Pow,

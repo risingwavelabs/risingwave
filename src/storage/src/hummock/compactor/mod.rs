@@ -483,7 +483,6 @@ impl Compactor {
         let pid = sysinfo::get_current_pid().unwrap();
         let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
-        const MAX_CONSUMED_LATENCY_MS: u64 = 500;
 
         assert_ge!(
             compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -668,15 +667,6 @@ impl Compactor {
                                 .compactor_metrics
                                 .compaction_event_consumed_latency
                                 .observe(consumed_latency_ms as _);
-
-                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
-                                tracing::warn!(
-                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
-                                    event,
-                                    create_at,
-                                    consumed_latency_ms
-                                );
-                            }
 
                             let meta_client = hummock_meta_client.clone();
                             executor.spawn(async move {

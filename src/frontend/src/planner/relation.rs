@@ -37,7 +37,7 @@ const ERROR_WINDOW_SIZE_ARG: &str =
 impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
-            Relation::BaseTable(t) => self.plan_base_table(*t),
+            Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
@@ -63,7 +63,7 @@ impl Planner {
         .into())
     }
 
-    pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
+    pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
             false,

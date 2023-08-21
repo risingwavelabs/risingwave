@@ -642,6 +642,12 @@ serde_with::with_prefix!(batch_prefix "batch_");
 /// It is put at [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StreamingDeveloperConfig {
+    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
+    /// and might affect the prometheus performance. If you only need actor input and output
+    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+    #[serde(default = "default::developer::stream_enable_executor_row_count")]
+    pub enable_executor_row_count: bool,
+
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::connector_message_buffer_size")]
@@ -832,7 +838,7 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            4 * 1024 * 1024 * 1024 // 4GB
+            10 * 1024 * 1024 * 1024 // 10GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -844,11 +850,11 @@ pub mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            128 * 1024 * 1024 // 128MB
+            16 * 1024 * 1024 // 16MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
-            32 * 1024 * 1024 // 32MB
+            4 * 1024 * 1024 // 4MB
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
@@ -1087,6 +1093,10 @@ pub mod default {
 
         pub fn batch_chunk_size() -> usize {
             1024
+        }
+
+        pub fn stream_enable_executor_row_count() -> bool {
+            false
         }
 
         pub fn connector_message_buffer_size() -> usize {
