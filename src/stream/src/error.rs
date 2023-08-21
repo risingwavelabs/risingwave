@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
+use std::error::request_ref;
 
 use risingwave_common::array::ArrayError;
 use risingwave_expr::ExprError;
@@ -67,7 +68,7 @@ impl std::fmt::Debug for StreamError {
 
         write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner.kind as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = request_ref::<Backtrace>(&self.inner.kind as &dyn Error) {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `StreamError`:\n{}", self.inner.backtrace)?;

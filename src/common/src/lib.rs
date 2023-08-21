@@ -26,7 +26,6 @@
 #![feature(map_try_insert)]
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(portable_simd)]

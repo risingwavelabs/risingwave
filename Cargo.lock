@@ -149,9 +149,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.72"
+version = "1.0.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b13c32d80ecc7ab747b80c3784bce54ee8a7a0cc4fbda9bf4cda2cf6fe90854"
+checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 dependencies = [
  "backtrace",
 ]
@@ -2710,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+source = "git+https://github.com/xxchan/foyer?rev=fc5e4cb#fc5e4cb3dadddc8fbab531c3e5aec7a0b4e6f670"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2721,9 +2721,9 @@ dependencies = [
  "foyer-storage",
  "foyer-workspace-hack",
  "futures",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "libc",
- "memoffset 0.8.0",
+ "memoffset 0.9.0",
  "nix 0.26.2",
  "parking_lot 0.12.1",
  "paste",
@@ -2738,7 +2738,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+source = "git+https://github.com/xxchan/foyer?rev=fc5e4cb#fc5e4cb3dadddc8fbab531c3e5aec7a0b4e6f670"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2752,14 +2752,14 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+source = "git+https://github.com/xxchan/foyer?rev=fc5e4cb#fc5e4cb3dadddc8fbab531c3e5aec7a0b4e6f670"
 dependencies = [
  "bytes",
  "cmsketch",
  "foyer-common",
  "foyer-workspace-hack",
  "itertools 0.10.5",
- "memoffset 0.8.0",
+ "memoffset 0.9.0",
  "parking_lot 0.12.1",
  "paste",
  "thiserror",
@@ -2770,7 +2770,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+source = "git+https://github.com/xxchan/foyer?rev=fc5e4cb#fc5e4cb3dadddc8fbab531c3e5aec7a0b4e6f670"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2783,9 +2783,9 @@ dependencies = [
  "foyer-intrusive",
  "foyer-workspace-hack",
  "futures",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "libc",
- "memoffset 0.8.0",
+ "memoffset 0.9.0",
  "nix 0.26.2",
  "parking_lot 0.12.1",
  "paste",
@@ -2801,7 +2801,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=6bd19cb#6bd19cb022ab63ae6e20a5f488693dc329b10bf0"
+source = "git+https://github.com/xxchan/foyer?rev=fc5e4cb#fc5e4cb3dadddc8fbab531c3e5aec7a0b4e6f670"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",
@@ -4189,15 +4189,6 @@ name = "memoffset"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
-name = "memoffset"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d61c719bcfbcf5d62b3a09efa6088de8c54bc0bfcd3ea7ae39fcc186108b8de1"
 dependencies = [
  "autocfg",
 ]
@@ -8372,18 +8363,18 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "thiserror"
-version = "1.0.44"
+version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "611040a08a0439f8248d1990b111c95baa9c704c805fa1f62104b39655fd7f90"
+checksum = "97a802ec30afc17eee47b2855fc72e0c4cd62be9b4efe6591edde0ec5bd68d8f"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.44"
+version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "090198534930841fab3a5d1bb637cde49e339654e606195f8d9c76eeb081dc96"
+checksum = "6bb623b56e39ab7dcd4b1b98bb6c8f8d907ed255b18de254088016b27a8ee19b"
 dependencies = [
  "proc-macro2",
  "quote",
