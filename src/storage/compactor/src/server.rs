@@ -41,9 +41,7 @@ use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
-use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
-};
+use risingwave_storage::monitor::monitor_cache;
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -86,16 +84,9 @@ pub async fn compactor_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
-    let registry = prometheus::Registry::new();
-    monitor_process(&registry).unwrap();
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
+    monitor_process().unwrap();
 
-    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
-        meta_client.clone(),
-        hummock_metrics.clone(),
-    ));
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(meta_client.clone()));
 
     let state_store_url = system_params_reader.state_store();
 
@@ -137,7 +128,6 @@ pub async fn compactor_serve(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
-        object_metrics,
         "Hummock",
         Some(Arc::new(config.storage.clone())),
     )
@@ -180,7 +170,7 @@ pub async fn compactor_serve(
         storage_memory_config,
     ));
 
-    monitor_cache(memory_collector, &registry).unwrap();
+    monitor_cache(memory_collector).unwrap();
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
@@ -198,7 +188,6 @@ pub async fn compactor_serve(
         storage_opts,
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
-        compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
@@ -266,10 +255,7 @@ pub async fn compactor_serve(
 
     // Boot metrics service.
     if config.server.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
-            registry.clone(),
-        );
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     (join_handle, observer_join_handle, shutdown_send)

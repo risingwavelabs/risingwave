@@ -98,7 +98,6 @@ async fn main_okk() {
             )
             .with_target("file_cache_bench", tracing::Level::TRACE)
             .with_default(tracing::Level::WARN),
-        prometheus::Registry::new(),
     );
 
     let (bench_stop_tx, bench_stop_rx) = oneshot::channel();

@@ -17,12 +17,10 @@ use std::sync::Arc;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::worker_util::WorkerNodeId;
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{BatchExecutorMetrics, BatchTaskMetrics};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -44,20 +42,11 @@ pub struct BatchEnvironment {
     /// State store for table scanning.
     state_store: StateStoreImpl,
 
-    /// Task level metrics.
-    task_metrics: Arc<BatchTaskMetrics>,
-
-    /// Executor level metrics.
-    executor_metrics: Arc<BatchExecutorMetrics>,
-
     /// Compute client pool for grpc exchange.
     client_pool: ComputeClientPoolRef,
 
     /// Manages dml information.
     dml_manager: DmlManagerRef,
-
-    /// Metrics for source.
-    source_metrics: Arc<SourceMetrics>,
 }
 
 impl BatchEnvironment {
@@ -68,11 +57,8 @@ impl BatchEnvironment {
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
-        task_metrics: Arc<BatchTaskMetrics>,
-        executor_metrics: Arc<BatchExecutorMetrics>,
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
-        source_metrics: Arc<SourceMetrics>,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -80,11 +66,8 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
-            task_metrics,
-            executor_metrics,
             client_pool,
             dml_manager,
-            source_metrics,
         }
     }
 
@@ -93,26 +76,15 @@ impl BatchEnvironment {
     pub fn for_test() -> Self {
         use risingwave_rpc_client::ComputeClientPool;
         use risingwave_source::dml_manager::DmlManager;
-        use risingwave_storage::monitor::MonitoredStorageMetrics;
-
-        use crate::monitor::BatchManagerMetrics;
 
         BatchEnvironment {
-            task_manager: Arc::new(BatchManager::new(
-                BatchConfig::default(),
-                BatchManagerMetrics::for_test(),
-            )),
+            task_manager: Arc::new(BatchManager::new(BatchConfig::default())),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
-            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
-                MonitoredStorageMetrics::unused(),
-            )),
-            task_metrics: Arc::new(BatchTaskMetrics::for_test()),
+            state_store: StateStoreImpl::shared_in_memory_store(),
             client_pool: Arc::new(ComputeClientPool::default()),
             dml_manager: Arc::new(DmlManager::for_test()),
-            source_metrics: Arc::new(SourceMetrics::default()),
-            executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
         }
     }
 
@@ -136,23 +108,11 @@ impl BatchEnvironment {
         self.state_store.clone()
     }
 
-    pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
-        self.task_metrics.clone()
-    }
-
-    pub fn executor_metrics(&self) -> Arc<BatchExecutorMetrics> {
-        self.executor_metrics.clone()
-    }
-
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
     }
 
     pub fn dml_manager_ref(&self) -> DmlManagerRef {
         self.dml_manager.clone()
-    }
-
-    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
-        self.source_metrics.clone()
     }
 }

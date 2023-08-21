@@ -16,10 +16,12 @@ pub mod my_stats;
 pub mod process_linux;
 pub mod rwlock;
 
+use std::sync::LazyLock;
+
 use prometheus::core::{
     AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
 };
-use prometheus::{Histogram, HistogramVec};
+use prometheus::{Histogram, HistogramVec, Registry};
 
 use crate::monitor::my_stats::MyHistogram;
 
@@ -81,3 +83,5 @@ impl Print for GenericCounterVec<AtomicU64> {
         println!("{desc} {:?}", self);
     }
 }
+
+pub static GLOBAL_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);

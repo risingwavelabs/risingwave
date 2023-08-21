@@ -28,7 +28,6 @@ use risingwave_backup::storage::{
 };
 use risingwave_backup::MetaSnapshotId;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::{StorageError, StorageResult};
@@ -43,14 +42,7 @@ type VersionHolder = (
 );
 
 async fn create_snapshot_store(config: &StoreConfig) -> StorageResult<BoxedMetaSnapshotStorage> {
-    let backup_object_store = Arc::new(
-        parse_remote_object_store(
-            &config.0,
-            Arc::new(ObjectStoreMetrics::unused()),
-            "Meta Backup",
-        )
-        .await,
-    );
+    let backup_object_store = Arc::new(parse_remote_object_store(&config.0, "Meta Backup").await);
     let store =
         Box::new(ObjectStoreMetaSnapshotStorage::new(&config.1, backup_object_store).await?);
     Ok(store)

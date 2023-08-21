@@ -41,7 +41,6 @@ use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, FilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
-use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
 
@@ -94,13 +93,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         &storage_memory_config,
     )));
 
-    let state_store_stats = Arc::new(HummockStateStoreMetrics::unused());
-    let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
-
-    let compactor_metrics = Arc::new(CompactorMetrics::unused());
-
-    let object_store =
-        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
+    let object_store = parse_remote_object_store(&args.object_storage, "Hummock").await;
 
     let sstable_store = {
         Arc::new(SstableStore::new(
@@ -147,8 +140,6 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         hummock_meta_client.clone(),
         notification_client,
         key_filter_manager,
-        state_store_stats,
-        compactor_metrics,
     )
     .await
     .expect("fail to create a HummockStorage object");

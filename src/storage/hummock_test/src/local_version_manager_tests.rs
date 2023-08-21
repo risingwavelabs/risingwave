@@ -72,7 +72,6 @@ pub async fn prepare_local_version_manager(
         opt,
         sstable_store,
         hummock_meta_client,
-        Arc::new(CompactorMetrics::unused()),
         sstable_object_id_manager,
         filter_key_extractor_manager,
     ));

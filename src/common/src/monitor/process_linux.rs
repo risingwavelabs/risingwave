@@ -15,16 +15,17 @@
 use std::io::{Error, ErrorKind, Result};
 
 use prometheus::core::{Collector, Desc};
-use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
+use prometheus::{proto, IntCounter, IntGauge, Opts};
 
 #[cfg(target_os = "linux")]
 use super::{CLOCK_TICK, PAGESIZE};
+use crate::monitor::GLOBAL_METRICS_REGISTRY;
 use crate::util::resource_util;
 
 /// Monitors current process.
-pub fn monitor_process(registry: &Registry) -> Result<()> {
+pub fn monitor_process() -> Result<()> {
     let pc = ProcessCollector::new();
-    registry
+    GLOBAL_METRICS_REGISTRY
         .register(Box::new(pc))
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
 }

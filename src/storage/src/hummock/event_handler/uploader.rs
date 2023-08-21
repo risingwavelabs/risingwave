@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::mem::swap;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -40,7 +40,7 @@ use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult};
-use crate::monitor::HummockStateStoreMetrics;
+use crate::monitor::{HummockStateStoreMetrics, GLOBAL_HUMMOCK_STATE_STORE_METRICS};
 use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
@@ -528,7 +528,7 @@ struct UploaderContext {
 
     compaction_executor: Arc<CompactionExecutor>,
 
-    stats: Arc<HummockStateStoreMetrics>,
+    stats: &'static HummockStateStoreMetrics,
 }
 
 impl UploaderContext {
@@ -538,7 +538,6 @@ impl UploaderContext {
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
         compaction_executor: Arc<CompactionExecutor>,
-        stats: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         UploaderContext {
             pinned_version,
@@ -546,7 +545,7 @@ impl UploaderContext {
             buffer_tracker,
             imm_merge_threshold: config.imm_merge_threshold,
             compaction_executor,
-            stats,
+            stats: GLOBAL_HUMMOCK_STATE_STORE_METRICS.deref(),
         }
     }
 }
@@ -593,7 +592,6 @@ pub struct HummockUploader {
 
 impl HummockUploader {
     pub(crate) fn new(
-        state_store_metrics: Arc<HummockStateStoreMetrics>,
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
@@ -615,7 +613,6 @@ impl HummockUploader {
                 buffer_tracker,
                 config,
                 compaction_executor,
-                state_store_metrics,
             ),
         }
     }
@@ -1048,7 +1045,6 @@ mod tests {
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
-    use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
@@ -1138,7 +1134,6 @@ mod tests {
             BufferTracker::for_test(),
             &config,
             compaction_executor,
-            Arc::new(HummockStateStoreMetrics::unused()),
         )
     }
 
@@ -1150,7 +1145,6 @@ mod tests {
         let config = StorageOpts::default();
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         HummockUploader::new(
-            Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
@@ -1624,7 +1618,6 @@ mod tests {
         let config = StorageOpts::default();
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         let uploader = HummockUploader::new(
-            Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new({
                 move |_: UploadTaskPayload, task_info: UploadTaskInfo| {

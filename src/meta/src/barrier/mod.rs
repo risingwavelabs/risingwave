@@ -56,7 +56,7 @@ use crate::manager::{
     WorkerId,
 };
 use crate::model::{ActorId, BarrierManagerState};
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::storage::meta_store::MetaStore;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -147,8 +147,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     sink_manager: SinkCoordinatorManager,
 
-    metrics: Arc<MetaMetrics>,
-
     pub(crate) env: MetaSrvEnv<S>,
 
     tracker: Mutex<CreateMviewProgressTracker<S>>,
@@ -172,8 +170,6 @@ struct CheckpointControl<S: MetaStore> {
     /// The barrier does not send or collect these actors, even if they are `Running`.
     removing_actors: HashSet<ActorId>,
 
-    metrics: Arc<MetaMetrics>,
-
     /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
     finished_commands: Vec<TrackingCommand<S>>,
 }
@@ -182,14 +178,13 @@ impl<S> CheckpointControl<S>
 where
     S: MetaStore,
 {
-    fn new(metrics: Arc<MetaMetrics>) -> Self {
+    fn new() -> Self {
         Self {
             command_ctx_queue: Default::default(),
             creating_tables: Default::default(),
             dropping_tables: Default::default(),
             adding_actors: Default::default(),
             removing_actors: Default::default(),
-            metrics,
             finished_commands: Default::default(),
         }
     }
@@ -310,20 +305,20 @@ where
 
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
-        self.metrics.in_flight_barrier_nums.set(
+        GLOBAL_META_METRICS.in_flight_barrier_nums.set(
             self.command_ctx_queue
                 .iter()
                 .filter(|x| matches!(x.state, InFlight))
                 .count() as i64,
         );
-        self.metrics
+        GLOBAL_META_METRICS
             .all_barrier_nums
             .set(self.command_ctx_queue.len() as i64);
     }
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
     fn enqueue_command(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: Vec<Notifier>) {
-        let timer = self.metrics.barrier_latency.start_timer();
+        let timer = GLOBAL_META_METRICS.barrier_latency.start_timer();
 
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -343,7 +338,9 @@ where
         result: Vec<BarrierCompleteResponse>,
     ) -> Vec<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
-        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
+        let wait_commit_timer = GLOBAL_META_METRICS
+            .barrier_wait_commit_latency
+            .start_timer();
         if let Some(node) = self
             .command_ctx_queue
             .iter_mut()
@@ -497,7 +494,6 @@ where
         hummock_manager: HummockManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         sink_manager: SinkCoordinatorManager,
-        metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -514,7 +510,6 @@ where
             hummock_manager,
             source_manager,
             sink_manager,
-            metrics,
             env,
             tracker: Mutex::new(tracker),
         }
@@ -589,7 +584,7 @@ where
         let mut min_interval = tokio::time::interval(interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
+        let mut checkpoint_control = CheckpointControl::new();
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env

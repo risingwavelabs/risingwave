@@ -67,7 +67,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cloud_service::CloudServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -298,7 +298,7 @@ pub async fn start_service_as_election_follower(
 
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
-        .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(MetricsMiddlewareLayer)
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
@@ -343,9 +343,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts, init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-    let meta_metrics = Arc::new(MetaMetrics::new());
-    let registry = meta_metrics.registry();
-    monitor_process(registry).unwrap();
+    monitor_process().unwrap();
 
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
@@ -390,7 +388,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
-        meta_metrics.clone(),
         compactor_manager.clone(),
         catalog_manager.clone(),
         compactor_streams_change_tx,
@@ -425,7 +422,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
-        meta_metrics.clone(),
         system_params_reader.checkpoint_frequency() as usize,
     );
 
@@ -435,7 +431,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
-            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -454,7 +449,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
-        meta_metrics.clone(),
     ));
 
     {
@@ -491,7 +485,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        meta_metrics.clone(),
         system_params_reader.backup_storage_url(),
         system_params_reader.backup_storage_directory(),
     )
@@ -567,10 +560,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager.clone(), aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
-        MetricsManager::boot_metrics_service(
-            prometheus_addr.to_string(),
-            meta_metrics.registry().clone(),
-        )
+        MetricsManager::boot_metrics_service(prometheus_addr.to_string())
     }
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
@@ -585,7 +575,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
-            meta_metrics.clone(),
         )
         .await,
     );
@@ -595,7 +584,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             catalog_manager,
             fragment_manager.clone(),
             hummock_manager.clone(),
-            meta_metrics.clone(),
         )
         .await,
     );
@@ -698,7 +686,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
-        .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(MetricsMiddlewareLayer)
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))

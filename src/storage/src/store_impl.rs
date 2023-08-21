@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_object_store::object::parse_remote_object_store;
 
@@ -33,10 +35,7 @@ use crate::hummock::{
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
-use crate::monitor::{
-    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
-};
+use crate::monitor::MonitoredStateStore as Monitored;
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
@@ -106,40 +105,26 @@ fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore 
 }
 
 impl StateStoreImpl {
-    fn in_memory(
-        state_store: MemoryStateStore,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
+    fn in_memory(state_store: MemoryStateStore) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored())
     }
 
-    pub fn hummock(
-        state_store: HummockStorage,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
+    pub fn hummock(state_store: HummockStorage) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
-        )
+        Self::HummockStateStore(may_dynamic_dispatch(may_verify(state_store)).monitored())
     }
 
-    pub fn sled(
-        state_store: SledStateStore,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
-        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+    pub fn sled(state_store: SledStateStore) -> Self {
+        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored())
     }
 
-    pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
-        Self::in_memory(MemoryStateStore::shared(), storage_metrics)
+    pub fn shared_in_memory_store() -> Self {
+        Self::in_memory(MemoryStateStore::shared())
     }
 
     pub fn for_test() -> Self {
-        Self::in_memory(
-            MemoryStateStore::new(),
-            Arc::new(MonitoredStorageMetrics::unused()),
-        )
+        Self::in_memory(MemoryStateStore::new())
     }
 
     pub fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
@@ -535,10 +520,6 @@ impl StateStoreImpl {
         s: &str,
         opts: Arc<StorageOpts>,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
-        state_store_metrics: Arc<HummockStateStoreMetrics>,
-        object_store_metrics: Arc<ObjectStoreMetrics>,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-        compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
@@ -561,7 +542,7 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(state_store_metrics.registry().clone()),
+                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.deref().clone()),
                 prometheus_namespace: Some("data".to_string()),
                 enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
             };
@@ -595,7 +576,7 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(state_store_metrics.registry().clone()),
+                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.deref().clone()),
                 prometheus_namespace: Some("meta".to_string()),
                 enable_filter: false,
             };
@@ -610,12 +591,9 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store = parse_remote_object_store(
-                    hummock.strip_prefix("hummock+").unwrap(),
-                    object_store_metrics.clone(),
-                    "Hummock",
-                )
-                .await;
+                let mut object_store =
+                    parse_remote_object_store(hummock.strip_prefix("hummock+").unwrap(), "Hummock")
+                        .await;
                 object_store.set_opts(
                     opts.object_store_streaming_read_timeout_ms,
                     opts.object_store_streaming_upload_timeout_ms,
@@ -643,23 +621,21 @@ impl StateStoreImpl {
                     hummock_meta_client.clone(),
                     notification_client,
                     key_filter_manager,
-                    state_store_metrics.clone(),
-                    compactor_metrics.clone(),
                 )
                 .await?;
 
-                StateStoreImpl::hummock(inner, storage_metrics)
+                StateStoreImpl::hummock(inner)
             }
 
             "in_memory" | "in-memory" => {
                 tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
-                StateStoreImpl::shared_in_memory_store(storage_metrics.clone())
+                StateStoreImpl::shared_in_memory_store()
             }
 
             sled if sled.starts_with("sled://") => {
                 tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
                 let path = sled.strip_prefix("sled://").unwrap();
-                StateStoreImpl::sled(SledStateStore::new(path), storage_metrics.clone())
+                StateStoreImpl::sled(SledStateStore::new(path))
             }
 
             other => unimplemented!("{} state store is not supported", other),

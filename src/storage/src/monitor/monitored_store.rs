@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::sync::Arc;
+use std::ops::{Bound, Deref};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -27,10 +26,10 @@ use tracing_futures::Instrument;
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
-use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::monitor::GLOBAL_STORAGE_METRICS;
 use crate::store::*;
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -40,36 +39,28 @@ pub struct MonitoredStateStore<S> {
 
     #[cfg(all(not(madsim), feature = "hm-trace"))]
     inner: Box<TracedStateStore<S>>,
-
-    storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
-    pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
+    pub fn new(inner: S) -> Self {
         #[cfg(all(not(madsim), feature = "hm-trace"))]
         let inner = TracedStateStore::new_global(inner);
         Self {
             inner: Box::new(inner),
-            storage_metrics,
         }
     }
 
     #[cfg(all(not(madsim), feature = "hm-trace"))]
-    pub fn new_from_local(
-        inner: TracedStateStore<S>,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
+    pub fn new_from_local(inner: TracedStateStore<S>) -> Self {
         Self {
             inner: Box::new(inner),
-            storage_metrics,
         }
     }
 
     #[cfg(not(all(not(madsim), feature = "hm-trace")))]
-    pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
+    pub fn new_from_local(inner: S) -> Self {
         Self {
             inner: Box::new(inner),
-            storage_metrics,
         }
     }
 }
@@ -92,6 +83,7 @@ impl<S> MonitoredStateStore<S> {
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
     ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
+        let metrics = GLOBAL_STORAGE_METRICS.deref();
         // start time takes iterator build time into account
         let start_time = Instant::now();
         let table_id_label = table_id.to_string();
@@ -102,12 +94,12 @@ impl<S> MonitoredStateStore<S> {
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
-        self.storage_metrics
+        metrics
             .iter_init_duration
             .with_label_values(&[table_id_label.as_str()])
             .observe(start_time.elapsed().as_secs_f64());
         // statistics of iter in process count to estimate the read ops in the same time
-        self.storage_metrics
+        metrics
             .iter_in_process_counts
             .with_label_values(&[table_id_label.as_str()])
             .inc();
@@ -119,7 +111,6 @@ impl<S> MonitoredStateStore<S> {
                 total_items: 0,
                 total_size: 0,
                 scan_time: Instant::now(),
-                storage_metrics: self.storage_metrics.clone(),
                 table_id,
             },
         };
@@ -141,9 +132,9 @@ impl<S> MonitoredStateStore<S> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<Bytes>> {
+        let metrics = GLOBAL_STORAGE_METRICS.deref();
         let table_id_label = table_id.to_string();
-        let timer = self
-            .storage_metrics
+        let timer = metrics
             .get_duration
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
@@ -156,12 +147,12 @@ impl<S> MonitoredStateStore<S> {
 
         timer.observe_duration();
 
-        self.storage_metrics
+        metrics
             .get_key_size
             .with_label_values(&[table_id_label.as_str()])
             .observe(key_len as _);
         if let Some(value) = value.as_ref() {
-            self.storage_metrics
+            metrics
                 .get_value_size
                 .with_label_values(&[table_id_label.as_str()])
                 .observe(value.len() as _);
@@ -207,9 +198,9 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
+        let metrics = GLOBAL_STORAGE_METRICS.deref();
         let table_id_label = read_options.table_id.to_string();
-        let timer = self
-            .storage_metrics
+        let timer = metrics
             .may_exist_duration
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
@@ -299,7 +290,8 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
         // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
         // move this metrics to inside uploader
-        let timer = self.storage_metrics.sync_duration.start_timer();
+        let metrics = GLOBAL_STORAGE_METRICS.deref();
+        let timer = metrics.sync_duration.start_timer();
         let sync_result = self
             .inner
             .sync(epoch)
@@ -308,9 +300,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
         timer.observe_duration();
         if sync_result.sync_size != 0 {
-            self.storage_metrics
-                .sync_size
-                .observe(sync_result.sync_size as _);
+            metrics.sync_size.observe(sync_result.sync_size as _);
         }
         Ok(sync_result)
     }
@@ -319,10 +309,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
-    fn monitored(
-        self,
-        _storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> MonitoredStateStore<Self> {
+    fn monitored(self) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }
 
@@ -339,7 +326,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
                 .new_local(option)
                 .instrument_await("store_new_local")
                 .await,
-            self.storage_metrics.clone(),
         )
     }
 
@@ -368,7 +354,6 @@ struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
     scan_time: Instant,
-    storage_metrics: Arc<MonitoredStorageMetrics>,
 
     table_id: TableId,
 }
@@ -399,17 +384,18 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
 
 impl Drop for MonitoredStateStoreIterStats {
     fn drop(&mut self) {
+        let metrics = GLOBAL_STORAGE_METRICS.deref();
         let table_id_label = self.table_id.to_string();
 
-        self.storage_metrics
+        metrics
             .iter_scan_duration
             .with_label_values(&[table_id_label.as_str()])
             .observe(self.scan_time.elapsed().as_secs_f64());
-        self.storage_metrics
+        metrics
             .iter_item
             .with_label_values(&[table_id_label.as_str()])
             .observe(self.total_items as f64);
-        self.storage_metrics
+        metrics
             .iter_size
             .with_label_values(&[table_id_label.as_str()])
             .observe(self.total_size as f64);

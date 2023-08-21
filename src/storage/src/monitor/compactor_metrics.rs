@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_counter_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
+    register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompactorMetrics {
     pub compaction_upload_sst_counts: GenericCounter<AtomicU64>,
     pub compact_write_bytes: GenericCounterVec<AtomicU64>,
@@ -50,8 +54,12 @@ pub struct CompactorMetrics {
     pub compaction_event_loop_iteration_latency: Histogram,
 }
 
+pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
+    LazyLock::new(CompactorMetrics::new);
+
 impl CompactorMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         let opts = histogram_opts!(
             "compactor_shared_buffer_to_sstable_size",
             "Histogram of batch size compacted from shared buffer to remote storage",
@@ -276,10 +284,5 @@ impl CompactorMetrics {
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
         }
-    }
-
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
-    pub fn unused() -> Self {
-        Self::new(Registry::new())
     }
 }

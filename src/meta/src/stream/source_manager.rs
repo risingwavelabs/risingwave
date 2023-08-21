@@ -39,7 +39,7 @@ use tokio::{select, time};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -51,7 +51,6 @@ pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
     core: Mutex<SourceManagerCore<S>>,
-    metrics: Arc<MetaMetrics>,
 }
 
 const MAX_FAIL_CNT: u32 = 10;
@@ -69,7 +68,6 @@ struct ConnectorSourceWorker {
     current_splits: SharedSplitMapRef,
     enumerator: SplitEnumeratorImpl,
     period: Duration,
-    metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
     connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
@@ -79,13 +77,12 @@ impl ConnectorSourceWorker {
     async fn refresh(&mut self) -> MetaResult<()> {
         let enumerator = SplitEnumeratorImpl::create(
             self.connector_properties.clone(),
-            Arc::new(SourceEnumeratorContext {
-                metrics: self.metrics.source_enumerator_metrics.clone(),
-                info: SourceEnumeratorInfo {
+            Arc::new(SourceEnumeratorContext::new(
+                SourceEnumeratorInfo {
                     source_id: self.source_id,
                 },
-                connector_client: self.connector_client.clone(),
-            }),
+                self.connector_client.clone(),
+            )),
         )
         .await?;
         self.enumerator = enumerator;
@@ -99,7 +96,6 @@ impl ConnectorSourceWorker {
         source: &Source,
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
-        metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
         if properties.is_cdc_connector() {
@@ -108,13 +104,12 @@ impl ConnectorSourceWorker {
         }
         let enumerator = SplitEnumeratorImpl::create(
             properties.clone(),
-            Arc::new(SourceEnumeratorContext {
-                metrics: metrics.source_enumerator_metrics.clone(),
-                info: SourceEnumeratorInfo {
+            Arc::new(SourceEnumeratorContext::new(
+                SourceEnumeratorInfo {
                     source_id: source.id,
                 },
-                connector_client: connector_client.clone(),
-            }),
+                connector_client.clone(),
+            )),
         )
         .await?;
 
@@ -124,7 +119,6 @@ impl ConnectorSourceWorker {
             current_splits: splits,
             enumerator,
             period,
-            metrics,
             connector_properties: properties,
             connector_client: connector_client.clone(),
             fail_cnt: 0,
@@ -161,7 +155,7 @@ impl ConnectorSourceWorker {
 
     async fn tick(&mut self) -> MetaResult<()> {
         let source_is_up = |res: i64| {
-            self.metrics
+            GLOBAL_META_METRICS
                 .source_is_up
                 .with_label_values(&[self.source_id.to_string().as_str(), &self.source_name])
                 .set(res);
@@ -521,7 +515,6 @@ where
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -531,7 +524,6 @@ where
                     env.connector_client(),
                     source,
                     &mut managed_sources,
-                    metrics.clone(),
                 )
                 .await
             }
@@ -561,7 +553,6 @@ where
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
-            metrics,
         })
     }
 
@@ -702,7 +693,6 @@ where
                 source,
                 &mut core.managed_sources,
                 true,
-                self.metrics.clone(),
             )
             .await?;
         }
@@ -713,7 +703,6 @@ where
         connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
-        metrics: Arc<MetaMetrics>,
     ) {
         tracing::info!("spawning new watcher for source {}", source.id);
 
@@ -735,7 +724,6 @@ where
                     &source,
                     Duration::from_secs(10),
                     splits.clone(),
-                    metrics.clone(),
                 )
                 .await
                 {
@@ -766,7 +754,6 @@ where
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         force_tick: bool,
-        metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
         let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let mut worker = ConnectorSourceWorker::create(
@@ -774,7 +761,6 @@ where
             source,
             Duration::from_secs(10),
             current_splits_ref.clone(),
-            metrics,
         )
         .await?;
 

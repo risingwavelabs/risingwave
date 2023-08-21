@@ -72,7 +72,6 @@ use value::*;
 use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
-use super::monitor::HummockStateStoreMetrics;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
@@ -83,7 +82,7 @@ use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::HummockVersionReader;
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
-use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 use crate::store::{NewLocalOptions, ReadOptions};
 
 struct HummockStorageShutdownGuard {
@@ -137,8 +136,6 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-        state_store_metrics: Arc<HummockStateStoreMetrics>,
-        compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -181,7 +178,6 @@ impl HummockStorage {
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
-            compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
         ));
@@ -193,7 +189,6 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
-            state_store_metrics.clone(),
             options
                 .data_file_cache_refill_levels
                 .iter()
@@ -208,10 +203,7 @@ impl HummockStorage {
             seal_epoch,
             hummock_event_sender: event_tx.clone(),
             pinned_version: hummock_event_handler.pinned_version(),
-            hummock_version_reader: HummockVersionReader::new(
-                sstable_store,
-                state_store_metrics.clone(),
-            ),
+            hummock_version_reader: HummockVersionReader::new(sstable_store),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
@@ -328,8 +320,6 @@ impl HummockStorage {
             hummock_meta_client,
             notification_client,
             Arc::new(FilterKeyExtractorManager::default()),
-            Arc::new(HummockStateStoreMetrics::unused()),
-            Arc::new(CompactorMetrics::unused()),
         )
         .await
     }

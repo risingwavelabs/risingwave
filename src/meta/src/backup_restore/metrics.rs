@@ -12,10 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+use std::sync::LazyLock;
+
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, Histogram, IntCounter, Registry,
+    register_int_counter_with_registry, Histogram, IntCounter,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+
+pub static GLOBAL_BACKUP_MANAGER_METRICS: LazyLock<BackupManagerMetrics> =
+    LazyLock::new(BackupManagerMetrics::new);
 
 pub struct BackupManagerMetrics {
     pub job_count: IntCounter,
@@ -24,7 +31,8 @@ pub struct BackupManagerMetrics {
 }
 
 impl BackupManagerMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         let job_count = register_int_counter_with_registry!(
             "backup_job_count",
             "total backup job count since meta node is started",

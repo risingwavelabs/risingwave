@@ -141,7 +141,7 @@ where
         versioning.mark_objects_for_deletion();
 
         let min_pinned_version_id = versioning.min_pinned_version_id();
-        trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
+        trigger_gc_stat(self.metrics, &versioning.checkpoint, min_pinned_version_id);
         drop(versioning_guard);
         timer.observe_duration();
         self.metrics

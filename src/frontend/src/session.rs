@@ -46,7 +46,6 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -113,8 +112,6 @@ pub struct FrontendEnv {
 
     pub frontend_metrics: Arc<FrontendMetrics>,
 
-    source_metrics: Arc<SourceMetrics>,
-
     batch_config: BatchConfig,
     meta_config: MetaConfig,
 
@@ -169,7 +166,6 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
-            source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime: Self::create_compute_runtime(),
         }
@@ -231,7 +227,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let registry = prometheus::Registry::new();
-        monitor_process(&registry).unwrap();
+        monitor_process().unwrap();
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
@@ -278,10 +274,9 @@ impl FrontendEnv {
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
-        let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
         if config.server.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
         let health_srv = HealthServiceImpl::new();
@@ -339,7 +334,6 @@ impl FrontendEnv {
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
                 meta_config,
-                source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime: Self::create_compute_runtime(),
             },
@@ -412,10 +406,6 @@ impl FrontendEnv {
 
     pub fn meta_config(&self) -> &MetaConfig {
         &self.meta_config
-    }
-
-    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
-        self.source_metrics.clone()
     }
 
     pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {

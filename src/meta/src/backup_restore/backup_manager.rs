@@ -22,17 +22,15 @@ use risingwave_backup::storage::{BoxedMetaSnapshotStorage, ObjectStoreMetaSnapsh
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
-use crate::backup_restore::metrics::BackupManagerMetrics;
+use crate::backup_restore::metrics::GLOBAL_BACKUP_MANAGER_METRICS;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
-use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -70,21 +68,17 @@ pub struct BackupManager<S: MetaStore> {
     backup_store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
-    metrics: BackupManagerMetrics,
-    meta_metrics: Arc<MetaMetrics>,
 }
 
 impl<S: MetaStore> BackupManager<S> {
     pub async fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        metrics: Arc<MetaMetrics>,
         store_url: &str,
         store_dir: &str,
     ) -> MetaResult<Arc<Self>> {
         let store_config = (store_url.to_string(), store_dir.to_string());
-        let store =
-            create_snapshot_store(&store_config, metrics.object_store_metric.clone()).await?;
+        let store = create_snapshot_store(&store_config).await?;
         tracing::info!(
             "backup manager initialized: url={}, dir={}",
             store_config.0,
@@ -93,7 +87,6 @@ impl<S: MetaStore> BackupManager<S> {
         let instance = Arc::new(Self::with_store(
             env.clone(),
             hummock_manager,
-            metrics,
             (store, store_config),
         ));
         let (local_notification_tx, mut local_notification_rx) =
@@ -141,7 +134,6 @@ impl<S: MetaStore> BackupManager<S> {
     fn with_store(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        meta_metrics: Arc<MetaMetrics>,
         backup_store: (BoxedMetaSnapshotStorage, StoreConfig),
     ) -> Self {
         Self {
@@ -149,14 +141,11 @@ impl<S: MetaStore> BackupManager<S> {
             hummock_manager,
             backup_store: ArcSwap::from_pointee(backup_store),
             running_backup_job: tokio::sync::Mutex::new(None),
-            metrics: BackupManagerMetrics::new(meta_metrics.registry.clone()),
-            meta_metrics,
         }
     }
 
     pub async fn set_store(&self, config: StoreConfig) -> MetaResult<()> {
-        let new_store =
-            create_snapshot_store(&config, self.meta_metrics.object_store_metric.clone()).await?;
+        let new_store = create_snapshot_store(&config).await?;
         tracing::info!(
             "new backup config is applied: url={}, dir={}",
             config.0,
@@ -171,7 +160,6 @@ impl<S: MetaStore> BackupManager<S> {
         Self::with_store(
             env,
             hummock_manager,
-            Arc::new(MetaMetrics::new()),
             (
                 Box::<risingwave_backup::storage::DummyMetaSnapshotStorage>::default(),
                 StoreConfig::default(),
@@ -224,7 +212,7 @@ impl<S: MetaStore> BackupManager<S> {
         BackupWorker::new(self.clone()).start(job_id);
         let job_handle = BackupJobHandle::new(job_id, hummock_version_safe_point);
         *guard = Some(job_handle);
-        self.metrics.job_count.inc();
+        GLOBAL_BACKUP_MANAGER_METRICS.job_count.inc();
         Ok(job_id)
     }
 
@@ -260,7 +248,9 @@ impl<S: MetaStore> BackupManager<S> {
         let job_latency = job_handle.start_time.elapsed().as_secs_f64();
         match job_result {
             BackupJobResult::Succeeded => {
-                self.metrics.job_latency_success.observe(job_latency);
+                GLOBAL_BACKUP_MANAGER_METRICS
+                    .job_latency_success
+                    .observe(job_latency);
                 tracing::info!("succeeded backup job {}", job_id);
                 self.env
                     .notification_manager()
@@ -272,7 +262,9 @@ impl<S: MetaStore> BackupManager<S> {
                     );
             }
             BackupJobResult::Failed(e) => {
-                self.metrics.job_latency_failure.observe(job_latency);
+                GLOBAL_BACKUP_MANAGER_METRICS
+                    .job_latency_failure
+                    .observe(job_latency);
                 tracing::warn!("failed backup job {}: {}", job_id, e);
             }
         }
@@ -365,11 +357,8 @@ impl<S: MetaStore> BackupWorker<S> {
     }
 }
 
-async fn create_snapshot_store(
-    config: &StoreConfig,
-    metric: Arc<ObjectStoreMetrics>,
-) -> MetaResult<BoxedMetaSnapshotStorage> {
-    let object_store = Arc::new(parse_remote_object_store(&config.0, metric, "Meta Backup").await);
+async fn create_snapshot_store(config: &StoreConfig) -> MetaResult<BoxedMetaSnapshotStorage> {
+    let object_store = Arc::new(parse_remote_object_store(&config.0, "Meta Backup").await);
     let store = ObjectStoreMetaSnapshotStorage::new(&config.1, object_store).await?;
     Ok(Box::new(store))
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,7 +26,7 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockError, HummockResult, TableHolder};
-use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
+use crate::monitor::{StoreLocalStatistic, GLOBAL_COMPACTOR_METRICS};
 
 const REFILL_DATA_FILE_CACHE_CONCURRENCY: usize = 100;
 const REFILL_DATA_FILE_CACHE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -38,16 +39,12 @@ struct CacheRefillLevel {
 
 pub struct CacheRefillPolicyConfig {
     pub sstable_store: SstableStoreRef,
-    pub metrics: Arc<CompactorMetrics>,
-
     pub max_preload_wait_time_mill: u64,
-
     pub refill_data_file_cache_levels: HashSet<u32>,
 }
 
 pub struct CacheRefillPolicy {
     sstable_store: SstableStoreRef,
-    metrics: Arc<CompactorMetrics>,
 
     max_preload_wait_time_mill: u64,
 
@@ -60,7 +57,6 @@ impl CacheRefillPolicy {
     pub fn new(config: CacheRefillPolicyConfig) -> Self {
         Self {
             sstable_store: config.sstable_store,
-            metrics: config.metrics,
 
             max_preload_wait_time_mill: config.max_preload_wait_time_mill,
 
@@ -74,7 +70,8 @@ impl CacheRefillPolicy {
         if self.max_preload_wait_time_mill > 0 && !sst_delta_infos.is_empty() {
             let policy = self.clone();
             let handle = tokio::spawn(async move {
-                let timer = policy.metrics.refill_cache_duration.start_timer();
+                let metrics = GLOBAL_COMPACTOR_METRICS.deref();
+                let timer = metrics.refill_cache_duration.start_timer();
                 let mut preload_count = 0;
                 let stats = StoreLocalStatistic::default();
 
@@ -101,7 +98,7 @@ impl CacheRefillPolicy {
                     reqs.push(level_reqs);
                 }
 
-                policy.metrics.preload_io_count.inc_by(preload_count as u64);
+                metrics.preload_io_count.inc_by(preload_count as u64);
 
                 let res = try_join_all(reqs.into_iter().map(try_join_all)).await;
 
@@ -192,6 +189,8 @@ impl CacheRefillPolicy {
                 }
             }
 
+            let metrics = GLOBAL_COMPACTOR_METRICS.deref();
+
             if refill {
                 for sst_info in &insert_sst_infos {
                     for block_index in 0..sst_info.value().block_count() {
@@ -199,11 +198,10 @@ impl CacheRefillPolicy {
                         let meta = sst_info.value().clone();
                         let mut stat = StoreLocalStatistic::default();
                         let sstable_store = self.sstable_store.clone();
-                        let metrics = self.metrics.clone();
 
                         concurrency.acquire().await;
                         if start.elapsed() > REFILL_DATA_FILE_CACHE_TIMEOUT {
-                            self.metrics
+                            metrics
                                 .refill_data_file_cache_count
                                 .with_label_values(&["timeout"])
                                 .inc();
@@ -237,7 +235,7 @@ impl CacheRefillPolicy {
                     }
                 }
             } else {
-                self.metrics
+                metrics
                     .refill_data_file_cache_count
                     .with_label_values(&["filtered"])
                     .inc_by(blocks as f64);

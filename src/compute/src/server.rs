@@ -17,7 +17,6 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -34,7 +33,6 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -49,13 +47,9 @@ use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
-use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
-};
+use risingwave_storage::monitor::monitor_cache;
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -67,7 +61,6 @@ use crate::memory_management::{
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
-use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{
@@ -82,7 +75,6 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
-    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
@@ -165,25 +157,10 @@ pub async fn compute_node_serve(
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
 
-    monitor_process(&registry).unwrap();
-    let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
-    let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
-    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
-    let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
-    let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
+    monitor_process().unwrap();
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
-    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
-    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
-
-    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
-        meta_client.clone(),
-        hummock_metrics.clone(),
-    ));
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(meta_client.clone()));
 
     let mut join_handle_vec = vec![];
 
@@ -191,10 +168,6 @@ pub async fn compute_node_serve(
         state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
-        state_store_metrics.clone(),
-        object_store_metrics,
-        storage_metrics.clone(),
-        compactor_metrics.clone(),
     )
     .await
     .unwrap();
@@ -218,7 +191,6 @@ pub async fn compute_node_serve(
                 storage_opts,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
-                compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
@@ -238,7 +210,7 @@ pub async fn compute_node_serve(
             flush_limiter,
             storage_memory_config,
         ));
-        monitor_cache(memory_collector, &registry).unwrap();
+        monitor_cache(memory_collector).unwrap();
         let backup_reader = storage.backup_reader();
         let system_params_mgr = system_params_manager.clone();
         tokio::spawn(async move {
@@ -263,14 +235,10 @@ pub async fn compute_node_serve(
     };
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new(
-        config.batch.clone(),
-        batch_manager_metrics,
-    ));
+    let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         advertise_addr.clone(),
         state_store.clone(),
-        streaming_metrics.clone(),
         config.streaming.clone(),
         await_tree_config.clone(),
     ));
@@ -280,7 +248,6 @@ pub async fn compute_node_serve(
     let stream_mgr_clone = stream_mgr.clone();
 
     let memory_mgr = GlobalMemoryManager::new(
-        streaming_metrics.clone(),
         total_memory_bytes,
         config.server.auto_dump_heap_profile.clone(),
     );
@@ -314,11 +281,8 @@ pub async fn compute_node_serve(
         batch_config,
         worker_id,
         state_store.clone(),
-        batch_task_metrics.clone(),
-        batch_executor_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
-        source_metrics.clone(),
     );
 
     info!(
@@ -351,7 +315,6 @@ pub async fn compute_node_serve(
         state_store,
         dml_mgr,
         system_params_manager.clone(),
-        source_metrics,
         meta_client.clone(),
     );
 
@@ -366,8 +329,7 @@ pub async fn compute_node_serve(
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
-    let exchange_srv =
-        ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
+    let exchange_srv = ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
     let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_await_tree_reg.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
@@ -442,10 +404,7 @@ pub async fn compute_node_serve(
 
     // Boot metrics service.
     if config.server.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
-            registry.clone(),
-        );
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     // All set, let the meta service know we're ready.

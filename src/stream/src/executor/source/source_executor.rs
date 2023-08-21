@@ -108,7 +108,6 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),

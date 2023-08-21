@@ -44,7 +44,7 @@ fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {
         .name(format!("compute-{idx}"))
         .ip([192, 168, 3, idx as u8].into())
         .cores(config.compute_node_cores)
-        .init(move || risingwave_compute::start(opts.clone(), prometheus::Registry::new()))
+        .init(move || risingwave_compute::start(opts.clone()))
         .build();
 }
 

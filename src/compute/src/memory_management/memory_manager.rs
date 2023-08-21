@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fs;
+use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +22,7 @@ use risingwave_batch::task::BatchManager;
 use risingwave_common::config::AutoDumpHeapProfileConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::monitor::{StreamingMetrics, GLOBAL_STREAMING_METRICS};
 use risingwave_stream::task::LocalStreamManager;
 
 use super::MemoryControlRef;
@@ -32,7 +33,7 @@ pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
 
-    metrics: Arc<StreamingMetrics>,
+    metrics: &'static StreamingMetrics,
     /// The memory control policy for computing tasks.
     memory_control_policy: MemoryControlRef,
 }
@@ -45,7 +46,6 @@ impl GlobalMemoryManager {
     const MIN_TICK_INTERVAL_MS: u32 = 10;
 
     pub fn new(
-        metrics: Arc<StreamingMetrics>,
         total_memory_bytes: usize,
         auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
     ) -> Arc<Self> {
@@ -59,7 +59,7 @@ impl GlobalMemoryManager {
         }
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
-            metrics,
+            metrics: GLOBAL_STREAMING_METRICS.deref(),
             memory_control_policy,
         })
     }

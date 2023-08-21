@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -36,7 +37,6 @@ use super::datagen::DatagenMeta;
 use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
-use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
@@ -58,7 +58,9 @@ use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
-use crate::source::monitor::EnumeratorMetrics;
+use crate::source::monitor::{
+    EnumeratorMetrics, SourceMetrics, GLOBAL_ENUMERATOR_METRICS, GLOBAL_SOURCE_METRICS,
+};
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
 use crate::source::nexmark::{
     NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
@@ -105,11 +107,27 @@ impl Default for SourceCtrlOpts {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
-    pub metrics: Arc<EnumeratorMetrics>,
+    pub metrics: &'static EnumeratorMetrics,
     pub connector_client: Option<ConnectorClient>,
+}
+
+impl SourceEnumeratorContext {
+    pub fn new(info: SourceEnumeratorInfo, connector_client: Option<ConnectorClient>) -> Self {
+        Self {
+            info,
+            connector_client,
+            metrics: GLOBAL_ENUMERATOR_METRICS.deref(),
+        }
+    }
+}
+
+impl Default for SourceEnumeratorContext {
+    fn default() -> Self {
+        Self::new(SourceEnumeratorInfo::default(), None)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -117,20 +135,33 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceContext {
     pub connector_client: Option<ConnectorClient>,
     pub source_info: SourceInfo,
-    pub metrics: Arc<SourceMetrics>,
+    pub metrics: &'static SourceMetrics,
     pub source_ctrl_opts: SourceCtrlOpts,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
+
+impl Default for SourceContext {
+    fn default() -> Self {
+        Self {
+            connector_client: None,
+            source_info: Default::default(),
+            metrics: GLOBAL_SOURCE_METRICS.deref(),
+
+            source_ctrl_opts: Default::default(),
+            error_suppressor: None,
+        }
+    }
+}
+
 impl SourceContext {
     pub fn new(
         actor_id: u32,
         table_id: TableId,
         fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
     ) -> Self {
@@ -141,7 +172,7 @@ impl SourceContext {
                 source_id: table_id,
                 fragment_id,
             },
-            metrics,
+            metrics: GLOBAL_SOURCE_METRICS.deref(),
             source_ctrl_opts,
             error_suppressor: None,
         }
@@ -151,7 +182,6 @@ impl SourceContext {
         actor_id: u32,
         table_id: TableId,
         fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
@@ -160,7 +190,6 @@ impl SourceContext {
             actor_id,
             table_id,
             fragment_id,
-            metrics,
             source_ctrl_opts,
             connector_client,
         );

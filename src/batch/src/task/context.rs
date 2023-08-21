@@ -21,13 +21,14 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
-use crate::monitor::{BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner};
+use crate::monitor::{
+    BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner, GLOBAL_BATCH_TASK_METRICS,
+};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
@@ -59,8 +60,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get config for batch environment
     fn get_config(&self) -> &BatchConfig;
-
-    fn source_metrics(&self) -> Arc<SourceMetrics>;
 
     fn store_mem_usage(&self, val: usize);
 
@@ -120,10 +119,6 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.config()
     }
 
-    fn source_metrics(&self) -> Arc<SourceMetrics> {
-        self.env.source_metrics()
-    }
-
     fn store_mem_usage(&self, val: usize) {
         // Record the last mem val.
         // Calculate the difference between old val and new value, and apply the diff to total
@@ -167,15 +162,10 @@ impl ComputeNodeContext {
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
         let batch_mem_context = env.task_manager().memory_context_ref();
-        let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
-            env.task_metrics(),
-            env.executor_metrics(),
-            task_id,
-        ));
+        let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(task_id));
         let mem_context = MemoryContext::new(
             Some(batch_mem_context),
-            batch_metrics
-                .get_task_metrics()
+            GLOBAL_BATCH_TASK_METRICS
                 .task_mem_usage
                 .with_label_values(&batch_metrics.task_labels()),
         );

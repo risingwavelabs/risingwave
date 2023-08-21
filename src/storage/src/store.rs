@@ -14,7 +14,6 @@
 
 use std::future::Future;
 use std::ops::Bound;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -29,7 +28,7 @@ use risingwave_hummock_trace::{
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
-use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
+use crate::monitor::MonitoredStateStore;
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
@@ -187,8 +186,8 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
-        MonitoredStateStore::new(self, storage_metrics)
+    fn monitored(self) -> MonitoredStateStore<Self> {
+        MonitoredStateStore::new(self)
     }
 
     /// Clears contents in shared buffer.

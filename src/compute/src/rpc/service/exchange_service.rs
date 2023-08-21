@@ -30,7 +30,7 @@ use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
+use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
 
 /// Buffer size of the receiver of the remote channel.
 const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
@@ -39,7 +39,6 @@ const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
     stream_mgr: Arc<LocalStreamManager>,
-    metrics: Arc<ExchangeServiceMetrics>,
 }
 
 type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
@@ -106,7 +105,6 @@ impl ExchangeService for ExchangeServiceImpl {
         });
 
         Ok(Response::new(Self::get_stream_impl(
-            self.metrics.clone(),
             peer_addr,
             receiver,
             add_permits_stream,
@@ -117,21 +115,15 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(
-        mgr: Arc<BatchManager>,
-        stream_mgr: Arc<LocalStreamManager>,
-        metrics: Arc<ExchangeServiceMetrics>,
-    ) -> Self {
+    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<LocalStreamManager>) -> Self {
         ExchangeServiceImpl {
             batch_mgr: mgr,
             stream_mgr,
-            metrics,
         }
     }
 
     #[try_stream(ok = GetStreamResponse, error = Status)]
     async fn get_stream_impl(
-        metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver,
         add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
@@ -170,7 +162,7 @@ impl ExchangeServiceImpl {
                     let proto = if rr % SAMPLING_FREQUENCY == 0 {
                         let start_time = Instant::now();
                         let proto = message.to_protobuf();
-                        metrics
+                        GLOBAL_EXCHANGE_SERVICE_METRICS
                             .actor_sampled_serialize_duration_ns
                             .with_label_values(&[&up_actor_id])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
@@ -189,7 +181,7 @@ impl ExchangeServiceImpl {
 
                     yield response;
 
-                    metrics
+                    GLOBAL_EXCHANGE_SERVICE_METRICS
                         .stream_fragment_exchange_bytes
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])
                         .inc_by(bytes as u64);

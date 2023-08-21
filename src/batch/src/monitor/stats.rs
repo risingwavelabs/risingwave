@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::ops::Deref;
+use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -23,9 +24,10 @@ use prometheus::core::{
 };
 use prometheus::{
     exponential_buckets, opts, proto, GaugeVec, Histogram, HistogramOpts, HistogramVec,
-    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    IntCounterVec, IntGauge, IntGaugeVec,
 };
 use risingwave_common::metrics::TrAdderGauge;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 use crate::task::TaskId;
 
@@ -56,9 +58,14 @@ macro_rules! def_task_metrics {
 
 for_all_task_metrics!(def_task_metrics);
 
+pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
+    LazyLock::new(BatchTaskMetrics::new);
+
 impl BatchTaskMetrics {
+    #[allow(clippy::new_without_default)]
     /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
-    pub fn new(registry: Registry) -> Self {
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         let task_labels = vec!["query_id", "stage_id", "task_id"];
         let mut descs = Vec::with_capacity(8);
 
@@ -145,7 +152,7 @@ impl BatchTaskMetrics {
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new()
     }
 
     fn clean_metrics(&self) {
@@ -225,8 +232,13 @@ macro_rules! def_executor_metrics {
 
 for_all_executor_metrics!(def_executor_metrics);
 
+pub static GLOBAL_BATCH_EXECUTOR_METRICS: LazyLock<BatchExecutorMetrics> =
+    LazyLock::new(BatchExecutorMetrics::new);
+
 impl BatchExecutorMetrics {
-    pub fn new(register: Registry) -> Self {
+    #[allow(clippy::new_without_default)]
+    fn new() -> Self {
+        let register = GLOBAL_METRICS_REGISTRY.deref();
         let executor_labels = vec!["query_id", "stage_id", "task_id", "executor_id"];
         let mut descs = Vec::with_capacity(2);
 
@@ -277,7 +289,7 @@ impl BatchExecutorMetrics {
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new()
     }
 
     fn clean_metrics(&self) {
@@ -331,8 +343,6 @@ pub type BatchMetricsWithTaskLabels = Arc<BatchMetricsWithTaskLabelsInner>;
 /// a `TaskId` so that we don't have to pass `task_id` around and repeatedly generate the same
 /// labels.
 pub struct BatchMetricsWithTaskLabelsInner {
-    task_metrics: Arc<BatchTaskMetrics>,
-    executor_metrics: Arc<BatchExecutorMetrics>,
     task_id: TaskId,
     task_labels: Vec<String>,
 }
@@ -346,14 +356,15 @@ macro_rules! def_create_executor_collector {
                     owned_task_labels.extend(executor_label);
                     let task_labels = owned_task_labels.iter().map(|s| s.as_str()).collect_vec();
 
-                    let collecter = self
-                        .executor_metrics
+                    use $crate::monitor::stats::GLOBAL_BATCH_EXECUTOR_METRICS;
+
+                    let collecter = GLOBAL_BATCH_EXECUTOR_METRICS
                         .$metric
                         .with_label_values(&task_labels);
 
-                    let metrics = self.executor_metrics.$metric.clone();
+                    let metrics = GLOBAL_BATCH_EXECUTOR_METRICS.$metric.clone();
 
-                    self.executor_metrics
+                    GLOBAL_BATCH_EXECUTOR_METRICS
                         .register_labels
                         .lock()
                         .entry(self.task_id.clone())
@@ -374,14 +385,8 @@ macro_rules! def_create_executor_collector {
 impl BatchMetricsWithTaskLabelsInner {
     for_all_executor_metrics! {def_create_executor_collector}
 
-    pub fn new(
-        task_metrics: Arc<BatchTaskMetrics>,
-        executor_metrics: Arc<BatchExecutorMetrics>,
-        id: TaskId,
-    ) -> Self {
+    pub fn new(id: TaskId) -> Self {
         Self {
-            task_metrics,
-            executor_metrics,
             task_id: id.clone(),
             task_labels: vec![id.query_id, id.stage_id.to_string(), id.task_id.to_string()],
         }
@@ -394,16 +399,15 @@ impl BatchMetricsWithTaskLabelsInner {
     pub fn task_id(&self) -> TaskId {
         self.task_id.clone()
     }
-
-    pub fn get_task_metrics(&self) -> &Arc<BatchTaskMetrics> {
-        &self.task_metrics
-    }
 }
 
 impl Drop for BatchMetricsWithTaskLabelsInner {
     fn drop(&mut self) {
-        self.task_metrics.delete_task.lock().push(self.task_id());
-        self.executor_metrics
+        GLOBAL_BATCH_TASK_METRICS
+            .delete_task
+            .lock()
+            .push(self.task_id());
+        GLOBAL_BATCH_EXECUTOR_METRICS
             .delete_task
             .lock()
             .push(self.task_id());
@@ -417,8 +421,13 @@ pub struct BatchManagerMetrics {
     pub batch_heartbeat_worker_num: IntGauge,
 }
 
+pub static GLOBAL_BATCH_MANAGER_METRICS: LazyLock<BatchManagerMetrics> =
+    LazyLock::new(BatchManagerMetrics::new);
+
 impl BatchManagerMetrics {
-    pub fn new(registry: Registry) -> Self {
+    #[allow(clippy::new_without_default)]
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
         let batch_total_mem = TrAdderGauge::new(
             "batch_total_mem",
@@ -447,6 +456,6 @@ impl BatchManagerMetrics {
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(Registry::new())
+        Self::new()
     }
 }

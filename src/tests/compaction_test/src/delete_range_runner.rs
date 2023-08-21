@@ -33,7 +33,6 @@ use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
@@ -48,7 +47,6 @@ use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
     CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
-use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
@@ -186,12 +184,8 @@ async fn compaction_test(
         &system_params,
         &storage_memory_config,
     )));
-    let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
-    let compactor_metrics = Arc::new(CompactorMetrics::unused());
-    let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
     let remote_object_store = parse_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
-        object_store_metrics.clone(),
         "Hummock",
     )
     .await;
@@ -211,8 +205,6 @@ async fn compaction_test(
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(FilterKeyExtractorManager::default()),
-        state_store_metrics.clone(),
-        compactor_metrics.clone(),
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();
@@ -236,7 +228,6 @@ async fn compaction_test(
         meta_client.clone(),
         filter_key_extractor_manager,
         sstable_object_id_manager,
-        compactor_metrics,
     );
     run_compare_result(
         &store,
@@ -560,7 +551,6 @@ fn run_compactor_thread(
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
-    compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
@@ -569,7 +559,6 @@ fn run_compactor_thread(
         storage_opts,
         hummock_meta_client: meta_client,
         sstable_store,
-        compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,

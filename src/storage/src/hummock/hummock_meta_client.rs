@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -25,17 +25,20 @@ use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
-use crate::monitor::HummockMetrics;
+use crate::monitor::{HummockMetrics, GLOBAL_HUMMOCK_METRICS};
 
 pub struct MonitoredHummockMetaClient {
     meta_client: MetaClient,
 
-    stats: Arc<HummockMetrics>,
+    stats: &'static HummockMetrics,
 }
 
 impl MonitoredHummockMetaClient {
-    pub fn new(meta_client: MetaClient, stats: Arc<HummockMetrics>) -> MonitoredHummockMetaClient {
-        MonitoredHummockMetaClient { meta_client, stats }
+    pub fn new(meta_client: MetaClient) -> MonitoredHummockMetaClient {
+        MonitoredHummockMetaClient {
+            meta_client,
+            stats: GLOBAL_HUMMOCK_METRICS.deref(),
+        }
     }
 
     pub fn get_inner(&self) -> &MetaClient {

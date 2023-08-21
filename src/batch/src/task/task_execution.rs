@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 #[cfg(enable_task_local_alloc)]
 use std::future::Future;
+use std::ops::Deref;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 #[cfg(enable_task_local_alloc)]
@@ -39,6 +40,7 @@ use tracing::Instrument;
 use crate::error::BatchError::SenderError;
 use crate::error::{to_rw_error, BatchError, Result as BatchResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
+use crate::monitor::GLOBAL_BATCH_TASK_METRICS;
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
@@ -483,7 +485,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 }
                 let cumulative = monitor.cumulative();
                 let labels = &batch_metrics.task_labels();
-                let task_metrics = batch_metrics.get_task_metrics();
+                let task_metrics = GLOBAL_BATCH_TASK_METRICS.deref();
                 task_metrics
                     .task_first_poll_delay
                     .with_label_values(labels)

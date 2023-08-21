@@ -48,6 +48,7 @@ use crate::hummock::{
     create_monotonic_events_from_compaction_delete_events, BlockedXor16FilterBuilder, CachePolicy,
     CompactionDeleteRanges, HummockError, HummockResult, SstableBuilderOptions,
 };
+use crate::monitor::GLOBAL_COMPACTOR_METRICS;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 const GC_WATERMARK_FOR_FLUSH: u64 = 0;
@@ -277,8 +278,7 @@ async fn compact_shared_buffer(
         let mut level0 = Vec::with_capacity(parallelism);
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
-                context
-                    .compactor_metrics
+                GLOBAL_COMPACTOR_METRICS
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
             }

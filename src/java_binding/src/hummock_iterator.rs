@@ -23,7 +23,6 @@ use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
@@ -32,7 +31,6 @@ use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{CachePolicy, FileCache, SstableStore};
-use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
@@ -69,14 +67,8 @@ impl KeyedRow {
 impl HummockJavaBindingIterator {
     pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
         // Note(bugen): should we forward the implementation to the `StorageTable`?
-        let object_store = Arc::new(
-            parse_remote_object_store(
-                &read_plan.object_store_url,
-                Arc::new(ObjectStoreMetrics::unused()),
-                "Hummock",
-            )
-            .await,
-        );
+        let object_store =
+            Arc::new(parse_remote_object_store(&read_plan.object_store_url, "Hummock").await);
         let sstable_store = Arc::new(SstableStore::new(
             object_store,
             read_plan.data_dir,
@@ -86,8 +78,7 @@ impl HummockJavaBindingIterator {
             FileCache::none(),
             FileCache::none(),
         ));
-        let reader =
-            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
+        let reader = HummockVersionReader::new(sstable_store);
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();

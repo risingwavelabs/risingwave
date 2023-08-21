@@ -33,6 +33,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_option_inspect)]
 #![feature(assert_matches)]
+#![feature(lazy_cell)]
 
 mod error;
 pub mod exchange_source;

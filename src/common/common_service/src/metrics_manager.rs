@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Deref;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -24,7 +26,7 @@ use tracing::info;
 pub struct MetricsManager {}
 
 impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String, registry: Registry) {
+    pub fn boot_metrics_service(listen_addr: String) {
         tokio::spawn(async move {
             info!(
                 "Prometheus listener for Prometheus is set up on http://{}",
@@ -32,7 +34,9 @@ impl MetricsManager {
             );
             let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
             let service = ServiceBuilder::new()
-                .layer(AddExtensionLayer::new(registry))
+                .layer(AddExtensionLayer::new(
+                    GLOBAL_METRICS_REGISTRY.deref().clone(),
+                ))
                 .service_fn(Self::metrics_service);
             let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
             if let Err(err) = serve_future.await {

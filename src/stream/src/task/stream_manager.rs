@@ -16,6 +16,7 @@ use core::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::Write;
+use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -43,7 +44,7 @@ use tokio::task::JoinHandle;
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::monitor::{StreamingMetrics, GLOBAL_STREAMING_METRICS};
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
 use crate::from_proto::create_executor;
@@ -166,14 +167,12 @@ impl LocalStreamManager {
     pub fn new(
         addr: HostAddr,
         state_store: StateStoreImpl,
-        streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
             state_store,
-            streaming_metrics,
             config,
             await_tree_config,
         ))
@@ -379,24 +378,16 @@ impl LocalStreamManagerCore {
     fn new(
         addr: HostAddr,
         state_store: StateStoreImpl,
-        streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
     ) -> Self {
         let context = SharedContext::new(addr, state_store.clone(), &config);
-        Self::new_inner(
-            state_store,
-            context,
-            streaming_metrics,
-            config,
-            await_tree_config,
-        )
+        Self::new_inner(state_store, context, config, await_tree_config)
     }
 
     fn new_inner(
         state_store: StateStoreImpl,
         context: SharedContext,
-        streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
     ) -> Self {
@@ -411,6 +402,8 @@ impl LocalStreamManagerCore {
                 .build()
                 .unwrap()
         };
+
+        let streaming_metrics = Arc::new(GLOBAL_STREAMING_METRICS.deref().clone());
 
         Self {
             runtime: runtime.into(),
@@ -429,14 +422,9 @@ impl LocalStreamManagerCore {
 
     #[cfg(test)]
     fn for_test() -> Self {
-        use risingwave_storage::monitor::MonitoredStorageMetrics;
-
-        let register = prometheus::Registry::new();
-        let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::new_inner(
-            StateStoreImpl::shared_in_memory_store(Arc::new(MonitoredStorageMetrics::unused())),
+            StateStoreImpl::shared_in_memory_store(),
             SharedContext::for_test(),
-            streaming_metrics,
             StreamingConfig::default(),
             None,
         )

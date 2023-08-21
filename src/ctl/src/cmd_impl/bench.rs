@@ -21,6 +21,7 @@ use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_storage::store::PrefetchOptions;
 use size::Size;
 use tokio::task::JoinHandle;
@@ -84,8 +85,8 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
             threads,
             data_dir,
         } => {
-            let (hummock, metrics) = context
-                .hummock_store_with_metrics(HummockServiceOpts::from_env(data_dir)?)
+            let hummock = context
+                .hummock_store(HummockServiceOpts::from_env(data_dir)?)
                 .await?;
             let table = get_table_catalog(meta.clone(), mv_name).await?;
             let mut handlers = vec![];
@@ -120,8 +121,8 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                 let mut last_collected_metrics = None;
                 loop {
                     let collected_metrics = InterestedMetrics {
-                        object_store_read: metrics.object_store_metrics.read_bytes.get(),
-                        object_store_write: metrics.object_store_metrics.write_bytes.get(),
+                        object_store_read: GLOBAL_OBJECT_STORE_METRICS.read_bytes.get(),
+                        object_store_write: GLOBAL_OBJECT_STORE_METRICS.write_bytes.get(),
                         next_cnt: next_cnt.load(std::sync::atomic::Ordering::Relaxed),
                         iter_cnt: iter_cnt.load(std::sync::atomic::Ordering::Relaxed),
                         now: Instant::now(),

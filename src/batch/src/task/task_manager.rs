@@ -31,7 +31,7 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
-use crate::monitor::BatchManagerMetrics;
+use crate::monitor::GLOBAL_BATCH_MANAGER_METRICS;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
     BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
@@ -56,13 +56,10 @@ pub struct BatchManager {
 
     /// Memory context used for batch tasks in cn.
     mem_context: MemoryContext,
-
-    /// Metrics for batch manager.
-    metrics: BatchManagerMetrics,
 }
 
 impl BatchManager {
-    pub fn new(config: BatchConfig, metrics: BatchManagerMetrics) -> Self {
+    pub fn new(config: BatchConfig) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = config.worker_threads_num {
@@ -75,13 +72,12 @@ impl BatchManager {
                 .unwrap()
         };
 
-        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone());
+        let mem_context = MemoryContext::root(GLOBAL_BATCH_MANAGER_METRICS.batch_total_mem.clone());
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime.into()),
             config,
             total_mem_val: TrAdder::new().into(),
-            metrics,
             mem_context,
         }
     }
@@ -108,7 +104,7 @@ impl BatchManager {
         // it's possible do not found parent task id in theory.
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
-            self.metrics.task_num.inc();
+            GLOBAL_BATCH_MANAGER_METRICS.task_num.inc();
 
             let this = self.clone();
             let task_id = task_id.clone();
@@ -156,10 +152,14 @@ impl BatchManager {
     async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
         let _metric_guard = scopeguard::guard((), |_| {
             tracing::debug!("heartbeat worker for task {:?} stopped", task_id);
-            self.metrics.batch_heartbeat_worker_num.dec();
+            GLOBAL_BATCH_MANAGER_METRICS
+                .batch_heartbeat_worker_num
+                .dec();
         });
         tracing::debug!("heartbeat worker for task {:?} started", task_id);
-        self.metrics.batch_heartbeat_worker_num.inc();
+        GLOBAL_BATCH_MANAGER_METRICS
+            .batch_heartbeat_worker_num
+            .inc();
         // The heartbeat is to ensure task cancellation when frontend's cancellation request fails
         // to reach compute node (for any reason like RPC fails, frontend crashes).
         let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(60));
@@ -230,7 +230,7 @@ impl BatchManager {
                 // Use `cancel` rather than `abort` here since this is not an error which should be
                 // propagated to upstream.
                 task.cancel();
-                self.metrics.task_num.dec();
+                GLOBAL_BATCH_MANAGER_METRICS.task_num.dec();
                 if let Some(heartbeat_join_handle) = task.heartbeat_join_handle() {
                     heartbeat_join_handle.abort();
                 }
@@ -335,16 +335,12 @@ mod tests {
     };
     use tonic::Code;
 
-    use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
         use tonic::Status;
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
+        let manager = Arc::new(BatchManager::new(BatchConfig::default()));
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
@@ -372,10 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
+        let manager = Arc::new(BatchManager::new(BatchConfig::default()));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -410,10 +403,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_cancel_for_busy_loop() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
+        let manager = Arc::new(BatchManager::new(BatchConfig::default()));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -438,10 +428,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_cancel_for_block() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
+        let manager = Arc::new(BatchManager::new(BatchConfig::default()));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -466,10 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_abort_for_busy_loop() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
+        let manager = Arc::new(BatchManager::new(BatchConfig::default()));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -499,10 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_abort_for_block() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
+        let manager = Arc::new(BatchManager::new(BatchConfig::default()));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],

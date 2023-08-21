@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntGauge, Registry,
+    HistogramVec, IntCounter, IntGauge,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+#[derive(Clone)]
 pub struct StreamingMetrics {
-    pub registry: Registry,
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -126,8 +130,13 @@ pub struct StreamingMetrics {
     pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
 }
 
+pub static GLOBAL_STREAMING_METRICS: LazyLock<StreamingMetrics> =
+    LazyLock::new(StreamingMetrics::new);
+
 impl StreamingMetrics {
-    pub fn new(registry: Registry) -> Self {
+    #[allow(clippy::new_without_default)]
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
@@ -688,7 +697,6 @@ impl StreamingMetrics {
         .unwrap();
 
         Self {
-            registry,
             executor_row_count,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
@@ -764,6 +772,6 @@ impl StreamingMetrics {
 
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new()
     }
 }

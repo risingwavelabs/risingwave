@@ -32,36 +32,35 @@ macro_rules! main {
         #[cfg_attr(coverage, no_coverage)]
         fn main() {
             let opts = clap::Parser::parse();
-            let registry = prometheus::Registry::new();
-            $crate::$component(opts, registry);
+            $crate::$component(opts);
         }
     };
 }
 
 // Entry point functions.
 
-pub fn compute(opts: ComputeNodeOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(LoggerSettings::new("compute"), registry.clone());
-    main_okk(risingwave_compute::start(opts, registry));
+pub fn compute(opts: ComputeNodeOpts) {
+    init_risingwave_logger(LoggerSettings::new("compute"));
+    main_okk(risingwave_compute::start(opts));
 }
 
-pub fn meta(opts: MetaNodeOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(LoggerSettings::new("meta"), registry);
+pub fn meta(opts: MetaNodeOpts) {
+    init_risingwave_logger(LoggerSettings::new("meta"));
     main_okk(risingwave_meta::start(opts));
 }
 
-pub fn frontend(opts: FrontendOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(LoggerSettings::new("frontend"), registry);
+pub fn frontend(opts: FrontendOpts) {
+    init_risingwave_logger(LoggerSettings::new("frontend"));
     main_okk(risingwave_frontend::start(opts));
 }
 
-pub fn compactor(opts: CompactorOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(LoggerSettings::new("compactor"), registry);
+pub fn compactor(opts: CompactorOpts) {
+    init_risingwave_logger(LoggerSettings::new("compactor"));
     main_okk(risingwave_compactor::start(opts));
 }
 
-pub fn ctl(opts: CtlOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(LoggerSettings::new("ctl").stderr(true), registry);
+pub fn ctl(opts: CtlOpts) {
+    init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need

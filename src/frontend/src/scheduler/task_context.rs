@@ -21,7 +21,6 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -77,10 +76,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn dml_manager(&self) -> risingwave_source::dml_manager::DmlManagerRef {
         unimplemented!("not supported in local mode")
-    }
-
-    fn source_metrics(&self) -> Arc<SourceMetrics> {
-        self.env.source_metrics()
     }
 
     fn store_mem_usage(&self, _val: usize) {

@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::io::{Error, ErrorKind, Result};
+use std::ops::Deref;
+use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{
     AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec, GenericGauge,
@@ -20,8 +22,9 @@ use prometheus::core::{
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, HistogramVec,
-    IntGauge, Opts, Registry,
+    IntGauge, Opts,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
 /// `RocksDBStateStore` and `TikvStateStore`.
@@ -65,12 +68,14 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
-
-    registry: Registry,
 }
 
+pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: LazyLock<HummockStateStoreMetrics> =
+    LazyLock::new(HummockStateStoreMetrics::new);
+
 impl HummockStateStoreMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
@@ -265,17 +270,7 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
-            registry,
         }
-    }
-
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
-    pub fn unused() -> Self {
-        Self::new(Registry::new())
-    }
-
-    pub fn registry(&self) -> &Registry {
-        &self.registry
     }
 }
 
@@ -386,14 +381,9 @@ impl Collector for StateStoreCollector {
     }
 }
 
-use std::io::{Error, ErrorKind, Result};
-
-pub fn monitor_cache(
-    memory_collector: Arc<dyn MemoryCollector>,
-    registry: &Registry,
-) -> Result<()> {
+pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) -> Result<()> {
     let collector = StateStoreCollector::new(memory_collector);
-    registry
+    GLOBAL_METRICS_REGISTRY
         .register(Box::new(collector))
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
 }

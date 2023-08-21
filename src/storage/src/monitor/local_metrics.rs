@@ -14,6 +14,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Deref;
 #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,7 +25,7 @@ use prometheus::local::LocalHistogram;
 use risingwave_common::catalog::TableId;
 
 use super::HummockStateStoreMetrics;
-use crate::monitor::CompactorMetrics;
+use crate::monitor::{GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_STATE_STORE_METRICS};
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
@@ -104,7 +105,8 @@ impl StoreLocalStatistic {
         }
     }
 
-    pub fn report_compactor(&self, metrics: &CompactorMetrics) {
+    pub fn report_compactor(&self) {
+        let metrics = GLOBAL_COMPACTOR_METRICS.deref();
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
             metrics.remote_read_time.observe(t / 1000.0);
@@ -243,7 +245,8 @@ struct LocalStoreMetrics {
 const FLUSH_LOCAL_METRICS_TIMES: usize = 32;
 
 impl LocalStoreMetrics {
-    pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str) -> Self {
+    pub fn new(table_id_label: &str) -> Self {
+        let metrics = GLOBAL_HUMMOCK_STATE_STORE_METRICS.deref();
         let cache_data_block_total = metrics
             .sst_store_block_request_counts
             .with_label_values(&[table_id_label, "data_total"])
@@ -486,15 +489,13 @@ define_bloom_filter_metrics!(
 );
 
 pub struct GetLocalMetricsGuard {
-    metrics: Arc<HummockStateStoreMetrics>,
     table_id: TableId,
     pub local_stats: StoreLocalStatistic,
 }
 
 impl GetLocalMetricsGuard {
-    pub fn new(metrics: Arc<HummockStateStoreMetrics>, table_id: TableId) -> Self {
+    pub fn new(table_id: TableId) -> Self {
         Self {
-            metrics,
             table_id,
             local_stats: StoreLocalStatistic::default(),
         }
@@ -506,12 +507,7 @@ impl Drop for GetLocalMetricsGuard {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics
                 .entry(self.table_id.table_id)
-                .or_insert_with(|| {
-                    LocalStoreMetrics::new(
-                        self.metrics.as_ref(),
-                        self.table_id.to_string().as_str(),
-                    )
-                });
+                .or_insert_with(|| LocalStoreMetrics::new(self.table_id.to_string().as_str()));
             self.local_stats.report(table_metrics);
             self.local_stats
                 .report_bloom_filter_metrics(&mut table_metrics.get_filter_metrics);
@@ -520,19 +516,13 @@ impl Drop for GetLocalMetricsGuard {
 }
 
 pub struct IterLocalMetricsGuard {
-    metrics: Arc<HummockStateStoreMetrics>,
     table_id: TableId,
     pub local_stats: StoreLocalStatistic,
 }
 
 impl IterLocalMetricsGuard {
-    pub fn new(
-        metrics: Arc<HummockStateStoreMetrics>,
-        table_id: TableId,
-        local_stats: StoreLocalStatistic,
-    ) -> Self {
+    pub fn new(table_id: TableId, local_stats: StoreLocalStatistic) -> Self {
         Self {
-            metrics,
             table_id,
             local_stats,
         }
@@ -544,12 +534,7 @@ impl Drop for IterLocalMetricsGuard {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics
                 .entry(self.table_id.table_id)
-                .or_insert_with(|| {
-                    LocalStoreMetrics::new(
-                        self.metrics.as_ref(),
-                        self.table_id.to_string().as_str(),
-                    )
-                });
+                .or_insert_with(|| LocalStoreMetrics::new(self.table_id.to_string().as_str()));
             self.local_stats.report(table_metrics);
             self.local_stats
                 .report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
@@ -558,15 +543,13 @@ impl Drop for IterLocalMetricsGuard {
 }
 
 pub struct MayExistLocalMetricsGuard {
-    metrics: Arc<HummockStateStoreMetrics>,
     table_id: TableId,
     pub local_stats: StoreLocalStatistic,
 }
 
 impl MayExistLocalMetricsGuard {
-    pub fn new(metrics: Arc<HummockStateStoreMetrics>, table_id: TableId) -> Self {
+    pub fn new(table_id: TableId) -> Self {
         Self {
-            metrics,
             table_id,
             local_stats: StoreLocalStatistic::default(),
         }
@@ -578,12 +561,7 @@ impl Drop for MayExistLocalMetricsGuard {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics
                 .entry(self.table_id.table_id)
-                .or_insert_with(|| {
-                    LocalStoreMetrics::new(
-                        self.metrics.as_ref(),
-                        self.table_id.to_string().as_str(),
-                    )
-                });
+                .or_insert_with(|| LocalStoreMetrics::new(self.table_id.to_string().as_str()));
             self.local_stats.report(table_metrics);
             self.local_stats
                 .report_bloom_filter_metrics(&mut table_metrics.may_exist_filter_metrics);
