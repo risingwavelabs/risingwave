@@ -371,6 +371,38 @@ impl From<StreamChunkMut> for StreamChunk {
         StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.into()))
     }
 }
+pub struct OpRowMutRef<'a> {
+    c: &'a mut StreamChunkMut,
+    i: usize,
+}
+
+impl OpRowMutRef<'_> {
+    pub fn set_vis(&mut self, val: bool) {
+        self.c.set_vis(self.i, val);
+    }
+
+    pub fn set_op(&mut self, val: Op) {
+        self.c.set_op(self.i, val);
+    }
+}
+
+impl StreamChunkMut {
+    pub fn set_vis(&mut self, n: usize, val: bool) {
+        self.vis.set(n, val);
+    }
+
+    pub fn set_op(&mut self, n: usize, val: Op) {
+        self.ops.set(n, val);
+    }
+
+    pub unsafe fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+        (0..self.vis.len()).map(|i| {
+            let p = self as *const StreamChunkMut;
+            let p = p as *mut StreamChunkMut;
+            OpRowMutRef { c: &mut *p, i }
+        })
+    }
+}
 /// Test utilities for [`StreamChunk`].
 pub trait StreamChunkTestExt: Sized {
     fn from_pretty(s: &str) -> Self;
