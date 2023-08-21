@@ -102,24 +102,16 @@ sleep 5
 echo "--- Querying source"
 ./risedev psql -c "SELECT * FROM kafka_source;"
 
-echo "--- Kill cluster"
+echo "--- Kill standalone cluster"
 pkill risingwave
-./risedev k
-rm -r $RW_PREFIX/data/kafka-*
-rm -r $RW_PREFIX/data/zookeeper-*
-
-echo "--- Restarting peripherals"
-./risedev d standalone-full-peripherals >"$LOG_PREFIX"/peripherals.log 2>&1 &
-
-# Wait for peripherals to finish startup
-sleep 5
 
 echo "--- Restarting standalone cluster"
-./risedev standalone-demo-full >"$LOG_PREFIX"/standalone.log 2>&1 &
+./risedev standalone-demo-full >"$LOG_PREFIX"/standalone-restarted.log 2>&1 &
 STANDALONE_PID=$!
 
-# Wait for rw cluster to finish startup
-sleep 20
+# Wait for rw cluster to finish startup & recovery to finish
+echo "--- Waiting 60s for recovery to finish"
+sleep 60
 
 echo "--- Querying table"
 ./risedev psql -c "SELECT * FROM t;"
@@ -128,6 +120,6 @@ echo "--- Querying source"
 ./risedev psql -c "SELECT * FROM kafka_source;"
 
 echo "--- Running cleanup"
-./risedev k
-pkill risingwave
-./risedev clean-data
+#./risedev k
+#pkill risingwave
+#./risedev clean-data
