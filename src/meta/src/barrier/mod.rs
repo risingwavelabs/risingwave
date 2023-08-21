@@ -579,7 +579,8 @@ where
             // inject the first `Initial` barrier.
             let new_epoch = if self.enable_recovery {
                 self.set_status(BarrierManagerStatus::Recovering).await;
-                let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+                let span =
+                    tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
                 self.recovery(prev_epoch).instrument(span).await
             } else {
                 prev_epoch.next()
