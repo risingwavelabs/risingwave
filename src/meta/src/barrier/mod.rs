@@ -577,9 +577,13 @@ where
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
-            self.set_status(BarrierManagerStatus::Recovering).await;
-            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
-            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
+            let new_epoch = if self.enable_recovery {
+                self.set_status(BarrierManagerStatus::Recovering).await;
+                let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+                self.recovery(prev_epoch).instrument(span).await
+            } else {
+                prev_epoch.next()
+            };
 
             BarrierManagerState::new(new_epoch)
         };

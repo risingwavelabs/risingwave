@@ -976,6 +976,9 @@ mod tests {
         let inject_barrier_err_success = "inject_barrier_err_success";
         let services = MockServices::start("127.0.0.1", 12335, true).await.unwrap();
 
+        // Wait for bootstrap_recovery to finish.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
