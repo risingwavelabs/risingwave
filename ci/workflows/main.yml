@@ -202,8 +202,8 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "integration test (deterministic simulation)"
-    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh"
+  - label: "integration test (deterministic simulation) - scale"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
@@ -213,8 +213,19 @@ steps:
     timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "sink integration test (deterministic simulation)"
-    command: "TEST_NUM=10 ci/scripts/deterministic-it-test.sh sink::"
+  - label: "integration test (deterministic simulation) - recovery"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh recovery::"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 40
+    retry: *auto-retry
+
+  - label: "integration test (deterministic simulation) - others"
+    command: "TEST_NUM=10 ci/scripts/deterministic-it-test.sh backfill_tests:: storage:: sink::"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
