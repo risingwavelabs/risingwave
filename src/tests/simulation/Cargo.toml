@@ -27,7 +27,7 @@ pin-project = "1.1"
 pretty_assertions = "1"
 prometheus = { version = "0.13" }
 rand = "0.8"
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
+rdkafka = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
