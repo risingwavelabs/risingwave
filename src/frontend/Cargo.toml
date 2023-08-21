@@ -44,7 +44,7 @@ paste = "1"
 petgraph = "0.6"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = "0.2"
-postgres-types = { version = "0.2.5" }
+postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }
