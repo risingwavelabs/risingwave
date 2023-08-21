@@ -246,3 +246,16 @@ pub fn estimate_task_output_capacity(context: Arc<CompactorContext>, task: &Comp
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
     std::cmp::min(capacity, total_input_uncompressed_file_size as usize)
 }
+
+pub fn estimate_task_output_capacity_v2(sstable_size_mb: u32, task: &CompactTask) -> usize {
+    let max_target_file_size = sstable_size_mb as usize * (1 << 20);
+    let total_input_uncompressed_file_size = task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table| table.uncompressed_file_size)
+        .sum::<u64>();
+
+    let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
+    std::cmp::min(capacity, total_input_uncompressed_file_size as usize)
+}

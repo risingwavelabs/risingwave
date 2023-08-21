@@ -26,6 +26,7 @@ use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
+use crate::{hummock::SstableObjectIdManager, filter_key_extractor::FilterKeyExtractorManager};
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{
@@ -50,7 +51,7 @@ use tokio::time::Instant;
 
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::{filter_key_extractor::FilterKeyExtractorImpl, hummock::{MemoryLimiter, SstableObjectIdManager}};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
@@ -1287,12 +1288,16 @@ pub async fn shared_compact(
     compactor_context: Arc<CompactorContext>,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
+    sstable_store: SstableStoreRef,
+    memory_limiter: Arc<MemoryLimiter>,
+    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
-    let context = compactor_context.clone();
+    // let context = compactor_context.clone();
     // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
     // write op. The watermark is invalidated when this method exits.
 
-    let sstable_object_id_manager_clone = context.sstable_object_id_manager.clone();
+    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
 
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -1358,8 +1363,7 @@ pub async fn shared_compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match context
-        .filter_key_extractor_manager
+    let multi_filter_key_extractor = match filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await
     {
@@ -1429,7 +1433,7 @@ pub async fn shared_compact(
         TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
     let delete_range_agg = match CompactorRunner::build_delete_range_iter(
         &sstable_infos,
-        &compactor_context.sstable_store,
+        &sstable_store,
         &mut multi_filter,
     )
     .await
@@ -1438,7 +1442,7 @@ pub async fn shared_compact(
         Err(err) => {
             tracing::warn!("Failed to build delete range aggregator {:#?}", err);
             task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return shared_compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
         }
     };
 
@@ -1452,7 +1456,7 @@ pub async fn shared_compact(
             .object_store_recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
-        context.sstable_store.store().support_streaming_upload(),
+        sstable_store.store().support_streaming_upload(),
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
@@ -1469,19 +1473,18 @@ pub async fn shared_compact(
 
     // If the task does not have enough memory, it should cancel the task and let the meta
     // reschedule it, so that it does not occupy the compactor's resources.
-    let memory_detector = context
-        .memory_limiter
+    let memory_detector = memory_limiter
         .try_require_memory(task_memory_capacity_with_parallelism);
     if memory_detector.is_none() {
         tracing::warn!(
                 "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
                 compact_task.task_id,
                 task_memory_capacity_with_parallelism,
-                context.memory_limiter.get_memory_usage(),
-                context.memory_limiter.quota()
+                memory_limiter.get_memory_usage(),
+                memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailResourceCanceled;
-        return compact_done(compact_task, context.clone(), output_ssts, task_status);
+        return shared_compact_done(compact_task, compactor_metrics, output_ssts, task_status);
     }
 
     compactor_metrics.compact_task_pending_num.inc();
@@ -1578,7 +1581,7 @@ pub async fn shared_compact(
     compactor_metrics.compact_task_pending_num.dec();
     for level in &compact_task.input_ssts {
         for table in &level.table_infos {
-            context.sstable_store.delete_cache(table.get_object_id());
+            sstable_store.delete_cache(table.get_object_id());
         }
     }
     (compact_task, table_stats)
