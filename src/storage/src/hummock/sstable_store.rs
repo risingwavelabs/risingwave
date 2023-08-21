@@ -19,13 +19,14 @@ use std::time::Duration;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
+use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
-    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
+    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
     ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
@@ -360,7 +361,7 @@ impl SstableStore {
         )
     }
 
-    pub fn get_object_id_from_path(&self, path: &str) -> HummockSstableObjectId {
+    pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
         let split = path.split(&['/', '.']).collect_vec();
         assert!(split.len() > 2);
         assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
@@ -463,16 +464,15 @@ impl SstableStore {
         )
     }
 
-    pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
-        self.store
-            .list(&format!("{}/", self.path))
-            .await
-            .map(|v| {
-                v.into_iter()
-                    .filter(|m| m.key.ends_with(&format!(".{}", OBJECT_SUFFIX)))
-                    .collect()
-            })
-            .map_err(HummockError::object_io_error)
+    pub async fn list_object_metadata_from_object_store(
+        &self,
+    ) -> HummockResult<ObjectMetadataIter> {
+        let raw_iter = self.store.list(&format!("{}/", self.path)).await?;
+        let iter = raw_iter.filter(|r| match r {
+            Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
+            Err(_) => future::ready(true),
+        });
+        Ok(Box::pin(iter))
     }
 
     pub fn create_sst_writer(
@@ -1007,7 +1007,7 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta};
+    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: HummockSstableObjectId = 1;
@@ -1108,6 +1108,6 @@ mod tests {
         let object_id = 123;
         let data_path = sstable_store.get_sst_data_path(object_id);
         assert_eq!(data_path, "test/123.data");
-        assert_eq!(sstable_store.get_object_id_from_path(&data_path), object_id);
+        assert_eq!(SstableStore::get_object_id_from_path(&data_path), object_id);
     }
 }

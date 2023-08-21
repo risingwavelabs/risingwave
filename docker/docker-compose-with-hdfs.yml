@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64
     command:
       - compactor-node
       - "--listen-addr"
@@ -23,13 +23,11 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<HADOOP_HOME>:/opt/hadoop/"
     environment:
-      RUST_BACKTRACE: "1"
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      - HADOOP_HOME=/opt/hadoop/
     container_name: compactor-0
     healthcheck:
       test:
@@ -39,7 +37,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
       - compute-node
       - "--listen-addr"
@@ -62,13 +60,11 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<HADOOP_HOME>:/opt/hadoop/"
     environment:
-      RUST_BACKTRACE: "1"
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      - HADOOP_HOME=/opt/hadoop/
     container_name: compute-node-0
     healthcheck:
       test:
@@ -113,7 +109,9 @@ services:
     depends_on: []
     volumes:
       - "etcd-0:/etcd-data"
-    environment: {}
+      - "<HADOOP_HOME>:/opt/hadoop/"
+    environment:
+      - HADOOP_HOME=/opt/hadoop/
     container_name: etcd-0
     healthcheck:
       test:
@@ -126,7 +124,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
       - frontend-node
       - "--listen-addr"
@@ -151,8 +149,6 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -185,7 +181,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:latest"
+    image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
       - meta-node
       - "--listen-addr"
@@ -203,7 +199,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "hummock+hdfs://<cluster_name>@<data_path>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -219,58 +215,14 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
+      - "<HADOOP_HOME>:/opt/hadoop"
     environment:
-      RUST_BACKTRACE: "1"
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      - HADOOP_HOME=/opt/hadoop/
     container_name: meta-node-0
     healthcheck:
       test:
         - CMD-SHELL
         - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
-      interval: 1s
-      timeout: 5s
-      retries: 5
-  minio-0:
-    image: "quay.io/minio/minio:latest"
-    command:
-      - server
-      - "--address"
-      - "0.0.0.0:9301"
-      - "--console-address"
-      - "0.0.0.0:9400"
-      - /data
-    expose:
-      - "9301"
-      - "9400"
-    ports:
-      - "9301:9301"
-      - "9400:9400"
-    depends_on: []
-    volumes:
-      - "minio-0:/data"
-    entrypoint: "
-
-      /bin/sh -c '
-
-      set -e
-
-      mkdir -p \"/data/hummock001\"
-
-      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
-
-      '"
-    environment:
-      MINIO_CI_CD: "1"
-      MINIO_PROMETHEUS_AUTH_TYPE: public
-      MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
-      MINIO_ROOT_PASSWORD: hummockadmin
-      MINIO_ROOT_USER: hummockadmin
-    container_name: minio-0
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9301; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -301,7 +253,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:latest
+    image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051
@@ -349,8 +301,6 @@ volumes:
   etcd-0:
     external: false
   grafana-0:
-    external: false
-  minio-0:
     external: false
   prometheus-0:
     external: false

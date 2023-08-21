@@ -16,14 +16,14 @@ use std::ops::Sub;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use itertools::Itertools;
+use futures::{StreamExt, TryStreamExt};
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::ObjectMetadata;
+use risingwave_object_store::object::ObjectMetadataIter;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::{HummockError, HummockResult};
-use crate::hummock::SstableStoreRef;
+use crate::hummock::{SstableStore, SstableStoreRef};
 
 pub struct Vacuum;
 
@@ -47,7 +47,7 @@ impl Vacuum {
                 tracing::info!("Finished vacuuming SSTs");
             }
             Err(e) => {
-                tracing::warn!("Failed to vacuum SSTs.\n{:#?}", e);
+                tracing::warn!("Failed to vacuum SSTs: {:#?}", e);
                 return false;
             }
         }
@@ -67,7 +67,7 @@ impl Vacuum {
             })
             .await
             .map_err(|e| {
-                HummockError::meta_error(format!("Failed to report vacuum task.\n{:#?}", e))
+                HummockError::meta_error(format!("Failed to report vacuum task: {:#?}", e))
             })?;
 
         Ok(())
@@ -84,44 +84,72 @@ impl Vacuum {
             "Try to full scan SSTs with timestamp {}",
             full_scan_task.sst_retention_time_sec
         );
-
-        let object_metadata = match sstable_store.list_ssts_from_object_store().await {
-            Ok(object_metadata) => object_metadata,
+        let metadata_iter = match sstable_store.list_object_metadata_from_object_store().await {
+            Ok(metadata_iter) => metadata_iter,
             Err(e) => {
-                tracing::warn!("Failed to list object store.\n{:#?}", e);
+                tracing::warn!("Failed to init object iter: {:#?}", e);
                 return false;
             }
         };
+        let (filtered_object_ids, unfiltered_count, unfiltered_size) =
+            match Vacuum::full_scan_inner(full_scan_task, metadata_iter).await {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::warn!("Failed to iter object: {:#?}", e);
+                    return false;
+                }
+            };
 
-        let object_ids =
-            Vacuum::full_scan_inner(full_scan_task, object_metadata, sstable_store.clone());
-        match hummock_meta_client.report_full_scan_task(object_ids).await {
+        match hummock_meta_client
+            .report_full_scan_task(filtered_object_ids, unfiltered_count, unfiltered_size)
+            .await
+        {
             Ok(_) => {
                 tracing::info!("Finished full scan SSTs");
             }
             Err(e) => {
-                tracing::warn!("Failed to report full scan task.\n{:#?}", e);
+                tracing::warn!("Failed to report full scan task: {:#?}", e);
                 return false;
             }
         }
         true
     }
 
-    pub fn full_scan_inner(
+    /// Returns **filtered** object ids, and **unfiltered** total object count and size.
+    pub async fn full_scan_inner(
         full_scan_task: FullScanTask,
-        object_metadata: Vec<ObjectMetadata>,
-        sstable_store: SstableStoreRef,
-    ) -> Vec<HummockSstableObjectId> {
+        metadata_iter: ObjectMetadataIter,
+    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64)> {
         let timestamp_watermark = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .sub(Duration::from_secs(full_scan_task.sst_retention_time_sec))
             .as_secs_f64();
-        object_metadata
-            .into_iter()
-            .filter(|o| o.last_modified < timestamp_watermark)
-            .map(|o| sstable_store.get_object_id_from_path(&o.key))
-            .dedup()
-            .collect_vec()
+
+        let mut total_object_count = 0;
+        let mut total_object_size = 0;
+        let filtered = metadata_iter
+            .filter_map(|r| {
+                let result = match r {
+                    Ok(o) => {
+                        total_object_count += 1;
+                        total_object_size += o.total_size;
+                        if o.last_modified < timestamp_watermark {
+                            Some(Ok(SstableStore::get_object_id_from_path(&o.key)))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => Some(Err(HummockError::from(e))),
+                };
+                async move { result }
+            })
+            .try_collect::<Vec<HummockSstableObjectId>>()
+            .await?;
+        Ok((
+            filtered,
+            total_object_count as u64,
+            total_object_size as u64,
+        ))
     }
 }

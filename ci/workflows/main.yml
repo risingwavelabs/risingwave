@@ -189,7 +189,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 13
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
@@ -202,7 +202,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "scaling test (deterministic simulation)"
+  - label: "integration test (deterministic simulation) - scale"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
@@ -213,7 +213,7 @@ steps:
     timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "recovery integration test (deterministic simulation)"
+  - label: "integration test (deterministic simulation) - recovery"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh recovery::"
     depends_on: "build-simulation"
     plugins:
@@ -224,15 +224,15 @@ steps:
     timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "backfill integration test (deterministic simulation)"
-    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh backfill_tests::"
+  - label: "integration test (deterministic simulation) - others"
+    command: "TEST_NUM=10 ci/scripts/deterministic-it-test.sh backfill_tests:: storage:: sink::"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -305,6 +305,20 @@ steps:
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end iceberg sink v2 test (release mode)"
+    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
     depends_on:
       - "build-release"
       - "build-other"

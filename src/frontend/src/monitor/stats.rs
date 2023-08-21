@@ -15,13 +15,15 @@
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, Histogram, Registry,
+    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, IntGauge,
+    Registry,
 };
 
 pub struct FrontendMetrics {
     pub registry: Registry,
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
+    pub active_sessions: IntGauge,
 }
 
 impl FrontendMetrics {
@@ -40,10 +42,18 @@ impl FrontendMetrics {
         );
         let latency_local_execution = register_histogram_with_registry!(opts, &registry).unwrap();
 
+        let active_sessions = register_int_gauge_with_registry!(
+            "frontend_active_sessions",
+            "Total number of active sessions in frontend",
+            &registry
+        )
+        .unwrap();
+
         Self {
             registry,
             query_counter_local_execution,
             latency_local_execution,
+            active_sessions,
         }
     }
 

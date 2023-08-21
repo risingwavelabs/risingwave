@@ -28,7 +28,7 @@ def section_actor_info(panels):
                           [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
         panels.table_info("Materialized View Info",
                           "Mapping from materialized view table id to it's internal table ids",
-                           [panels.table_target(f"{metric('materialized_info')}")], excluded_cols),
+                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
     ]
 
 
@@ -609,8 +609,11 @@ def section_object_storage(outer_panels):
 
 
 def section_streaming(panels):
-    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
     sink_filter = "executor_identity=~\".*SinkExecutor.*\""
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
+    mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
+    sink_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=sink_filter)}[$__rate_interval]) * on(actor_id) group_left(sink_name) (group({metric("sink_info")}) by (actor_id, sink_name))) by (sink_name)'
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
@@ -703,21 +706,22 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
-            "The figure shows the number of rows output by each sink executor actor per second.",
+            "The figure shows the number of rows output by each sink per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])",
-                    "sink={{executor_identity}} {{actor_id}} @ {{instance}}",
+                    sink_throughput_query,
+                   "sink {{sink_name}}",
                 ),
             ],
         ),
+
         panels.timeseries_rowsps(
             "Materialized View Throughput(rows/s)",
-            "The figure shows the number of rows written into each materialized executor actor per second.",
+            "The figure shows the number of rows written into each materialized view per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])",
-                    "MV={{executor_identity}} {{actor_id}} @ {{instance}}",
+                   mv_throughput_query,
+                   "materialized view {{table_name}} table_id {{materialized_view_id}}",
                 ),
             ],
         ),
@@ -850,7 +854,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_executor_row_count')}[$__rate_interval]) > 0",
-                            "{{actor_id}}->{{executor_identity}}",
+                            "actor {{actor_id}}->{{executor_identity}}",
                         ),
                     ],
                 ),
@@ -883,6 +887,17 @@ def section_streaming_actors(outer_panels):
                         panels.target(
                             f"{metric('stream_memory_usage')}",
                             "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Materialized View Memory Usage",
+                    "Materialzed View Memory Usage",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            "materialized_view {{materialized_view_id}}",
                         ),
                     ],
                 ),
@@ -1490,8 +1505,18 @@ def section_frontend(outer_panels):
         outer_panels.row_collapsed(
             "Frontend",
             [
+                panels.timeseries_count(
+                    "Active Sessions",
+                    "Number of active sessions",
+                    [
+                        panels.target(
+                            f"{metric('frontend_active_sessions')}",
+                            "",
+                        ),
+                    ]
+                ),
                 panels.timeseries_query_per_sec(
-                    "Query Per Second(Local Query Mode)",
+                    "Query Per Second (Local Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1501,7 +1526,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_query_per_sec(
-                    "Query Per Second(Distributed Query Mode)",
+                    "Query Per Second (Distributed Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1511,7 +1536,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "The Number of Running Queries(Distributed Query Mode)",
+                    "The Number of Running Queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_running_query_num')}",
@@ -1520,7 +1545,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "The Number of Rejected queries(Distributed Query Mode)",
+                    "The Number of Rejected queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_rejected_query_counter')}",
@@ -1529,7 +1554,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "The Number of Completed Queries(Distributed Query Mode)",
+                    "The Number of Completed Queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_completed_query_counter')}",
@@ -1538,7 +1563,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_latency(
-                    "Query Latency(Distributed Query Mode)",
+                    "Query Latency (Distributed Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1556,7 +1581,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Query Latency(Local Query Mode)",
+                    "Query Latency (Local Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1584,6 +1609,7 @@ def section_hummock(panels):
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
     file_cache_get_filter = "op='get'"
+
     return [
         panels.row("Hummock"),
         panels.timeseries_latency(
@@ -1725,6 +1751,36 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_bytes(
+            "Materialized View Read Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_iter_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id) + sum((histogram_quantile({quantile}, sum(rate({metric("state_store_get_key_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({metric("state_store_get_value_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id)',
+                        f"read p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+        panels.timeseries_bytes(
+            "Materialized View Write Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_write_batch_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id, table_name)',
+                        f"write p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+
         panels.timeseries_count(
             "Read Item Count - Iter",
             "",
@@ -2312,6 +2368,8 @@ Objects are classified into 3 groups:
 - not referenced by versions: these object are being deleted from object store.
 - referenced by non-current versions: these objects are stale (not in the latest version), but those old versions may still be in use (e.g. long-running pinning). Thus those objects cannot be deleted at the moment.
 - referenced by current version: these objects are in the latest version.
+
+Additionally, a metric on all objects (including dangling ones) is updated with low-frequency. The metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.
                     """,
                     [
                         panels.target(f"{metric('storage_stale_object_count')}",
@@ -2320,6 +2378,8 @@ Objects are classified into 3 groups:
                                       "referenced by non-current versions"),
                         panels.target(f"{metric('storage_current_version_object_count')}",
                                       "referenced by current version"),
+                        panels.target(f"{metric('storage_total_object_count')}",
+                                      "all objects (including dangling ones)"),
                     ],
                 ),
                 panels.timeseries_bytes(
@@ -2332,6 +2392,8 @@ Objects are classified into 3 groups:
                                       "referenced by non-current versions"),
                         panels.target(f"{metric('storage_current_version_object_size')}",
                                       "referenced by current version"),
+                        panels.target(f"{metric('storage_total_object_size')}",
+                                      "all objects, including dangling ones"),
                     ],
                 ),
                 panels.timeseries_count(
@@ -2380,6 +2442,48 @@ Objects are classified into 3 groups:
                     [
                         panels.target(f"{metric('storage_full_gc_last_object_id_watermark')}",
                                       "full_gc_last_object_id_watermark"),
+                    ],
+                ),
+
+                panels.timeseries_latency_ms(
+                    "Compaction Event Loop Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"meta consumed latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"meta iteration latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"compactor consumed latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
+
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"compactor iteration latency p{legend}" +
+                                " - {{job}} @ {{instance}}",
+                            ),
+                            [50, 99, 999, "max"],
+                        ),
                     ],
                 ),
             ],
