@@ -42,11 +42,8 @@ impl CompactionPicker for LevelCompactionPicker {
             return (None, local_picker_stats);
         }
 
-        let mut to_base_picker_stat = LocalPickerStatistic::new(
-            0,
-            self.target_level,
-            format!("{} -> {} base", 0, self.target_level),
-        );
+        let mut to_base_picker_stat =
+            LocalPickerStatistic::new(0, self.target_level, String::from("base"));
         if l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
             && l0.sub_levels[0].table_infos.len() > 1
         {
@@ -79,11 +76,8 @@ impl CompactionPicker for LevelCompactionPicker {
             level_handlers,
         );
 
-        let mut to_base_trivial_picker_stat = LocalPickerStatistic::new(
-            0,
-            self.target_level,
-            format!("{} -> {} base trivial", 0, self.target_level),
-        );
+        let mut to_base_trivial_picker_stat =
+            LocalPickerStatistic::new(0, self.target_level, String::from("base trivial"));
         // only pick tables for trivial move
         if !select_tables.is_empty() && target_tables.is_empty() {
             return (
@@ -122,15 +116,14 @@ impl CompactionPicker for LevelCompactionPicker {
         }
 
         local_picker_stats.push(to_base_picker_stat);
-        let mut l0_intra_picker_stat =
-            LocalPickerStatistic::new(0, 0, format!("{} -> {} intra", 0, 0));
+        let mut l0_intra_picker_stat = LocalPickerStatistic::new(0, 0, String::from("intra"));
         if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], &mut l0_intra_picker_stat) {
             local_picker_stats.push(l0_intra_picker_stat);
             return (Some(ret), local_picker_stats);
         }
 
         let mut l0_trivial_move_picker_stat =
-            LocalPickerStatistic::new(0, 0, format!("{} -> {} trivial-move", 0, 0));
+            LocalPickerStatistic::new(0, 0, String::from("trivial-move"));
         let ret =
             self.pick_l0_trivial_move_file(l0, level_handlers, &mut l0_trivial_move_picker_stat);
         local_picker_stats.push(l0_trivial_move_picker_stat);

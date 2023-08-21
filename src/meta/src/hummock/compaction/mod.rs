@@ -234,13 +234,14 @@ impl Default for ManualCompactionOption {
 
 #[derive(Default)]
 pub struct LocalSelectorStatistic {
+    // vec is used to record the cause of skip in different branches within the picker
     skip_picker: Vec<LocalPickerStatistic>,
 }
 
 impl LocalSelectorStatistic {
     pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
         for stats in &self.skip_picker {
-            let level_label = format!("cg{} {} ", group_id, stats.task_label);
+            let level_label = format!("cg{} {} ", group_id, stats.task_label());
             if stats.skip_by_write_amp_limit() {
                 metrics
                     .compact_skip_frequency

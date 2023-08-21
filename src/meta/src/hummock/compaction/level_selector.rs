@@ -381,7 +381,6 @@ impl LevelSelector for DynamicLevelSelector {
                 target_level,
                 overlap_strategy.clone(),
             );
-            // let mut stats: LocalPickerStatistic = LocalPickerStatistic::default();
             let (ret, local_picker_stats) = picker.pick_compaction(levels, level_handlers);
             if let Some(ret) = ret {
                 ret.add_pending_task(task_id, level_handlers);

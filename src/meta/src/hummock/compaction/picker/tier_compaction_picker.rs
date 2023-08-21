@@ -157,7 +157,7 @@ impl CompactionPicker for TierCompactionPicker {
     ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>) {
         let l0 = levels.l0.as_ref().unwrap();
         let mut local_picker_stats = Vec::default();
-        let mut tier_picker_stat = LocalPickerStatistic::new(0, 0, format!("{} -> {} tier", 0, 0));
+        let mut tier_picker_stat = LocalPickerStatistic::new(0, 0, String::from("tier"));
         if l0.sub_levels.is_empty() {
             return (None, local_picker_stats);
         }

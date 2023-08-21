@@ -32,19 +32,19 @@ use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default)]
 pub struct LocalPickerStatistic {
-    skip_by_write_amp_limit: bool,
-    skip_by_count_limit: bool,
-    skip_by_pending_files: bool,
-    skip_by_overlapping: bool,
-    skip_by_trivial_move: bool,
+    skip_by_write_amp_limit: bool, // task does not satisfy write-amp limit
+    skip_by_count_limit: bool,     // task does not satisfy the count / size limit.
+    skip_by_pending_files: bool,   // sst is pending and the picker exits.
+    skip_by_overlapping: bool,     // overlapping level is encountered and the picker exits.
+    skip_by_trivial_move: bool,    // ssts that do not satisfy trivial-move
 
     pub select_level: usize,
     pub target_level: usize,
-    pub task_label: String,
+    pub pick_type: String,
 }
 
 impl LocalPickerStatistic {
-    fn new(select_level: usize, target_level: usize, task_label: String) -> Self {
+    fn new(select_level: usize, target_level: usize, pick_type: String) -> Self {
         Self {
             skip_by_write_amp_limit: false,
             skip_by_count_limit: false,
@@ -53,7 +53,7 @@ impl LocalPickerStatistic {
             skip_by_trivial_move: false,
             select_level,
             target_level,
-            task_label,
+            pick_type,
         }
     }
 
@@ -95,6 +95,13 @@ impl LocalPickerStatistic {
 
     pub fn skip_by_trivial_move(&self) -> bool {
         self.skip_by_trivial_move
+    }
+
+    pub fn task_label(&self) -> String {
+        format!(
+            "{} -> {} {}",
+            self.select_level, self.target_level, self.pick_type
+        )
     }
 }
 

@@ -120,11 +120,8 @@ impl CompactionPicker for MinOverlappingPicker {
     ) -> (Option<CompactionInput>, Vec<LocalPickerStatistic>) {
         assert!(self.level > 0);
         let mut local_picker_stats = Vec::default();
-        let mut min_overlapping_picker_stat = LocalPickerStatistic::new(
-            self.level,
-            self.target_level,
-            format!("{} -> {} ", self.level, self.target_level),
-        );
+        let mut min_overlapping_picker_stat =
+            LocalPickerStatistic::new(self.level, self.target_level, String::default());
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
             &levels.get_level(self.level).table_infos,
             &levels.get_level(self.target_level).table_infos,
@@ -137,7 +134,6 @@ impl CompactionPicker for MinOverlappingPicker {
             return (None, local_picker_stats);
         }
 
-        local_picker_stats.push(min_overlapping_picker_stat);
         (
             Some(CompactionInput {
                 input_levels: vec![
