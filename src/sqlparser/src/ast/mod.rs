@@ -1103,7 +1103,10 @@ pub enum Statement {
         name: ObjectName,
     },
     /// SHOW OBJECT COMMAND
-    ShowObjects(ShowObject),
+    ShowObjects {
+        object: ShowObject,
+        filter: Option<ShowStatementFilter>,
+    },
     /// SHOW CREATE COMMAND
     ShowCreateObject {
         /// Show create object type
@@ -1264,8 +1267,11 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects(show_object) => {
+            Statement::ShowObjects{ object: show_object, filter} => {
                 write!(f, "SHOW {}", show_object)?;
+                if let Some(filter) = filter {
+                    write!(f, " {}", filter)?;
+                }
                 Ok(())
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {

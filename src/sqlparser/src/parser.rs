@@ -3814,76 +3814,115 @@ impl Parser {
         if let Token::Word(w) = self.next_token().token {
             match w.keyword {
                 Keyword::TABLES => {
-                    return Ok(Statement::ShowObjects(ShowObject::Table {
-                        schema: self.parse_from_and_identifier()?,
-                    }));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Table {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::INTERNAL => {
                     self.expect_keyword(Keyword::TABLES)?;
-                    return Ok(Statement::ShowObjects(ShowObject::InternalTable {
-                        schema: self.parse_from_and_identifier()?,
-                    }));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::InternalTable {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::SOURCES => {
-                    return Ok(Statement::ShowObjects(ShowObject::Source {
-                        schema: self.parse_from_and_identifier()?,
-                    }));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Source {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::SINKS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Sink {
-                        schema: self.parse_from_and_identifier()?,
-                    }))
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Sink {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::DATABASES => {
-                    return Ok(Statement::ShowObjects(ShowObject::Database));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Database,
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::SCHEMAS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Schema));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Schema,
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::VIEWS => {
-                    return Ok(Statement::ShowObjects(ShowObject::View {
-                        schema: self.parse_from_and_identifier()?,
-                    }));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::View {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
-                        return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
-                            schema: self.parse_from_and_identifier()?,
-                        }));
+                        return Ok(Statement::ShowObjects {
+                            object: ShowObject::MaterializedView {
+                                schema: self.parse_from_and_identifier()?,
+                            },
+                            filter: self.parse_show_statement_filter()?,
+                        });
                     } else {
                         return self.expected("VIEWS after MATERIALIZED", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {
                     if self.parse_keyword(Keyword::FROM) {
-                        return Ok(Statement::ShowObjects(ShowObject::Columns {
-                            table: self.parse_object_name()?,
-                        }));
+                        return Ok(Statement::ShowObjects {
+                            object: ShowObject::Columns {
+                                table: self.parse_object_name()?,
+                            },
+                            filter: self.parse_show_statement_filter()?,
+                        });
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }
                 }
                 Keyword::CONNECTIONS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Connection {
-                        schema: self.parse_from_and_identifier()?,
-                    }));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Connection {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::FUNCTIONS => {
-                    return Ok(Statement::ShowObjects(ShowObject::Function {
-                        schema: self.parse_from_and_identifier()?,
-                    }));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Function {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::INDEXES => {
                     if self.parse_keyword(Keyword::FROM) {
-                        return Ok(Statement::ShowObjects(ShowObject::Indexes {
-                            table: self.parse_object_name()?,
-                        }));
+                        return Ok(Statement::ShowObjects {
+                            object: ShowObject::Indexes {
+                                table: self.parse_object_name()?,
+                            },
+                            filter: self.parse_show_statement_filter()?,
+                        });
                     } else {
                         return self.expected("from after indexes", self.peek_token());
                     }
                 }
                 Keyword::CLUSTER => {
-                    return Ok(Statement::ShowObjects(ShowObject::Cluster));
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Cluster,
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 _ => {}
             }
@@ -3937,6 +3976,24 @@ impl Parser {
             "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
             self.peek_token(),
         )
+    }
+
+    pub fn parse_show_statement_filter(
+        &mut self,
+    ) -> Result<Option<ShowStatementFilter>, ParserError> {
+        if self.parse_keyword(Keyword::LIKE) {
+            Ok(Some(ShowStatementFilter::Like(
+                self.parse_literal_string()?,
+            )))
+        } else if self.parse_keyword(Keyword::ILIKE) {
+            Ok(Some(ShowStatementFilter::ILike(
+                self.parse_literal_string()?,
+            )))
+        } else if self.parse_keyword(Keyword::WHERE) {
+            Ok(Some(ShowStatementFilter::Where(self.parse_expr()?)))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn parse_table_and_joins(&mut self) -> Result<TableWithJoins, ParserError> {
