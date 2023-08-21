@@ -42,7 +42,7 @@ pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompactionDeleteRanges, HummockResult, MemoryLimiter, SstableBuilderOptions,
-    SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef, Xor16FilterBuilder,
+    SstableObjectIdManager, SstableStoreRef, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
