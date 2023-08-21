@@ -361,7 +361,7 @@ create table s27 with (
   topic = 'json_schema',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/avro-complex-schema.json')
+) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/json-complex-schema')
 
 statement ok
 CREATE TABLE mongo_customers (
