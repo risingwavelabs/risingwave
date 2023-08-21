@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::table_stats::{
     add_table_stats_map, to_prost_table_stats_map, TableStats, TableStatsMap,
 };
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
@@ -1232,4 +1233,48 @@ mod tests {
             create_monotonic_events(vec![range_tombstones[1].clone()])
         );
     }
+}
+
+/// The background compaction thread that receives compaction tasks from hummock compaction
+/// manager and runs compaction tasks.
+#[cfg_attr(coverage, no_coverage)]
+pub fn start_shared_compactor(
+    compact_task: CompactTask,
+    table_catalogs: Table,
+    output_ids: Vec<u64>,
+    cpu_core_num: u32,
+) -> (JoinHandle<()>, Sender<()>) {
+    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let stream_retry_interval = Duration::from_secs(30);
+    let periodic_event_update_interval = Duration::from_millis(1000);
+    let mut system =
+        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
+    let pid = sysinfo::get_current_pid().unwrap();
+    let pull_task_ack = Arc::new(AtomicBool::new(true));
+
+    let join_handle = tokio::spawn(async move {
+        let shutdown_map = CompactionShutdownMap::default();
+        let shutdown = shutdown_map.clone();
+        let mut min_interval = tokio::time::interval(stream_retry_interval);
+        let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
+        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
+        running_task_count.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task_id = compact_task.task_id;
+        shutdown.lock().unwrap().insert(task_id, tx);
+        let (compact_task, table_stats) = compact(context, compact_task, rx).await;
+        shutdown.lock().unwrap().remove(&task_id);
+        running_task_count.fetch_sub(1, Ordering::SeqCst);
+
+        if let Err(e) = request_sender.send(ReportCompactionTaskRequest {
+            event: Some(RequestEvent::ReportTask(ReportTask {
+                compact_task: Some(compact_task),
+                table_stats_change: to_prost_table_stats_map(table_stats),
+            })),
+        }) {
+            tracing::warn!("Failed to report task {task_id:?} . {e:?}");
+        }
+    });
+    (join_handle, shutdown_tx)
 }
