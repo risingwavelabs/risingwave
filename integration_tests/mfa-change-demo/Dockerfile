@@ -19,6 +19,7 @@ RUN apt install -y postgresql-client
 
 ADD ./server/model/requirements.txt $WORK_DIR/model-pipreqs.txt
 ADD ./generator/requirements.txt $WORK_DIR/generator-pipreqs.txt
+RUN python3 -m pip install --upgrade pip
 RUN pip3 install -r $WORK_DIR/model-pipreqs.txt
 RUN pip3 install -r $WORK_DIR/generator-pipreqs.txt
 
@@ -44,7 +45,6 @@ RUN cp $WORK_DIR/build/server/target/release/server $WORK_DIR/feature-store-serv
 RUN cp $WORK_DIR/build/simulator/target/release/simulator $WORK_DIR/feature-store-simulator
 RUN rm -rf $WORK_DIR/build
 
-ADD ./parquet_data.csv $WORK_DIR/parquet_data.csv
 ADD ./server/model $WORK_DIR/server/model
 ADD ./generator $WORK_DIR/generator
 ADD ./taxi-start.sql $WORK_DIR/taxi-start.sql
