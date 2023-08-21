@@ -101,7 +101,6 @@ impl CompactorRunner {
         };
 
         let compactor = Compactor::new(
-            context.clone(),
             options,
             TaskConfig {
                 key_range: key_range.clone(),
@@ -116,6 +115,12 @@ impl CompactorRunner {
                 split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
             },
+            context.compactor_metrics.clone(),
+            context.is_share_buffer_compact,
+            context.sstable_store.clone(),
+            context.memory_limiter.clone(),
+            context.sstable_object_id_manager.clone(),
+            context.storage_opts.compact_iter_recreate_timeout_ms,
         );
 
         Self {
@@ -182,11 +187,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
-        let compact_io_retry_time = self
-            .compactor
-            .context
-            .storage_opts
-            .compact_iter_recreate_timeout_ms;
+        let compact_io_retry_time = self.compactor.compact_iter_recreate_timeout_ms;
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -353,7 +354,12 @@ pub async fn compact(
         Err(e) => {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
             let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(
+                compact_task,
+                context.compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
         Ok(extractor) => extractor,
     };
@@ -367,7 +373,12 @@ pub async fn compact(
         if !removed_tables.is_empty() {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
             let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(
+                compact_task,
+                context.compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
     }
 
@@ -401,7 +412,12 @@ pub async fn compact(
         Err(e) => {
             tracing::warn!("Failed to generate_splits {:#?}", e);
             task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(
+                compact_task,
+                context.compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
     }
 
@@ -425,7 +441,12 @@ pub async fn compact(
         Err(err) => {
             tracing::warn!("Failed to build delete range aggregator {:#?}", err);
             task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return compact_done(
+                compact_task,
+                context.compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
     };
 
@@ -468,7 +489,12 @@ pub async fn compact(
                 context.memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailResourceCanceled;
-        return compact_done(compact_task, context.clone(), output_ssts, task_status);
+        return compact_done(
+            compact_task,
+            context.compactor_metrics.clone(),
+            output_ssts,
+            task_status,
+        );
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
@@ -554,8 +580,12 @@ pub async fn compact(
     }
 
     // After a compaction is done, mutate the compaction task.
-    let (compact_task, table_stats) =
-        compact_done(compact_task, context.clone(), output_ssts, task_status);
+    let (compact_task, table_stats) = compact_done(
+        compact_task,
+        context.compactor_metrics.clone(),
+        output_ssts,
+        task_status,
+    );
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
@@ -574,7 +604,7 @@ pub async fn compact(
 /// Fills in the compact task and tries to report the task result to meta node.
 fn compact_done(
     mut compact_task: CompactTask,
-    context: Arc<CompactorContext>,
+    compactor_metrics: Arc<CompactorMetrics>,
     output_ssts: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
@@ -601,13 +631,11 @@ fn compact_done(
 
     let group_label = compact_task.compaction_group_id.to_string();
     let level_label = compact_task.target_level.to_string();
-    context
-        .compactor_metrics
+    compactor_metrics
         .compact_write_bytes
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compaction_write_bytes);
-    context
-        .compactor_metrics
+    compactor_metrics
         .compact_write_sstn
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
