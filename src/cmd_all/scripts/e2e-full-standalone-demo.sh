@@ -77,6 +77,10 @@ echo "--- Setting up table"
 ./risedev psql -c "
 CREATE TABLE t (v1 int);
 INSERT INTO t VALUES (1);
+INSERT INTO t VALUES (2);
+INSERT INTO t VALUES (3);
+INSERT INTO t VALUES (4);
+INSERT INTO t VALUES (5);
 flush;
 "
 
@@ -86,6 +90,10 @@ echo "--- Querying table"
 echo "--- Seeding kafka topic"
 create_topic_kafka
 insert_json_kafka '{"v1": 1}'
+insert_json_kafka '{"v1": 2}'
+insert_json_kafka '{"v1": 3}'
+insert_json_kafka '{"v1": 4}'
+insert_json_kafka '{"v1": 5}'
 
 echo "--- Setting up kafka source"
 ./risedev psql -c "
