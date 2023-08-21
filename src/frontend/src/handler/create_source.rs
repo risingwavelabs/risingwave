@@ -27,8 +27,8 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    name_strategy_from_str, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig,
+    name_strategy_from_str, schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
+    ProtobufParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -331,15 +331,41 @@ pub(crate) async fn try_bind_columns_from_source(
                 },
             )
         }
-        (Format::Plain, Encode::Json) => (
-            None,
-            sql_defined_pk_names,
-            StreamSourceInfo {
-                format: FormatType::Plain as i32,
-                row_encode: EncodeType::Json as i32,
-                ..Default::default()
-            },
-        ),
+        (Format::Plain, Encode::Json) => {
+            let schema_registry = try_consume_string_from_options(&mut options, "schema.location");
+            if schema_registry.is_some() && sql_defined_schema {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with schema registry.".to_string(),
+                )));
+            }
+            if schema_registry.is_none() && sql_defined_columns.is_empty() {
+                return Err(RwError::from(InvalidInputSyntax(
+                    "schema definition is required for ENCODE JSON".to_owned(),
+                )));
+            }
+            (
+                if schema_registry.is_none() {
+                    None
+                } else {
+                    Some(
+                        schema_to_columns(&schema_registry.unwrap().0)
+                            .await?
+                            .into_iter()
+                            .map(|col| ColumnCatalog {
+                                column_desc: col.into(),
+                                is_hidden: false,
+                            })
+                            .collect_vec(),
+                    )
+                },
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    format: FormatType::Plain as i32,
+                    row_encode: EncodeType::Json as i32,
+                    ..Default::default()
+                },
+            )
+        }
         (Format::Plain, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) = get_schema_location(&mut options)?;
             let avro_schema = AvroSchema {
@@ -991,11 +1017,6 @@ pub async fn handle_create_source(
 
     let source_schema = stmt.source_schema.into_source_schema_v2();
 
-    if source_schema.row_encode == Encode::Json && stmt.columns.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(
-            "schema definition is required for ENCODE JSON".to_owned(),
-        )));
-    }
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
 

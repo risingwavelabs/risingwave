@@ -35,6 +35,7 @@ echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
 cp src/connector/src/test_data/complex-schema ./proto-complex-schema
+cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
 
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
