@@ -49,18 +49,29 @@ mkdir -p "$RW_PREFIX"
 mkdir -p "$LOG_PREFIX"
 mkdir -p "$BIN_PREFIX"
 
+echo "--- Compiling Risingwave"
 ./risedev build
 
+echo "--- Starting peripherals"
 ./risedev d standalone-full-peripherals >"$LOG_PREFIX"/peripherals.log 2>&1 &
 
 # Wait for peripherals to finish startup
 sleep 5
 
+echo "--- Starting standalone cluster"
 ./risedev standalone-demo-full >"$LOG_PREFIX"/standalone.log 2>&1 &
 STANDALONE_PID=$!
 
 # Wait for rw cluster to finish startup
-sleep 20
+sleep 10
+
+# Make sure the env file is present
+set +e
+while [ ! -f "$RW_PREFIX"/config/risedev-env ]; do
+  echo "Waiting for risedev-env to be configured."
+  sleep 1
+done
+set -e
 
 echo "--- Setting up table"
 ./risedev psql -c "
@@ -91,6 +102,32 @@ sleep 5
 echo "--- Querying source"
 ./risedev psql -c "SELECT * FROM kafka_source;"
 
+echo "--- Kill cluster"
+pkill risingwave
+./risedev k
+rm -r $RW_PREFIX/data/kafka-*
+rm -r $RW_PREFIX/data/zookeeper-*
+
+echo "--- Restarting peripherals"
+./risedev d standalone-full-peripherals >"$LOG_PREFIX"/peripherals.log 2>&1 &
+
+# Wait for peripherals to finish startup
+sleep 5
+
+echo "--- Restarting standalone cluster"
+./risedev standalone-demo-full >"$LOG_PREFIX"/standalone.log 2>&1 &
+STANDALONE_PID=$!
+
+# Wait for rw cluster to finish startup
+sleep 20
+
+echo "--- Querying table"
+./risedev psql -c "SELECT * FROM t;"
+
+echo "--- Querying source"
+./risedev psql -c "SELECT * FROM kafka_source;"
+
+echo "--- Running cleanup"
 ./risedev k
 pkill risingwave
 ./risedev clean-data
