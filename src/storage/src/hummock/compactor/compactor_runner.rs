@@ -84,7 +84,8 @@ impl CompactorRunner {
             _ => CompressionAlgorithm::Zstd,
         };
 
-        options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        options.capacity =
+            estimate_task_output_capacity(context.storage_opts.sstable_size_mb, &task);
         let kv_count = task
             .input_ssts
             .iter()
@@ -402,7 +403,16 @@ pub async fn compact(
         .iter()
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
-    match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
+    match generate_splits(
+        &sstable_infos,
+        compaction_size,
+        context.storage_opts.parallel_compact_size_mb,
+        context.compaction_executor.worker_num() as u32,
+        context.storage_opts.max_sub_compaction,
+        context.sstable_store.clone(),
+    )
+    .await
+    {
         Ok(splits) => {
             if !splits.is_empty() {
                 compact_task.splits = splits;
@@ -450,7 +460,8 @@ pub async fn compact(
         }
     };
 
-    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
+    let capacity =
+        estimate_task_output_capacity(context.storage_opts.sstable_size_mb, &compact_task);
 
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
