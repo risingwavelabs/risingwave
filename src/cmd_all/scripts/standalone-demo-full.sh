@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# set -euo pipefail
+set -euo pipefail
 
 RW_PREFIX=$PWD/.risingwave
 PREFIX_BIN=$RW_PREFIX/bin

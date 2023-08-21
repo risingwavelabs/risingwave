@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+# This script is used to run a full standalone demo of RisingWave.
+# It includes the following components:
+# - RisingWave cluster
+# - Minio
+# - Etcd
+# - Kafka
+# - Connector
+# - Compactor
+# - Prometheus
+# - Grafana
+#
+# We test the full cluster by:
+# 1. Creating source and rw table.
+# 2. Inserting data into the tables.
+# 3. Querying the data from the tables.
+# 4. Restart the cluster, repeat step 3.
+
 set -euo pipefail
 
 insert_json_kafka() {
@@ -69,20 +86,11 @@ CREATE TABLE kafka_source (v1 int) WITH (
 ) FORMAT PLAIN ENCODE JSON;
 "
 
-echo "--- Querying source"
-./risedev psql -c "SELECT * FROM kafka_source;"
-
-echo "--- Tearing down rw components, check if data still persists"
-kill $STANDALONE_PID
-
-echo "--- Restarting rw"
-./risedev standalone-demo-full >$LOG_PREFIX/standalone-restarted.log 2>&1 &
-STANDALONE_PID=$!
-
-sleep 10
-
-echo "--- Querying table"
-./risedev psql -c "SELECT * from t;"
+sleep 5
 
 echo "--- Querying source"
 ./risedev psql -c "SELECT * FROM kafka_source;"
+
+./risedev k
+pkill risingwave
+./risedev clean-data
