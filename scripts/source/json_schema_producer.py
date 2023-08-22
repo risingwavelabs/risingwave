@@ -49,8 +49,8 @@ if __name__ == '__main__':
         for (i, line) in enumerate(file):
             if i == 0:
                 value_serializer = JSONSerializer(schema_registry_client=schema_registry_client,
-                                                      schema_str=line)
-            else:             
+                                                  schema_str=line)
+            else:
                 producer.produce(topic=topic, partition=0,
                                  value=value_serializer(
                                  json.loads(line), SerializationContext(topic, MessageField.VALUE)),
