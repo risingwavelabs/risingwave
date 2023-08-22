@@ -1183,7 +1183,6 @@ where
         // TODO(kwannoel): Refactor `PrefetchOptions` -> `StorageIterOptions`, so we can include
         // epoch?
         prefetch_options: PrefetchOptions,
-        snapshot_read_epoch: Option<u64>,
     ) -> StreamExecutorResult<ProjectedRowStream<'_, S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>>
     {
         assert!(

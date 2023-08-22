@@ -217,7 +217,7 @@ where
         // expects to have been initialized in previous epoch.
 
         // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch = cur_checkpointing_epoch;
+        let mut snapshot_read_epoch;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -600,7 +600,6 @@ where
                     &range_bounds,
                     vnode,
                     PrefetchOptions::new_with_epoch(snapshot_read_epoch),
-                    snapshot_read_epoch,
                 )
                 .await?;
 
