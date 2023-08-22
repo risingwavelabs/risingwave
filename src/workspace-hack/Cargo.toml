@@ -30,14 +30,12 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
-futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
@@ -56,14 +54,17 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "f01e3ca", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -97,7 +98,6 @@ tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time", "parking_lot"] }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
@@ -119,14 +119,12 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
-futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
@@ -145,14 +143,17 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "f01e3ca", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
+opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -178,7 +179,7 @@ serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
@@ -189,7 +190,6 @@ tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time", "parking_lot"] }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }

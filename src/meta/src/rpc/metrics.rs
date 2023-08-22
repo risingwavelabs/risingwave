@@ -28,9 +28,11 @@ use prometheus::{
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
@@ -117,6 +119,10 @@ pub struct MetaMetrics {
     pub current_version_object_count: IntGauge,
     /// Total size of objects that is referenced by current version.
     pub current_version_object_size: IntGauge,
+    /// Total number of objects that includes dangling objects.
+    pub total_object_count: IntGauge,
+    /// Total size of objects that includes dangling objects.
+    pub total_object_size: IntGauge,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -141,6 +147,9 @@ pub struct MetaMetrics {
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
 
+    pub compaction_event_consumed_latency: Histogram,
+    pub compaction_event_loop_iteration_latency: Histogram,
+
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
@@ -155,9 +164,8 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
-    /// id.
-    pub mv_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
+    pub sink_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -394,6 +402,18 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let total_object_count = register_int_gauge_with_registry!(
+            "storage_total_object_count",
+            "Total number of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
+            registry
+        ).unwrap();
+
+        let total_object_size = register_int_gauge_with_registry!(
+            "storage_total_object_size",
+            "Total size of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
+            registry
+        ).unwrap();
+
         let delta_log_count = register_int_gauge_with_registry!(
             "storage_delta_log_count",
             "total number of hummock version delta log",
@@ -498,15 +518,22 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["materialized_view_id", "table_id", "actor_id", "table_name"],
+            &[
+                "materialized_view_id",
+                "table_id",
+                "actor_id",
+                "table_name",
+                "table_type",
+                "compaction_group_id"
+            ],
             registry
         )
         .unwrap();
 
-        let mv_info = register_int_gauge_vec_with_registry!(
-            "materialized_info",
-            "Mapping from materialized view id to (table id, table name)",
-            &["id", "table_id", "table_name"],
+        let sink_info = register_int_gauge_vec_with_registry!(
+            "sink_info",
+            "Mapping from actor id to (actor id, sink name)",
+            &["actor_id", "sink_name",],
             registry
         )
         .unwrap();
@@ -567,6 +594,22 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "storage_compaction_event_consumed_latency",
+            "The latency(ms) of each event being consumed",
+            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
+        );
+        let compaction_event_consumed_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "storage_compaction_event_loop_iteration_latency",
+            "The latency(ms) of each iteration of the compaction event loop",
+            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
+        );
+        let compaction_event_loop_iteration_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -595,6 +638,8 @@ impl MetaMetrics {
             old_version_object_size,
             current_version_object_count,
             current_version_object_size,
+            total_object_count,
+            total_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -619,7 +664,7 @@ impl MetaMetrics {
             source_enumerator_metrics,
             actor_info,
             table_info,
-            mv_info,
+            sink_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -627,6 +672,8 @@ impl MetaMetrics {
             move_state_table_count,
             state_table_count,
             branched_sst_count,
+            compaction_event_consumed_latency,
+            compaction_event_loop_iteration_latency,
         }
     }
 
@@ -692,6 +739,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;
@@ -725,7 +773,12 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                     None => (worker_node.id, "".to_owned()),
                 })
                 .collect();
-            let table_name_mapping = catalog_manager.get_table_name_mapping().await;
+            let table_name_and_type_mapping =
+                catalog_manager.get_table_name_and_type_mapping().await;
+            let table_compaction_group_id_mapping = hummock_manager
+                .get_table_compaction_group_id_mapping()
+                .await;
+
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {
                 let mv_id_str = table_fragments.table_id().to_string();
@@ -752,14 +805,33 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                             }
                         }
 
+                        if let Some(stream_node) = &actor.nodes {
+                            if let Some(Sink(sink_node)) = &stream_node.node_body {
+                                let sink_name = match &sink_node.sink_desc {
+                                    Some(sink_desc) => &sink_desc.name,
+                                    _ => "unknown",
+                                };
+                                meta_metrics
+                                    .sink_info
+                                    .with_label_values(&[&actor_id_str, sink_name])
+                                    .set(1);
+                            }
+                        }
+
                         // Report a dummy gauge metrics with (table id, actor id, table
                         // name) as its label
+
                         for table_id in &fragment.state_table_ids {
                             let table_id_str = table_id.to_string();
-                            let table_name = table_name_mapping
+                            let (table_name, table_type) = table_name_and_type_mapping
                                 .get(table_id)
                                 .cloned()
+                                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                            let compaction_group_id = table_compaction_group_id_mapping
+                                .get(table_id)
+                                .map(|cg_id| cg_id.to_string())
                                 .unwrap_or_else(|| "unknown".to_string());
+
                             meta_metrics
                                 .table_info
                                 .with_label_values(&[
@@ -767,11 +839,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                     &table_id_str,
                                     &actor_id_str,
                                     &table_name,
+                                    &table_type,
+                                    &compaction_group_id,
                                 ])
-                                .set(1);
-                            meta_metrics
-                                .mv_info
-                                .with_label_values(&[&mv_id_str, &table_id_str, &table_name])
                                 .set(1);
                         }
                     }

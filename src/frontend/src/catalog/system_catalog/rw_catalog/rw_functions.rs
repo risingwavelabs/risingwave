@@ -78,6 +78,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::FunctionId(function.id.function_id()),
+                                false,
                                 &users,
                                 username_map,
                             )

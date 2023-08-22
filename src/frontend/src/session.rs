@@ -127,6 +127,7 @@ pub struct FrontendEnv {
     compute_runtime: Arc<BackgroundShutdownRuntime>,
 }
 
+/// Session map identified by `(process_id, secret_key)`
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
@@ -668,10 +669,12 @@ impl SessionImpl {
         let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
         let connection = schema
             .get_connection_by_name(connection_name)
-            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
-                "connection {} not found",
-                connection_name
-            ))))?;
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "connection {} not found",
+                    connection_name
+                )))
+            })?;
         Ok(connection.clone())
     }
 
@@ -907,13 +910,27 @@ impl SessionManagerImpl {
     }
 
     fn insert_session(&self, session: Arc<SessionImpl>) {
-        let mut write_guard = self.env.sessions_map.lock();
-        write_guard.insert(session.id(), session);
+        let active_sessions = {
+            let mut write_guard = self.env.sessions_map.lock();
+            write_guard.insert(session.id(), session);
+            write_guard.len()
+        };
+        self.env
+            .frontend_metrics
+            .active_sessions
+            .set(active_sessions as i64);
     }
 
     fn delete_session(&self, session_id: &SessionId) {
-        let mut write_guard = self.env.sessions_map.lock();
-        write_guard.remove(session_id);
+        let active_sessions = {
+            let mut write_guard = self.env.sessions_map.lock();
+            write_guard.remove(session_id);
+            write_guard.len()
+        };
+        self.env
+            .frontend_metrics
+            .active_sessions
+            .set(active_sessions as i64);
     }
 }
 
@@ -963,7 +980,7 @@ impl Session for SessionImpl {
     fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
-        params_types: Vec<DataType>,
+        params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types)?
@@ -975,7 +992,7 @@ impl Session for SessionImpl {
     fn bind(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> std::result::Result<Portal, BoxedError> {
@@ -1081,7 +1098,10 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             .iter()
             .map(to_pg_field)
             .collect()),
-        Statement::ShowObjects(show_object) => match show_object {
+        Statement::ShowObjects {
+            object: show_object,
+            ..
+        } => match show_object {
             ShowObject::Columns { table: _ } => Ok(vec![
                 PgFieldDescriptor::new(
                     "Name".to_owned(),

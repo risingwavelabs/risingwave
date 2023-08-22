@@ -146,6 +146,8 @@ pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
 /// It will reduce state cleaning overhead.
 pub type WatermarkCacheStateTable<S> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
+pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
+    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
@@ -580,10 +582,8 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            ignore_range_tombstone: false,
-            read_version_from_backup: false,
-            prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
 
         self.local_store

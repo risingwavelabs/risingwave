@@ -1,3 +1,6 @@
+[server]
+telemetry_enabled = false
+
 [streaming.developer]
 stream_chunk_size = 1
 
@@ -6,3 +9,4 @@ stream_chunk_size = 1
 # This will throttle snapshot read.
 # barrier_interval_ms = 1
 barrier_interval_ms = 50
+max_concurrent_creating_streaming_jobs = 0

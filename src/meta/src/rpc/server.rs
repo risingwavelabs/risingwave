@@ -30,6 +30,7 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
+use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -59,6 +60,7 @@ use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::HummockManager;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
@@ -72,6 +74,7 @@ use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
+use crate::rpc::service::sink_coordination_service::SinkCoordinationServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
@@ -401,7 +404,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     });
 
     #[cfg(not(madsim))]
-    if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+    let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
             prometheus_endpoint: prometheus_endpoint.clone(),
@@ -414,9 +417,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
         };
-        // TODO: join dashboard service back to local thread.
-        tokio::spawn(dashboard_service.serve(address_info.ui_path));
-    }
+        let task = tokio::spawn(dashboard_service.serve(address_info.ui_path));
+        Some(task)
+    } else {
+        None
+    };
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
@@ -436,6 +441,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .unwrap(),
     );
 
+    let (sink_manager, shutdown_handle) =
+        SinkCoordinatorManager::start_worker(env.connector_client());
+    let mut sub_tasks = vec![shutdown_handle];
+
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
@@ -444,6 +453,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         fragment_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
+        sink_manager.clone(),
         meta_metrics.clone(),
     ));
 
@@ -510,7 +520,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         cluster_manager.clone(),
         fragment_manager.clone(),
         barrier_manager.clone(),
-    );
+        sink_manager.clone(),
+    )
+    .await;
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
 
@@ -531,6 +543,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         catalog_manager.clone(),
         fragment_manager.clone(),
     );
+    let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         vacuum_manager.clone(),
@@ -561,12 +574,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks = hummock::start_hummock_workers(
+    sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
         vacuum_manager,
         // compaction_scheduler,
         &env.opts,
-    );
+    ));
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),
@@ -581,6 +594,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             catalog_manager,
             fragment_manager.clone(),
+            hummock_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -689,7 +703,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
-        .add_service(HummockManagerServiceServer::new(hummock_srv))
+        .add_service(
+            HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(NotificationServiceServer::new(notification_srv))
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
@@ -701,6 +717,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
+        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {
@@ -717,6 +734,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         })
         .await
         .unwrap();
+
+    #[cfg(not(madsim))]
+    if let Some(dashboard_task) = dashboard_task {
+        // Join the task while ignoring the cancellation error.
+        let _ = dashboard_task.await;
+    }
     Ok(())
 }
 

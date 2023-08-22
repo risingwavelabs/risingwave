@@ -110,6 +110,14 @@ static DAG_TO_TREE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static TABLE_FUNCTION_TO_PROJECT_SET: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Table Function To Project Set",
+        vec![TableFunctionToProjectSetRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simple Unnesting",
@@ -175,8 +183,12 @@ static GENERAL_UNNESTING_PUSH_DOWN_APPLY: LazyLock<OptimizationStage> = LazyLock
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyProjectSetTransposeRule::create(),
+            ApplyTopNTransposeRule::create(),
+            ApplyLimitTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
             ApplyUnionTransposeRule::create(),
+            ApplyOverWindowTransposeRule::create(),
+            ApplyExpandTransposeRule::create(),
             CrossJoinEliminateRule::create(),
             ApplyShareEliminateRule::create(),
         ],
@@ -355,6 +367,14 @@ static GROUPING_SETS: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Common Sub Expression Extract",
+        vec![CommonSubExprExtractRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -389,6 +409,8 @@ impl LogicalOptimizer {
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = Self::predicate_pushdown(plan, explain_trace, ctx);
+        // In order to unnest a table function, we need to convert it into a `project_set` first.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
@@ -541,6 +563,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -610,6 +634,8 @@ impl LogicalOptimizer {
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
 
