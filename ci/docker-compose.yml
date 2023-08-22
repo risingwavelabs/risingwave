@@ -76,6 +76,7 @@ services:
       - mysql
       - db
       - message_queue
+      - schema-registry
     volumes:
       - ..:/risingwave
 
