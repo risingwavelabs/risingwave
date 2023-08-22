@@ -19,6 +19,7 @@ use prometheus::{
     Registry,
 };
 
+#[derive(Debug)]
 pub struct ObjectStoreMetrics {
     pub write_bytes: GenericCounter<AtomicU64>,
     pub read_bytes: GenericCounter<AtomicU64>,
@@ -26,6 +27,12 @@ pub struct ObjectStoreMetrics {
     pub operation_size: HistogramVec,
     pub failure_count: GenericCounterVec<AtomicU64>,
     pub request_retry_count: GenericCounterVec<AtomicU64>,
+
+    pub scheduled_read_count: GenericCounterVec<AtomicU64>,
+    pub scheduled_read_request_count: GenericCounter<AtomicU64>,
+    pub scheduled_read_merge_inflight_count: GenericCounter<AtomicU64>,
+    pub scheduled_read_merge_queued_count: GenericCounter<AtomicU64>,
+    pub scheduled_read_io_count: GenericCounter<AtomicU64>,
 }
 
 impl ObjectStoreMetrics {
@@ -90,6 +97,21 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
+        let scheduled_read_count = register_int_counter_vec_with_registry!(
+            "object_store_scheduled_read_count",
+            "The number of scheduled read operations",
+            &["op"],
+            registry,
+        )
+        .unwrap();
+
+        let scheduled_read_request_count = scheduled_read_count.with_label_values(&["request"]);
+        let scheduled_read_merge_inflight_count =
+            scheduled_read_count.with_label_values(&["merge_inflight"]);
+        let scheduled_read_merge_queued_count =
+            scheduled_read_count.with_label_values(&["merge_queued"]);
+        let scheduled_read_io_count = scheduled_read_count.with_label_values(&["io"]);
+
         Self {
             write_bytes,
             read_bytes,
@@ -97,6 +119,11 @@ impl ObjectStoreMetrics {
             operation_size,
             failure_count,
             request_retry_count,
+            scheduled_read_count,
+            scheduled_read_request_count,
+            scheduled_read_merge_inflight_count,
+            scheduled_read_merge_queued_count,
+            scheduled_read_io_count,
         }
     }
 

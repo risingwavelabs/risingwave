@@ -17,6 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use tokio::io::AsyncRead;
 
+use super::object_metrics::ObjectStoreMetrics;
 use super::{BoxedStreamingUploader, ObjectMetadata, ObjectMetadataIter};
 use crate::object::{BlockLocation, ObjectResult, ObjectStore};
 use crate::scheduler::Scheduler;
@@ -33,9 +34,9 @@ impl<OS> ScheduledObjectStore<OS>
 where
     OS: ObjectStore,
 {
-    pub fn new(store: OS) -> Self {
+    pub fn new(store: OS, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let store = Arc::new(store);
-        let scheduler = Scheduler::new(5, store.clone());
+        let scheduler = Scheduler::new(5, store.clone(), metrics);
         Self { scheduler, store }
     }
 
@@ -103,7 +104,7 @@ where
         self.store.store_media_type()
     }
 
-    fn scheduled(self) -> ScheduledObjectStore<Self>
+    fn scheduled(self, _metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self>
     where
         Self: Sized,
     {

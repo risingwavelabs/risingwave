@@ -33,9 +33,12 @@ use range_map::{Entry, OrdRange, RangeExt, RangeMap};
 use tokio::sync::{oneshot, Notify};
 use twox_hash::XxHash64;
 
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{BlockLocation, ObjectError, ObjectResult, ObjectStore};
 
 pub type Sequence = u64;
+
+const PLUGGING: Duration = Duration::from_millis(5);
 
 #[derive(Debug)]
 pub struct TaskHandle {
@@ -137,7 +140,7 @@ pub struct Launch {
 }
 
 /// [`Scheduler`] guarantees there is no overlapping object io.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TaskManager {
     sequence: Sequence,
 
@@ -149,9 +152,22 @@ pub struct TaskManager {
     inflights: BTreeMap<String, RangeMap<usize, ObjectIoTask>>,
 
     waits: BTreeMap<String, CountMap<Sequence, SchedulerTask>>,
+
+    metrics: Arc<ObjectStoreMetrics>,
 }
 
 impl TaskManager {
+    fn new(metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self {
+            sequence: 0,
+            queue: BTreeMap::new(),
+            windows: BTreeMap::new(),
+            inflights: BTreeMap::new(),
+            waits: BTreeMap::new(),
+            metrics,
+        }
+    }
+
     pub fn submit(&mut self, path: &str, range: Range<usize>) -> TaskHandle {
         let sequence = self.sequence;
         self.sequence += 1;
@@ -166,6 +182,7 @@ impl TaskManager {
         // Join an inflight io task if there is a range covering.
         let inflight = self.inflights.entry(path.to_string()).or_default();
         if let Some(mut covers) = inflight.covers(range.clone()) {
+            self.metrics.scheduled_read_merge_inflight_count.inc();
             covers.value_mut().io_tasks.push(io_task);
             return handle;
         }
@@ -200,6 +217,9 @@ impl TaskManager {
             }
         });
 
+        self.metrics
+            .scheduled_read_merge_queued_count
+            .inc_by(merged_sequences.len() as u64);
         for sequence in merged_sequences {
             self.queue.remove(&sequence).unwrap();
         }
@@ -327,10 +347,11 @@ pub struct Scheduler {
     bits: usize,
     task_managers: Vec<Arc<Mutex<TaskManager>>>,
     notifies: Vec<Arc<Notify>>,
+    metrics: Arc<ObjectStoreMetrics>,
 }
 
 impl Scheduler {
-    pub fn new<OS>(bits: usize, store: Arc<OS>) -> Self
+    pub fn new<OS>(bits: usize, store: Arc<OS>, metrics: Arc<ObjectStoreMetrics>) -> Self
     where
         OS: ObjectStore,
     {
@@ -340,7 +361,7 @@ impl Scheduler {
         let mut runners = Vec::with_capacity(len);
 
         for _ in 0..len {
-            let task_manager = Arc::new(Mutex::new(TaskManager::default()));
+            let task_manager = Arc::new(Mutex::new(TaskManager::new(metrics.clone())));
             let notify = Arc::new(Notify::new());
 
             task_managers.push(task_manager.clone());
@@ -349,6 +370,7 @@ impl Scheduler {
                 task_manager,
                 notify,
                 store: store.clone(),
+                metrics: metrics.clone(),
             });
         }
 
@@ -362,10 +384,13 @@ impl Scheduler {
             bits,
             task_managers,
             notifies,
+            metrics,
         }
     }
 
     pub fn submit(&self, path: &str, range: Range<usize>) -> TaskHandle {
+        self.metrics.scheduled_read_request_count.inc();
+
         let shard = self.hash(path) as usize & ((1 << self.bits) - 1);
         let mut task_manager = self.task_managers[shard].lock();
         let handle = task_manager.submit(path, range);
@@ -399,6 +424,7 @@ where
     task_manager: Arc<Mutex<TaskManager>>,
     notify: Arc<Notify>,
     store: Arc<OS>,
+    metrics: Arc<ObjectStoreMetrics>,
 }
 
 impl<OS> Runner<OS>
@@ -414,7 +440,7 @@ where
                 Some(enqueue) => {
                     let elapsed = enqueue.elapsed();
                     if elapsed < Duration::from_millis(5) {
-                        tokio::time::sleep(Duration::from_millis(5) - elapsed).await;
+                        tokio::time::sleep(PLUGGING - elapsed).await;
                     }
                     let launch = self.task_manager.lock().launch().unwrap();
                     self.launch(launch).await;
@@ -424,6 +450,9 @@ where
     }
 
     async fn launch(&self, Launch { path, ranges }: Launch) {
+        self.metrics
+            .scheduled_read_io_count
+            .inc_by(ranges.len() as u64);
         for range in ranges {
             tokio::spawn({
                 let path = path.clone();
@@ -486,7 +515,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_manager() {
-        let mut tm = TaskManager::default();
+        let mut tm = TaskManager::new(Arc::new(ObjectStoreMetrics::unused()));
 
         let mut h1 = pin!(tm.submit("1", 0..10));
         let mut h2 = pin!(tm.submit("2", 0..10));

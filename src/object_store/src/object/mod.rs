@@ -139,11 +139,11 @@ pub trait ObjectStore: Send + Sync + 'static {
         MonitoredObjectStore::new(self, metrics)
     }
 
-    fn scheduled(self) -> ScheduledObjectStore<Self>
+    fn scheduled(self, metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self>
     where
         Self: Sized,
     {
-        ScheduledObjectStore::new(self)
+        ScheduledObjectStore::new(self, metrics)
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
@@ -869,7 +869,7 @@ pub async fn parse_remote_object_store_with_config(
                 metrics.clone(),
             )
             .await
-            .scheduled()
+            .scheduled(metrics.clone())
             .monitored(metrics),
         ),
         #[cfg(feature = "hdfs-backend")]
@@ -958,14 +958,14 @@ pub async fn parse_remote_object_store_with_config(
                     s3_object_store_config,
                 )
                 .await
-                .scheduled()
+                .scheduled(metrics.clone())
                 .monitored(metrics),
             )
         }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
-                .scheduled()
+                .scheduled(metrics.clone())
                 .monitored(metrics),
         ),
         "memory" => {
