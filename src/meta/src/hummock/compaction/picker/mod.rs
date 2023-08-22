@@ -18,6 +18,7 @@ mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
 mod tombstone_reclaim_compaction_picker;
+mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
@@ -30,6 +31,7 @@ pub use tier_compaction_picker::TierCompactionPicker;
 pub use tombstone_reclaim_compaction_picker::{
     TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
 };
+pub use trivial_move_compaction_picker::TrivialMovePicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
 
 use crate::hummock::level_handler::LevelHandler;

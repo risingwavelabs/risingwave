@@ -332,14 +332,8 @@ pub(crate) mod tests {
                 key.clone(),
                 read_epoch,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await;
@@ -351,13 +345,9 @@ pub(crate) mod tests {
                 key.clone(),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     prefix_hint: Some(key.clone()),
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await;
@@ -469,13 +459,8 @@ pub(crate) mod tests {
                 key.clone(),
                 SST_COUNT + 1,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -795,14 +780,10 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -969,14 +950,10 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1153,13 +1130,11 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await

@@ -108,6 +108,8 @@ message UpdateNode {
   uint64 table_version_id = 4;
   repeated expr.ExprNode exprs = 2;
   bool returning = 3;
+  // The columns indices in the input schema, representing the columns need to send to streamDML exeuctor.
+  repeated uint32 update_column_indices = 5;
 }
 
 message ValuesNode {
