@@ -603,6 +603,16 @@ def section_object_storage(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ops(
+                    "I/O Scheduler",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('object_store_scheduled_read_count')}[$__rate_interval])) by (le, op, job, instance)",
+                            "{{op}} - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
