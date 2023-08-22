@@ -771,6 +771,9 @@ fn find_affected_ranges<'cache>(
 
 #[cfg(test)]
 mod find_affected_ranges_tests {
+    //! Function `find_affected_ranges` is important enough to deserve its own test module. We must
+    //! test it thoroughly.
+
     use itertools::Itertools;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_expr::agg::{AggArgs, AggKind};
@@ -1074,6 +1077,82 @@ mod find_affected_ranges_tests {
             assert_eq!(
                 range.2.as_normal_expect().pk.0,
                 OwnedRow::new(vec![Some(2.into())])
+            );
+            assert!(range.3.is_largest());
+        }
+    }
+
+    #[test]
+    fn test_with_left_sentinel() {
+        let cache = create_cache!(..., 2, 4, 5, 8);
+        let delta = create_delta!((3, Insert), (4, Insert), (8, Delete));
+
+        {
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::Following(1),
+                FrameBound::Following(1),
+            ))];
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [(2.into(), 2.into(), 5.into(), 5.into())],
+            );
+        }
+
+        {
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::Preceding(1),
+                FrameBound::Following(1),
+            ))];
+            let range = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta))[0];
+            assert!(range.0.is_smallest());
+            assert_eq!(
+                range.1.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(2.into())])
+            );
+            assert_eq!(
+                range.2.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(5.into())])
+            );
+            assert_eq!(
+                range.3.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(5.into())])
+            );
+        }
+    }
+
+    #[test]
+    fn test_with_right_sentinel() {
+        let cache = create_cache!(1, 2, 4, 5, 8, ...);
+        let delta = create_delta!((3, Insert), (4, Insert), (8, Delete));
+
+        {
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::Preceding(1),
+                FrameBound::Preceding(1),
+            ))];
+            assert_ranges_eq(
+                find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
+                [(1.into(), 2.into(), 5.into(), 5.into())],
+            );
+        }
+
+        {
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::Preceding(1),
+                FrameBound::Following(1),
+            ))];
+            let range = find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta))[0];
+            assert_eq!(
+                range.0.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(1.into())])
+            );
+            assert_eq!(
+                range.1.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(2.into())])
+            );
+            assert_eq!(
+                range.2.as_normal_expect().pk.0,
+                OwnedRow::new(vec![Some(5.into())])
             );
             assert!(range.3.is_largest());
         }
