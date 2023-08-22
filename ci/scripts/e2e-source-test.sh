@@ -127,9 +127,6 @@ sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- Check schema registry service"
-curl http://schemaregistry:8082/subjects
-
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-pubsub

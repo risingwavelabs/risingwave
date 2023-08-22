@@ -54,7 +54,7 @@ done
 wait
 
 echo "Fulfill kafka topics"
-python3 -m pip install requests fastavro confluent_kafka
+python3 -m pip install requests fastavro confluent_kafka jsonschema
 for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
