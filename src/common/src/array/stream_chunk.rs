@@ -350,6 +350,8 @@ impl From<OpsMut> for Arc<[Op]> {
     }
 }
 
+/// A mutable wrapper for `StreamChunk`. can only set the visibilities and ops in place, can not
+/// change the length.
 struct StreamChunkMut {
     columns: Arc<[ArrayRef]>,
     ops: OpsMut,
@@ -397,12 +399,15 @@ impl StreamChunkMut {
         self.ops.set(n, val);
     }
 
-    pub unsafe fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
-        (0..self.vis.len()).map(|i| {
-            let p = self as *const StreamChunkMut;
-            let p = p as *mut StreamChunkMut;
-            OpRowMutRef { c: &mut *p, i }
-        })
+    /// get the mut reference of the stream chunk.
+    pub fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+        unsafe {
+            (0..self.vis.len()).map(|i| {
+                let p = self as *const StreamChunkMut;
+                let p = p as *mut StreamChunkMut;
+                OpRowMutRef { c: &mut *p, i }
+            })
+        }
     }
 }
 /// Test utilities for [`StreamChunk`].
