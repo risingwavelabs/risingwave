@@ -358,11 +358,20 @@ pub(crate) async fn try_bind_columns_from_source(
                     "schema definition is required for ENCODE JSON".to_owned(),
                 )));
             }
-            (
-                if schema_config.is_none() {
-                    None
-                } else {
-                    let (schema_location, use_schema_registry) = schema_config.unwrap();
+            if schema_config.is_none() {
+                (
+                    None,
+                    sql_defined_pk_names,
+                    StreamSourceInfo {
+                        format: FormatType::Plain as i32,
+                        row_encode: EncodeType::Json as i32,
+                        use_schema_registry: false,
+                        ..Default::default()
+                    },
+                )
+            } else {
+                let (schema_location, use_schema_registry) = schema_config.unwrap();
+                (
                     Some(
                         schema_to_columns(&schema_location.0, use_schema_registry, with_properties)
                             .await?
@@ -372,15 +381,16 @@ pub(crate) async fn try_bind_columns_from_source(
                                 is_hidden: false,
                             })
                             .collect_vec(),
-                    )
-                },
-                sql_defined_pk_names,
-                StreamSourceInfo {
-                    format: FormatType::Plain as i32,
-                    row_encode: EncodeType::Json as i32,
-                    ..Default::default()
-                },
-            )
+                    ),
+                    sql_defined_pk_names,
+                    StreamSourceInfo {
+                        format: FormatType::Plain as i32,
+                        row_encode: EncodeType::Json as i32,
+                        use_schema_registry,
+                        ..Default::default()
+                    },
+                )
+            }
         }
         (Format::Plain, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) = get_schema_location(&mut options)?;

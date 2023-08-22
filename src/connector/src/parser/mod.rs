@@ -615,7 +615,7 @@ impl ByteStreamSourceParserImpl {
         let encode = &parser_config.specific.encoding_config;
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
-                JsonParser::new(rw_columns, source_ctx).map(Self::Json)
+                JsonParser::new(parser_config.specific, rw_columns, source_ctx).map(Self::Json)
             }
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
@@ -728,7 +728,9 @@ pub struct CsvProperties {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct JsonProperties {}
+pub struct JsonProperties {
+    pub use_schema_registry: bool,
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct BytesProperties {
@@ -884,15 +886,19 @@ impl SpecificParserConfig {
                     ..Default::default()
                 })
             }
+            (SourceFormat::Plain, SourceEncode::Json) => EncodingProperties::Json(JsonProperties {
+                use_schema_registry: info.use_schema_registry,
+            }),
             (
                 SourceFormat::Debezium
                 | SourceFormat::DebeziumMongo
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
-                | SourceFormat::Plain
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
-            ) => EncodingProperties::Json(JsonProperties {}),
+            ) => EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
             (SourceFormat::Plain, SourceEncode::Bytes) => {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }

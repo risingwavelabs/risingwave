@@ -18,13 +18,14 @@ use apache_avro::Schema;
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
 use super::schema_registry::Client;
 use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
-use super::SchemaRegistryAuth;
+use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
@@ -65,13 +66,26 @@ impl JsonAccessBuilder {
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+    // If schema registry is used, the starting index of payload is 5.
+    payload_start_idx: usize,
 }
 
 impl JsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+    pub fn new(
+        props: SpecificParserConfig,
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+    ) -> Result<Self> {
+        let json_config = try_match_expand!(props.encoding_config, EncodingProperties::Json)?;
+        let payload_start_idx = if json_config.use_schema_registry {
+            5
+        } else {
+            0
+        };
         Ok(Self {
             rw_columns,
             source_ctx,
+            payload_start_idx,
         })
     }
 
@@ -79,6 +93,7 @@ impl JsonParser {
         Ok(Self {
             rw_columns,
             source_ctx: Default::default(),
+            payload_start_idx: 0,
         })
     }
 
@@ -93,8 +108,9 @@ impl JsonParser {
                 "Empty payload with nonempty key for non-upsert".into(),
             )));
         }
-        let value = simd_json::to_borrowed_value(payload.as_mut().unwrap())
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let value =
+            simd_json::to_borrowed_value(&mut payload.as_mut().unwrap()[self.payload_start_idx..])
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
             arr
         } else {
@@ -210,6 +226,16 @@ mod tests {
         ]
     }
 
+    fn get_json_config() -> SpecificParserConfig {
+        SpecificParserConfig {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
+            protocol_config: ProtocolProperties::Plain,
+        }
+    }
+
     async fn test_json_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
@@ -224,7 +250,7 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -323,7 +349,7 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
@@ -386,7 +412,7 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
         let payload = br#"
         {
             "data": {
@@ -453,7 +479,7 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
         let payload = br#"
         {
             "struct": "{\"varchar\": \"varchar\", \"boolean\": true}"
@@ -492,7 +518,9 @@ mod tests {
         ];
         let props = SpecificParserConfig {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
             protocol_config: ProtocolProperties::Upsert,
         };
         let mut parser = UpsertParser::new(props, descs.clone(), Default::default())
