@@ -551,7 +551,6 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
-    use std::time;
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
