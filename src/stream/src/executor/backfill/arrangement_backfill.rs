@@ -130,7 +130,10 @@ where
         let first_checkpointing_epoch = first_barrier.epoch.prev;
         let cur_checkpointing_epoch = first_barrier.epoch.curr;
 
-        println!("first barrier: {:?}, actor: {:?}", first_barrier, self.actor_id);
+        println!(
+            "first barrier: {:?}, actor: {:?}",
+            first_barrier, self.actor_id
+        );
         self.state_table.init_epoch(first_barrier.epoch);
         upstream_table.init_epoch(first_barrier.epoch);
 
@@ -216,7 +219,7 @@ where
         // expects to have been initialized in previous epoch.
 
         // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch= cur_checkpointing_epoch;
+        let mut snapshot_read_epoch = cur_checkpointing_epoch;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;

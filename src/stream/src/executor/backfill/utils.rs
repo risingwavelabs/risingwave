@@ -454,10 +454,13 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
 
         if let Some(old_state) = old_state {
             // No progress for vnode, means no data
-            if old_state == current_pos.as_inner() {
+            if &old_state[1..current_pos.len() + 1] == current_pos.as_inner()
+                && old_state[current_pos.len() + 1] == Some(is_finished.into())
+            {
                 println!("No progress for vnode {:?}", vnode);
                 continue;
             } else {
+                debug_assert!(old_state[0] == Some((*vnode).to_scalar());
                 println!("Has progress persisted for vnode {:?}", vnode);
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
@@ -473,7 +476,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             });
             has_progress = true;
         }
-        committed_progress.insert(*vnode, current_pos.as_inner().to_vec());
+        committed_progress.insert(*vnode, temporary_state.to_vec());
     }
     if has_progress {
         table.commit(epoch).await?;
