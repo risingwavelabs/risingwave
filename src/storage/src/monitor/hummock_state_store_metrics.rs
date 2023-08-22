@@ -25,6 +25,7 @@ use prometheus::{
     IntGauge, Opts,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use tracing::warn;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
 /// `RocksDBStateStore` and `TikvStateStore`.
@@ -283,6 +284,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
+#[derive(Clone)]
 struct StateStoreCollector {
     memory_collector: Arc<dyn MemoryCollector>,
     descs: Vec<Desc>,
@@ -381,9 +383,9 @@ impl Collector for StateStoreCollector {
     }
 }
 
-pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) -> Result<()> {
-    let collector = StateStoreCollector::new(memory_collector);
-    GLOBAL_METRICS_REGISTRY
-        .register(Box::new(collector))
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
+    let collector = Box::new(StateStoreCollector::new(memory_collector));
+    if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
+        warn!("unable to monitor cache: {:?}", e);
+    }
 }

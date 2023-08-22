@@ -157,7 +157,7 @@ pub async fn compute_node_serve(
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
 
-    monitor_process().unwrap();
+    monitor_process();
 
     // Initialize state store.
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(meta_client.clone()));
@@ -210,7 +210,7 @@ pub async fn compute_node_serve(
             flush_limiter,
             storage_memory_config,
         ));
-        monitor_cache(memory_collector).unwrap();
+        monitor_cache(memory_collector);
         let backup_reader = storage.backup_reader();
         let system_params_mgr = system_params_manager.clone();
         tokio::spawn(async move {

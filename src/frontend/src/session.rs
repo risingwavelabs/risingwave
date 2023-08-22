@@ -227,7 +227,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let registry = prometheus::Registry::new();
-        monitor_process().unwrap();
+        monitor_process();
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =

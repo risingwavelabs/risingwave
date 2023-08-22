@@ -84,7 +84,7 @@ pub async fn compactor_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
-    monitor_process().unwrap();
+    monitor_process();
 
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(meta_client.clone()));
 
@@ -170,7 +170,7 @@ pub async fn compactor_serve(
         storage_memory_config,
     ));
 
-    monitor_cache(memory_collector).unwrap();
+    monitor_cache(memory_collector);
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,

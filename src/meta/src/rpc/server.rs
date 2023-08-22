@@ -343,7 +343,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts, init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-    monitor_process().unwrap();
+    monitor_process();
 
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;

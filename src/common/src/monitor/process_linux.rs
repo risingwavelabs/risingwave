@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error, ErrorKind, Result};
+use std::sync::Once;
 
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts};
@@ -23,11 +23,12 @@ use crate::monitor::GLOBAL_METRICS_REGISTRY;
 use crate::util::resource_util;
 
 /// Monitors current process.
-pub fn monitor_process() -> Result<()> {
-    let pc = ProcessCollector::new();
-    GLOBAL_METRICS_REGISTRY
-        .register(Box::new(pc))
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+pub fn monitor_process() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let pc = ProcessCollector::new();
+        GLOBAL_METRICS_REGISTRY.register(Box::new(pc)).unwrap()
+    })
 }
 
 /// A collector to collect process metrics.
