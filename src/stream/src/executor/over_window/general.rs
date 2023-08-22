@@ -61,6 +61,7 @@ struct ExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     calls: Vec<WindowFuncCall>,
+    has_unbounded_frame: bool,
     partition_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
@@ -156,6 +157,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
             schema
         };
 
+        let has_unbounded_frame = args.calls.iter().any(|call| call.frame.is_unbounded());
+
         let order_key_data_types = args
             .order_key_indices
             .iter()
@@ -172,6 +175,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     identity: format!("OverWindowExecutor {:X}", args.executor_id),
                 },
                 calls: args.calls,
+                has_unbounded_frame,
                 partition_key_indices: args.partition_key_indices,
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
@@ -401,7 +405,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
         let (part_with_delta, affected_ranges) = partition
-            .find_affected_ranges(&this.state_table, &this.calls, &delta)
+            .find_affected_ranges(
+                &this.state_table,
+                &this.calls,
+                this.has_unbounded_frame,
+                &delta,
+            )
             .await?;
 
         let snapshot = part_with_delta.snapshot();

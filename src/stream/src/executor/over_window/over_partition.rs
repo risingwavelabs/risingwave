@@ -208,6 +208,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         &'s mut self,
         table: &'_ StateTable<S>,
         calls: &'_ [WindowFuncCall],
+        has_unbounded_frame: bool,
         delta: &'cache PartitionDelta,
     ) -> StreamExecutorResult<(
         DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
@@ -224,9 +225,15 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
-        // ensure the cache covers all delta (if possible)
-        self.extend_cache_by_range(table, &delta_first..=&delta_last)
-            .await?;
+        if has_unbounded_frame {
+            // for unbounded frame, we finally need all entries of the partition in the cache, so
+            // for simplicity we just load all entries at once
+            self.extend_cache_to_boundary(table).await?;
+        } else {
+            // ensure the cache covers all delta (if possible)
+            self.extend_cache_by_range(table, &delta_first..=&delta_last)
+                .await?;
+        }
 
         loop {
             let (left_reached_sentinel, right_reached_sentinel) = {
@@ -255,17 +262,46 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
             if left_reached_sentinel {
                 // TODO(rc): should count cache miss for this, and also the below
-                tracing::info!("partition cache left extension triggered");
+                tracing::debug!(partition=?self.this_partition_key, "partition cache left extension triggered");
                 let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if right_reached_sentinel {
-                tracing::info!("partition cache right extension triggered");
+                tracing::debug!(partition=?self.this_partition_key, "partition cache right extension triggered");
                 let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
-            tracing::info!("partition cache extended");
+            tracing::debug!(partition=?self.this_partition_key, "partition cache extended");
         }
+    }
+
+    async fn extend_cache_to_boundary(
+        &mut self,
+        table: &StateTable<S>,
+    ) -> StreamExecutorResult<()> {
+        if self.cache_real_len() == self.range_cache.len() {
+            // no sentinel in the cache, meaning we already cached all entries of this partition
+            return Ok(());
+        }
+
+        tracing::debug!(partition=?self.this_partition_key, "loading the whole partition into cache");
+
+        let mut new_cache = new_empty_partition_cache();
+        let table_iter = table
+            .iter_with_pk_prefix(
+                self.this_partition_key,
+                PrefetchOptions::new_for_exhaust_iter(),
+            )
+            .await?;
+
+        #[for_await]
+        for row in table_iter {
+            let row: OwnedRow = row?;
+            new_cache.insert(self.row_to_state_key(&row)?.into(), row);
+        }
+        *self.range_cache = new_cache;
+
+        Ok(())
     }
 
     /// Try to load the given range of entries from table into cache.
@@ -289,11 +325,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             || cache_real_last_key.is_some() && *range.start() > cache_real_last_key.unwrap()
         {
             // completely not overlapping, for the sake of simplicity, we re-init the cache
-            tracing::info!(
+            tracing::debug!(
+                partition=?self.this_partition_key,
                 cache_first=?cache_real_first_key,
                 cache_last=?cache_real_last_key,
                 range=?range,
-                "modified range is completely non-overlapping with the cached range, re-init the cache"
+                "modified range is completely non-overlapping with the cached range, re-initializing the cache"
             );
             *self.range_cache = new_empty_partition_cache();
         }
@@ -304,7 +341,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.state_key_to_table_pk(range.start())?),
                 Bound::Included(self.state_key_to_table_pk(range.end())?),
             );
-            tracing::debug!(table_pk_range=?table_pk_range, "cache is empty, just load the given range");
+            tracing::debug!(
+                partition=?self.this_partition_key,
+                table_pk_range=?table_pk_range,
+                "cache is empty, just loading the given range"
+            );
             return self
                 .extend_cache_by_range_inner(table, table_pk_range)
                 .await;
@@ -320,7 +361,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.state_key_to_table_pk(range.start())?),
                 Bound::Excluded(self.state_key_to_table_pk(cache_real_first_key)?),
             );
-            tracing::debug!(table_pk_range=?table_pk_range, "load the left half of given range");
+            tracing::debug!(
+                partition=?self.this_partition_key,
+                table_pk_range=?table_pk_range,
+                "loading the left half of given range"
+            );
             return self
                 .extend_cache_by_range_inner(table, table_pk_range)
                 .await;
@@ -332,7 +377,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Excluded(self.state_key_to_table_pk(cache_real_last_key)?),
                 Bound::Included(self.state_key_to_table_pk(range.end())?),
             );
-            tracing::debug!(table_pk_range=?table_pk_range, "load the right half of given range");
+            tracing::debug!(
+                partition=?self.this_partition_key,
+                table_pk_range=?table_pk_range,
+                "loading the right half of given range"
+            );
             return self
                 .extend_cache_by_range_inner(table, table_pk_range)
                 .await;
