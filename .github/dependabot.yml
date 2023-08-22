@@ -16,8 +16,3 @@ updates:
     aws:
       patterns:
         - "aws*"
-    # a grouped PR for any dependencies where the highest resolvable version is a patch or minor SemVer update
-    non-major-versions:
-      update-types:
-        - "minor"
-        - "patch"

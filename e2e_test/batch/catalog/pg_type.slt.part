@@ -1,5 +1,5 @@
 query ITITT
-SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type;
+SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type order by oid;
 ----
 16	bool	0	f	b
 17	bytea	0	f	b
