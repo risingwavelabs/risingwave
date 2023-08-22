@@ -287,11 +287,6 @@ impl BatchExecutorMetrics {
         metrics
     }
 
-    /// Create a new `BatchTaskMetrics` instance used in tests or other places.
-    pub fn for_test() -> Self {
-        Self::new()
-    }
-
     fn clean_metrics(&self) {
         let delete_task: Vec<TaskId> = {
             let mut delete_task = self.delete_task.lock();

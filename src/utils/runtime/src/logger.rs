@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::env;
-use std::ops::Deref;
 use std::path::PathBuf;
 
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::deployment::Deployment;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
@@ -150,7 +148,6 @@ impl LoggerSettings {
 /// `RW_QUERY_LOG_TRUNCATE_LEN` configures the max length of the SQLs logged in the query log,
 /// to avoid the log file growing too large. The default value is 1024 in production.
 pub fn init_risingwave_logger(settings: LoggerSettings) {
-    let registry = GLOBAL_METRICS_REGISTRY.deref();
     let deployment = Deployment::current();
 
     // Default timer for logging with local time offset.
@@ -385,9 +382,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     {
         let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
 
-        layers.push(Box::new(
-            MetricsLayer::new(registry.clone()).with_filter(filter),
-        ));
+        layers.push(Box::new(MetricsLayer::new().with_filter(filter)));
     }
     tracing_subscriber::registry().with(layers).init();
     // TODO: add file-appender tracing subscriber in the future

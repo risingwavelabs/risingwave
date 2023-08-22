@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, Histogram, Registry,
+    register_int_counter_with_registry, Histogram,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -38,11 +38,11 @@ pub struct HummockMetrics {
     pub report_compaction_task_latency: Histogram,
 }
 
-pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> =
-    LazyLock::new(|| HummockMetrics::new(GLOBAL_METRICS_REGISTRY.deref()));
+pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> = LazyLock::new(HummockMetrics::new);
 
 impl HummockMetrics {
-    fn new(registry: &Registry) -> Self {
+    fn new() -> Self {
+        let registry = GLOBAL_METRICS_REGISTRY.deref();
         // ----- Hummock -----
         // gRPC count
         let unpin_version_before_counts = register_int_counter_with_registry!(
