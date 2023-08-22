@@ -309,8 +309,11 @@ impl EstimateSize for StreamChunk {
 
 enum OpsMutState {
     ArcRef(Arc<[Op]>),
-    MutRef(Vec<Op>),
-    Undefined,
+    Mut(Vec<Op>),
+}
+
+impl OpsMutState {
+    const UNDEFINED: Self = Self::Mut(Vec::new());
 }
 
 pub struct OpsMut {
@@ -325,16 +328,16 @@ impl OpsMut {
     }
 
     pub fn set(&mut self, n: usize, val: Op) {
-        if let OpsMutState::MutRef(v) = &mut self.state {
+        if let OpsMutState::Mut(v) = &mut self.state {
             v[n] = val;
         } else {
-            let state = mem::replace(&mut self.state, OpsMutState::Undefined); // intermediate state
+            let state = mem::replace(&mut self.state, OpsMutState::UNDEFINED); // intermediate state
             let mut v = match state {
                 OpsMutState::ArcRef(v) => v.to_vec(),
-                OpsMutState::MutRef(_) | OpsMutState::Undefined => unreachable!(),
+                OpsMutState::Mut(_) => unreachable!(),
             };
             v[n] = val;
-            self.state = OpsMutState::MutRef(v);
+            self.state = OpsMutState::Mut(v);
         }
     }
 }
@@ -342,8 +345,7 @@ impl From<OpsMut> for Arc<[Op]> {
     fn from(v: OpsMut) -> Self {
         match v.state {
             OpsMutState::ArcRef(a) => a,
-            OpsMutState::MutRef(v) => v.into(),
-            OpsMutState::Undefined => unreachable!(),
+            OpsMutState::Mut(v) => v.into(),
         }
     }
 }
