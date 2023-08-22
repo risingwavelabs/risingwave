@@ -341,8 +341,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
             let mut partition = OverPartition::new(
                 &part_key,
-                &this.partition_key_indices,
                 &mut cache,
+                &this.calls,
+                this.has_unbounded_frame,
+                &this.partition_key_indices,
                 &this.order_key_data_types,
                 &this.order_key_order_types,
                 &this.order_key_indices,
@@ -405,12 +407,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
         let (part_with_delta, affected_ranges) = partition
-            .find_affected_ranges(
-                &this.state_table,
-                &this.calls,
-                this.has_unbounded_frame,
-                &delta,
-            )
+            .find_affected_ranges(&this.state_table, &delta)
             .await?;
 
         let snapshot = part_with_delta.snapshot();

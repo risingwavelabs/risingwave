@@ -70,8 +70,11 @@ pub(super) fn new_empty_partition_cache() -> PartitionCache {
 /// methods.
 pub(super) struct OverPartition<'a, S: StateStore> {
     this_partition_key: &'a OwnedRow,
-    partition_key_indices: &'a [usize],
     range_cache: &'a mut PartitionCache,
+
+    calls: &'a [WindowFuncCall],
+    has_unbounded_frame: bool,
+    partition_key_indices: &'a [usize],
     order_key_data_types: &'a [DataType],
     order_key_order_types: &'a [OrderType],
     order_key_indices: &'a [usize],
@@ -85,8 +88,11 @@ const MAGIC_BATCH_SIZE: usize = 512;
 impl<'a, S: StateStore> OverPartition<'a, S> {
     pub fn new(
         this_partition_key: &'a OwnedRow,
-        partition_key_indices: &'a [usize],
         cache: &'a mut PartitionCache,
+
+        calls: &'a [WindowFuncCall],
+        has_unbounded_frame: bool,
+        partition_key_indices: &'a [usize],
         order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
         order_key_indices: &'a [usize],
@@ -109,8 +115,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         Self {
             this_partition_key,
-            partition_key_indices,
             range_cache: cache,
+
+            calls,
+            has_unbounded_frame,
+            partition_key_indices,
             order_key_data_types,
             order_key_order_types,
             order_key_indices,
@@ -207,8 +216,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     pub async fn find_affected_ranges<'s, 'cache>(
         &'s mut self,
         table: &'_ StateTable<S>,
-        calls: &'_ [WindowFuncCall],
-        has_unbounded_frame: bool,
         delta: &'cache PartitionDelta,
     ) -> StreamExecutorResult<(
         DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
@@ -225,7 +232,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
-        if has_unbounded_frame {
+        if self.has_unbounded_frame {
             // for unbounded frame, we finally need all entries of the partition in the cache, so
             // for simplicity we just load all entries at once
             self.extend_cache_to_boundary(table).await?;
@@ -242,7 +249,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 // the reference once we don't need to do any further mutation.
                 let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
                 let ranges =
-                    self::find_affected_ranges(calls, DeltaBTreeMap::new(cache_inner, delta));
+                    self::find_affected_ranges(self.calls, DeltaBTreeMap::new(cache_inner, delta));
 
                 if ranges.is_empty() {
                     // no ranges affected, we're done
