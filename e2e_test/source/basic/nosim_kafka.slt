@@ -74,7 +74,7 @@ CREATE TABLE kafka_json_schema with (
     kafka.topic = 'kafka_json_schema',
     kafka.brokers = 'kafka:9093',
     kafka.scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schema_registry:8082');
+) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
 
 statement ok
 flush;
