@@ -300,6 +300,8 @@ where
                         .collect();
 
                     if let Some(change) = diff_splits(
+                        *source_id,
+                        *fragment_id,
                         prev_actor_splits,
                         &discovered_splits,
                         SplitDiffOptions::default(),
@@ -420,6 +422,8 @@ impl Default for SplitDiffOptions {
 }
 
 fn diff_splits<T>(
+    source_id: SourceId,
+    fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
     opts: SplitDiffOptions,
@@ -433,7 +437,7 @@ where
     }
 
     if discovered_splits.is_empty() {
-        tracing::warn!("no splits discovered");
+        tracing::warn!("no splits discovered for source {}", source_id);
     }
 
     let prev_split_ids: HashSet<_> = actor_splits
@@ -441,8 +445,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::debug!("previous splits {:?}", prev_split_ids);
-    tracing::debug!("discovered splits {:?}", discovered_splits.keys());
+    tracing::trace!(fragment_id, source_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::trace!(fragment_id, source_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 
@@ -453,12 +457,9 @@ where
 
     if !dropped_splits.is_empty() {
         if opts.enable_scale_in {
-            tracing::debug!("dropping splits {:?}", dropped_splits);
+            tracing::info!(fragment_id, source_id, dropped_spltis = ?dropped_splits, "new dropped splits");
         } else {
-            tracing::warn!(
-                "dropping splits {:?} happened, but it is not allowed",
-                dropped_splits
-            );
+            tracing::warn!(fragment_id, source_id, dropped_spltis = ?dropped_splits, "split dropping happened, but it is not allowed");
         }
     }
 
@@ -467,7 +468,7 @@ where
         .filter(|split_id| !prev_split_ids.contains(split_id))
         .collect();
 
-    tracing::debug!("new created splits {:?}", new_discovered_splits);
+    tracing::info!(new_discovered_splits = ?new_discovered_splits, "new discovered splits");
 
     if opts.enable_scale_in {
         // if we support scale in, no more splits are discovered, and no splits are dropped, return
