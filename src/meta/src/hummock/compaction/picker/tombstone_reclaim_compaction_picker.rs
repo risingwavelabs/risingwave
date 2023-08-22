@@ -24,8 +24,8 @@ use crate::hummock::level_handler::LevelHandler;
 pub struct TombstoneReclaimCompactionPicker {
     overlap_strategy: Arc<dyn OverlapStrategy>,
     max_compaction_bytes: u64,
-    delete_ratio_percent: u64,
-    range_delete_ratio_percent: u64,
+    delete_ratio: u64,
+    range_delete_ratio: u64,
 }
 
 #[derive(Default)]
@@ -37,14 +37,14 @@ impl TombstoneReclaimCompactionPicker {
     pub fn new(
         overlap_strategy: Arc<dyn OverlapStrategy>,
         max_compaction_bytes: u64,
-        delete_ratio_percent: u64,
-        range_delete_ratio_percent: u64,
+        delete_ratio: u64,
+        range_delete_ratio: u64,
     ) -> Self {
         Self {
             overlap_strategy,
             max_compaction_bytes,
-            delete_ratio_percent,
-            range_delete_ratio_percent,
+            delete_ratio,
+            range_delete_ratio,
         }
     }
 
@@ -56,14 +56,16 @@ impl TombstoneReclaimCompactionPicker {
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
         let mut select_input_ssts = vec![];
+        if state.last_level == 0 {
+            state.last_level = 1;
+        }
 
         while state.last_level <= levels.levels.len() {
             let mut select_file_size = 0;
             for sst in &levels.levels[state.last_level - 1].table_infos {
-                let need_reclaim = sst.range_tombstone_count * self.range_delete_ratio_percent
-                    / 100
+                let need_reclaim = sst.range_tombstone_count * self.range_delete_ratio / 100
                     > sst.total_key_count
-                    || sst.stale_key_count * self.delete_ratio_percent / 100 > sst.total_key_count;
+                    || sst.stale_key_count * self.delete_ratio / 100 > sst.total_key_count;
                 if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
                 {
                     if !select_input_ssts.is_empty() {

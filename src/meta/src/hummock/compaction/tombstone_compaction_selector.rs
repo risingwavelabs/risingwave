@@ -49,8 +49,8 @@ impl LevelSelector for TombstoneCompactionSelector {
         let picker = TombstoneReclaimCompactionPicker::new(
             create_overlap_strategy(group.compaction_config.compaction_mode()),
             group.compaction_config.max_compaction_bytes,
-            group.compaction_config.tombstone_reclaim_ratio_percent as u64,
-            group.compaction_config.tombstone_reclaim_ratio_percent as u64 / 2,
+            group.compaction_config.tombstone_reclaim_ratio as u64,
+            group.compaction_config.tombstone_reclaim_ratio as u64 / 2,
         );
         let state = self
             .state

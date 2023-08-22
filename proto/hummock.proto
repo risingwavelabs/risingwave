@@ -691,7 +691,7 @@ message CompactionConfig {
 
   // for tier compaction pick overlapping level
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
-  uint32 tombstone_reclaim_ratio_percent = 19;
+  uint32 tombstone_reclaim_ratio = 19;
 }
 
 message TableStats {

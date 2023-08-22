@@ -1208,7 +1208,7 @@ pub mod default {
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
-        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 30;
+        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1251,7 +1251,7 @@ pub mod default {
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
         }
-        pub fn tombstone_reclaim_ratio_percent() -> u32 {
+        pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
     }
@@ -1377,8 +1377,8 @@ pub struct CompactionConfig {
     pub max_space_reclaim_bytes: u64,
     #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
     pub level0_max_compact_file_number: u64,
-    #[serde(default = "default::compaction_config::tombstone_reclaim_ratio_percent")]
-    pub tombstone_reclaim_ratio_percent: u32,
+    #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
+    pub tombstone_reclaim_ratio: u32,
 }
 
 #[cfg(test)]

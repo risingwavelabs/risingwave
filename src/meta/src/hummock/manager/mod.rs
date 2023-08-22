@@ -2036,7 +2036,7 @@ where
                     hummock_manager
                         .env
                         .opts
-                        .periodic_ttl_reclaim_compaction_interval_sec,
+                        .periodic_tombstone_reclaim_compaction_interval_sec,
                 ));
             tombstone_reclaim_trigger_interval
                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
