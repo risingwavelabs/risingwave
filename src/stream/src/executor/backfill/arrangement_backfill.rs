@@ -130,10 +130,10 @@ where
         let first_checkpointing_epoch = first_barrier.epoch.prev;
         let cur_checkpointing_epoch = first_barrier.epoch.curr;
 
-        println!(
-            "first barrier: {:?}, actor: {:?}",
-            first_barrier, self.actor_id
-        );
+        // println!(
+        //     "first barrier: {:?}, actor: {:?}",
+        //     first_barrier, self.actor_id
+        // );
         self.state_table.init_epoch(first_barrier.epoch);
         upstream_table.init_epoch(first_barrier.epoch);
 
@@ -156,7 +156,6 @@ where
         let mut committed_progress = HashMap::new();
 
         let output_data_types = upstream_table.get_output_data_types();
-        // println!("output_data_types: {:?}", output_data_types);
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
@@ -189,11 +188,10 @@ where
                     empty
                 };
                 let builder_is_empty = builders.iter().all(|b| b.is_empty());
-                // println!("Snapshot is empty: {}", snapshot_is_empty && builder_is_empty);
                 snapshot_is_empty && builder_is_empty
             }
         };
-        println!("is_snapshot_empty: {}", is_snapshot_empty);
+        // println!("is_snapshot_empty: {}", is_snapshot_empty);
 
         // | backfill_is_finished | snapshot_empty | -> | need_to_backfill |
         // | -------------------- | -------------- | -- | ---------------- |
@@ -287,8 +285,9 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
-                                        println!("Backfill: Barrier from upstream {:?}", barrier);
-                                        // We have to process the barrier outside of the loop.
+                                        // println!("Backfill: Barrier from upstream {:?}",
+                                        // barrier); We have
+                                        // to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
                                         // so we can do replication of upstream state_table.
@@ -298,7 +297,7 @@ where
                                         break;
                                     }
                                     Message::Chunk(chunk) => {
-                                        println!("Backfill: Chunk from upstream {:?}", chunk);
+                                        // println!("Backfill: Chunk from upstream {:?}", chunk);
                                         // Buffer the upstream chunk.
                                         upstream_chunk_buffer.push(chunk.compact());
                                     }
@@ -311,7 +310,7 @@ where
                             Either::Right(msg) => {
                                 match msg? {
                                     None => {
-                                        println!("Backfill: Snapshot read stream is empty");
+                                        // println!("Backfill: Snapshot read stream is empty");
                                         // End of the snapshot read stream.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows
@@ -323,7 +322,7 @@ where
                                             cur_barrier_snapshot_processed_rows +=
                                                 chunk_cardinality;
                                             total_snapshot_processed_rows += chunk_cardinality;
-                                            println!("{:#?}", "yielding chunks");
+                                            // println!("{:#?}", "yielding chunks");
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
@@ -333,8 +332,9 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
-                                        println!("Backfill: Chunk from snapshot read, {:?}", chunk);
-                                        // Raise the current position.
+                                        // println!("Backfill: Chunk from snapshot read, {:?}",
+                                        // chunk); Raise the
+                                        // current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
                                         update_pos_by_vnode(
@@ -347,7 +347,7 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
-                                        println!("snapshot_read: {:#?}", chunk);
+                                        // println!("snapshot_read: {:#?}", chunk);
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
@@ -583,7 +583,6 @@ where
             .zip_eq_debug(builders.iter_mut())
         {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
-            // println!("backfill_progress: {:?}", backfill_progress);
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
                 BackfillProgressPerVnode::Completed(current_pos)
@@ -591,7 +590,6 @@ where
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
-            // println!("range_bounds: {:?}", range_bounds);
             if range_bounds.is_none() {
                 continue;
             }
@@ -610,17 +608,13 @@ where
             let vnode_row_iter = Box::pin(vnode_row_iter);
 
             let vnode_chunk_iter = iter_chunks(vnode_row_iter, chunk_size, builder)
-                .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
+                .map_ok(move |chunk| (vnode, chunk));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));
         }
         #[for_await]
         for chunk in select_all(streams) {
-            println!("snapshot_read_chunk: {:#?}", chunk);
-            let chunk = chunk?;
-            if let Some(_) = chunk {
-                yield chunk;
-            }
+            yield Some(chunk?);
         }
         yield None;
         return Ok(());

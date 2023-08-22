@@ -512,8 +512,9 @@ where
 
         #[for_await]
         for chunk in iter_chunks(iter, chunk_size, builder) {
-            yield chunk?;
+            yield Some(chunk?);
         }
+        yield None;
     }
 
     async fn persist_state(

@@ -379,7 +379,7 @@ pub(crate) fn compute_bounds(
     }
 }
 
-#[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+#[try_stream(ok = StreamChunk, error = StreamExecutorError)]
 pub(crate) async fn iter_chunks<'a, S, E, R>(
     mut iter: S,
     chunk_size: usize,
@@ -397,10 +397,8 @@ pub(crate) async fn iter_chunks<'a, S, E, R>(
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-        yield Some(stream_chunk);
+        yield stream_chunk;
     }
-
-    yield None;
 }
 
 /// Schema
@@ -457,11 +455,9 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             if &old_state[1..current_pos.len() + 1] == current_pos.as_inner()
                 && old_state[current_pos.len() + 1] == Some(is_finished.into())
             {
-                println!("No progress for vnode {:?}", vnode);
                 continue;
             } else {
-                debug_assert!(old_state[0] == Some((*vnode).to_scalar()));
-                println!("Has progress persisted for vnode {:?}", vnode);
+                debug_assert!(old_state[0] == Some((*vnode).to_scalar().into()));
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
                     old_row: &old_state[..],
