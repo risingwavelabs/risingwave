@@ -452,7 +452,6 @@ impl SharedBufferCompactRunner {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
         let compactor = Compactor::new(
-            context,
             options,
             super::TaskConfig {
                 key_range,
@@ -466,6 +465,12 @@ impl SharedBufferCompactRunner {
                 split_weight_by_vnode,
                 use_block_based_filter,
             },
+            context.compactor_metrics.clone(),
+            context.is_share_buffer_compact,
+            context.sstable_store.clone(),
+            context.memory_limiter.clone(),
+            context.sstable_object_id_manager.clone(),
+            context.storage_opts.compact_iter_recreate_timeout_ms,
         );
         Self {
             compactor,

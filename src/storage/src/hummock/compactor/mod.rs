@@ -40,7 +40,10 @@ pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
+use super::{
+    CompactionDeleteRanges, HummockResult, MemoryLimiter, SstableBuilderOptions,
+    SstableObjectIdManager, SstableStoreRef, Xor16FilterBuilder,
+};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -49,11 +52,18 @@ use crate::hummock::{
     BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder, HummockError,
     SstableWriterFactory, StreamingSstableWriterFactory,
 };
+use crate::monitor::CompactorMetrics;
 
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
-    context: Arc<CompactorContext>,
+    compactor_metrics: Arc<CompactorMetrics>,
+    is_share_buffer_compact: bool,
+    sstable_store: SstableStoreRef,
+    memory_limiter: Arc<MemoryLimiter>,
+
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    compact_iter_recreate_timeout_ms: u64,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
@@ -64,15 +74,27 @@ pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
 impl Compactor {
     /// Create a new compactor.
     pub fn new(
-        context: Arc<CompactorContext>,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
+        compactor_metrics: Arc<CompactorMetrics>,
+        is_share_buffer_compact: bool,
+        sstable_store: SstableStoreRef,
+        memory_limiter: Arc<MemoryLimiter>,
+
+        sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        compact_iter_recreate_timeout_ms: u64,
     ) -> Self {
         Self {
-            context,
+            compactor_metrics,
+            is_share_buffer_compact,
+            sstable_store,
+            memory_limiter,
+
+            sstable_object_id_manager,
             options,
             task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
+            compact_iter_recreate_timeout_ms,
         }
     }
 
@@ -91,74 +113,66 @@ impl Compactor {
         split_index: Option<usize>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
-        let compact_timer = if self.context.is_share_buffer_compact {
-            self.context
-                .compactor_metrics
+        let compact_timer = if self.is_share_buffer_compact {
+            self.compactor_metrics
                 .write_build_l0_sst_duration
                 .start_timer()
         } else {
-            self.context
-                .compactor_metrics
-                .compact_sst_duration
-                .start_timer()
+            self.compactor_metrics.compact_sst_duration.start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = if self
-            .context
-            .sstable_store
-            .store()
-            .support_streaming_upload()
-        {
-            let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
+        let (split_table_outputs, table_stats_map) =
+            if self.sstable_store.store().support_streaming_upload() {
+                let factory = StreamingSstableWriterFactory::new(self.sstable_store.clone());
+                if self.task_config.use_block_based_filter {
+                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                } else {
+                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                }
             } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
-        } else {
-            let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
-        };
+                let factory = BatchSstableWriterFactory::new(self.sstable_store.clone());
+                if self.task_config.use_block_based_filter {
+                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                } else {
+                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                }
+            };
 
         compact_timer.observe_duration();
 
@@ -174,7 +188,8 @@ impl Compactor {
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress.clone();
-            let context_cloned = self.context.clone();
+            let compactor_metrics_cloned = self.compactor_metrics.clone();
+            let is_share_buffer_compact = self.is_share_buffer_compact;
             upload_join_handles.push(async move {
                 upload_join_handle
                     .verbose_instrument_await("upload")
@@ -186,16 +201,12 @@ impl Compactor {
                         .num_pending_write_io
                         .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
-                if context_cloned.is_share_buffer_compact {
-                    context_cloned
-                        .compactor_metrics
+                if is_share_buffer_compact {
+                    compactor_metrics_cloned
                         .shared_buffer_to_sstable_size
                         .observe(sst_size as _);
                 } else {
-                    context_cloned
-                        .compactor_metrics
-                        .compaction_upload_sst_counts
-                        .inc();
+                    compactor_metrics_cloned.compaction_upload_sst_counts.inc();
                 }
                 Ok::<_, HummockError>(())
             });
@@ -205,8 +216,7 @@ impl Compactor {
         try_join_all(upload_join_handles)
             .verbose_instrument_await("join")
             .await?;
-        self.context
-            .compactor_metrics
+        self.compactor_metrics
             .get_table_id_total_time_duration
             .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
@@ -236,8 +246,8 @@ impl Compactor {
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
-            sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
-            limiter: self.context.memory_limiter.clone(),
+            sstable_object_id_manager: self.sstable_object_id_manager.clone(),
+            limiter: self.memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),
@@ -248,7 +258,7 @@ impl Compactor {
 
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
-            self.context.compactor_metrics.clone(),
+            self.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.is_target_l0_or_lbase,
             self.task_config.split_by_table,
@@ -258,7 +268,7 @@ impl Compactor {
             &mut sst_builder,
             del_agg,
             &self.task_config,
-            self.context.compactor_metrics.clone(),
+            self.compactor_metrics.clone(),
             iter,
             compaction_filter,
             task_progress,
