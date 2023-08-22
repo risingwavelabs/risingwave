@@ -358,7 +358,7 @@ create source s26 (id int) with (
 statement ok
 create table s27 with (
   connector = 'kafka',
-  topic = 'json_schema',
+  topic = 'json_schema_without_schema',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/json-complex-schema')

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use apache_avro::Schema;
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
@@ -19,7 +21,10 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use super::util::{read_schema_from_http, read_schema_from_local};
+use super::avro::schema_resolver::ConfluentSchemaResolver;
+use super::schema_registry::Client;
+use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
+use super::SchemaRegistryAuth;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
@@ -119,17 +124,32 @@ impl JsonParser {
     }
 }
 
-pub async fn schema_to_columns(schema_location: &str) -> anyhow::Result<Vec<ColumnDesc>> {
+pub async fn schema_to_columns(
+    schema_location: &str,
+    use_schema_registry: bool,
+    props: &HashMap<String, String>,
+) -> anyhow::Result<Vec<ColumnDesc>> {
     let url = Url::parse(schema_location)
         .map_err(|e| InternalError(format!("failed to parse url ({}): {}", schema_location, e)))?;
-    let schema_content = match url.scheme() {
-        "file" => read_schema_from_local(url.path()),
-        "https" | "http" => read_schema_from_http(&url).await,
-        scheme => Err(RwError::from(ProtocolError(format!(
-            "path scheme {} is not supported",
-            scheme
-        )))),
-    }?;
+    let schema_content = if use_schema_registry {
+        let schema_registry_auth = SchemaRegistryAuth::from(props);
+        let client = Client::new(url, &schema_registry_auth)?;
+        let topic = get_kafka_topic(props)?;
+        let resolver = ConfluentSchemaResolver::new(client);
+        resolver
+            .get_raw_schema_by_subject_name(&format!("{}-value", topic))
+            .await?
+            .content
+    } else {
+        match url.scheme() {
+            "file" => read_schema_from_local(url.path()),
+            "https" | "http" => read_schema_from_http(&url).await,
+            scheme => Err(RwError::from(ProtocolError(format!(
+                "path scheme {} is not supported",
+                scheme
+            )))),
+        }?
+    };
     let json_schema = serde_json::from_str(&schema_content)?;
     let context = Context::default();
     let avro_schema = convert_avro(&json_schema, context).to_string();

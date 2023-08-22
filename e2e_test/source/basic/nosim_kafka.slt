@@ -69,6 +69,14 @@ CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
 ) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 statement ok
+CREATE TABLE kafka_json_schema with (
+    connector = 'kafka',
+    kafka.topic = 'kafka_json_schema',
+    kafka.brokers = 'kafka:29093',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schema-registry:8082');
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -141,6 +149,11 @@ select count(*) from debezium_compact;
 ----
 2
 
+query TFITT
+select * from kafka_json_schema
+----
+(9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
+
 statement ok
 DROP TABLE upsert_avro_json_default_key;
 
@@ -159,3 +172,6 @@ DROP TABLE debezium_non_compact;
 
 statement ok
 DROP TABLE debezium_compact;
+
+statement ok
+DROP TABLE kafka_json_schema;

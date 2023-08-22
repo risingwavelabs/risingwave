@@ -225,6 +225,21 @@ fn consume_string_from_options(
     ))))
 }
 
+fn get_json_schema_location(
+    row_options: &mut BTreeMap<String, String>,
+) -> Result<Option<(AstString, bool)>> {
+    let schema_location = try_consume_string_from_options(row_options, "schema.location");
+    let schema_registry = try_consume_string_from_options(row_options, "schema.registry");
+    match (schema_location, schema_registry) {
+        (None, None) => Ok(None),
+        (None, Some(schema_registry)) => Ok(Some((schema_registry, true))),
+        (Some(schema_location), None) => Ok(Some((schema_location, false))),
+        (Some(_), Some(_)) => Err(RwError::from(ProtocolError(
+            "only need either the schema location or the schema registry".to_string(),
+        ))),
+    }
+}
+
 fn get_schema_location(row_options: &mut BTreeMap<String, String>) -> Result<(AstString, bool)> {
     let schema_location = try_consume_string_from_options(row_options, "schema.location");
     let schema_registry = try_consume_string_from_options(row_options, "schema.registry");
@@ -332,23 +347,24 @@ pub(crate) async fn try_bind_columns_from_source(
             )
         }
         (Format::Plain, Encode::Json) => {
-            let schema_registry = try_consume_string_from_options(&mut options, "schema.location");
-            if schema_registry.is_some() && sql_defined_schema {
+            let schema_config = get_json_schema_location(&mut options)?;
+            if schema_config.is_some() && sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with schema registry.".to_string(),
                 )));
             }
-            if schema_registry.is_none() && sql_defined_columns.is_empty() {
+            if schema_config.is_none() && sql_defined_columns.is_empty() {
                 return Err(RwError::from(InvalidInputSyntax(
                     "schema definition is required for ENCODE JSON".to_owned(),
                 )));
             }
             (
-                if schema_registry.is_none() {
+                if schema_config.is_none() {
                     None
                 } else {
+                    let (schema_location, use_schema_registry) = schema_config.unwrap();
                     Some(
-                        schema_to_columns(&schema_registry.unwrap().0)
+                        schema_to_columns(&schema_location.0, use_schema_registry, with_properties)
                             .await?
                             .into_iter()
                             .map(|col| ColumnCatalog {

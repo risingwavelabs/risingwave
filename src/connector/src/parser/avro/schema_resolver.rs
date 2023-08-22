@@ -47,11 +47,17 @@ impl ConfluentSchemaResolver {
     }
 
     pub async fn get_by_subject_name(&self, subject_name: &str) -> Result<Arc<Schema>> {
-        let raw_schema = self
-            .confluent_client
-            .get_schema_by_subject(subject_name)
-            .await?;
+        let raw_schema = self.get_raw_schema_by_subject_name(subject_name).await?;
         self.parse_and_cache_schema(raw_schema).await
+    }
+
+    pub async fn get_raw_schema_by_subject_name(
+        &self,
+        subject_name: &str,
+    ) -> Result<ConfluentSchema> {
+        self.confluent_client
+            .get_schema_by_subject(subject_name)
+            .await
     }
 
     // get the writer schema by id
