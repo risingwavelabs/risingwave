@@ -52,8 +52,8 @@ class TypeUtils {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE));
         } else if (typeStr.equals("FLOAT8") || typeStr.equals("DOUBLE PRECISION")) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
-        } else if (typeStr.startsWith("DECIMAL") || typeStr.startsWith("NUMERIC")) {
-            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
+        } else if (typeStr.equals("DECIMAL") || typeStr.equals("NUMERIC")) {
+            return Field.nullable(name, new ArrowType.LargeBinary());
         } else if (typeStr.equals("DATE")) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (typeStr.equals("TIME") || typeStr.equals("TIME WITHOUT TIME ZONE")) {
@@ -75,10 +75,9 @@ class TypeUtils {
         } else if (typeStr.startsWith("STRUCT")) {
             // extract "STRUCT<INT, VARCHAR, ...>"
             var typeList = typeStr.substring(7, typeStr.length() - 1);
-            var fields =
-                    Arrays.stream(typeList.split(","))
-                            .map(s -> stringToField(s.trim(), ""))
-                            .collect(Collectors.toList());
+            var fields = Arrays.stream(typeList.split(","))
+                    .map(s -> stringToField(s.trim(), ""))
+                    .collect(Collectors.toList());
             return new Field(name, FieldType.nullable(new ArrowType.Struct()), fields);
         } else {
             throw new IllegalArgumentException("Unsupported type: " + typeStr);
@@ -89,8 +88,8 @@ class TypeUtils {
      * Convert a Java class to an Arrow type.
      *
      * @param param The Java class.
-     * @param hint An optional DataTypeHint annotation.
-     * @param name The name of the field.
+     * @param hint  An optional DataTypeHint annotation.
+     * @param name  The name of the field.
      * @return The Arrow type.
      */
     static Field classToField(Class<?> param, DataTypeHint hint, String name) {
@@ -109,7 +108,7 @@ class TypeUtils {
         } else if (param == Double.class || param == double.class) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         } else if (param == BigDecimal.class) {
-            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
+            return Field.nullable(name, new ArrowType.LargeBinary());
         } else if (param == LocalDate.class) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (param == LocalTime.class) {
@@ -163,8 +162,7 @@ class TypeUtils {
         if (!Iterator.class.isAssignableFrom(type)) {
             throw new IllegalArgumentException("Table function must return Iterator");
         }
-        var typeArguments =
-                ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
+        var typeArguments = ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
         var rowIndex = Field.nullable("row_index", new ArrowType.Int(32, true));
         return new Schema(Arrays.asList(rowIndex, classToField(type, hint, "")));
@@ -239,12 +237,12 @@ class TypeUtils {
                     vector.set(i, (double) values[i]);
                 }
             }
-        } else if (fieldVector instanceof DecimalVector) {
-            var vector = (DecimalVector) fieldVector;
+        } else if (fieldVector instanceof LargeVarBinaryVector) {
+            var vector = (LargeVarBinaryVector) fieldVector;
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, (BigDecimal) values[i]);
+                    vector.set(i, ((BigDecimal) values[i]).toString().getBytes());
                 }
             }
         } else if (fieldVector instanceof DateDayVector) {
@@ -328,9 +326,9 @@ class TypeUtils {
             } else if (vector.getDataVector() instanceof Float8Vector) {
                 TypeUtils.<Float8Vector, Double>fillListVector(
                         vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof DecimalVector) {
-                TypeUtils.<DecimalVector, BigDecimal>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof LargeVarBinaryVector) {
+                TypeUtils.<LargeVarBinaryVector, BigDecimal>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.toString().getBytes()));
             } else if (vector.getDataVector() instanceof DateDayVector) {
                 TypeUtils.<DateDayVector, LocalDate>fillListVector(
                         vector, values, (vec, i, val) -> vec.set(i, (int) val.toEpochDay()));
@@ -425,7 +423,10 @@ class TypeUtils {
         return date * 24 * 3600 * 1000 * 1000 + time / 1000;
     }
 
-    /** Return a function that converts the object get from input array to the correct type. */
+    /**
+     * Return a function that converts the object get from input array to the
+     * correct type.
+     */
     static Function<Object, Object> processFunc(Field field, Class<?> targetClass) {
         var inner = processFunc0(field, targetClass);
         return obj -> obj == null ? null : inner.apply(obj);
@@ -438,6 +439,10 @@ class TypeUtils {
         } else if (field.getType() instanceof ArrowType.LargeUtf8 && targetClass == String.class) {
             // object is org.apache.arrow.vector.util.Text
             return obj -> obj.toString();
+        } else if (field.getType() instanceof ArrowType.LargeBinary
+                && targetClass == BigDecimal.class) {
+            // object is byte[]
+            return obj -> new BigDecimal(new String((byte[]) obj));
         } else if (field.getType() instanceof ArrowType.Date && targetClass == LocalDate.class) {
             // object is Integer
             return obj -> LocalDate.ofEpochDay((int) obj);
@@ -466,7 +471,7 @@ class TypeUtils {
             } else if (subfield.getType()
                     .equals(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE))) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Double[]::new);
-            } else if (subfield.getType() instanceof ArrowType.Decimal) {
+            } else if (subfield.getType() instanceof ArrowType.LargeBinary) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(BigDecimal[]::new);
             } else if (subfield.getType() instanceof ArrowType.Date) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(LocalDate[]::new);

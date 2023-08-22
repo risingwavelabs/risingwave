@@ -172,9 +172,9 @@ public class TestUdfServer {
         c5.set(0, 1);
         c5.setValueCount(2);
 
-        var c6 = new DecimalVector("", allocator, 38, 0);
+        var c6 = new LargeVarBinaryVector("", allocator);
         c6.allocateNew(2);
-        c6.set(0, BigDecimal.valueOf(10).pow(37));
+        c6.set(0, "1.234".getBytes());
         c6.setValueCount(2);
 
         var c7 = new DateDayVector("", allocator);
@@ -226,7 +226,7 @@ public class TestUdfServer {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(
-                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"decimal\":10000000000000000000000000000000000000,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1000M2000D\",\"duration\":0.000003000},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}\n{}",
+                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"decimal\":\"MS4yMzQ=\",\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1000M2000D\",\"duration\":0.000003000},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}\n{}",
                     output.contentToTSVString().trim());
         }
     }
