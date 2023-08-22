@@ -893,7 +893,8 @@ mod tests {
                 columns: column_defs,
                 constraints,
                 ..
-            } = ast.remove(0) else {
+            } = ast.remove(0)
+            else {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {

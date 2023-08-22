@@ -101,13 +101,10 @@ fn criterion_benchmark(c: &mut Criterion) {
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
-                        table_id: Default::default(),
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 ))
                 .unwrap();
