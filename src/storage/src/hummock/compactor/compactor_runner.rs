@@ -26,7 +26,6 @@ use more_asserts::assert_ge;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
-use crate::{hummock::SstableObjectIdManager, filter_key_extractor::FilterKeyExtractorManager};
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{
@@ -49,11 +48,12 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use super::task_progress::TaskProgress;
+use super::task_progress::{TaskProgress, TaskProgressManagerRef};
 use super::{CompactionStatistics, TaskConfig};
-use crate::{filter_key_extractor::FilterKeyExtractorImpl, hummock::{MemoryLimiter, SstableObjectIdManager}};
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
+    build_multi_compaction_filter, estimate_task_output_capacity, estimate_task_output_capacity_v2,
+    generate_splits, generate_splits_v2,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -65,8 +65,8 @@ use crate::hummock::vacuum::Vacuum;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     validate_ssts, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges,
-    CompressionAlgorithm, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
-    SstableStoreRef,
+    CompressionAlgorithm, HummockResult, MemoryLimiter, MonotonicDeleteEvent,
+    SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -1246,6 +1246,21 @@ pub fn start_shared_compactor(
     output_ids: Vec<u64>,
     cpu_core_num: u32,
     running_task_count: Arc<AtomicU32>,
+    compactor_metrics: Arc<CompactorMetrics>,
+    compactor_context: Arc<CompactorContext>,
+    mut shutdown_rx: Receiver<()>,
+    sstable_store: SstableStoreRef,
+    parallel_compact_size_mb: u32,
+
+    worker_num: u64,
+    max_sub_compaction: u32,
+    memory_limiter: Arc<MemoryLimiter>,
+    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    block_size_kb: u32,
+    object_store_recv_buffer_size: usize,
+    sstable_size_mb: u32,
+    task_progress_manager: TaskProgressManagerRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -1266,7 +1281,24 @@ pub fn start_shared_compactor(
         let (tx, rx) = tokio::sync::oneshot::channel();
         let task_id = compact_task.task_id;
         shutdown.lock().unwrap().insert(task_id, tx);
-        let (compact_task, table_stats) = compact(context, compact_task, rx).await;
+        let (compact_task, table_stats) = shared_compact(
+            output_ids,
+            compactor_metrics,
+            compact_task,
+            rx,
+            sstable_store,
+            parallel_compact_size_mb,
+            worker_num,
+            max_sub_compaction,
+            memory_limiter,
+            filter_key_extractor_manager,
+            sstable_object_id_manager,
+            block_size_kb,
+            object_store_recv_buffer_size,
+            sstable_size_mb,
+            task_progress_manager,
+        )
+        .await;
         shutdown.lock().unwrap().remove(&task_id);
         running_task_count.fetch_sub(1, Ordering::SeqCst);
         // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
@@ -1285,13 +1317,20 @@ pub fn start_shared_compactor(
 pub async fn shared_compact(
     output_object_id: Vec<u64>,
     compactor_metrics: Arc<CompactorMetrics>,
-    compactor_context: Arc<CompactorContext>,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
+    parallel_compact_size_mb: u32,
+
+    worker_num: u64,
+    max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    block_size_kb: u32,
+    object_store_recv_buffer_size: usize,
+    sstable_size_mb: u32,
+    task_progress_manager: TaskProgressManagerRef,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     // let context = compactor_context.clone();
     // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
@@ -1370,7 +1409,12 @@ pub async fn shared_compact(
         Err(e) => {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
             let task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return shared_compact_done(
+                compact_task,
+                compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
         Ok(extractor) => extractor,
     };
@@ -1384,7 +1428,12 @@ pub async fn shared_compact(
         if !removed_tables.is_empty() {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
             let task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return shared_compact_done(
+                compact_task,
+                compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
     }
 
@@ -1408,7 +1457,16 @@ pub async fn shared_compact(
         .iter()
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
-    match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
+    match generate_splits_v2(
+        &sstable_infos,
+        compaction_size,
+        parallel_compact_size_mb,
+        sstable_store,
+        worker_num,
+        max_sub_compaction,
+    )
+    .await
+    {
         Ok(splits) => {
             if !splits.is_empty() {
                 compact_task.splits = splits;
@@ -1418,7 +1476,12 @@ pub async fn shared_compact(
         Err(e) => {
             tracing::warn!("Failed to generate_splits {:#?}", e);
             task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return shared_compact_done(
+                compact_task,
+                compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
     }
 
@@ -1429,8 +1492,7 @@ pub async fn shared_compact(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
-    let task_progress_guard =
-        TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
+    let task_progress_guard = TaskProgressGuard::new(compact_task.task_id, task_progress_manager);
     let delete_range_agg = match CompactorRunner::build_delete_range_iter(
         &sstable_infos,
         &sstable_store,
@@ -1442,19 +1504,21 @@ pub async fn shared_compact(
         Err(err) => {
             tracing::warn!("Failed to build delete range aggregator {:#?}", err);
             task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return shared_compact_done(
+                compact_task,
+                compactor_metrics.clone(),
+                vec![],
+                task_status,
+            );
         }
     };
 
-    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
+    let capacity = estimate_task_output_capacity_v2(sstable_size_mb, &compact_task);
 
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
-        (context.storage_opts.block_size_kb as u64) * (1 << 10),
-        context
-            .storage_opts
-            .object_store_recv_buffer_size
-            .unwrap_or(6 * 1024 * 1024) as u64,
+        (block_size_kb as u64) * (1 << 10),
+        object_store_recv_buffer_size as u64,
         capacity as u64,
         sstable_store.store().support_streaming_upload(),
     ) * compact_task.splits.len() as u64;
@@ -1473,8 +1537,7 @@ pub async fn shared_compact(
 
     // If the task does not have enough memory, it should cancel the task and let the meta
     // reschedule it, so that it does not occupy the compactor's resources.
-    let memory_detector = memory_limiter
-        .try_require_memory(task_memory_capacity_with_parallelism);
+    let memory_detector = memory_limiter.try_require_memory(task_memory_capacity_with_parallelism);
     if memory_detector.is_none() {
         tracing::warn!(
                 "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
@@ -1500,21 +1563,21 @@ pub async fn shared_compact(
                 .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                 .await
         };
-        let traced = match context.await_tree_reg.as_ref() {
-            None => runner.right_future(),
-            Some(await_tree_reg) => await_tree_reg
-                .write()
-                .register(
-                    format!("{}-{}", compact_task.task_id, split_index),
-                    format!(
-                        "Compaction Task {} Split {} ",
-                        compact_task.task_id, split_index
-                    ),
-                )
-                .instrument(runner)
-                .left_future(),
-        };
-        let handle = tokio::spawn(traced);
+        // let traced = match context.await_tree_reg.as_ref() {
+        //     None => runner.right_future(),
+        //     Some(await_tree_reg) => await_tree_reg
+        //         .write()
+        //         .register(
+        //             format!("{}-{}", compact_task.task_id, split_index),
+        //             format!(
+        //                 "Compaction Task {} Split {} ",
+        //                 compact_task.task_id, split_index
+        //             ),
+        //         )
+        //         .instrument(runner)
+        //         .left_future(),
+        // };
+        let handle = tokio::spawn(runner.right_future());
         abort_handles.push(handle.abort_handle());
         compaction_futures.push(handle);
     }
@@ -1570,8 +1633,12 @@ pub async fn shared_compact(
     }
 
     // After a compaction is done, mutate the compaction task.
-    let (compact_task, table_stats) =
-        shared_compact_done(compact_task, compactor_metrics.clone(), output_ssts, task_status);
+    let (compact_task, table_stats) = shared_compact_done(
+        compact_task,
+        compactor_metrics.clone(),
+        output_ssts,
+        task_status,
+    );
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
