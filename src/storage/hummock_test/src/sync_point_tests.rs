@@ -37,7 +37,8 @@ use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
+use risingwave_storage::hummock::compactor::compactor_runner::compact;
+use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
@@ -205,7 +206,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (result_task, task_stats) = Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+    let (result_task, task_stats) = compact(compact_ctx, compact_task.clone(), rx).await;
 
     hummock_manager_ref
         .report_compact_task(
