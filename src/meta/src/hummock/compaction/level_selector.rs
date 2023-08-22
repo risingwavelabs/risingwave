@@ -53,6 +53,7 @@ pub trait LevelSelector: Sync + Send {
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         table_id_to_options: HashMap<u32, TableOption>,
+        strict_check: bool,
     ) -> Option<CompactionTask>;
 
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
@@ -76,6 +77,7 @@ pub struct SelectContext {
 
 pub struct DynamicLevelSelectorCore {
     config: Arc<CompactionConfig>,
+    strict_check: bool,
 }
 
 #[derive(Default)]
@@ -83,7 +85,14 @@ pub struct DynamicLevelSelector {}
 
 impl DynamicLevelSelectorCore {
     pub fn new(config: Arc<CompactionConfig>) -> Self {
-        Self { config }
+        Self::new_with_check(config, true)
+    }
+
+    pub fn new_with_check(config: Arc<CompactionConfig>, strict_check: bool) -> Self {
+        Self {
+            config,
+            strict_check,
+        }
     }
 
     pub fn get_config(&self) -> &CompactionConfig {
@@ -95,14 +104,16 @@ impl DynamicLevelSelectorCore {
         select_level: usize,
         target_level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        strict_check: bool,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
-                Box::new(TierCompactionPicker::new(self.config.clone()))
+                Box::new(TierCompactionPicker::new(self.config.clone(), strict_check))
             } else {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
                     self.config.clone(),
+                    strict_check,
                 ))
             }
         } else {
@@ -220,7 +231,7 @@ impl DynamicLevelSelectorCore {
             // range at each level, so the number of levels is the most important factor affecting
             // the read performance. At the same time, the size factor is also added to the score
             // calculation rule to avoid unbalanced compact task due to large size.
-            let non_overlapping_score = {
+            let mut non_overlapping_score = {
                 let total_size = levels.l0.as_ref().unwrap().total_file_size
                     - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
                 let base_level_size = levels.get_level(ctx.base_level).total_file_size;
@@ -247,6 +258,12 @@ impl DynamicLevelSelectorCore {
 
                 std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
             };
+
+            if !self.strict_check {
+                // When the system resources are insufficient, we will turn off strict_check to make
+                // the l0 compact as soon as possible
+                non_overlapping_score = std::cmp::max(non_overlapping_score, SCORE_BASE + 1);
+            }
 
             // Reduce the level num of l0 non-overlapping sub_level
             ctx.score_levels
@@ -368,6 +385,7 @@ impl LevelSelector for DynamicLevelSelector {
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
+        strict_check: bool,
     ) -> Option<CompactionTask> {
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(compaction_group.compaction_config.clone());
@@ -382,6 +400,7 @@ impl LevelSelector for DynamicLevelSelector {
                 select_level,
                 target_level,
                 overlap_strategy.clone(),
+                strict_check,
             );
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
@@ -428,6 +447,7 @@ impl LevelSelector for ManualCompactionSelector {
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
+        _strict_check: bool,
     ) -> Option<CompactionTask> {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
@@ -484,6 +504,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
+        _strict_check: bool,
     ) -> Option<CompactionTask> {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let mut picker = SpaceReclaimCompactionPicker::new(
@@ -530,6 +551,7 @@ impl LevelSelector for TtlCompactionSelector {
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
         table_id_to_options: HashMap<u32, TableOption>,
+        _strict_check: bool,
     ) -> Option<CompactionTask> {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
@@ -920,6 +942,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
+                true,
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -946,6 +969,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
+                true,
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -964,6 +988,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
+                true,
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -999,6 +1024,7 @@ pub mod tests {
             &mut levels_handlers,
             &mut local_stats,
             HashMap::default(),
+            true,
         );
         assert!(compaction.is_none());
     }

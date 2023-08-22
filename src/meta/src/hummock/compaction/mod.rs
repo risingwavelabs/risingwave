@@ -109,6 +109,7 @@ impl CompactStatus {
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn LevelSelector>,
         table_id_to_options: HashMap<u32, TableOption>,
+        strict_check: bool,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -120,6 +121,7 @@ impl CompactStatus {
             &mut self.level_handlers,
             stats,
             table_id_to_options,
+            strict_check,
         )?;
         let target_level_id = ret.input.target_level;
 

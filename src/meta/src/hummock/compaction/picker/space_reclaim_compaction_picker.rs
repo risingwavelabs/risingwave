@@ -247,6 +247,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -262,6 +263,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_eq!(task.input.input_levels.len(), 2);
@@ -301,6 +303,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -326,6 +329,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true
                 )
                 .is_none())
         }
@@ -348,6 +352,7 @@ mod test {
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
+                true,
             );
             assert!(task.is_none());
         }
@@ -369,6 +374,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -406,6 +412,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         HashMap::default(),
+                        true,
                     )
                     .unwrap();
 
@@ -460,6 +467,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         HashMap::default(),
+                        true,
                     )
                     .unwrap();
 

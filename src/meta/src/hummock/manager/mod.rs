@@ -822,6 +822,8 @@ where
                 return Ok(None);
             }
         };
+
+        let strict_check;
         let (current_version, watermark) = {
             let versioning_guard = read_lock!(self, versioning).await;
             let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
@@ -830,6 +832,10 @@ where
                 .values()
                 .map(|v| v.minimal_pinned_snapshot)
                 .fold(max_committed_epoch, std::cmp::min);
+
+            strict_check = !versioning_guard
+                .write_limit
+                .contains_key(&compaction_group_id);
 
             (versioning_guard.current_version.clone(), watermark)
         };
@@ -856,6 +862,7 @@ where
             &mut stats,
             selector,
             table_id_to_option.clone(),
+            strict_check,
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {

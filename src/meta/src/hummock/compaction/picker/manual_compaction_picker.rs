@@ -1207,6 +1207,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1243,6 +1244,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1317,6 +1319,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1355,6 +1358,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);

@@ -395,6 +395,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -444,6 +445,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -476,6 +478,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -502,6 +505,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    true
                 )
                 .is_none())
         }
@@ -542,6 +546,7 @@ mod test {
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    true,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -582,6 +587,7 @@ mod test {
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
+                true,
             );
 
             // empty table_options does not select any files
@@ -643,6 +649,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        true,
                     )
                     .unwrap();
 
@@ -734,6 +741,7 @@ mod test {
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        true,
                     )
                     .unwrap();
 
