@@ -73,13 +73,11 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::FrontendMetrics;
+use crate::monitor::GLOBAL_FRONTEND_METRICS;
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{
-    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
-};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
@@ -109,8 +107,6 @@ pub struct FrontendEnv {
     /// secret_key). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
-
-    pub frontend_metrics: Arc<FrontendMetrics>,
 
     batch_config: BatchConfig,
     meta_config: MetaConfig,
@@ -145,7 +141,6 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
-            Arc::new(DistributedQueryMetrics::for_test()),
             None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
@@ -163,7 +158,6 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
-            frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
@@ -226,7 +220,6 @@ impl FrontendEnv {
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
-        let registry = prometheus::Registry::new();
         monitor_process();
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
@@ -238,7 +231,6 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
-            Arc::new(DistributedQueryMetrics::new(registry.clone())),
             batch_config.distributed_query_limit,
         );
 
@@ -272,8 +264,6 @@ impl FrontendEnv {
         meta_client.activate(&frontend_address).await?;
 
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
-
-        let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
 
         if config.server.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
@@ -330,7 +320,6 @@ impl FrontendEnv {
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
                 client_pool,
-                frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
                 meta_config,
@@ -905,8 +894,7 @@ impl SessionManagerImpl {
             write_guard.insert(session.id(), session);
             write_guard.len()
         };
-        self.env
-            .frontend_metrics
+        GLOBAL_FRONTEND_METRICS
             .active_sessions
             .set(active_sessions as i64);
     }
@@ -917,8 +905,7 @@ impl SessionManagerImpl {
             write_guard.remove(session_id);
             write_guard.len()
         };
-        self.env
-            .frontend_metrics
+        GLOBAL_FRONTEND_METRICS
             .active_sessions
             .set(active_sessions as i64);
     }
