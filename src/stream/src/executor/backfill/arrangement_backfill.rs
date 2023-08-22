@@ -116,10 +116,7 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
-        println!("pk: {:?}", self.upstream_table.pk_indices());
-        println!("output: {:?}", self.output_indices);
         let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        println!("pk_in_output_indices: {:?}", pk_indices);
         let state_len = pk_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
@@ -131,8 +128,9 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let first_checkpointing_epoch = first_barrier.epoch.prev;
+        let cur_checkpointing_epoch = first_barrier.epoch.curr;
 
-        println!("backfill_first_barrier: {:?}", first_barrier);
+        println!("first barrier: {:?}, actor: {:?}", first_barrier, self.actor_id);
         self.state_table.init_epoch(first_barrier.epoch);
         upstream_table.init_epoch(first_barrier.epoch);
 
@@ -213,7 +211,7 @@ where
         // expects to have been initialized in previous epoch.
 
         // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch;
+        let mut snapshot_read_epoch= cur_checkpointing_epoch;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -262,8 +260,8 @@ where
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
                         &mut builders,
-                        None,
-                        // Some(snapshot_read_epoch),
+                        // None,
+                        Some(snapshot_read_epoch),
                     )
                     .map(Either::Right),);
 
@@ -435,13 +433,14 @@ where
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
 
+                // TODO(kwannoel): Not sure if this holds for arrangement backfill.
+                // May need to revisit it.
+                // Need to check it after scale-in / scale-out.
                 self.progress.update(
                     barrier.epoch.curr,
                     snapshot_read_epoch,
                     total_snapshot_processed_rows,
                 );
-
-                println!("persisted epoch: {:?}", barrier.epoch);
 
                 // Persist state on barrier
                 persist_state_per_vnode(
@@ -454,6 +453,12 @@ where
                 )
                 .await?;
 
+                tracing::trace!(
+                    actor = self.actor_id,
+                    barrier = ?barrier,
+                    "barrier persisted"
+                );
+
                 yield Message::Barrier(barrier);
 
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
@@ -462,7 +467,7 @@ where
 
         tracing::trace!(
             actor = self.actor_id,
-            "Arrangement Backfill has already finished and forward messages directly to the downstream"
+            "Arrangement Backfill has finished and forward messages directly to the downstream"
         );
 
         // Update our progress as finished in state table.
@@ -471,7 +476,11 @@ where
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
-                println!("mapping message: {:?}", msg);
+                tracing::trace!(
+                    actor = self.actor_id,
+                    message = ?msg,
+                    "backfill_finished_wait_for_barrier"
+                );
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg && !is_completely_finished {
                     // If snapshot was empty, we do not need to backfill,
@@ -483,7 +492,6 @@ where
                     // TODO: if we reach here, maybe some vnodes do not have their state finished.
                     // We should update them to finished state.
                     let finished_placeholder_state = construct_initial_finished_state(pk_indices.len());
-                    println!("need to to persist finished state");
                     for vnode in upstream_table.vnodes().iter_vnodes() {
                         let backfill_progress = backfill_state.get_progress(&vnode)?;
                         let finished_state = match backfill_progress {
@@ -519,7 +527,11 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                println!("mapping message after barrier: {:?}", msg);
+                tracing::trace!(
+                    actor = self.actor_id,
+                    message = ?msg,
+                    "backfill_finished_after_barrier"
+                );
                 if let Message::Barrier(barrier) = &msg {
                     self.state_table.commit_no_data_expected(barrier.epoch);
                 }
@@ -563,7 +575,7 @@ where
             .zip_eq_debug(builders.iter_mut())
         {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
-            println!("backfill_progress: {:?}", backfill_progress);
+            // println!("backfill_progress: {:?}", backfill_progress);
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
                 BackfillProgressPerVnode::Completed(current_pos)
@@ -571,7 +583,7 @@ where
             };
 
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
-            println!("range_bounds: {:?}", range_bounds);
+            // println!("range_bounds: {:?}", range_bounds);
             if range_bounds.is_none() {
                 continue;
             }

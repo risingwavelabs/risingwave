@@ -132,7 +132,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         for msg in input {
             let msg = msg?;
             self.materialize_cache.evict();
-
+            println!("Mview actor_id {:?}: Received msg: {:#?}", self.actor_context.id, msg);
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {

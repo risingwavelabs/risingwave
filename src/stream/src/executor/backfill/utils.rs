@@ -440,7 +440,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     // }
 
     let mut has_progress = false;
-    println!("Persisting state");
     for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
         let current_pos = match backfill_progress {
             BackfillProgressPerVnode::NotStarted => {

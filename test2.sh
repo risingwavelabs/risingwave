@@ -20,10 +20,25 @@ flush;
 sleep 10
 
 ./risedev psql -c "
-
 select * from mv1;
 
-explain create index i1 on mv1(v1);
+explain (verbose) create index i1 on mv1(v1);
+"
+
+./risedev psql -c "
 create index i1 on mv1(v1);
 select * from i1;
 "
+#
+#./risedev psql -c "
+#insert into t values (1), (2), (3), (4);
+#flush;
+#"
+#
+#sleep 10
+#
+#./risedev psql -c "
+#select * from i1;
+#"
+
+./risedev k
