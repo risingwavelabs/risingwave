@@ -178,7 +178,12 @@ where
                         Some(first_checkpointing_epoch),
                     );
                     pin_mut!(snapshot);
-                    snapshot.try_next().await?.unwrap().is_none()
+                    let empty = snapshot.try_next().await?.unwrap().is_none();
+                    // #[for_await]
+                    // for c in snapshot {
+                    //     println!("Backfill: snapshot_empty_check: {:?}", c);
+                    // }
+                    empty
                 };
                 let builder_is_empty = builders.iter().all(|b| b.is_empty());
                 // println!("Snapshot is empty: {}", snapshot_is_empty && builder_is_empty);
@@ -260,8 +265,8 @@ where
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
                         &mut builders,
-                        // None,
-                        Some(snapshot_read_epoch),
+                        None,
+                        // Some(snapshot_read_epoch),
                     )
                     .map(Either::Right),);
 
@@ -608,7 +613,11 @@ where
         }
         #[for_await]
         for chunk in select_all(streams) {
-            yield chunk?;
+            println!("snapshot_read_chunk: {:#?}", chunk);
+            let chunk = chunk?;
+            if let Some(_) = chunk {
+                yield chunk;
+            }
         }
         yield None;
         return Ok(());
