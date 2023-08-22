@@ -210,7 +210,6 @@ impl DynamicLevelSelectorCore {
             let total_size = levels.l0.as_ref().unwrap().total_file_size
                 - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
-            let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
 
             // size limit
             let non_overlapping_size_score = total_size * SCORE_BASE
@@ -225,10 +224,7 @@ impl DynamicLevelSelectorCore {
                 .filter(|level| level.level_type() == LevelType::Nonoverlapping)
                 .count() as u64;
             let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
-                / std::cmp::max(
-                    base_level_sst_count / 16,
-                    self.config.level0_sub_level_compact_level_count as u64,
-                );
+                / self.config.level0_sub_level_compact_level_count as u64;
 
             if non_overlapping_size_score > SCORE_BASE {
                 // Reduce the level num of l0 non-overlapping sub_level
