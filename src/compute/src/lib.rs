@@ -31,6 +31,7 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
+use std::fs;
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
@@ -186,7 +187,11 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 }
 
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
+use jni::{InitArgsBuilder, JavaVM, JNIVersion};
+use jni::objects::{JObject, JValue};
+use jni::sys::jint;
 
 use crate::server::compute_node_serve;
 
@@ -218,10 +223,82 @@ pub fn start(
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
 
+        tokio::task::spawn_blocking(move || {
+            run_jvm();
+        });
+
+
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
         }
     })
+}
+
+fn run_jvm() {
+
+    let dir_path = "/Users/dylan/Desktop/workspace/risingwave/.risingwave/bin/connector-node/libs/";
+
+    let dir = Path::new(dir_path);
+
+    if !dir.is_dir() {
+        println!("{} is not a directory", dir_path);
+        return;
+    }
+
+    let mut class_vec = vec![];
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Some(name) = entry.path().file_name() {
+                    println!("{:?}", name);
+                    class_vec.push(String::from( dir_path.to_owned() + name.to_str().to_owned().unwrap()));
+                }
+            }
+        }
+    } else {
+        println!("failed to read directory {}", dir_path);
+    }
+
+    // Build the VM properties
+    let jvm_args = InitArgsBuilder::new()
+        // Pass the JNI API version (default is 8)
+        .version(JNIVersion::V8)
+        // You can additionally pass any JVM options (standard, like a system property,
+        // or VM-specific).
+        // Here we enable some extra JNI checks useful during development
+        // .option("-Xcheck:jni")
+        .option("-ea")
+        .option(format!("-Djava.class.path={}", class_vec.join(":")) )
+        .option("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=9111")
+        .build()
+        .unwrap();
+
+    // Create a new VM
+    let jvm = match JavaVM::new(jvm_args) {
+        Err(err) => {
+            panic!("{:?}", err)
+        },
+        Ok(jvm) => jvm,
+    };
+
+    // Attach the current thread to call into Java — see extra options in
+    // "Attaching Native Threads" section.
+    //
+    // This method returns the guard that will detach the current thread when dropped,
+    // also freeing any local references created in it
+    let mut env = jvm.attach_current_thread_as_daemon().unwrap();
+
+    // Call Java Math#abs(-10)
+    let x = JValue::from(-10);
+    let val: jint = env.call_static_method("java/lang/Math", "abs", "(I)I", &[x]).unwrap()
+        .i().unwrap();
+
+    assert_eq!(val, 10);
+    let string_class = env.find_class("java/lang/String").unwrap();
+    let jarray = env.new_object_array(0, string_class, JObject::null()).unwrap();
+
+    let _ = env.call_static_method("com/risingwave/connector/ConnectorService", "main", "([Ljava/lang/String;)V", &[JValue::Object(&jarray)]).inspect_err(|e| eprintln!("{:?}", e));
 }
 
 fn default_total_memory_bytes() -> usize {
