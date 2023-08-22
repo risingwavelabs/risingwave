@@ -35,7 +35,9 @@ mod tests {
 
         let props = SpecificParserConfig {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
             protocol_config: ProtocolProperties::Maxwell,
         };
         let mut parser = MaxwellParser::new(props, descs.clone(), Default::default())

@@ -16,7 +16,10 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use maplit::hashmap;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_connector::parser::{JsonParser, SourceStreamChunkBuilder};
+use risingwave_connector::parser::{
+    EncodingProperties, JsonParser, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
+    SpecificParserConfig,
+};
 use risingwave_connector::source::SourceColumnDesc;
 use serde_json::json;
 use tokio::runtime::Runtime;
@@ -70,7 +73,14 @@ fn create_parser(
         SourceColumnDesc::simple("charlie", DataType::Int64, 2.into()),
         SourceColumnDesc::simple("delta", DataType::Int64, 3.into()),
     ];
-    let parser = JsonParser::new(desc.clone(), Default::default()).unwrap();
+    let props = SpecificParserConfig {
+        key_encoding_config: None,
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+        }),
+        protocol_config: ProtocolProperties::Plain,
+    };
+    let parser = JsonParser::new(props, desc.clone(), Default::default()).unwrap();
     let input = gen_input(mode, chunk_size, chunk_num);
     (parser, desc, input)
 }
