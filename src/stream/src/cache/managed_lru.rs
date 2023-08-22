@@ -54,14 +54,26 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
         let info = &self.metrics_info;
         self.memory_usage_metrics.set(0.into());
 
-        info.metrics
-            .stream_memory_usage
-            .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
-            .unwrap();
-        info.metrics
+        if let Err(e) = info.metrics.stream_memory_usage.remove_label_values(&[
+            &info.table_id,
+            &info.actor_id,
+            &info.desc,
+        ]) {
+            warn!(
+                "unable to remove stream_memory_usage of {} {} {}: {:?}",
+                info.table_id, info.actor_id, info.desc, e
+            );
+        };
+        if let Err(e) = info
+            .metrics
             .lru_evicted_watermark_time_diff_ms
             .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
-            .unwrap();
+        {
+            warn!(
+                "unable to remove lru_evicted_watermark_time_diff_ms of {} {} {}: {:?}",
+                info.table_id, info.actor_id, info.desc, e
+            );
+        }
     }
 }
 

@@ -772,6 +772,6 @@ impl StreamingMetrics {
 
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new()
+        GLOBAL_STREAMING_METRICS.clone()
     }
 }
