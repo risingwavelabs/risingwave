@@ -280,7 +280,10 @@ pub async fn handle(
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
         Statement::Describe { name } => describe::handle_describe(handler_args, name),
-        Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowObjects {
+            object: show_object,
+            filter,
+        } => show::handle_show_object(handler_args, show_object, filter),
         Statement::ShowCreateObject { create_type, name } => {
             show::handle_show_create_object(handler_args, create_type, name)
         }

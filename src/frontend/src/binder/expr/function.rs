@@ -852,6 +852,62 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_relation_size", dispatch_by_len(vec![
+                    (1, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    })),
+                    (2, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        match inputs[1].as_literal() {
+                            Some(literal) if literal.return_type() == DataType::Varchar => {
+                                match literal
+                                     .get_data()
+                                     .as_ref()
+                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
+                                     .as_utf8()
+                                     .as_ref() {
+                                        "main" => {
+                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                                                BoundQuery {
+                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
+                                                    order: vec![],
+                                                    limit: None,
+                                                    offset: None,
+                                                    with_ties: false,
+                                                    extra_order_exprs: vec![],
+                                                },
+                                                SubqueryKind::Scalar,
+                                            ))))
+                                        },
+                                        // These options are invalid in RW so we return 0 value as the result
+                                        "fsm"|"vm"|"init" => {
+                                            Ok(ExprImpl::literal_int(0))
+                                        },
+                                        _ => Err(ErrorCode::InvalidInputSyntax(
+                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
+                                    }
+                            },
+                            _ => Err(ErrorCode::ExprError(
+                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
+                            )
+                            .into())
+                        }
+                    })),
+                    ]
+                )),
                 ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
@@ -1055,19 +1111,22 @@ impl Binder {
 
     fn rewrite_format_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         let Some((format_expr, args)) = inputs.split_first() else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes at least 1 arguments (0 given)".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into());
         };
         let ExprImpl::Literal(expr_literal) = format_expr else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes a literal string as the first argument".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
         };
         let Some(ScalarImpl::Utf8(format_str)) = expr_literal.get_data() else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes a literal string as the first argument".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
         };
         let formatter = Formatter::parse(format_str)
             .map_err(|err| -> RwError { ErrorCode::BindError(err.to_string()).into() })?;

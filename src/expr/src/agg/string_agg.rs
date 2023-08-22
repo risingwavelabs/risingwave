@@ -22,7 +22,9 @@ fn string_agg(
     delimiter: Option<&str>,
 ) -> Option<String> {
     let Some(value) = value else { return state };
-    let Some(mut state) = state else { return Some(value.into()) };
+    let Some(mut state) = state else {
+        return Some(value.into());
+    };
     state += delimiter.unwrap_or("");
     state += value;
     Some(state)

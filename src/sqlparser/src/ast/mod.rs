@@ -411,12 +411,13 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
-    /// e.g. {1, 2, 3},
+    /// An array constructor `ARRAY[[2,3,4],[5,6,7]]`
     Array(Array),
-    /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
+    /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
+    ArraySubquery(Box<Query>),
+    /// A subscript expression `arr[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
-    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
+    /// A slice expression `arr[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
@@ -636,6 +637,7 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
+            Expr::ArraySubquery(s) => write!(f, "ARRAY ({})", s),
         }
     }
 }
@@ -1101,7 +1103,10 @@ pub enum Statement {
         name: ObjectName,
     },
     /// SHOW OBJECT COMMAND
-    ShowObjects(ShowObject),
+    ShowObjects {
+        object: ShowObject,
+        filter: Option<ShowStatementFilter>,
+    },
     /// SHOW CREATE COMMAND
     ShowCreateObject {
         /// Show create object type
@@ -1262,8 +1267,11 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects(show_object) => {
+            Statement::ShowObjects{ object: show_object, filter} => {
                 write!(f, "SHOW {}", show_object)?;
+                if let Some(filter) = filter {
+                    write!(f, " {}", filter)?;
+                }
                 Ok(())
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {
