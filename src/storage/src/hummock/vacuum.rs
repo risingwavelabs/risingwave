@@ -30,47 +30,37 @@ pub struct Vacuum;
 impl Vacuum {
     /// Wrapper method that warns on any error and doesn't propagate it.
     /// Returns false if any error.
-    pub async fn vacuum(
+    pub async fn handle_vacuum_task(
         vacuum_task: VacuumTask,
         sstable_store: SstableStoreRef,
+    ) -> HummockResult<VacuumTask> {
+        tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_object_ids);
+        let object_ids = vacuum_task.sstable_object_ids;
+        sstable_store
+            .delete_list(&object_ids)
+            .await
+            .map_err(|e| HummockError::meta_error(format!("Failed to vacuum task: {:#?}", e)))?;
+        let vacuum_task = VacuumTask {
+            sstable_object_ids: object_ids,
+        };
+        Ok(vacuum_task)
+    }
+
+    pub async fn report_vacuum_task(
+        vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> bool {
         tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_object_ids);
-        match Vacuum::vacuum_inner(
-            vacuum_task,
-            sstable_store.clone(),
-            hummock_meta_client.clone(),
-        )
-        .await
-        {
+        match hummock_meta_client.report_vacuum_task(vacuum_task).await {
             Ok(_) => {
                 tracing::info!("Finished vacuuming SSTs");
             }
             Err(e) => {
-                tracing::warn!("Failed to vacuum SSTs: {:#?}", e);
+                tracing::warn!("Failed to report vacuum task: {:#?}", e);
                 return false;
             }
         }
         true
-    }
-
-    pub async fn vacuum_inner(
-        vacuum_task: VacuumTask,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> HummockResult<()> {
-        let object_ids = vacuum_task.sstable_object_ids;
-        sstable_store.delete_list(&object_ids).await?;
-        hummock_meta_client
-            .report_vacuum_task(VacuumTask {
-                sstable_object_ids: object_ids,
-            })
-            .await
-            .map_err(|e| {
-                HummockError::meta_error(format!("Failed to report vacuum task: {:#?}", e))
-            })?;
-
-        Ok(())
     }
 
     /// Wrapper method that warns on any error and doesn't propagate it.
