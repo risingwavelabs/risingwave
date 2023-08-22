@@ -551,6 +551,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
+    use std::time;
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
@@ -804,6 +805,14 @@ mod tests {
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 
+            // Wait until the bootstrap recovery is done.
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if let Ok(_) = barrier_scheduler.flush(false).await {
+                    break;
+                }
+            }
+
             Ok(Self {
                 global_stream_manager: Arc::new(stream_manager),
                 catalog_manager,
@@ -918,9 +927,6 @@ mod tests {
     async fn test_drop_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12334, false).await?;
 
-        // Wait for bootstrap_recovery to finish.
-        tokio::time::sleep(Duration::from_secs(2)).await;
-
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
@@ -978,9 +984,6 @@ mod tests {
         let inject_barrier_err = "inject_barrier_err";
         let inject_barrier_err_success = "inject_barrier_err_success";
         let services = MockServices::start("127.0.0.1", 12335, true).await.unwrap();
-
-        // Wait for bootstrap_recovery to finish.
-        tokio::time::sleep(Duration::from_secs(2)).await;
 
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
