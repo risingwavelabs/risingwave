@@ -321,7 +321,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             }
             _ => {
                 return Err(ExprError::UnsupportedFunction(
-                    "non-constant pattern in regexp_replace".to_string()
+                    "non-constant pattern in regexp_replace".to_string(),
                 ))
             }
         };
@@ -348,7 +348,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             }
             _ => {
                 return Err(ExprError::UnsupportedFunction(
-                    "non-constant in regexp_replace".to_string()
+                    "non-constant in regexp_replace".to_string(),
                 ))
             }
         };
@@ -370,7 +370,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                         &DataType::from(placeholder_node.get_return_type().unwrap()),
                     )
                     .map_err(|e| ExprError::Internal(e.into()))?;
-    
+
                     match placeholder_datum {
                         Some(ScalarImpl::Int32(v)) => {
                             start = v;
@@ -390,7 +390,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                 }
                 _ => {
                     return Err(ExprError::UnsupportedFunction(
-                        "non-constant in regexp_replace".to_string()
+                        "non-constant in regexp_replace".to_string(),
                     ))
                 }
             };
@@ -406,7 +406,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                                 &DataType::from(placeholder_node.get_return_type().unwrap()),
                             )
                             .map_err(|e| ExprError::Internal(e.into()))?;
-            
+
                             match placeholder_datum {
                                 Some(ScalarImpl::Int32(v)) => {
                                     n_flag = true;
@@ -421,7 +421,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                         }
                         _ => {
                             return Err(ExprError::UnsupportedFunction(
-                                "non-constant in regexp_replace".to_string()
+                                "non-constant in regexp_replace".to_string(),
                             ))
                         }
                     };
@@ -437,7 +437,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                                         &DataType::from(flag_node.get_return_type().unwrap()),
                                     )
                                     .map_err(|e| ExprError::Internal(e.into()))?;
-                    
+
                                     match flag_datum {
                                         Some(ScalarImpl::Utf8(v)) => v.to_string(),
                                         // NULL replacement
@@ -447,7 +447,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                                 }
                                 _ => {
                                     return Err(ExprError::UnsupportedFunction(
-                                        "non-constant in regexp_replace".to_string()
+                                        "non-constant in regexp_replace".to_string(),
                                     ))
                                 }
                             };
@@ -469,7 +469,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
         let ctx = RegexpContext::new(&pattern, &flags)?;
 
         let mut global_flag = false;
-        if flags.chars().nth(0).unwrap() == 'g' {
+        if !flags.is_empty() && flags.starts_with('g') {
             // Set the `global_flag` to true
             global_flag = true;
         }
@@ -493,53 +493,98 @@ impl RegexpReplaceExpression {
             // The start position to begin the search
             let start = if self.start != -1 { self.start - 1 } else { 0 };
 
-            // `-g` enabled, we need to replace all the occurrence of the matched pattern
             if self.global_flag {
-                let mut offset = start as usize;
-                // The default capacity is hard-coded to `10`
-                let mut capture_group = Vec::with_capacity(10);
-                while let Some(capture) = self.ctx.0.captures(&text[offset..]) {
-                    // Note that `captures[0]` represents the whole match
-                    capture_group.push(capture[0].to_string());
+                // `-g` enabled, we need to replace all the occurrence of the matched pattern
+                if self.ctx.0.captures_len() <= 1 {
+                    println!("Path One");
+                    // There is no capture groups in the regex
+                    return Some(
+                        self.ctx
+                            .0
+                            .replace_all(&text[start as usize..], self.replacement.clone())
+                            .into(),
+                    );
+                } else {
+                    println!("Path Two");
 
-                    let start = capture.get(0).unwrap().start();
-                    let end = capture.get(0).unwrap().end();
+                    // Get the replaced string
+                    let regex = Regex::new(r"\\([1-9])").unwrap();
+                    let replaced = regex.replace_all(&self.replacement, "$${$1}").to_string();
+                    println!("replaced: {}", replaced);
 
-                    // Update the offset according to the `start` & `end`
-                    if start == end {
-                        // This is a zero-width match
-                        offset += 1;
-                    } else {
-                        offset += end - start;
+                    // The position to start searching for replacement
+                    let mut search_start = start as usize;
+
+                    // Construct the return string
+                    let mut ret = text[..search_start].to_string();
+
+                    while let Some(capture) = self.ctx.0.captures(&text[search_start..]) {
+                        let match_start = capture.get(0).unwrap().start();
+                        let match_end = capture.get(0).unwrap().end();
+
+                        if match_start == match_end {
+                            // If this is an empty match
+                            search_start += 1;
+                            continue;
+                        }
+
+                        // Append the portion of the text from `search_start` to `match_start`
+                        ret.push_str(&text[search_start..search_start + match_start].to_string());
+                        println!("current ret: {}", ret);
+
+                        // Start to replacing
+                        let mut expanded = String::new();
+                        capture.expand(&replaced, &mut expanded);
+
+                        // Update the return string
+                        ret.push_str(&expanded);
+
+                        // Update the `search_start`
+                        search_start += match_end;
                     }
 
-                    // println!("start: {} end: {}", capture.get(0).unwrap().start(), capture.get(0).unwrap().end());
-
-                    // println!("current offset: {} current capture: {}", offset, &capture[0]);
+                    Some(ret)
                 }
-
-                // Then replace the string all at once
-                let mut replaced = text.to_string();
-
-                for c in capture_group {
-                    // FIXME: Now the `replace` will execute on all the matches,
-                    // we only need to substitute the first match
-                    replaced = replaced.replace(&c, &self.replacement);
-                }
-
-                return Some(replaced);
-            }
-
-            if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
-                let replaced = text.replace(&capture[0], &self.replacement);
-                Some(replaced)
             } else {
-                // There exists no match
-                // Return the original string
-                Some(text.into())
+                // Only replace the first matched pattern
+                // Construct the return string
+                let mut ret = if start > 1 {
+                    text[..start as usize].to_string()
+                } else {
+                    "".to_string()
+                };
+
+                if self.ctx.0.captures_len() <= 1 {
+                    // There is no capture groups in the regex
+                    println!("Path Three");
+                    ret.push_str(&self.ctx.0.replacen(
+                        &text[start as usize..],
+                        1,
+                        self.replacement.clone(),
+                    ));
+                } else {
+                    // There are capture groups in the regex
+                    println!("Path Four");
+                    if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
+                        // Make the replacement to satisfy `expand`
+                        let start = capture.get(0).unwrap().start();
+                        let end = capture.get(0).unwrap().end();
+                        let regex = Regex::new(r"\\([1-9])").unwrap();
+                        let replaced = regex.replace_all(&self.replacement, "$${$1}").to_string();
+                        let mut expanded = String::new();
+                        capture.expand(&replaced, &mut expanded);
+                        ret = format!("{}{}{}", &text[..start], expanded, &text[end..]);
+                    } else {
+                        // No match
+                        ret = text.into();
+                    }
+                }
+                
+                Some(ret)
             }
         } else {
             // The input string is None
+            println!("Path Four");
             None
         }
     }
@@ -554,7 +599,7 @@ impl Expression for RegexpReplaceExpression {
     async fn eval(&self, _input: &DataChunk) -> Result<ArrayRef> {
         // let text_arr = self.source.eval_checked(input).await?;
         // let text_arr = text_arr.as_utf8();
-        unimplemented!() 
+        unimplemented!()
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
@@ -567,12 +612,9 @@ impl Expression for RegexpReplaceExpression {
             _ => return Ok(None),
         };
 
-        Ok(if let Some(replaced) = self.match_row(Some(&source)) {
-            Some(replaced.into())
-        } else {
-            // Invalid
-            None
-        })
+        Ok(self
+            .match_row(Some(&source))
+            .map(|replaced| replaced.into()))
     }
 }
 
