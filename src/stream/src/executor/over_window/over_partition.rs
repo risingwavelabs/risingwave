@@ -1179,7 +1179,7 @@ mod find_affected_ranges_tests {
     #[test]
     fn test_with_right_sentinel() {
         let cache = create_cache!(1, 2, 4, 5, 8, ...);
-        let delta = create_delta!((3, Insert), (4, Insert), (8, Delete));
+        let delta = create_delta!((3, Insert), (4, Insert), (5, Delete));
 
         {
             let calls = vec![create_call(Frame::rows(
@@ -1188,7 +1188,7 @@ mod find_affected_ranges_tests {
             ))];
             assert_ranges_eq(
                 find_affected_ranges(&calls, DeltaBTreeMap::new(&cache, &delta)),
-                [(1.into(), 2.into(), 5.into(), 5.into())],
+                [(2.into(), 3.into(), 8.into(), 8.into())],
             );
         }
 
@@ -1208,7 +1208,7 @@ mod find_affected_ranges_tests {
             );
             assert_eq!(
                 range.2.as_normal_expect().pk.0,
-                OwnedRow::new(vec![Some(5.into())])
+                OwnedRow::new(vec![Some(8.into())])
             );
             assert!(range.3.is_largest());
         }
