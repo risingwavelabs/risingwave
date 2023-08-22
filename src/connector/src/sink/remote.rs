@@ -48,7 +48,7 @@ use crate::sink::{
 };
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 4] = ["jdbc", "iceberg", "deltalake", "elasticsearch-7"];
+pub const VALID_REMOTE_SINKS: [&str; 5] = ["jdbc", "iceberg", "deltalake", "elasticsearch-7","cassandra"];
 
 pub fn is_valid_remote_sink(connector_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&connector_type)
