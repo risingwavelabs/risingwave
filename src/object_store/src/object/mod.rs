@@ -36,6 +36,7 @@ pub mod error;
 pub mod object_metrics;
 
 pub use error::*;
+use object_metrics::ObjectStoreMetrics;
 
 use crate::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 
@@ -339,6 +340,7 @@ fn try_update_failure_metric<T>(result: &ObjectResult<T>, operation_type: &'stat
 ///   `streaming_upload_finish`
 pub struct MonitoredStreamingUploader {
     inner: BoxedStreamingUploader,
+    object_store_metrics: &'static ObjectStoreMetrics,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
     media_type: &'static str,
@@ -353,6 +355,7 @@ impl MonitoredStreamingUploader {
     ) -> Self {
         Self {
             inner: handle,
+            object_store_metrics: GLOBAL_OBJECT_STORE_METRICS.deref(),
             operation_size: 0,
             media_type,
             streaming_upload_timeout,
@@ -362,15 +365,17 @@ impl MonitoredStreamingUploader {
 
 impl MonitoredStreamingUploader {
     pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "streaming_upload_write_bytes";
         let data_len = data.len();
-        metrics.write_bytes.inc_by(data.len() as u64);
-        metrics
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(data.len() as u64);
+        self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(data_len as f64);
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
@@ -398,13 +403,13 @@ impl MonitoredStreamingUploader {
     }
 
     pub async fn finish(self) -> ObjectResult<()> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "streaming_upload_finish";
-        metrics
+        self.object_store_metrics
             .operation_size
             .with_label_values(&["streaming_upload"])
             .observe(self.operation_size as f64);
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
@@ -434,6 +439,7 @@ impl MonitoredStreamingUploader {
 type BoxedStreamingReader = Box<dyn AsyncRead + Unpin + Send + Sync>;
 pub struct MonitoredStreamingReader {
     inner: BoxedStreamingReader,
+    object_store_metrics: &'static ObjectStoreMetrics,
     operation_size: usize,
     media_type: &'static str,
     timer: Option<HistogramTimer>,
@@ -453,6 +459,7 @@ impl MonitoredStreamingReader {
             .start_timer();
         Self {
             inner: handle,
+            object_store_metrics: GLOBAL_OBJECT_STORE_METRICS.deref(),
             operation_size: 0,
             media_type,
             timer: Some(timer),
@@ -461,15 +468,15 @@ impl MonitoredStreamingReader {
     }
 
     pub async fn read_bytes(&mut self, buf: &mut [u8]) -> ObjectResult<usize> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "streaming_read_read_bytes";
         let data_len = buf.len();
-        metrics.read_bytes.inc_by(data_len as u64);
-        metrics
+        self.object_store_metrics.read_bytes.inc_by(data_len as u64);
+        self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(data_len as f64);
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
@@ -500,7 +507,7 @@ impl MonitoredStreamingReader {
 impl Drop for MonitoredStreamingReader {
     fn drop(&mut self) {
         let operation_type = "streaming_read";
-        GLOBAL_OBJECT_STORE_METRICS
+        self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(self.operation_size as f64);
@@ -510,6 +517,7 @@ impl Drop for MonitoredStreamingReader {
 
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
+    object_store_metrics: &'static ObjectStoreMetrics,
     streaming_read_timeout: Option<Duration>,
     streaming_upload_timeout: Option<Duration>,
     read_timeout: Option<Duration>,
@@ -536,6 +544,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(store: OS) -> Self {
         Self {
             inner: store,
+            object_store_metrics: GLOBAL_OBJECT_STORE_METRICS.deref(),
             streaming_read_timeout: None,
             streaming_upload_timeout: None,
             read_timeout: None,
@@ -552,14 +561,16 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "upload";
-        metrics.write_bytes.inc_by(obj.len() as u64);
-        metrics
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(obj.len() as u64);
+        self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(obj.len() as f64);
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
@@ -581,10 +592,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "streaming_upload_start";
         let media_type = self.media_type();
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
@@ -610,9 +621,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "read";
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
@@ -632,8 +643,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         try_update_failure_metric(&res, operation_type);
 
         let data = res?;
-        metrics.read_bytes.inc_by(data.len() as u64);
-        metrics
+        self.object_store_metrics
+            .read_bytes
+            .inc_by(data.len() as u64);
+        self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(data.len() as f64);
@@ -645,9 +658,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         path: &str,
         block_locs: &[BlockLocation],
     ) -> ObjectResult<Vec<Bytes>> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "readv";
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
@@ -669,8 +682,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
         let data = res?;
         let data_len = data.iter().map(|block| block.len()).sum::<usize>() as u64;
-        metrics.read_bytes.inc_by(data_len);
-        metrics
+        self.object_store_metrics.read_bytes.inc_by(data_len);
+        self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(data_len as f64);
@@ -685,10 +698,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         path: &str,
         start_pos: Option<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "streaming_read_start";
         let media_type = self.media_type();
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
@@ -714,9 +727,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "metadata";
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
@@ -739,9 +752,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "delete";
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
@@ -764,9 +777,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "delete_objects";
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
@@ -789,9 +802,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let metrics = GLOBAL_OBJECT_STORE_METRICS.deref();
         let operation_type = "list";
-        let _timer = metrics
+        let _timer = self
+            .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
