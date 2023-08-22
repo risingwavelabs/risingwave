@@ -253,8 +253,9 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
         .expect("failed to get schema path");
-    let json_schema_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
-        .expect("failed to get schema path");
+    let json_schema_full_path =
+        std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
+            .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
         .replace(
