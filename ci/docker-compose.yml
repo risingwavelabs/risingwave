@@ -76,7 +76,7 @@ services:
       - mysql
       - db
       - message_queue
-      - schema-registry
+      - schema_registry
     volumes:
       - ..:/risingwave
 
@@ -142,25 +142,23 @@ services:
     ports:
       - "2181:2181"
 
-  schema-registry:
-    container_name: schema-registry
+  schema_registry:
+    container_name: schema_registry
     image: confluentinc/cp-schema-registry:latest
-    hostname: schema-registry
     depends_on:
       - kafka
     ports:
       - "8082:8082"
     environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_HOST_NAME: schema_registry
       SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
-      SCHEMA_REGISTRY_LISTENERS: http://schema-registry:8082
+      SCHEMA_REGISTRY_LISTENERS: http://schema_registry:8082
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9093,PLAINTEXT_INTERNAL://localhost:29093
       SCHEMA_REGISTRY_DEBUG: 'true'
 
   kafka:
     container_name: kafka
     image: confluentinc/cp-kafka:latest
-    hostname: kafka-broker-1
     ports:
       - "29093:29093"
     depends_on:
