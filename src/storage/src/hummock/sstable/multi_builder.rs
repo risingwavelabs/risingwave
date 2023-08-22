@@ -69,7 +69,6 @@ where
     task_progress: Option<Arc<TaskProgress>>,
 
     last_table_id: u32,
-    is_target_level_l0_or_lbase: bool,
     split_by_table: bool,
     split_weight_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
@@ -88,14 +87,9 @@ where
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        is_target_level_l0_or_lbase: bool,
         mut split_by_table: bool,
         mut split_weight_by_vnode: u32,
     ) -> Self {
-        if !is_target_level_l0_or_lbase {
-            split_weight_by_vnode = 0;
-        }
-
         if split_weight_by_vnode > 0 {
             split_by_table = true;
         }
@@ -107,7 +101,6 @@ where
             compactor_metrics,
             task_progress,
             last_table_id: 0,
-            is_target_level_l0_or_lbase,
             split_by_table,
             split_weight_by_vnode,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
@@ -123,7 +116,6 @@ where
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_table_id: 0,
-            is_target_level_l0_or_lbase: false,
             split_by_table: false,
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
@@ -183,7 +175,7 @@ where
                     if self.split_weight_by_vnode == 0 || builder.reach_max_sst_size() {
                         need_seal_current = true;
                     } else {
-                        need_seal_current = self.is_target_level_l0_or_lbase && vnode_changed;
+                        need_seal_current = vnode_changed;
                     }
                 }
             }
@@ -568,7 +560,6 @@ mod tests {
             Arc::new(CompactorMetrics::unused()),
             None,
             false,
-            false,
             0,
         );
         let full_key = FullKey::for_test(
@@ -655,7 +646,6 @@ mod tests {
             Arc::new(CompactorMetrics::unused()),
             None,
             false,
-            false,
             0,
         );
         assert_eq!(del_iter.earliest_epoch(), HummockEpoch::MAX);
@@ -691,7 +681,6 @@ mod tests {
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            false,
             false,
             0,
         );

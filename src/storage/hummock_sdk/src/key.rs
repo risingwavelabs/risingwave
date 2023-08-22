@@ -523,6 +523,13 @@ impl<T: AsRef<[u8]>> UserKey<T> {
 }
 
 impl UserKey<Vec<u8>> {
+    pub fn prefix_of_vnode(table_id: u32, vnode: VirtualNode) -> Self {
+        Self {
+            table_id: TableId::new(table_id),
+            table_key: TableKey(vnode.to_be_bytes().to_vec()),
+        }
+    }
+
     pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
         let table_id = buf.get_u32();
         let len = buf.get_u32() as usize;

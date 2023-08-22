@@ -42,6 +42,7 @@ pub struct GroupDeltasSummary {
     pub group_destroy: Option<GroupDestroy>,
     pub group_meta_changes: Vec<GroupMetaChange>,
     pub group_table_change: Option<GroupTableChange>,
+    pub new_partition_vnode_count: u32,
 }
 
 pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
@@ -54,6 +55,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut group_destroy = None;
     let mut group_meta_changes = vec![];
     let mut group_table_change = None;
+    let mut new_partition_vnode_count = 0;
 
     for group_delta in &group_deltas.group_deltas {
         match group_delta.get_delta_type().unwrap() {
@@ -67,6 +69,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                     insert_sub_level_id = intra_level.l0_sub_level_id;
                     insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
                 }
+                new_partition_vnode_count = intra_level.partition_vnode_count;
             }
             DeltaType::GroupConstruct(construct_delta) => {
                 assert!(group_construct.is_none());
@@ -98,6 +101,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         group_destroy,
         group_meta_changes,
         group_table_change,
+        new_partition_vnode_count,
     }
 }
 
@@ -647,6 +651,7 @@ impl HummockLevelsExt for Levels {
             insert_sst_level_id,
             insert_sub_level_id,
             insert_table_infos,
+            new_partition_vnode_count,
             ..
         } = summary;
 
@@ -691,6 +696,9 @@ impl HummockLevelsExt for Levels {
                     "should find the level to insert into when applying compaction generated delta. sub level idx: {},  removed sst ids: {:?}, sub levels: {:?},",
                     insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
                 );
+                if l0.sub_levels[index].table_infos.is_empty() && insert_table_infos.iter().all(|sst|sst.table_ids.len() == 1) {
+                    l0.sub_levels[index].partition_vnode_count = new_partition_vnode_count;
+                }
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
                 let idx = insert_sst_level_id as usize - 1;
@@ -758,6 +766,7 @@ pub fn build_initial_compaction_group_levels(
             total_file_size: 0,
             sub_level_id: 0,
             uncompressed_file_size: 0,
+            partition_vnode_count: 0,
         });
     }
     Levels {
@@ -908,6 +917,7 @@ pub fn new_sub_level(
         total_file_size,
         sub_level_id,
         uncompressed_file_size,
+        partition_vnode_count,
     }
 }
 

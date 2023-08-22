@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod base_level_compaction_picker;
+mod intral_sub_level_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;

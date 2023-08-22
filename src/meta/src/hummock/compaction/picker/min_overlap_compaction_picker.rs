@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use risingwave_common::config::CompactionConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -148,229 +149,6 @@ impl CompactionPicker for MinOverlappingPicker {
     }
 }
 
-#[derive(Default)]
-pub struct SubLevelSstables {
-    pub total_file_size: u64,
-    pub total_file_count: usize,
-    pub sstable_infos: Vec<Vec<SstableInfo>>,
-}
-
-pub struct NonOverlapSubLevelPicker {
-    min_compaction_bytes: u64,
-    max_compaction_bytes: u64,
-    min_depth: usize,
-    max_file_count: u64,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
-}
-
-impl NonOverlapSubLevelPicker {
-    pub fn new(
-        min_compaction_bytes: u64,
-        max_compaction_bytes: u64,
-        min_depth: usize,
-        max_file_count: u64,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> Self {
-        Self {
-            min_compaction_bytes,
-            max_compaction_bytes,
-            min_depth,
-            max_file_count,
-            overlap_strategy,
-        }
-    }
-
-    fn pick_sub_level(
-        &self,
-        levels: &[Level],
-        level_handler: &LevelHandler,
-        sst_index: usize,
-        sst: &SstableInfo,
-    ) -> SubLevelSstables {
-        let mut ret = SubLevelSstables {
-            total_file_count: 1,
-            total_file_size: sst.file_size,
-            sstable_infos: vec![vec![]; levels.len()],
-        };
-        ret.sstable_infos[0].extend(vec![sst.clone()]);
-        let mut overlap_info = self.overlap_strategy.create_overlap_info();
-        let mut select_sst_id_set = BTreeSet::default();
-        let mut overlap_len_and_begins = vec![(sst_index..(sst_index + 1))];
-        for sst in &ret.sstable_infos[0] {
-            overlap_info.update(sst);
-            select_sst_id_set.insert(sst.sst_id);
-        }
-
-        for (target_index, target_level) in levels.iter().enumerate().skip(1) {
-            if target_level.level_type() != LevelType::Nonoverlapping {
-                break;
-            }
-
-            let mut overlap_files_range =
-                overlap_info.check_multiple_include(&target_level.table_infos);
-            if overlap_files_range.is_empty() {
-                overlap_files_range =
-                    overlap_info.check_multiple_overlap(&target_level.table_infos);
-            }
-            // We allow a layer in the middle without overlap, so we need to continue to
-            // the next layer to search for overlap
-            let mut pending_compact = false;
-            let mut current_level_size = 0;
-            for index in overlap_files_range.start..overlap_files_range.end {
-                let other = &target_level.table_infos[index];
-                if level_handler.is_pending_compact(&other.sst_id) {
-                    pending_compact = true;
-                    break;
-                }
-                overlap_info.update(other);
-                select_sst_id_set.insert(other.sst_id);
-                current_level_size += other.file_size;
-            }
-
-            if pending_compact {
-                break;
-            }
-
-            let mut extra_overlap_levels = vec![];
-
-            let mut add_files_size = 0;
-            // check reverse overlap
-            for (reverse_index, old_overlap_range) in
-                overlap_len_and_begins.iter_mut().enumerate().rev()
-            {
-                let target_tables = &levels[reverse_index].table_infos;
-                // It has select all files in this sub-level, so it can not overlap with more files.
-                if ret.sstable_infos[reverse_index].len() == target_tables.len() {
-                    continue;
-                }
-                let new_overlap_range = overlap_info.check_multiple_overlap(target_tables);
-                let mut extra_overlap_sst = Vec::with_capacity(new_overlap_range.len());
-                for new_overlap_index in new_overlap_range.clone() {
-                    if old_overlap_range.contains(&new_overlap_index) {
-                        // Since some of the files have already been selected when selecting
-                        // upwards, we filter here to avoid adding sst repeatedly
-                        continue;
-                    }
-
-                    let other = &target_tables[new_overlap_index];
-                    if level_handler.is_pending_compact(&other.sst_id) {
-                        pending_compact = true;
-                        break;
-                    }
-                    debug_assert!(!select_sst_id_set.contains(&other.sst_id));
-                    add_files_size += other.file_size;
-                    overlap_info.update(other);
-                    select_sst_id_set.insert(other.sst_id);
-                    extra_overlap_sst.push(other.clone());
-                }
-
-                if pending_compact {
-                    break;
-                }
-
-                extra_overlap_levels.push((reverse_index, extra_overlap_sst));
-                *old_overlap_range = new_overlap_range;
-            }
-
-            // check reverse overlap
-            if pending_compact {
-                // encountering a pending file means we don't need to continue processing this
-                // interval
-                break;
-            }
-
-            let add_files_count = overlap_files_range.len()
-                + extra_overlap_levels
-                    .iter()
-                    .map(|(_, files)| files.len())
-                    .sum::<usize>();
-
-            // more than 1 sub_level
-            if ret.total_file_count > 1
-                && (ret.total_file_size + (add_files_size + current_level_size)
-                    >= self.max_compaction_bytes
-                    || ret.total_file_count + add_files_count >= self.max_file_count as usize)
-            {
-                break;
-            }
-
-            if ret
-                .sstable_infos
-                .iter()
-                .filter(|ssts| !ssts.is_empty())
-                .count()
-                > MAX_LEVEL_COUNT
-            {
-                break;
-            }
-
-            ret.total_file_count += add_files_count;
-            ret.total_file_size += add_files_size + current_level_size;
-            if !overlap_files_range.is_empty() {
-                ret.sstable_infos[target_index]
-                    .extend_from_slice(&target_level.table_infos[overlap_files_range.clone()]);
-            }
-            overlap_len_and_begins.push(overlap_files_range);
-            for (reverse_index, files) in extra_overlap_levels {
-                ret.sstable_infos[reverse_index].extend(files);
-            }
-        }
-
-        ret.sstable_infos.retain(|ssts| !ssts.is_empty());
-        // sort sst per level due to reverse expand
-        ret.sstable_infos.iter_mut().for_each(|level_ssts| {
-            level_ssts.sort_by(|sst1, sst2| {
-                let a = sst1.key_range.as_ref().unwrap();
-                let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
-            });
-        });
-        ret
-    }
-
-    pub fn pick_l0_multi_non_overlap_level(
-        &self,
-        l0: &[Level],
-        level_handler: &LevelHandler,
-    ) -> Vec<SubLevelSstables> {
-        if l0.len() < self.min_depth {
-            return vec![];
-        }
-
-        let mut scores = vec![];
-        let select_tables = &l0[0].table_infos;
-        for (sst_index, sst) in select_tables.iter().enumerate() {
-            if level_handler.is_pending_compact(&sst.sst_id) {
-                continue;
-            }
-
-            let ret = self.pick_sub_level(l0, level_handler, sst_index, sst);
-            if ret.sstable_infos.len() < self.min_depth
-                && ret.total_file_size < self.min_compaction_bytes
-            {
-                continue;
-            }
-            scores.push(ret);
-        }
-
-        if scores.is_empty() {
-            return vec![];
-        }
-
-        // The logic of sorting depends on the interval we expect to select.
-        // 1. contain as many levels as possible
-        // 2. fewer files in the bottom sub level, containing as many smaller intervals as possible.
-        scores.sort_by(|a, b| {
-            b.sstable_infos
-                .len()
-                .cmp(&a.sstable_infos.len())
-                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
-                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
-        });
-        scores
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
@@ -399,10 +177,7 @@ pub mod tests {
                     generate_table(1, 1, 101, 200, 1),
                     generate_table(2, 1, 222, 300, 1),
                 ],
-
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -414,9 +189,7 @@ pub mod tests {
                     generate_table(7, 1, 501, 800, 1),
                     generate_table(8, 2, 301, 400, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let levels = Levels {
@@ -481,9 +254,7 @@ pub mod tests {
                     generate_table(1, 1, 100, 149, 2),
                     generate_table(2, 1, 150, 249, 2),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -492,9 +263,7 @@ pub mod tests {
                     generate_table(4, 1, 50, 199, 1),
                     generate_table(5, 1, 200, 399, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let levels = Levels {
@@ -543,8 +312,7 @@ pub mod tests {
                     generate_table(8, 1, 450, 500, 2),
                 ],
                 total_file_size: 800,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -557,8 +325,7 @@ pub mod tests {
                     generate_table(11, 1, 450, 500, 2),
                 ],
                 total_file_size: 250,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -569,8 +336,7 @@ pub mod tests {
                     generate_table(13, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 4,
@@ -581,8 +347,7 @@ pub mod tests {
                     generate_table(16, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -647,8 +412,7 @@ pub mod tests {
                     generate_table(8, 1, 450, 500, 2),
                 ],
                 total_file_size: 800,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -661,8 +425,7 @@ pub mod tests {
                     generate_table(11, 1, 450, 500, 2),
                 ],
                 total_file_size: 250,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -673,8 +436,7 @@ pub mod tests {
                     generate_table(13, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 4,
@@ -685,8 +447,7 @@ pub mod tests {
                     generate_table(16, 1, 450, 500, 2),
                 ],
                 total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -776,8 +537,7 @@ pub mod tests {
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(0, 1, 400, 500, 2)],
                 total_file_size: 100,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -787,8 +547,7 @@ pub mod tests {
                     generate_table(2, 1, 600, 700, 1),
                 ],
                 total_file_size: 200,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 3,
@@ -798,8 +557,7 @@ pub mod tests {
                     generate_table(4, 1, 600, 800, 1),
                 ],
                 total_file_size: 400,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 

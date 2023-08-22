@@ -192,7 +192,7 @@ impl MetaOpts {
             table_write_throughput_threshold: 128 * 1024 * 1024,
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
-            partition_vnode_count: 32,
+            partition_vnode_count: 16,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
         }
