@@ -460,7 +460,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 println!("No progress for vnode {:?}", vnode);
                 continue;
             } else {
-                debug_assert!(old_state[0] == Some((*vnode).to_scalar());
+                debug_assert!(old_state[0] == Some((*vnode).to_scalar()));
                 println!("Has progress persisted for vnode {:?}", vnode);
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
