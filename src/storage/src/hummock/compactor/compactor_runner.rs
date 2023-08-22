@@ -19,11 +19,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use await_tree::InstrumentAwait;
-use parking_lot::RwLock;
 use bytes::Bytes;
 use futures::{pin_mut, stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use more_asserts::assert_ge;
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
@@ -1352,7 +1352,6 @@ pub fn start_shared_compactor(
     cpu_core_num: u32,
     running_task_count: Arc<AtomicU32>,
     compactor_metrics: Arc<CompactorMetrics>,
-    compactor_context: Arc<CompactorContext>,
     mut shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
     parallel_compact_size_mb: u32,
@@ -1453,8 +1452,6 @@ pub async fn shared_compact(
     // let context = compactor_context.clone();
     // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
     // write op. The watermark is invalidated when this method exits.
-
-    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
 
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -1690,7 +1687,7 @@ pub async fn shared_compact(
                 .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                 .await
         };
-        
+
         // let traced = match await_tree_reg.as_ref() {
         //     None => runner.right_future(),
         //     Some(await_tree_reg) => await_tree_reg
@@ -1714,9 +1711,9 @@ pub async fn shared_compact(
     // loop {
     //     tokio::select! {
     //         _ = &mut shutdown_rx => {
-    //             tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-    //             task_status = TaskStatus::ManualCanceled;
-    //             break;
+    //             tracing::warn!("Compaction task cancelled externally:\n{}",
+    // compact_task_to_string(&compact_task));             task_status =
+    // TaskStatus::ManualCanceled;             break;
     //         }
     //         future_result = buffered.next() => {
     //             match future_result {
