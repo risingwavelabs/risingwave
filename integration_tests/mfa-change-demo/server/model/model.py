@@ -77,7 +77,7 @@ if __name__ == '__main__':
     for i in range(1):
         print("making the", i, "th connection")
 
-        conn = psycopg.connect("dbname=dev user=root host=127.0.0.1 port=4566")
+        conn = psycopg.connect("dbname=dev user=root host=frontend-node-0 port=4566")
         with conn.cursor() as cur:
             # the following code will panic
             # because placeholder is completely not supported

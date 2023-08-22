@@ -1,10 +1,5 @@
-FROM ghcr.io/risingwavelabs/risingwave:latest as meta-last
-USER root
-
-RUN apt update
-RUN apt install -y python3 python3-pip lsof
-
 FROM rust:1.67 as feature-store-server
+ARG BUILD_ARG
 
 USER root
 
@@ -19,9 +14,10 @@ RUN apt install -y postgresql-client
 
 ADD ./server/model/requirements.txt $WORK_DIR/model-pipreqs.txt
 ADD ./generator/requirements.txt $WORK_DIR/generator-pipreqs.txt
-RUN python3 -m pip install --upgrade pip
+RUN pip3 install --upgrade pip
 RUN pip3 install -r $WORK_DIR/model-pipreqs.txt
 RUN pip3 install -r $WORK_DIR/generator-pipreqs.txt
+RUN pip3 install risingwave
 
 RUN apt install -y lsof curl openssl libssl-dev pkg-config build-essential
 RUN apt install -y cmake librdkafka-dev
@@ -38,19 +34,26 @@ ADD ./server $WORK_DIR/build/server
 ADD ./simulator $WORK_DIR/build/simulator
 RUN cargo build --manifest-path $WORK_DIR/build/server/Cargo.toml --release
 RUN cargo build --manifest-path $WORK_DIR/build/simulator/Cargo.toml --release
-# Use for MFA
-# RUN cargo build --manifest-path $WORK_DIR/build/server/Cargo.toml --release -- --output-topics mfa
-# RUN cargo build --manifest-path $WORK_DIR/build/simulator/Cargo.toml --release -- --types mfa
+
 RUN cp $WORK_DIR/build/server/target/release/server $WORK_DIR/feature-store-server
 RUN cp $WORK_DIR/build/simulator/target/release/simulator $WORK_DIR/feature-store-simulator
 RUN rm -rf $WORK_DIR/build
 
 ADD ./server/model $WORK_DIR/server/model
+ADD ./server/udf.py $WORK_DIR/udf.py
 ADD ./generator $WORK_DIR/generator
 ADD ./taxi-start.sql $WORK_DIR/taxi-start.sql
-ADD ./run.sh $WORK_DIR/run.sh
-RUN chmod +x $WORK_DIR/run.sh
+ADD ./mfa-start.sql $WORK_DIR/mfa-start.sql
+RUN mkdir $WORK_DIR/run-sh
+ADD ./run.sh $WORK_DIR/run-sh/
+ADD ./run-mfa.sh $WORK_DIR/run-sh/
 
-# Use for MFA
-# CMD ["sh", "-c", "sleep 10 && ./run-mfa.sh"]
+RUN if [ "$BUILD_ARG" = "mfa" ]; then \
+        cp $WORK_DIR/run-sh/run-mfa.sh $WORK_DIR/run.sh;\
+    else \
+        cp $WORK_DIR/run-sh/run.sh $WORK_DIR/run.sh;\
+    fi
+
+RUN chmod +x $WORK_DIR/run.sh && rm -rf $WORK_DIR/run-sh
+
 CMD ["sh", "-c", "sleep 10 && ./run.sh"]

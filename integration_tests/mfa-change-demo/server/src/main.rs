@@ -24,8 +24,7 @@ async fn main() {
             .expect("failed to decode output_topics")
             .to_string(),
     );
-
-    println!("Testing Kafka payload");
+    println!("Testing Kafka payload,args{:?}",args);
     tokio::spawn(KafkaSink::mock_consume());
     kafka_sink
         .send("0".to_string(), "{init: true}".to_string())

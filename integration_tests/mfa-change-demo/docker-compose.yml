@@ -36,6 +36,8 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --list
       echo -e 'Creating kafka topics'
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic taxi --replication-factor 1 --partitions 1
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic mfa --replication-factor 1 --partitions 1
 
       echo -e 'Successfully created the following topics:'
       kafka-topics --bootstrap-server kafka:9092 --list
@@ -85,16 +87,13 @@ services:
       file: ../../docker/docker-compose-nightly.yml
       service: grafana-0
   meta-node-0:
-    build:
-      context: .
-      target: meta-last
     extends:
       file: ../../docker/docker-compose-nightly.yml
       service: meta-node-0
-    volumes:
-      - "./server/udf.py:/udf.py"
-      - "./mfa-start.sql:/mfa-start.sql"
-      - "./mfa-mock.sql:/mfa-mock.sql"
+    # volumes:
+    #   - "./server/udf.py:/udf.py"
+    #   - "./mfa-start.sql:/mfa-start.sql"
+    #   - "./mfa-mock.sql:/mfa-mock.sql"
     ports:
       - "8815:8815"
     depends_on:

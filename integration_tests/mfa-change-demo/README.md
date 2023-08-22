@@ -22,6 +22,9 @@ Run it in local.
 
 ```cat .log/simulator_log```
 
-3. We can modify the configuration in the `Dockerfile` to use MFA example.
+3. We also can run MFA demo
+
+```docker compose build --build-arg BUILD_ARG=mfa```
+```docker compose up```
 
 * Build Dependencies: librdkafka, pkg-config , openssl
