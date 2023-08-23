@@ -638,6 +638,7 @@ pub mod tests {
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
             uncompressed_file_size: (right - left + 1) as u64,
+            total_key_count: (right - left + 1) as u64,
             ..Default::default()
         }
     }
