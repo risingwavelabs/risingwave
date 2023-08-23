@@ -2223,12 +2223,13 @@ where
     }
 
     pub async fn get_created_table_ids(&self) -> Vec<u32> {
-        let mut tables = vec![];
         let guard = self.core.lock().await;
-        for table in guard.database.tables.values() {
-            tables.push(table.id);
-        }
-        tables
+        guard
+            .database
+            .tables
+            .values()
+            .map(|table| table.id)
+            .collect()
     }
 }
 
