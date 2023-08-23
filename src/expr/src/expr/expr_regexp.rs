@@ -482,6 +482,12 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
         // Check: https://docs.rs/regex/latest/regex/struct.Captures.html#method.expand
         let regex = Regex::new(r"\\([1-9])").unwrap();
 
+        // Check if the syntax is correct
+        if !flags.is_empty() && start != -1 && n == -1 {
+            // `start`, `flag` with no `N` specified is an invalid combination
+            bail!("invalid syntax for `regexp_replace`");
+        }
+
         Ok(Self {
             source,
             ctx,
@@ -505,6 +511,8 @@ impl RegexpReplaceExpression {
             if (self.n == -1 && self.global_flag) || self.n == 0 {
                 // `-g` enabled (& `N` is not specified) or `N` is `0`
                 // We need to replace all the occurrence of the matched pattern
+
+                // See if there is capture group or not
                 if self.ctx.0.captures_len() <= 1 {
                     println!("Path One");
 
@@ -563,6 +571,8 @@ impl RegexpReplaceExpression {
                 }
             } else {
                 // Only replace the first matched pattern
+                // Or the N-th matched pattern if `N` is specified
+
                 // Construct the return string
                 let mut ret = if start > 1 {
                     text[..start as usize].to_string()
@@ -570,34 +580,110 @@ impl RegexpReplaceExpression {
                     "".to_string()
                 };
 
+                // See if there is capture group or not
                 if self.ctx.0.captures_len() <= 1 {
                     // There is no capture groups in the regex
                     println!("Path Three");
-                    ret.push_str(&self.ctx.0.replacen(
-                        &text[start as usize..],
-                        1,
-                        self.replacement.clone(),
-                    ));
+                    if self.n == -1 {
+                        // `N` is not specified
+                        ret.push_str(&self.ctx.0.replacen(
+                            &text[start as usize..],
+                            1,
+                            self.replacement.clone(),
+                        ));
+                    } else {
+                        // Replace only the N-th match
+                        let mut count = 1;
+                        // The absolute index for the start of searching
+                        let mut search_start = start as usize;
+                        while let Some(capture) = self.ctx.0.captures(&text[search_start..]) {
+                            // Get the current start & end index
+                            let match_start = capture.get(0).unwrap().start();
+                            let match_end = capture.get(0).unwrap().end();
+
+                            if count == self.n {
+                                // We've reached the pattern to replace
+                                // Let's construct the return string
+                                ret = format!(
+                                    "{}{}{}",
+                                    &text[..search_start + match_start],
+                                    self.replacement.clone(),
+                                    &text[search_start + match_end..]
+                                );
+                                break;
+                            }
+
+                            // Update the counter
+                            count += 1;
+
+                            // Update `start`
+                            search_start += match_end;
+                        }
+                    }
                 } else {
                     // There are capture groups in the regex
                     println!("Path Four");
-                    if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
-                        let start = capture.get(0).unwrap().start();
-                        let end = capture.get(0).unwrap().end();
+                    // Reset return string at the beginning
+                    ret = "".to_string();
+                    if self.n == -1 {
+                        // `N` is not specified
+                        if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
+                            let match_start = capture.get(0).unwrap().start();
+                            let match_end = capture.get(0).unwrap().end();
 
-                        // Get the replaced string and expand it
-                        let replaced = self
-                            .regex
-                            .replace_all(&self.replacement, "$${$1}")
-                            .to_string();
-                        let mut expanded = String::new();
-                        capture.expand(&replaced, &mut expanded);
+                            // Get the replaced string and expand it
+                            let replaced = self
+                                .regex
+                                .replace_all(&self.replacement, "$${$1}")
+                                .to_string();
+                            let mut expanded = String::new();
+                            capture.expand(&replaced, &mut expanded);
 
-                        // Construct the return string
-                        ret = format!("{}{}{}", &text[..start], expanded, &text[end..]);
+                            // Construct the return string
+                            ret = format!(
+                                "{}{}{}",
+                                &text[..start as usize + match_start],
+                                expanded,
+                                &text[start as usize + match_end..]
+                            );
+                        } else {
+                            // No match
+                            ret = text.into();
+                        }
                     } else {
-                        // No match
-                        ret = text.into();
+                        // Replace only the N-th match
+                        let mut count = 1;
+                        while let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
+                            if count == self.n {
+                                // We've reached the pattern to replace
+                                let match_start = capture.get(0).unwrap().start();
+                                let match_end = capture.get(0).unwrap().end();
+
+                                // Get the replaced string and expand it
+                                let replaced = self
+                                    .regex
+                                    .replace_all(&self.replacement, "$${$1}")
+                                    .to_string();
+                                let mut expanded = String::new();
+                                capture.expand(&replaced, &mut expanded);
+
+                                // Construct the return string
+                                ret = format!(
+                                    "{}{}{}",
+                                    &text[..start as usize + match_start],
+                                    expanded,
+                                    &text[start as usize + match_end..]
+                                );
+                            }
+
+                            // Update the counter
+                            count += 1;
+                        }
+
+                        // If there is no match, just return the original string
+                        if ret.is_empty() {
+                            ret = text.into();
+                        }
                     }
                 }
 

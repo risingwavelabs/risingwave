@@ -463,3 +463,13 @@ query T
 select regexp_replace('foobarbazabc', 'b(..)', 'X\1Y', 'g');
 ----
 fooXarYXazYabc
+
+query T
+select regexp_replace('A PostgreSQL function', 'a|e|i|o|u', 'X', 1, 0, 'i');
+----
+X PXstgrXSQL fXnctXXn
+
+query T
+select regexp_replace('A PostgreSQL function', 'a|e|i|o|u', 'X', 1, 3, 'i');
+----
+A PostgrXSQL function
