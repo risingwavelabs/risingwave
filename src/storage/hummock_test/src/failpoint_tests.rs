@@ -101,13 +101,9 @@ async fn test_failpoints_state_store_read_upload() {
             anchor.clone(),
             1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -156,13 +152,9 @@ async fn test_failpoints_state_store_read_upload() {
             anchor.clone(),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await;
@@ -172,13 +164,9 @@ async fn test_failpoints_state_store_read_upload() {
             (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
-                prefix_hint: None,
                 table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await;
@@ -195,13 +183,9 @@ async fn test_failpoints_state_store_read_upload() {
             Bytes::from("ee"),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(bee_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -237,13 +221,9 @@ async fn test_failpoints_state_store_read_upload() {
             anchor.clone(),
             5,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -255,13 +235,9 @@ async fn test_failpoints_state_store_read_upload() {
             (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             5,
             ReadOptions {
-                ignore_range_tombstone: false,
-                prefix_hint: None,
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await

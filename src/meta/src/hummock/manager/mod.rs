@@ -98,7 +98,7 @@ mod worker;
 use compaction::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 16;
+const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 32;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -1164,7 +1164,7 @@ where
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
             let versioning = versioning_guard.deref_mut();
-            let current_version = &mut versioning.current_version;
+            let mut current_version = versioning.current_version.clone();
             // purge stale compact_status
             for group_id in original_keys {
                 if !current_version.levels.contains_key(&group_id) {
@@ -1228,7 +1228,7 @@ where
                 let version_delta = gen_version_delta(
                     &mut hummock_version_deltas,
                     &mut branched_ssts,
-                    current_version,
+                    &current_version,
                     compact_task,
                     deterministic_mode,
                 );
@@ -1251,9 +1251,10 @@ where
                 )?;
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
+                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
+                versioning.current_version = current_version;
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -2330,15 +2331,29 @@ where
         }
     }
 
+    /// * For compaction group with only one single state-table, do not change it again.
+    /// * For state-table which only write less than `HISTORY_TABLE_INFO_WINDOW_SIZE` times, do not
+    ///   change it. Because we need more statistic data to decide split strategy.
+    /// * For state-table with low throughput which write no more than
+    ///   `min_table_split_write_throughput` data, never split it.
+    /// * For state-table whose size less than `min_table_split_size`, do not split it unless its
+    ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
+    /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
+    ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
+        let params = self.env.system_params_manager().get_params().await;
+        let barrier_interval_ms = params.barrier_interval_ms() as u64;
+        let checkpoint_secs = std::cmp::max(
+            1,
+            params.checkpoint_frequency() * barrier_interval_ms / 1000,
+        );
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-        let group_size_limit = self.env.opts.split_group_size_limit;
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let mut partition_vnode_count = self.env.opts.partition_vnode_count;
+        let partition_vnode_count = self.env.opts.partition_vnode_count;
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 continue;
@@ -2349,16 +2364,21 @@ where
                 let mut is_low_write_throughput = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
-                        let window_total_size = history.iter().sum::<u64>();
                         is_high_write_throughput = history.iter().all(|throughput| {
-                            *throughput > self.env.opts.table_write_throughput_threshold
+                            *throughput / checkpoint_secs
+                                > self.env.opts.table_write_throughput_threshold
                         });
-                        is_low_write_throughput = window_total_size
-                            < (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
-                                * self.env.opts.min_table_split_write_throughput;
+                        is_low_write_throughput = history.iter().any(|throughput| {
+                            *throughput / checkpoint_secs
+                                < self.env.opts.min_table_split_write_throughput
+                        });
                     }
                 }
                 let state_table_size = *table_size;
+
+                if is_low_write_throughput {
+                    continue;
+                }
 
                 if state_table_size < self.env.opts.min_table_split_size
                     && !is_high_write_throughput
@@ -2367,37 +2387,15 @@ where
                 }
 
                 let parent_group_id = group.group_id;
-                let mut target_compact_group_id = None;
-                let mut allow_split_by_table = false;
-                if state_table_size < self.env.opts.split_group_size_limit
-                    && is_low_write_throughput
-                {
-                    // do not split a large table and a small table because it would increase IOPS
-                    // of small table.
-                    if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-                        let rest_group_size = group.group_size - state_table_size;
-                        if rest_group_size < state_table_size
-                            && rest_group_size < self.env.opts.min_table_split_size
-                        {
-                            continue;
-                        }
-                    } else {
-                        for group in &group_infos {
-                            // do not move to mv group or state group
-                            if !group.split_by_table || group.group_id == mv_group_id
-                                || group.group_id == default_group_id
-                                || group.group_id == parent_group_id
-                                // do not move state-table to a large group.
-                                || group.group_size + state_table_size > group_size_limit
-                                // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
-                                || group.group_size + state_table_size > group.group_size - state_table_size
-                            {
-                                continue;
-                            }
-                            target_compact_group_id = Some(group.group_id);
-                        }
-                        allow_split_by_table = true;
-                        partition_vnode_count = 1;
+
+                // do not split a large table and a small table because it would increase IOPS
+                // of small table.
+                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                    let rest_group_size = group.group_size - state_table_size;
+                    if rest_group_size < state_table_size
+                        && rest_group_size < self.env.opts.min_table_split_size
+                    {
+                        continue;
                     }
                 }
 
@@ -2405,24 +2403,26 @@ where
                     .move_state_table_to_compaction_group(
                         parent_group_id,
                         &[*table_id],
-                        target_compact_group_id,
-                        allow_split_by_table,
+                        None,
+                        false,
                         partition_vnode_count,
                     )
                     .await;
                 match ret {
                     Ok(_) => {
                         tracing::info!(
-                        "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
-                        table_id, parent_group_id, target_compact_group_id, allow_split_by_table
+                        "move state table [{}] from group-{} success, Allow split by table: false",
+                        table_id, parent_group_id
                     );
                         return;
                     }
                     Err(e) => {
                         tracing::info!(
-                        "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
-                        table_id, parent_group_id, target_compact_group_id, e
-                    )
+                            "failed to move state table [{}] from group-{} because {:?}",
+                            table_id,
+                            parent_group_id,
+                            e
+                        )
                     }
                 }
             }
@@ -2500,7 +2500,6 @@ where
                         };
 
                         {
-                            const MAX_CONSUMED_LATENCY_MS: u64 = 500;
                             let consumed_latency_ms = SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .expect("Clock may have gone backwards")
@@ -2510,14 +2509,6 @@ where
                             hummock_manager.metrics
                                 .compaction_event_consumed_latency
                                 .observe(consumed_latency_ms as _);
-                            if consumed_latency_ms > MAX_CONSUMED_LATENCY_MS {
-                                tracing::warn!(
-                                    "Compaction event {:?} takes too long create_at {} consumed_latency_ms {}",
-                                    event,
-                                    create_at,
-                                    consumed_latency_ms
-                                );
-                            }
                         }
 
                         match event {

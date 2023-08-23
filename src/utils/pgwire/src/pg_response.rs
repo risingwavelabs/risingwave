@@ -256,7 +256,7 @@ impl StatementType {
             Statement::Grant { .. } => Ok(StatementType::GRANT_PRIVILEGE),
             Statement::Revoke { .. } => Ok(StatementType::REVOKE_PRIVILEGE),
             Statement::Describe { .. } => Ok(StatementType::DESCRIBE),
-            Statement::ShowCreateObject { .. } | Statement::ShowObjects(_) => {
+            Statement::ShowCreateObject { .. } | Statement::ShowObjects { .. } => {
                 Ok(StatementType::SHOW_COMMAND)
             }
             Statement::Drop(stmt) => match stmt.object_type {

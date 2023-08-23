@@ -234,7 +234,11 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             table.insert(row);
                         }
                         table.commit(barrier.epoch).await?;
+                    } else {
+                        table.commit_no_data_expected(barrier.epoch);
+                    }
 
+                    if barrier.kind.is_checkpoint() {
                         if idle_input {
                             // Align watermark
                             let global_max_watermark =
@@ -245,11 +249,14 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                                 global_max_watermark,
                                 DefaultOrd::default_cmp,
                             );
+                            yield Message::Watermark(Watermark::new(
+                                event_time_col_idx,
+                                watermark_type.clone(),
+                                current_watermark.clone(),
+                            ));
                         } else {
                             idle_input = true;
                         }
-                    } else {
-                        table.commit_no_data_expected(barrier.epoch);
                     }
 
                     yield Message::Barrier(barrier);

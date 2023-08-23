@@ -4,6 +4,7 @@ on:
   pull_request:
     types:
       - closed
+      - labeled
 
 jobs:
   check_pr_description:
@@ -14,15 +15,11 @@ jobs:
         id: check_merged
         run: echo "merged=$(echo ${{ github.event.pull_request.merged }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      - name: Retrieve PR description
-        id: pr_description
-        run: |
-          description=$(curl -s -H "Authorization: Bearer ${{ secrets.ACCESS_TOKEN }}" ${{ github.event.pull_request.url }} | jq -r '.body')
-          echo "description=$description" >> $GITHUB_OUTPUT
-
       - name: Retrieve PR information
         uses: 8BitJonny/gh-get-current-pr@2.2.0
         id: PR
+        with:
+          sha: ${{ github.event.pull_request.head.sha }}
 
       - name: Check if documentation update is needed
         id: check_documentation_update
@@ -61,11 +58,9 @@ jobs:
       - name: print_output_variables
         run: |
           echo "Merged: ${{ steps.check_merged.outputs.merged }}"
-          echo "PR Description: ${{ steps.pr_description.outputs.description }}"
           echo "PR ID: ${{ steps.PR.outputs.number }}"
           echo "PR URL: ${{ steps.PR.outputs.pr_url }}"
           echo "PR Title: ${{ steps.PR.outputs.pr_title }}"
-          echo "PR Body: ${{ steps.PR.outputs.pr_body }}"
           echo "PR Created At: ${{ steps.PR.outputs.pr_created_at }}"
           echo "PR Merged At: ${{ steps.PR.outputs.pr_merged_at }}"
           echo "PR Closed At: ${{ steps.PR.outputs.pr_closed_at }}"
