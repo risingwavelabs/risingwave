@@ -60,9 +60,10 @@ async fn test_vacuum() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    Vacuum::vacuum_inner(vacuum_task, sstable_store, mock_hummock_meta_client)
+    let vacuum_task = Vacuum::handle_vacuum_task(vacuum_task, sstable_store)
         .await
         .unwrap();
+    assert!(Vacuum::report_vacuum_task(vacuum_task, mock_hummock_meta_client).await);
 }
 
 #[tokio::test]

@@ -244,6 +244,9 @@ where
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
+                // We should not buffer rows from previous epoch, else we can have duplicates.
+                assert!(upstream_chunk_buffer.is_empty());
+
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
@@ -361,7 +364,7 @@ where
                 // Consume upstream buffer chunk
                 // If no current_pos, means we did not process any snapshot
                 // yet. In that case
-                // we can just ignore the upstream buffer chunk.
+                // we can just ignore the upstream buffer chunk, but still need to clean it.
                 if let Some(current_pos) = &current_pos {
                     for chunk in upstream_chunk_buffer.drain(..) {
                         cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
@@ -370,6 +373,8 @@ where
                             &self.output_indices,
                         ));
                     }
+                } else {
+                    upstream_chunk_buffer.clear()
                 }
 
                 self.metrics
@@ -520,9 +525,7 @@ where
         current_state: &mut [Datum],
     ) -> StreamExecutorResult<()> {
         // Backwards compatibility with no state table in backfill.
-        let Some(table) = table else {
-            return Ok(())
-        };
+        let Some(table) = table else { return Ok(()) };
         utils::persist_state(
             epoch,
             table,

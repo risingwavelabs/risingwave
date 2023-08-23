@@ -59,7 +59,7 @@ where
     S: MetaStore,
 {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv<S>,
         aws_client: Option<AwsEc2Client>,
         catalog_manager: CatalogManagerRef<S>,
@@ -80,7 +80,8 @@ where
             fragment_manager,
             barrier_manager,
             aws_cli_ref.clone(),
-        );
+        )
+        .await;
         Self {
             env,
             catalog_manager,

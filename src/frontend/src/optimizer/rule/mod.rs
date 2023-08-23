@@ -134,6 +134,14 @@ mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
 mod apply_limit_transpose_rule;
 pub use apply_limit_transpose_rule::*;
+mod batch;
+pub use batch::batch_project_merge_rule::*;
+mod common_sub_expr_extract_rule;
+pub use common_sub_expr_extract_rule::*;
+mod apply_over_window_transpose_rule;
+pub use apply_over_window_transpose_rule::*;
+mod apply_expand_transpose_rule;
+pub use apply_expand_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -191,6 +199,10 @@ macro_rules! for_all_rules {
             , { ApplyTopNTransposeRule }
             , { TableFunctionToProjectSetRule }
             , { ApplyLimitTransposeRule }
+            , { CommonSubExprExtractRule }
+            , { BatchProjectMergeRule }
+            , { ApplyOverWindowTransposeRule }
+            , { ApplyExpandTransposeRule }
         }
     };
 }

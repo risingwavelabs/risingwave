@@ -396,13 +396,8 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    prefix_hint: None,
-                    ignore_range_tombstone: false,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await?;

@@ -17,15 +17,10 @@ use std::sync::LazyLock;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::BuiltinView;
+use crate::catalog::system_catalog::{BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
-/// todo: should we add internal tables as well?
-pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_class",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &[
+pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
+    vec![
         (DataType::Int32, "oid"),
         (DataType::Varchar, "relname"),
         (DataType::Int32, "relnamespace"),
@@ -36,7 +31,17 @@ pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                                          * table, I = partitioned index */
         (DataType::Int32, "relam"),
         (DataType::Int32, "reltablespace"),
-    ],
+        (DataType::List(Box::new(DataType::Varchar)), "reloptions"),
+    ]
+});
+
+/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
+/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// todo: should we add internal tables as well?
+pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_class",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &PG_CLASS_COLUMNS,
     sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, \
         CASE \
             WHEN relation_type = 'table' THEN 'r' \
@@ -46,7 +51,8 @@ pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
             WHEN relation_type = 'materialized view' THEN 'm' \
         END relkind, \
         0 AS relam, \
-        0 AS reltablespace \
+        0 AS reltablespace, \
+        ARRAY[]::varchar[] AS reloptions \
         FROM rw_catalog.rw_relations\
     "
     .to_string(),

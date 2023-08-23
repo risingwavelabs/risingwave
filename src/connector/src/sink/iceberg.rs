@@ -14,30 +14,45 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use arrow_array::RecordBatch;
+use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema};
 use async_trait::async_trait;
+use icelake::config::{TableConfig, TableConfigRef};
 use icelake::transaction::Transaction;
+use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
 use icelake::Table;
 use itertools::Itertools;
 use opendal::services::S3;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::anyhow_error;
+use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
+use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
+use serde_json::Value;
 use url::Url;
 
 use super::{
-    DummySinkCommitCoordinator, Sink, SinkError, SinkWriter, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 use crate::deserialize_bool_from_string;
-use crate::sink::Result;
+use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig};
+use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
-pub const ICEBERG_SINK: &str = "iceberg_v2";
+pub const ICEBERG_SINK: &str = "iceberg";
+pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
+
+pub type RemoteIcebergSink = CoordinatedRemoteSink;
+pub type RemoteIcebergConfig = RemoteConfig;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,7 +72,7 @@ pub struct IcebergConfig {
     pub region: Option<String>,
 
     #[serde(rename = "s3.endpoint")]
-    pub endpoint: String,
+    pub endpoint: Option<String>,
 
     #[serde(rename = "s3.access.key")]
     pub access_key: String,
@@ -70,12 +85,20 @@ pub struct IcebergConfig {
 
     #[serde(rename = "table.name")]
     pub table_name: String,
+
+    #[serde(skip)]
+    pub iceberg_table_config: TableConfigRef,
 }
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let iceberg_table_config =
+            Arc::new(TableConfig::try_from(&values).map_err(|e| SinkError::Iceberg(anyhow!(e)))?);
+        let mut config =
+            serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        config.iceberg_table_config = iceberg_table_config;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -85,13 +108,20 @@ impl IcebergConfig {
                 SINK_TYPE_UPSERT
             )));
         }
+
+        if config.endpoint.is_none() && config.region.is_none() {
+            return Err(SinkError::Config(anyhow!(
+                "You must fill either s3 region or s3 endpoint",
+            )));
+        }
+
         Ok(config)
     }
 }
 
 pub struct IcebergSink {
     config: IcebergConfig,
-    schema: Schema,
+    param: SinkParam,
     table_root: String,
     bucket_name: String,
 }
@@ -114,7 +144,6 @@ impl IcebergSink {
         builder
             .root(&self.table_root)
             .bucket(&self.bucket_name)
-            .endpoint(&self.config.endpoint)
             .access_key_id(&self.config.access_key)
             .secret_access_key(&self.config.secret_key);
 
@@ -122,27 +151,28 @@ impl IcebergSink {
             builder.region(region);
         }
 
+        if let Some(endpoint) = &self.config.endpoint {
+            builder.endpoint(endpoint);
+        }
+
         let op = opendal::Operator::new(builder)
-            .map_err(|err| SinkError::Config(anyhow!("{}", err)))?
+            .map_err(|err| SinkError::Config(anyhow!("{err}")))?
             .finish();
 
-        let table = Table::open_with_op(op)
+        let table = Table::open_with_config(op, self.config.iceberg_table_config.clone())
             .await
-            .map_err(|err| SinkError::Iceberg(format!("Create table fail: {}", err)))?;
+            .map_err(|err| SinkError::Iceberg(anyhow!("Create table fail: {}", err)))?;
 
+        let sink_schema = self.param.schema();
         let iceberg_schema = table
             .current_table_metadata()
             .current_schema()
-            .map_err(|err| SinkError::Iceberg(err.to_string()))?
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
             .clone()
             .try_into()
-            .map_err(|err: icelake::Error| SinkError::Iceberg(err.to_string()))?;
-        if !self.schema.same_as_arrow_schema(&iceberg_schema) {
-            return Err(SinkError::Iceberg(format!(
-                "Schema not match, expect: {:?}, actual: {:?}",
-                self.schema, iceberg_schema
-            )));
-        }
+            .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?;
+
+        try_matches_arrow_schema(&sink_schema, &iceberg_schema)?;
 
         Ok(table)
     }
@@ -181,18 +211,18 @@ impl IcebergSink {
         Ok((bucket.to_string(), table_root_path))
     }
 
-    pub fn new(config: IcebergConfig, schema: Schema) -> Result<Self> {
+    pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
         let (bucket_name, table_root) = Self::parse_bucket_and_root_from_path(&config)?;
         // TODO(ZENOTME): Only support append-only mode now.
         if !config.force_append_only {
-            return Err(SinkError::Iceberg(
-                "Iceberg sink only support append-only mode now.".to_string(),
-            ));
+            return Err(SinkError::Iceberg(anyhow!(
+                "Iceberg sink only support append-only mode now."
+            )));
         }
 
         Ok(Self {
             config,
-            schema,
+            param,
             table_root,
             bucket_name,
         })
@@ -201,26 +231,49 @@ impl IcebergSink {
 
 #[async_trait::async_trait]
 impl Sink for IcebergSink {
-    /// TODO: Can't support commit coordinator now.
-    type Coordinator = DummySinkCommitCoordinator;
-    type Writer = IcebergWriter;
+    type Coordinator = IcebergSinkCommitter;
+    type Writer = CoordinatedSinkWriter<IcebergWriter>;
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
-        // We used icelake to write data into storage directly, don't need to validate.
+        let _ = self.create_table().await?;
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
         let table = self.create_table().await?;
 
-        Ok(IcebergWriter {
+        let inner = IcebergWriter {
             is_append_only: self.config.force_append_only,
             writer: table
                 .task_writer()
                 .await
-                .map_err(|err| SinkError::Iceberg(err.to_string()))?,
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             table,
-        })
+        };
+        Ok(CoordinatedSinkWriter::new(
+            writer_param
+                .meta_client
+                .expect("should have meta client")
+                .sink_coordinate_client()
+                .await,
+            self.param.clone(),
+            writer_param.vnode_bitmap.ok_or_else(|| {
+                SinkError::Remote(anyhow_error!(
+                    "sink needs coordination should not have singleton input"
+                ))
+            })?,
+            inner,
+        )
+        .await?)
+    }
+
+    async fn new_coordinator(
+        &self,
+        _connector_client: Option<ConnectorClient>,
+    ) -> Result<Self::Coordinator> {
+        let table = self.create_table().await?;
+
+        Ok(IcebergSinkCommitter { table })
     }
 }
 
@@ -245,18 +298,73 @@ impl IcebergWriter {
 
         chunk.set_visibility(filters);
         let chunk = RecordBatch::try_from(&chunk.compact())
-            .map_err(|err| SinkError::Iceberg(err.to_string()))?;
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         self.writer.write(&chunk).await.map_err(|err| {
-            SinkError::Iceberg(format!("Write chunk fail: {}, chunk: {:?}", err, chunk))
+            SinkError::Iceberg(anyhow!("Write chunk fail: {}, chunk: {:?}", err, chunk))
         })?;
 
         Ok(())
     }
 }
 
+#[derive(Default, Debug)]
+struct WriteResult {
+    data_files: Vec<DataFile>,
+}
+
+impl<'a> TryFrom<&'a SinkMetadata> for WriteResult {
+    type Error = SinkError;
+
+    fn try_from(value: &'a SinkMetadata) -> std::result::Result<Self, Self::Error> {
+        if let Some(Serialized(v)) = &value.metadata {
+            if let Value::Array(json_values) =
+                serde_json::from_slice::<serde_json::Value>(&v.metadata).map_err(
+                    |e| -> SinkError { anyhow!("Can't parse iceberg sink metadata: {}", e).into() },
+                )?
+            {
+                let data_files = json_values
+                    .into_iter()
+                    .map(data_file_from_json)
+                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                    .map_err(|e| anyhow!("Failed to parse data file from json: {}", e))?;
+                Ok(WriteResult { data_files })
+            } else {
+                Err(anyhow!("Serialized data files should be json array!").into())
+            }
+        } else {
+            Err(anyhow!("Can't create iceberg sink write result from empty data!").into())
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
+    type Error = SinkError;
+
+    fn try_from(value: &'a WriteResult) -> std::result::Result<SinkMetadata, Self::Error> {
+        let json_value = serde_json::Value::Array(
+            value
+                .data_files
+                .iter()
+                .cloned()
+                .map(data_file_to_json)
+                .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
+                .map_err(|e| anyhow!("Can't serialize data files to json: {}", e))?,
+        );
+        Ok(SinkMetadata {
+            metadata: Some(Serialized(SerializedMetadata {
+                metadata: serde_json::to_vec(&json_value).map_err(|e| -> SinkError {
+                    anyhow!("Can't serialized iceberg sink metadata: {}", e).into()
+                })?,
+            })),
+        })
+    }
+}
+
 #[async_trait]
 impl SinkWriter for IcebergWriter {
+    type CommitMetadata = Option<SinkMetadata>;
+
     /// Begin a new epoch
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         // Just skip it.
@@ -268,18 +376,18 @@ impl SinkWriter for IcebergWriter {
         if self.is_append_only {
             self.append_only_write(chunk).await
         } else {
-            return Err(SinkError::Iceberg(
-                "Iceberg sink only support append-only mode now.".to_string(),
-            ));
+            return Err(SinkError::Iceberg(anyhow!(
+                "Iceberg sink only support append-only mode now."
+            )));
         }
     }
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
         // Skip it if not checkpoint
         if !is_checkpoint {
-            return Ok(());
+            return Ok(None);
         }
 
         let old_writer = std::mem::replace(
@@ -287,25 +395,15 @@ impl SinkWriter for IcebergWriter {
             self.table
                 .task_writer()
                 .await
-                .map_err(|err| SinkError::Iceberg(err.to_string()))?,
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         );
-
-        let mut tx = Transaction::new(&mut self.table);
 
         let data_files = old_writer
             .close()
             .await
-            .map_err(|err| SinkError::Iceberg(format!("Close writer fail: {}", err)))?;
-        if data_files.is_empty() {
-            return Ok(());
-        }
+            .map_err(|err| SinkError::Iceberg(anyhow!("Close writer fail: {}", err)))?;
 
-        tx.append_file(data_files.into_iter());
-        tx.commit()
-            .await
-            .map_err(|err| SinkError::Iceberg(err.to_string()))?;
-
-        Ok(())
+        Ok(Some(SinkMetadata::try_from(&WriteResult { data_files })?))
     }
 
     /// Clean up
@@ -318,5 +416,123 @@ impl SinkWriter for IcebergWriter {
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         // Just skip it.
         Ok(())
+    }
+}
+
+pub struct IcebergSinkCommitter {
+    table: Table,
+}
+
+#[async_trait::async_trait]
+impl SinkCommitCoordinator for IcebergSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!("Iceberg commit coordinator inited.");
+        Ok(())
+    }
+
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        tracing::info!("Starting iceberg commit in epoch {epoch}.");
+
+        let write_results = metadata
+            .iter()
+            .map(WriteResult::try_from)
+            .collect::<Result<Vec<WriteResult>>>()?;
+
+        let mut txn = Transaction::new(&mut self.table);
+        txn.append_file(
+            write_results
+                .into_iter()
+                .flat_map(|s| s.data_files.into_iter()),
+        );
+        txn.commit()
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+        tracing::info!("Succeeded to commit ti iceberg table in epoch {epoch}.");
+        Ok(())
+    }
+}
+
+/// Try to match our schema with iceberg schema.
+fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
+    if rw_schema.fields.len() != arrow_schema.fields().len() {
+        return Err(SinkError::Iceberg(anyhow!(
+            "Schema length not match, ours is {}, and iceberg is {}",
+            rw_schema.fields.len(),
+            arrow_schema.fields.len()
+        )));
+    }
+
+    let mut schema_fields = HashMap::new();
+    rw_schema.fields.iter().for_each(|field| {
+        let res = schema_fields.insert(&field.name, &field.data_type);
+        // This assert is to make sure there is no duplicate field name in the schema.
+        assert!(res.is_none())
+    });
+
+    for arrow_field in &arrow_schema.fields {
+        let our_field_type = schema_fields.get(arrow_field.name()).ok_or_else(|| {
+            SinkError::Iceberg(anyhow!(
+                "Field {} not found in our schema",
+                arrow_field.name()
+            ))
+        })?;
+
+        let converted_arrow_data_type =
+            ArrowDataType::try_from(*our_field_type).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+
+        let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
+            (ArrowDataType::Decimal128(p1, s1), ArrowDataType::Decimal128(p2, s2)) => {
+                *p1 >= *p2 && *s1 >= *s2
+            }
+            (left, right) => left == right,
+        };
+        if !compatible {
+            return Err(SinkError::Iceberg(anyhow!("Field {}'s type not compatible, ours converted data type {}, iceberg's data type: {}",
+                    arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
+                )));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::catalog::Field;
+
+    use crate::source::DataType;
+
+    #[test]
+    fn test_compatible_arrow_schema() {
+        use arrow_schema::{DataType as ArrowDataType, Field as ArrowField};
+
+        use super::*;
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "a"),
+            Field::with_name(DataType::Int32, "b"),
+            Field::with_name(DataType::Int32, "c"),
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new("a", ArrowDataType::Int32, false),
+            ArrowField::new("b", ArrowDataType::Int32, false),
+            ArrowField::new("c", ArrowDataType::Int32, false),
+        ]);
+
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "d"),
+            Field::with_name(DataType::Int32, "c"),
+            Field::with_name(DataType::Int32, "a"),
+            Field::with_name(DataType::Int32, "b"),
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new("a", ArrowDataType::Int32, false),
+            ArrowField::new("b", ArrowDataType::Int32, false),
+            ArrowField::new("d", ArrowDataType::Int32, false),
+            ArrowField::new("c", ArrowDataType::Int32, false),
+        ]);
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
     }
 }

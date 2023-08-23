@@ -1267,7 +1267,8 @@ impl GrpcMetaClientCore {
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
-        let hummock_client = HummockManagerServiceClient::new(channel.clone());
+        let hummock_client =
+            HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let notification_client =
             NotificationServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let stream_client =
@@ -1276,7 +1277,8 @@ impl GrpcMetaClientCore {
         let scale_client =
             ScaleServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let backup_client = BackupServiceClient::new(channel.clone());
-        let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
+        let telemetry_client =
+            TelemetryInfoServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());

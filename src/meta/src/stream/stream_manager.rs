@@ -682,7 +682,7 @@ mod tests {
             &self,
             _request: Request<WaitEpochCommitRequest>,
         ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
-            unimplemented!()
+            Ok(Response::new(WaitEpochCommitResponse::default()))
         }
     }
 
@@ -803,6 +803,14 @@ mod tests {
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
+
+            // Wait until the bootstrap recovery is done.
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if barrier_scheduler.flush(false).await.is_ok() {
+                    break;
+                }
+            }
 
             Ok(Self {
                 global_stream_manager: Arc::new(stream_manager),

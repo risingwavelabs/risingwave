@@ -46,7 +46,9 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    start_compactor, CompactionExecutor, CompactorContext,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
@@ -59,6 +61,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tower::Layer;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
@@ -228,7 +231,7 @@ pub async fn compute_node_serve(
                 running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
-            let (handle, shutdown_sender) = Compactor::start_compactor(compactor_context);
+            let (handle, shutdown_sender) = start_compactor(compactor_context);
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -397,12 +400,24 @@ pub async fn compute_node_serve(
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
-            .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
-            .add_service(ExchangeServiceServer::new(exchange_srv))
-            .add_service(StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX))
+            .add_service(
+                ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
+            )
+            .add_service({
+                let srv =
+                    StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
+                #[cfg(madsim)]
+                {
+                    srv
+                }
+                #[cfg(not(madsim))]
+                {
+                    AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(srv)
+                }
+            })
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))

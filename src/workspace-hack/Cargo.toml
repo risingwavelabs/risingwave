@@ -30,7 +30,6 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -55,9 +54,10 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "f01e3ca", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
@@ -119,7 +119,6 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-crossterm = { version = "0.25" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -144,9 +143,10 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "f01e3ca", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nix = { version = "0.26" }
 num-bigint = { version = "0.4" }
@@ -179,7 +179,7 @@ serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
