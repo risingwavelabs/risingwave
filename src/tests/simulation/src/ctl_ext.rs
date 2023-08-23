@@ -106,7 +106,9 @@ pub mod predicate {
             // The rescheduling of no-shuffle downstreams must be derived from the most upstream
             // fragment. So if a fragment has no-shuffle upstreams, it cannot be rescheduled.
             !any(root(f), &|n| {
-                let Some(NodeBody::Merge(merge)) = &n.node_body else { return false };
+                let Some(NodeBody::Merge(merge)) = &n.node_body else {
+                    return false;
+                };
                 merge.upstream_dispatcher_type() == DispatcherType::NoShuffle
             })
         };

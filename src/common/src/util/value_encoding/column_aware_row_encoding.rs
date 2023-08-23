@@ -196,7 +196,7 @@ impl ValueRowDeserializer for Deserializer {
         let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
         let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
         let data = &encoded_bytes[data_start_idx..];
-        let mut datums = vec![None; self.schema.len()];
+        let mut datums: Vec<Option<Datum>> = vec![None; self.schema.len()];
         let mut contained_indices = BTreeSet::new();
         for i in 0..datum_num {
             let this_id = encoded_bytes.get_i32_le();
@@ -228,15 +228,15 @@ impl ValueRowDeserializer for Deserializer {
                         &mut data_slice,
                     )?)
                 };
-                datums[decoded_idx] = data;
+                datums[decoded_idx] = Some(data);
             }
         }
         for (id, datum) in &self.default_column_values {
-            if !contained_indices.contains(id) && datums[*id].is_none() {
-                datums[*id] = datum.clone()
+            if !contained_indices.contains(id) {
+                datums[*id].get_or_insert(datum.clone());
             }
         }
-        Ok(datums)
+        Ok(datums.into_iter().map(|d| d.unwrap_or(None)).collect())
     }
 }
 
