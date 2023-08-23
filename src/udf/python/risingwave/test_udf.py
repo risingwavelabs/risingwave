@@ -185,7 +185,7 @@ def test_all_types():
         pa.array([1], type=pa.int64()),
         pa.array([1], type=pa.float32()),
         pa.array([1], type=pa.float64()),
-        pa.array([10**37], type=pa.decimal128(38)),
+        pa.array(["12345678901234567890.1234567890"], type=pa.large_binary()),
         pa.array([datetime.date(2023, 6, 1)], type=pa.date32()),
         pa.array([datetime.time(1, 2, 3, 456789)], type=pa.time64("us")),
         pa.array(
@@ -215,7 +215,7 @@ def test_all_types():
                 1,
                 1.0,
                 1.0,
-                10**37,
+                b"12345678901234567890.1234567890",
                 datetime.date(2023, 6, 1),
                 datetime.time(1, 2, 3, 456789),
                 datetime.datetime(2023, 6, 1, 1, 2, 3, 456789),
