@@ -53,7 +53,21 @@ pub async fn handle_create_function(
         .into());
     }
     let language = match params.language {
-        Some(lang) => lang.real_value().to_lowercase(),
+        Some(lang) => {
+            let lang = lang.real_value().to_lowercase();
+            match &*lang {
+                "python" | "java" => lang,
+                _ => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "language {} is not supported",
+                        lang
+                    ))
+                    .into())
+                }
+            }
+        }
+        // Empty language is acceptable since we only require the external server implements the
+        // correct protocol.
         None => "".to_string(),
     };
     let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
