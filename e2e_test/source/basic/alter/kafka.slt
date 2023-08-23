@@ -25,17 +25,15 @@ sleep 10s
 statement ok
 flush;
 
-query I rowsort
+query I
 select * from s1;
 ----
 1
-2
 
-query T rowsort
+query T
 select * from s2;
 ----
 11
-22
 
 # alter source
 statement ok
@@ -43,7 +41,7 @@ alter source s1 add column v2 varchar;
 
 # alter source with null column
 statement ok
-alter source s2 add column v3 int;
+alter source s2 add column v4 int;
 
 statement ok
 create materialized view mv3 as select * from s1;
@@ -56,38 +54,54 @@ sleep 10s
 statement ok
 flush;
 
-query IT rowsort
+query IT
 select * from s1
 ----
 1 11
-2 22
 
-query TI rowsort
+query TI
 select * from s2
 ----
 11 NULL
-22 NULL
 
-query I rowsort
-select * from mv1;
+query I
+select * from mv1
 ----
 1
-2
 
-query T rowsort
-select * from mv2;
+query T
+select * from mv2
 ----
 11
-22
 
-query IT rowsort
-select * from mv3;
+query IT
+select * from mv3
 ----
 1 11
-2 22
 
-query TI rowsort
-select * from mv4;
+query TI
+select * from mv4
 ----
 11 NULL
-22 NULL
+
+# alter source again
+statement ok
+alter source s1 add column v3 int;
+
+statement ok
+create materialized view mv5 as select * from s1;
+
+sleep 10s
+
+statement ok
+flush;
+
+query ITI
+select * from s1
+----
+1 11 111
+
+query ITI
+select * from mv5
+----
+1 11 111

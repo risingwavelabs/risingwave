@@ -76,7 +76,7 @@ impl SourceCatalog {
         }
     }
 
-    /// Get a reference to the table catalog's version.
+    /// Get a reference to the source catalog's version.
     pub fn version(&self) -> SourceVersionId {
         self.version
     }

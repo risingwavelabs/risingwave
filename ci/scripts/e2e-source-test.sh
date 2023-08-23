@@ -137,7 +137,7 @@ sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka.slt'
 
 echo "--- e2e, kafka alter source"
 chmod +x ./scripts/source/prepare_data_after_alter.sh
-./scripts/source/prepare_data_after_alter.sh
+./scripts/source/prepare_data_after_alter.sh 2
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data.slt'
 
 echo "--- Run CH-benCHmark"

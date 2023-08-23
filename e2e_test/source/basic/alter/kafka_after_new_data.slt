@@ -6,50 +6,44 @@ flush;
 query IT rowsort
 select * from s1
 ----
-1 11
-1 11
-2 22
-2 22
+1 11 111
+2 22 222
 
 query I rowsort
 select * from mv1
 ----
 1
-1
-2
 2
 
 query IT rowsort
 select * from mv3
 ----
 1 11
-1 11
-2 22
 2 22
 
 query TI rowsort
 select * from s2
 ----
 11 NULL
-11 NULL
-22 NULL
 22 NULL
 
 query T rowsort
 select * from mv2
 ----
 11
-11
-22
 22
 
 query TI rowsort
 select * from mv4
 ----
 11 NULL
-11 NULL
 22 NULL
-22 NULL
+
+query ITI rowsort
+select * from mv5
+----
+1 11 111
+2 22 222
 
 statement ok
 drop materialized view mv1
@@ -62,6 +56,9 @@ drop materialized view mv3
 
 statement ok
 drop materialized view mv4
+
+statement ok
+drop materialized view mv5
 
 statement ok
 drop source s1

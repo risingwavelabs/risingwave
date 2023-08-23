@@ -18,8 +18,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, Ident, ObjectName, Query,
-    StructField, TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
@@ -611,46 +611,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)
         | AstDataType::Time(true) => return Err(new_err().into()),
-    };
-    Ok(data_type)
-}
-
-pub fn unbind_data_type(data_type: &DataType) -> Result<AstDataType> {
-    let data_type = match data_type {
-        DataType::Boolean => AstDataType::Boolean,
-        DataType::Int16 => AstDataType::SmallInt,
-        DataType::Int32 => AstDataType::Int,
-        DataType::Int64 => AstDataType::BigInt,
-        DataType::Float32 => AstDataType::Float(Some(24)),
-        DataType::Float64 => AstDataType::Float(Some(53)),
-        DataType::Decimal => AstDataType::Decimal(None, None),
-        DataType::Date => AstDataType::Date,
-        DataType::Varchar => AstDataType::Varchar,
-        DataType::Time => AstDataType::Time(false),
-        DataType::Timestamp => AstDataType::Timestamp(false),
-        DataType::Timestamptz => AstDataType::Timestamp(true),
-        DataType::Interval => AstDataType::Interval,
-        DataType::Struct(struct_type) => {
-            let mut fields = vec![];
-            for (name, data_type) in struct_type.iter() {
-                fields.push(StructField {
-                    name: Ident::new_unchecked(name),
-                    data_type: unbind_data_type(data_type)?,
-                });
-            }
-            AstDataType::Struct(fields)
-        }
-        DataType::List(datatype) => AstDataType::Array(Box::new(unbind_data_type(datatype)?)),
-        DataType::Bytea => AstDataType::Bytea,
-        DataType::Jsonb => AstDataType::Custom(ObjectName::from_test_str("jsonb")),
-        DataType::Serial => {
-            return Err(ErrorCode::NotSupported(
-                "Column type SERIAL is not supported".into(),
-                "Please remove the SERIAL column".into(),
-            )
-            .into())
-        }
-        DataType::Int256 => AstDataType::Custom(ObjectName::from_test_str("rw_int256")),
     };
     Ok(data_type)
 }

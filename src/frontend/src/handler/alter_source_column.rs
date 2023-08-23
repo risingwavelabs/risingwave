@@ -48,7 +48,6 @@ pub async fn handle_alter_source_column(
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
-        println!("Schema_name: {schema_name}");
         let db = reader.get_database_by_name(db_name)?;
         let schema = db.get_schema_by_name(schema_name).unwrap();
 
@@ -87,14 +86,13 @@ pub async fn handle_alter_source_column(
                     "column \"{new_column_name}\" of source \"{source_name}\" already exists"
                 )))?
             }
+            catalog.definition =
+                alter_definition_add_column(&catalog.definition, column_def.clone())?;
             let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
             bound_column.column_desc.column_id = columns
                 .iter()
                 .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
                 .next();
-            println!("Def: {}", catalog.definition);
-            catalog.definition = alter_definition_add_column(&catalog.definition, &bound_column)?;
-            println!("Def: {}", catalog.definition);
             columns.push(bound_column);
         }
         _ => unreachable!(),
