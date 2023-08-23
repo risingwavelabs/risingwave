@@ -34,7 +34,7 @@ use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::external::{
-    BinlogOffset, ExternalTableReader, ExternalTableReaderImpl,
+    CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
 };
 use risingwave_storage::table::collect_data_chunk_with_builder;
 use risingwave_storage::StateStore;
@@ -122,14 +122,14 @@ pub(crate) fn mark_cdc_chunk(
     current_pos: &OwnedRow,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
-    last_binlog_offset: Option<BinlogOffset>,
+    last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.compact();
     mark_cdc_chunk_inner(
         table_reader,
         chunk,
         current_pos,
-        last_binlog_offset,
+        last_cdc_offset,
         pk_in_output_indices,
         pk_order,
     )
@@ -207,19 +207,14 @@ fn mark_cdc_chunk_inner(
     table_reader: &ExternalTableReaderImpl,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    last_binlog_offset: Option<BinlogOffset>,
+    last_cdc_offset: Option<CdcOffset>,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
 
-    // if let Some(StreamChunkMeta { offsets }) = meta {
-    //     let binlog_offsets = offsets
-    //         .into_iter()
-    //         .map(|offset| table_reader.parse_binlog_offset(offset.value()))
-    //         .try_collect::<Vec<_>>()?;
-
+    // `_rw_offset` must be placed at the last column right now
     let offset_col_idx = data.dimension() - 1;
     for v in data.rows_with_holes().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
@@ -228,7 +223,7 @@ fn mark_cdc_chunk_inner(
             None => false,
             Some(row) => {
                 // filter changelog events with binlog range
-                let in_binlog_range = if let Some(binlog_low) = &last_binlog_offset {
+                let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
                     binlog_low <= &event_offset
                 } else {
                     true
@@ -251,7 +246,6 @@ fn mark_cdc_chunk_inner(
     }) {
         new_visibility.append(v?);
     }
-    // }
 
     let (columns, _) = data.into_parts();
     Ok(StreamChunk::new(
@@ -429,7 +423,7 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
 pub(crate) fn get_cdc_chunk_last_offset(
     table_reader: &ExternalTableReaderImpl,
     chunk: &StreamChunk,
-) -> StreamExecutorResult<Option<BinlogOffset>> {
+) -> StreamExecutorResult<Option<CdcOffset>> {
     let row = chunk.rows().last().unwrap().1;
     let offset_col = row.iter().last().unwrap();
     let output = offset_col.map(|scalar| {

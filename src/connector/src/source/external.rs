@@ -133,7 +133,7 @@ pub struct PostgresOffset {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum BinlogOffset {
+pub enum CdcOffset {
     MySql(MySqlOffset),
     Postgres(PostgresOffset),
 }
@@ -199,15 +199,15 @@ impl MySqlOffset {
 }
 
 pub trait ExternalTableReader {
-    type BinlogOffsetFuture<'a>: Future<Output = ConnectorResult<BinlogOffset>> + Send + 'a
+    type CdcOffsetFuture<'a>: Future<Output = ConnectorResult<CdcOffset>> + Send + 'a
     where
         Self: 'a;
 
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
 
-    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_>;
+    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_>;
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset>;
+    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset>;
 
     fn snapshot_read(
         &self,
@@ -246,13 +246,13 @@ pub struct ExternalTableConfig {
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
+    type CdcOffsetFuture<'a> = impl Future<Output = ConnectorResult<CdcOffset>> + 'a;
 
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
     }
 
-    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_> {
         async move {
             let mut conn = self
                 .pool
@@ -267,15 +267,15 @@ impl ExternalTableReader for MySqlExternalTableReader {
                 .exactly_one()
                 .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
 
-            Ok(BinlogOffset::MySql(MySqlOffset {
+            Ok(CdcOffset::MySql(MySqlOffset {
                 filename: row.take("File").unwrap(),
                 position: row.take("Position").unwrap(),
             }))
         }
     }
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
-        Ok(BinlogOffset::MySql(MySqlOffset::parse_str(offset)?))
+    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
+        Ok(CdcOffset::MySql(MySqlOffset::parse_str(offset)?))
     }
 
     fn snapshot_read(
@@ -449,7 +449,7 @@ impl MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
-    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
+    type CdcOffsetFuture<'a> = impl Future<Output = ConnectorResult<CdcOffset>> + 'a;
 
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         match self {
@@ -458,16 +458,16 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         }
     }
 
-    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_> {
         async move {
             match self {
-                ExternalTableReaderImpl::MySql(mysql) => mysql.current_binlog_offset().await,
-                ExternalTableReaderImpl::Mock(mock) => mock.current_binlog_offset().await,
+                ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
+                ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
             }
         }
     }
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
+    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.parse_binlog_offset(offset),
             ExternalTableReaderImpl::Mock(mock) => mock.parse_binlog_offset(offset),
@@ -522,7 +522,7 @@ mod tests {
     use crate::sink::catalog::SinkType;
     use crate::sink::SinkParam;
     use crate::source::external::{
-        BinlogOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
+        CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
     };
 
     #[test]
@@ -533,11 +533,11 @@ mod tests {
         let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
         let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
 
-        let off0 = BinlogOffset::MySql(MySqlOffset::parse_str(off0_str).unwrap());
-        let off1 = BinlogOffset::MySql(MySqlOffset::parse_str(off1_str).unwrap());
-        let off2 = BinlogOffset::MySql(MySqlOffset::parse_str(off2_str).unwrap());
-        let off3 = BinlogOffset::MySql(MySqlOffset::parse_str(off3_str).unwrap());
-        let off4 = BinlogOffset::MySql(MySqlOffset::parse_str(off4_str).unwrap());
+        let off0 = CdcOffset::MySql(MySqlOffset::parse_str(off0_str).unwrap());
+        let off1 = CdcOffset::MySql(MySqlOffset::parse_str(off1_str).unwrap());
+        let off2 = CdcOffset::MySql(MySqlOffset::parse_str(off2_str).unwrap());
+        let off3 = CdcOffset::MySql(MySqlOffset::parse_str(off3_str).unwrap());
+        let off4 = CdcOffset::MySql(MySqlOffset::parse_str(off4_str).unwrap());
 
         assert!(off0 <= off1);
         assert!(off1 > off2);
@@ -572,7 +572,7 @@ mod tests {
                 "table.name" => "t1"));
 
         let reader = MySqlExternalTableReader::new(props, rw_schema).unwrap();
-        let offset = reader.current_binlog_offset().await.unwrap();
+        let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
         let table_name = SchemaTableName {

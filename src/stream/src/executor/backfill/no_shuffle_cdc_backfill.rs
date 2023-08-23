@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_connector::source::external::BinlogOffset;
+use risingwave_connector::source::external::CdcOffset;
 
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
@@ -178,9 +178,9 @@ impl CdcBackfillExecutor {
         #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
 
-        let mut last_binlog_offset: Option<BinlogOffset>;
+        let mut last_binlog_offset: Option<CdcOffset>;
 
-        let mut consumed_binlog_offset: Option<BinlogOffset> = None;
+        let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         // CDC Backfill Algorithm:
         //

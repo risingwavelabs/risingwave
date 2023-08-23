@@ -21,7 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::row;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::source::external::{BinlogOffset, ExternalTableReader};
+use risingwave_connector::source::external::{CdcOffset, ExternalTableReader};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -33,7 +33,7 @@ use crate::executor::backfill::utils::{compute_bounds, iter_chunks};
 use crate::executor::{StreamExecutorResult, INVALID_EPOCH};
 
 pub trait UpstreamTableRead {
-    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<BinlogOffset>>>
+    type BinlogOffsetFuture<'a>: Future<Output = StreamExecutorResult<Option<CdcOffset>>>
         + Send
         + 'a
     where
@@ -99,7 +99,7 @@ impl<T> UpstreamTableReader<T> {
 
 impl<S: StateStore> UpstreamTableRead for UpstreamTableReader<StorageTable<S>> {
     type BinlogOffsetFuture<'a> =
-        impl Future<Output = StreamExecutorResult<Option<BinlogOffset>>> + 'a;
+        impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + 'a;
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
@@ -146,7 +146,7 @@ impl<S: StateStore> UpstreamTableRead for UpstreamTableReader<StorageTable<S>> {
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     type BinlogOffsetFuture<'a> =
-        impl Future<Output = StreamExecutorResult<Option<BinlogOffset>>> + 'a;
+        impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + 'a;
     type SnapshotStream<'a> = impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + 'a;
 
     fn snapshot_read(&self, args: SnapshotReadArgs) -> Self::SnapshotStream<'_> {
@@ -188,7 +188,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
     fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
         async move {
-            let binlog = self.inner.table_reader().current_binlog_offset();
+            let binlog = self.inner.table_reader().current_cdc_offset();
             let binlog = binlog.await?;
             Ok(Some(binlog))
         }

@@ -22,7 +22,7 @@ use risingwave_common::types::ScalarImpl;
 
 use crate::error::ConnectorError;
 use crate::source::external::{
-    BinlogOffset, ConnectorResult, ExternalTableReader, MySqlOffset, SchemaTableName,
+    CdcOffset, ConnectorResult, ExternalTableReader, MySqlOffset, SchemaTableName,
 };
 
 #[derive(Debug)]
@@ -87,23 +87,23 @@ impl MockExternalTableReader {
 }
 
 impl ExternalTableReader for MockExternalTableReader {
-    type BinlogOffsetFuture<'a> = impl Future<Output = ConnectorResult<BinlogOffset>> + 'a;
+    type CdcOffsetFuture<'a> = impl Future<Output = ConnectorResult<CdcOffset>> + 'a;
 
     fn get_normalized_table_name(&self, _table_name: &SchemaTableName) -> String {
         "`mock_table`".to_string()
     }
 
-    fn current_binlog_offset(&self) -> Self::BinlogOffsetFuture<'_> {
+    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_> {
         static IDX: AtomicUsize = AtomicUsize::new(0);
         async move {
             let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(BinlogOffset::MySql(self.binlog_watermarks[idx].clone()))
+            Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
         }
     }
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<BinlogOffset> {
+    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
         // same as mysql offset
-        Ok(BinlogOffset::MySql(MySqlOffset::parse_str(offset)?))
+        Ok(CdcOffset::MySql(MySqlOffset::parse_str(offset)?))
     }
 
     fn snapshot_read(
