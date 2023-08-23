@@ -59,6 +59,7 @@ message ExprNode {
     // Parse text to timestamp by format string.
     // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
     TO_TIMESTAMP1 = 107;
+    CHAR_TO_DATE = 111;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
     ADD_WITH_TIME_ZONE = 109;
@@ -68,6 +69,7 @@ message ExprNode {
     SUBSTR = 202;
     LENGTH = 203;
     LIKE = 204;
+    I_LIKE = 279;
     UPPER = 205;
     LOWER = 206;
     TRIM = 207;
@@ -141,6 +143,9 @@ message ExprNode {
     LOG10 = 273;
     CBRT = 274;
     SIGN = 275;
+    SCALE = 276;
+    MIN_SCALE = 277;
+    TRIM_SCALE = 278;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -162,6 +167,7 @@ message ExprNode {
     SHA512 = 316;
     LEFT = 317;
     RIGHT = 318;
+    FORMAT = 319;
 
     // Unary operators
     NEG = 401;
@@ -226,6 +232,7 @@ message TableFunction {
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    GENERATE_SUBSCRIPTS = 5;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;

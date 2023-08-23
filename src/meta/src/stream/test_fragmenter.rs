@@ -78,8 +78,8 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
 
 fn make_agg_call_result_state() -> AggCallState {
     AggCallState {
-        inner: Some(agg_call_state::Inner::ResultValueState(
-            agg_call_state::ResultValueState {},
+        inner: Some(agg_call_state::Inner::ValueState(
+            agg_call_state::ValueState {},
         )),
     }
 }
@@ -343,8 +343,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_key: vec![],
-            watermark_output_key: vec![],
+            watermark_input_cols: vec![],
+            watermark_output_cols: vec![],
+            nondecreasing_exprs: vec![],
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],

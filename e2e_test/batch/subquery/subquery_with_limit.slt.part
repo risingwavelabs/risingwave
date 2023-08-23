@@ -1,0 +1,27 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, k1 int);
+
+statement ok
+create table t2 (v2 int, k2 int);
+
+statement ok
+insert into t1 values (1, 11), (2, 22), (3, 33), (4, 44);
+
+statement ok
+insert into t2 values (1, 11), (1, 11), (2, 22), (2, 22), (3, 33);
+
+query II rowsort
+select * from t1 where v1 in ( select v2 from t2 where k2 = k1 limit 1 offset 1);
+----
+1 11
+2 22
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+

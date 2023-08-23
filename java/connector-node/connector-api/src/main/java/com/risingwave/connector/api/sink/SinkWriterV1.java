@@ -14,7 +14,9 @@
 
 package com.risingwave.connector.api.sink;
 
+import com.risingwave.proto.ConnectorServiceProto;
 import java.util.Iterator;
+import java.util.Optional;
 
 public interface SinkWriterV1 {
     void write(Iterator<SinkRow> rows);
@@ -49,13 +51,14 @@ public interface SinkWriterV1 {
         }
 
         @Override
-        public void barrier(boolean isCheckpoint) {
+        public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
             if (isCheckpoint) {
                 if (hasBegun) {
                     this.inner.sync();
                     this.hasBegun = false;
                 }
             }
+            return Optional.empty();
         }
 
         @Override

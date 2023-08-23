@@ -22,6 +22,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
 #[cfg(test)]
 use risingwave_pb::connector_service::SinkPayloadFormat;
+use risingwave_rpc_client::MetaClient;
 use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
@@ -57,6 +58,9 @@ pub struct StreamEnvironment {
 
     /// Total memory usage in stream.
     total_mem_val: Arc<TrAdder<i64>>,
+
+    /// Meta client. Use `None` for test only
+    meta_client: Option<MetaClient>,
 }
 
 impl StreamEnvironment {
@@ -70,6 +74,7 @@ impl StreamEnvironment {
         dml_manager: DmlManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
         source_metrics: Arc<SourceMetrics>,
+        meta_client: MetaClient,
     ) -> Self {
         StreamEnvironment {
             server_addr,
@@ -81,6 +86,7 @@ impl StreamEnvironment {
             system_params_manager,
             source_metrics,
             total_mem_val: Arc::new(TrAdder::new()),
+            meta_client: Some(meta_client),
         }
     }
 
@@ -102,6 +108,7 @@ impl StreamEnvironment {
             system_params_manager: Arc::new(LocalSystemParamsManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             total_mem_val: Arc::new(TrAdder::new()),
+            meta_client: None,
         }
     }
 
@@ -139,5 +146,9 @@ impl StreamEnvironment {
 
     pub fn total_mem_usage(&self) -> Arc<TrAdder<i64>> {
         self.total_mem_val.clone()
+    }
+
+    pub fn meta_client(&self) -> Option<MetaClient> {
+        self.meta_client.clone()
     }
 }

@@ -112,7 +112,11 @@ impl WithOptions {
 
 #[inline(always)]
 fn is_kafka_connector(with_options: &WithOptions) -> bool {
-    let Some(connector) = with_options.inner().get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase()) else {
+    let Some(connector) = with_options
+        .inner()
+        .get(UPSTREAM_SOURCE_KEY)
+        .map(|s| s.to_lowercase())
+    else {
         return false;
     };
     connector == KAFKA_CONNECTOR
@@ -151,7 +155,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             .iter()
             .cloned()
             .map(|x| match x.value {
-                Value::CstyleEscapesString(s) => Ok((x.name.real_value(), s)),
+                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
                 Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),

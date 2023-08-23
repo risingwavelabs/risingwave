@@ -2131,8 +2131,20 @@ where
         self.core.lock().await.database.get_all_table_options()
     }
 
-    pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
-        self.core.lock().await.database.list_table_ids(schema_id)
+    pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_readonly_table_ids(schema_id)
+    }
+
+    pub async fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_dml_table_ids(schema_id)
     }
 
     pub async fn list_sources(&self) -> Vec<Source> {
@@ -2141,6 +2153,14 @@ where
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
         self.core.lock().await.database.list_source_ids(schema_id)
+    }
+
+    pub async fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
+        self.core
+            .lock()
+            .await
+            .database
+            .get_table_name_and_type_mapping()
     }
 
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery

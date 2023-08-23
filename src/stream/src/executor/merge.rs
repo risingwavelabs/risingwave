@@ -757,9 +757,9 @@ mod tests {
 
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
-            assert_eq!(ops.len() as u64, 0);
-            assert_eq!(columns.len() as u64, 0);
-            assert_eq!(visibility, None);
+            assert!(ops.is_empty());
+            assert!(columns.is_empty());
+            assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
             assert_eq!(barrier_epoch.curr, 12345);

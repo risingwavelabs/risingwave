@@ -25,8 +25,9 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
+use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
-    Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
+    ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
     ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
@@ -38,9 +39,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, SstableBuilder,
-    SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, TieredCache,
-    Xor16FilterBuilder,
+    CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -54,7 +54,8 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         64 << 20,
         128 << 20,
         0,
-        TieredCache::none(),
+        FileCache::none(),
+        FileCache::none(),
     ))
 }
 
@@ -91,7 +92,7 @@ async fn build_table(
         block_capacity: 16 * 1024,
         restart_interval: 16,
         bloom_false_positive: 0.001,
-        compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     };
     let writer = sstable_store.create_sst_writer(
         sstable_object_id,
@@ -180,7 +181,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         block_capacity: 64 * 1024,
         restart_interval: 16,
         bloom_false_positive: 0.001,
-        compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     };
     let mut builder =
         CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(32, sstable_store, opt));
@@ -195,8 +196,9 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         is_target_l0_or_lbase: false,
         split_by_table: false,
         split_weight_by_vnode: 0,
+        use_block_based_filter: true,
     };
-    Compactor::compact_and_build_sst(
+    compact_and_build_sst(
         &mut builder,
         Arc::new(CompactionDeleteRanges::default()),
         &task_config,
@@ -250,6 +252,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     KeyRange::inf(),
                     sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
+                    0,
                 ),
                 ConcatSstableIterator::new(
                     vec![0],
@@ -257,6 +260,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     KeyRange::inf(),
                     sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
+                    0,
                 ),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);

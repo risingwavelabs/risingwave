@@ -163,6 +163,7 @@ pub fn prune_nonoverlapping_ssts<'a>(
     ssts[start_table_idx..=end_table_idx].iter()
 }
 
+#[derive(Debug)]
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     notify: Notify,
@@ -173,6 +174,10 @@ impl MemoryLimiterInner {
     fn release_quota(&self, quota: u64) {
         self.total_size.fetch_sub(quota, AtomicOrdering::Release);
         self.notify.notify_waiters();
+    }
+
+    fn add_memory(&self, quota: u64) {
+        self.total_size.fetch_add(quota, AtomicOrdering::SeqCst);
     }
 
     fn try_require_memory(&self, quota: u64) -> bool {
@@ -240,6 +245,7 @@ impl MemoryLimiterInner {
     }
 }
 
+#[derive(Debug)]
 pub struct MemoryLimiter {
     inner: Arc<MemoryLimiterInner>,
 }
@@ -293,6 +299,17 @@ impl MemoryLimiter {
 
     pub fn quota(&self) -> u64 {
         self.inner.quota
+    }
+
+    pub fn must_require_memory(&self, quota: u64) -> MemoryTracker {
+        if !self.inner.try_require_memory(quota) {
+            self.inner.add_memory(quota);
+        }
+
+        MemoryTracker {
+            limiter: self.inner.clone(),
+            quota,
+        }
     }
 }
 
@@ -361,13 +378,10 @@ pub(crate) async fn do_insert_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        prefix_hint: None,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        ignore_range_tombstone: false,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
@@ -392,13 +406,10 @@ pub(crate) async fn do_delete_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        prefix_hint: None,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        ignore_range_tombstone: false,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
@@ -433,13 +444,10 @@ pub(crate) async fn do_update_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        prefix_hint: None,
-        ignore_range_tombstone: false,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
 
     match inner.get(key.clone(), epoch, read_options).await? {

@@ -69,7 +69,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
 
-    // TODO: rename to listen_address and separate out the port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
@@ -259,6 +258,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -266,6 +266,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
+                full_gc_interval_sec: config.meta.full_gc_interval_sec,
                 collect_gc_watermark_spin_interval_sec: config
                     .meta
                     .collect_gc_watermark_spin_interval_sec,
