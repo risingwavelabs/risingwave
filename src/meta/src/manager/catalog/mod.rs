@@ -2221,6 +2221,16 @@ where
         }
         tables
     }
+
+    pub async fn get_created_table_ids(&self) -> Vec<u32> {
+        let guard = self.core.lock().await;
+        guard
+            .database
+            .tables
+            .values()
+            .map(|table| table.id)
+            .collect()
+    }
 }
 
 // User related methods
