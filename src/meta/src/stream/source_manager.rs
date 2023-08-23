@@ -55,7 +55,6 @@ pub struct SourceManager<S: MetaStore> {
 }
 
 const MAX_FAIL_CNT: u32 = 10;
-const DEFAULT_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -76,6 +75,8 @@ struct ConnectorSourceWorker {
 }
 
 impl ConnectorSourceWorker {
+    const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
+
     async fn refresh(&mut self) -> MetaResult<()> {
         let enumerator = SplitEnumeratorImpl::create(
             self.connector_properties.clone(),
@@ -299,7 +300,12 @@ where
                         })
                         .collect();
 
+                    if discovered_splits.is_empty() {
+                        tracing::warn!("No splits discovered for source {}", source_id);
+                    }
+
                     if let Some(change) = diff_splits(
+                        *fragment_id,
                         prev_actor_splits,
                         &discovered_splits,
                         SplitDiffOptions::default(),
@@ -420,6 +426,7 @@ impl Default for SplitDiffOptions {
 }
 
 fn diff_splits<T>(
+    fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
     opts: SplitDiffOptions,
@@ -432,17 +439,13 @@ where
         return None;
     }
 
-    if discovered_splits.is_empty() {
-        tracing::warn!("no splits discovered");
-    }
-
     let prev_split_ids: HashSet<_> = actor_splits
         .values()
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::debug!("previous splits {:?}", prev_split_ids);
-    tracing::debug!("discovered splits {:?}", discovered_splits.keys());
+    tracing::trace!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::trace!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 
@@ -453,12 +456,9 @@ where
 
     if !dropped_splits.is_empty() {
         if opts.enable_scale_in {
-            tracing::debug!("dropping splits {:?}", dropped_splits);
+            tracing::info!(fragment_id, dropped_spltis = ?dropped_splits, "new dropped splits");
         } else {
-            tracing::warn!(
-                "dropping splits {:?} happened, but it is not allowed",
-                dropped_splits
-            );
+            tracing::warn!(fragment_id, dropped_spltis = ?dropped_splits, "split dropping happened, but it is not allowed");
         }
     }
 
@@ -466,8 +466,6 @@ where
         .into_iter()
         .filter(|split_id| !prev_split_ids.contains(split_id))
         .collect();
-
-    tracing::debug!("new created splits {:?}", new_discovered_splits);
 
     if opts.enable_scale_in {
         // if we support scale in, no more splits are discovered, and no splits are dropped, return
@@ -485,6 +483,8 @@ where
             return None;
         }
     }
+
+    tracing::info!(fragment_id, new_discovered_splits = ?new_discovered_splits, "new discovered splits");
 
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
 
@@ -514,7 +514,8 @@ impl<S> SourceManager<S>
 where
     S: MetaStore,
 {
-    const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
+    const DEFAULT_SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
+    const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -605,6 +606,7 @@ where
     // command.
     pub async fn reallocate_splits(
         &self,
+        fragment_id: FragmentId,
         prev_actor_ids: &[ActorId],
         curr_actor_ids: &[ActorId],
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
@@ -627,6 +629,7 @@ where
             .collect();
 
         let diff = diff_splits(
+            fragment_id,
             empty_actor_splits,
             &prev_splits,
             SplitDiffOptions::default(),
@@ -680,9 +683,12 @@ where
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
 
-                if let Some(diff) =
-                    diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
-                {
+                if let Some(diff) = diff_splits(
+                    fragment_id,
+                    empty_actor_splits,
+                    &splits,
+                    SplitDiffOptions::default(),
+                ) {
                     assigned.insert(fragment_id, diff);
                 }
             }
@@ -724,7 +730,7 @@ where
         let source_id = source.id;
 
         let handle = tokio::spawn(async move {
-            let mut ticker = time::interval(Self::SOURCE_TICK_INTERVAL);
+            let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
             let mut worker = loop {
@@ -733,7 +739,7 @@ where
                 match ConnectorSourceWorker::create(
                     &connector_client,
                     &source,
-                    Duration::from_secs(10),
+                    ConnectorSourceWorker::DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
                     splits.clone(),
                     metrics.clone(),
                 )
@@ -772,7 +778,7 @@ where
         let mut worker = ConnectorSourceWorker::create(
             &connector_client,
             source,
-            Duration::from_secs(10),
+            ConnectorSourceWorker::DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
             current_splits_ref.clone(),
             metrics,
         )
@@ -787,13 +793,13 @@ where
 
             // todo: make the timeout configurable, longer than `properties.sync.call.timeout` in
             // kafka
-            tokio::time::timeout(DEFAULT_TICK_TIMEOUT, worker.tick())
+            tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
                 .await
                 .map_err(|_e| {
                     anyhow!(
                         "failed to fetch meta info for source {}, error: timeout {}",
                         source.id,
-                        DEFAULT_TICK_TIMEOUT.as_secs()
+                        Self::DEFAULT_SOURCE_TICK_TIMEOUT.as_secs()
                     )
                 })??;
         }
@@ -845,7 +851,7 @@ where
     }
 
     pub async fn run(&self) -> MetaResult<()> {
-        let mut ticker = time::interval(Self::SOURCE_TICK_INTERVAL);
+        let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
@@ -906,7 +912,7 @@ mod tests {
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
-    use crate::model::ActorId;
+    use crate::model::{ActorId, FragmentId};
     use crate::stream::source_manager::{diff_splits, SplitDiffOptions};
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -973,7 +979,13 @@ mod tests {
             .flat_map(|splits| splits.iter().map(|split| split.id()))
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits, opts).unwrap();
+        let diff = diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            opts,
+        )
+        .unwrap();
         check_all_splits(&discovered_splits, &diff);
 
         let mut after_split_to_actor = HashMap::new();
@@ -1007,7 +1019,13 @@ mod tests {
             enable_scale_in: true,
         };
 
-        let diff = diff_splits(actor_splits, &discovered_splits, opts).unwrap();
+        let diff = diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            opts,
+        )
+        .unwrap();
 
         assert!(!diff.is_empty())
     }
@@ -1016,11 +1034,23 @@ mod tests {
     fn test_diff_splits() {
         let actor_splits = HashMap::new();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        assert!(diff_splits(actor_splits, &discovered_splits, Default::default()).is_none());
+        assert!(diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            Default::default()
+        )
+        .is_none());
 
         let actor_splits = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
+        let diff = diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             assert!(splits.is_empty())
@@ -1034,7 +1064,13 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
+        let diff = diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             assert_eq!(splits.len(), 1);
@@ -1050,7 +1086,13 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
+        let diff = diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             let len = splits.len();
@@ -1071,7 +1113,13 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
+        let diff = diff_splits(
+            FragmentId::default(),
+            actor_splits,
+            &discovered_splits,
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(diff.len(), 5);
         for splits in diff.values() {
             assert_eq!(splits.len(), 1);
