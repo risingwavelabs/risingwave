@@ -270,6 +270,8 @@ pub struct RegexpReplaceExpression {
     pub n: i32,
     /// Indicates if the `-g` flag is specified
     pub global_flag: bool,
+    /// The regex to replace `\n` to `${n}`
+    pub regex: Regex,
 }
 
 /// This trait provides the transformation from `ExprNode` to `RegexpReplaceExpression`
@@ -373,6 +375,11 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
 
                     match placeholder_datum {
                         Some(ScalarImpl::Int32(v)) => {
+                            if v <= 0 {
+                                // `start` must be greater than zero, if ever specified
+                                // This conforms with PG
+                                bail!("`start` must be greater than zero.");
+                            }
                             start = v;
                             "".to_string()
                         }
@@ -468,11 +475,12 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
         // Construct the final `RegexpReplaceExpression`
         let ctx = RegexpContext::new(&pattern, &flags)?;
 
-        let mut global_flag = false;
-        if !flags.is_empty() && flags.starts_with('g') {
-            // Set the `global_flag` to true
-            global_flag = true;
-        }
+        // Set the `global_flag` if 'g' is specified
+        let global_flag = !flags.is_empty() && flags.starts_with('g');
+
+        // Construct the regex used to match and replace `\n` expression
+        // Check: https://docs.rs/regex/latest/regex/struct.Captures.html#method.expand
+        let regex = Regex::new(r"\\([1-9])").unwrap();
 
         Ok(Self {
             source,
@@ -482,6 +490,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             start,
             n,
             global_flag,
+            regex,
         })
     }
 }
@@ -493,11 +502,14 @@ impl RegexpReplaceExpression {
             // The start position to begin the search
             let start = if self.start != -1 { self.start - 1 } else { 0 };
 
-            if self.global_flag {
-                // `-g` enabled, we need to replace all the occurrence of the matched pattern
+            if (self.n == -1 && self.global_flag) || self.n == 0 {
+                // `-g` enabled (& `N` is not specified) or `N` is `0`
+                // We need to replace all the occurrence of the matched pattern
                 if self.ctx.0.captures_len() <= 1 {
                     println!("Path One");
+
                     // There is no capture groups in the regex
+                    // Just replace all matched patterns after `start`
                     return Some(
                         self.ctx
                             .0
@@ -508,9 +520,10 @@ impl RegexpReplaceExpression {
                     println!("Path Two");
 
                     // Get the replaced string
-                    let regex = Regex::new(r"\\([1-9])").unwrap();
-                    let replaced = regex.replace_all(&self.replacement, "$${$1}").to_string();
-                    println!("replaced: {}", replaced);
+                    let replaced = self
+                        .regex
+                        .replace_all(&self.replacement, "$${$1}")
+                        .to_string();
 
                     // The position to start searching for replacement
                     let mut search_start = start as usize;
@@ -518,6 +531,7 @@ impl RegexpReplaceExpression {
                     // Construct the return string
                     let mut ret = text[..search_start].to_string();
 
+                    // Begin the actual replace logic
                     while let Some(capture) = self.ctx.0.captures(&text[search_start..]) {
                         let match_start = capture.get(0).unwrap().start();
                         let match_end = capture.get(0).unwrap().end();
@@ -529,8 +543,7 @@ impl RegexpReplaceExpression {
                         }
 
                         // Append the portion of the text from `search_start` to `match_start`
-                        ret.push_str(&text[search_start..search_start + match_start].to_string());
-                        println!("current ret: {}", ret);
+                        ret.push_str(&text[search_start..search_start + match_start]);
 
                         // Start to replacing
                         let mut expanded = String::new();
@@ -542,6 +555,9 @@ impl RegexpReplaceExpression {
                         // Update the `search_start`
                         search_start += match_end;
                     }
+
+                    // Push the rest of the text to return string
+                    ret.push_str(&text[search_start..]);
 
                     Some(ret)
                 }
@@ -566,20 +582,25 @@ impl RegexpReplaceExpression {
                     // There are capture groups in the regex
                     println!("Path Four");
                     if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
-                        // Make the replacement to satisfy `expand`
                         let start = capture.get(0).unwrap().start();
                         let end = capture.get(0).unwrap().end();
-                        let regex = Regex::new(r"\\([1-9])").unwrap();
-                        let replaced = regex.replace_all(&self.replacement, "$${$1}").to_string();
+
+                        // Get the replaced string and expand it
+                        let replaced = self
+                            .regex
+                            .replace_all(&self.replacement, "$${$1}")
+                            .to_string();
                         let mut expanded = String::new();
                         capture.expand(&replaced, &mut expanded);
+
+                        // Construct the return string
                         ret = format!("{}{}{}", &text[..start], expanded, &text[end..]);
                     } else {
                         // No match
                         ret = text.into();
                     }
                 }
-                
+
                 Some(ret)
             }
         } else {
