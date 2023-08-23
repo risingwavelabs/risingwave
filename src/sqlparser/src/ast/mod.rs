@@ -35,7 +35,7 @@ pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, SourceWatermark, TableConstraint,
 };
-pub use self::operator::{BinaryOperator, UnaryOperator};
+pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
     Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
