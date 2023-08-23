@@ -45,8 +45,10 @@ impl TrivialMovePicker {
         target_tables: &[SstableInfo],
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
-    ) -> Option<SstableInfo> {
+        count: usize,
+    ) -> Option<Vec<SstableInfo>> {
         let mut skip_by_pending = false;
+        let mut result = Vec::with_capacity(count);
         for sst in select_tables {
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 skip_by_pending = true;
@@ -57,7 +59,12 @@ impl TrivialMovePicker {
             let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
 
             if overlap_files_range.is_empty() {
-                return Some(sst.clone());
+                // return Some(sst.clone());
+                result.push(sst.clone());
+            }
+
+            if result.len() >= count {
+                return Some(result);
             }
         }
 
@@ -65,7 +72,11 @@ impl TrivialMovePicker {
             stats.skip_by_pending_files += 1;
         }
 
-        None
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
 
     pub fn pick_trivial_move_task(
@@ -74,26 +85,32 @@ impl TrivialMovePicker {
         target_tables: &[SstableInfo],
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
-        if let Some(trivial_move_sst) =
-            self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
+        count: usize,
+    ) -> Option<Vec<CompactionInput>> {
+        if let Some(trivial_move_ssts) =
+            self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats, count)
         {
-            return Some(CompactionInput {
-                input_levels: vec![
-                    InputLevel {
-                        level_idx: self.level as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: vec![trivial_move_sst],
-                    },
-                    InputLevel {
-                        level_idx: self.target_level as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: vec![],
-                    },
-                ],
-                target_level: self.target_level,
-                target_sub_level_id: 0,
-            });
+            let mut result = Vec::with_capacity(count);
+            for trivial_move_sst in trivial_move_ssts {
+                result.push(CompactionInput {
+                    input_levels: vec![
+                        InputLevel {
+                            level_idx: self.level as u32,
+                            level_type: LevelType::Nonoverlapping as i32,
+                            table_infos: vec![trivial_move_sst],
+                        },
+                        InputLevel {
+                            level_idx: self.target_level as u32,
+                            level_type: LevelType::Nonoverlapping as i32,
+                            table_infos: vec![],
+                        },
+                    ],
+                    target_level: self.target_level,
+                    target_sub_level_id: 0,
+                });
+            }
+
+            return Some(result);
         }
 
         None
