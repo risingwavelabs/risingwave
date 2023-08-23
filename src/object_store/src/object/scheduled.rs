@@ -22,22 +22,24 @@ use super::{BoxedStreamingUploader, ObjectMetadata, ObjectMetadataIter};
 use crate::object::{BlockLocation, ObjectResult, ObjectStore};
 use crate::scheduler::Scheduler;
 
-pub struct ScheduledObjectStore<OS>
+pub struct ScheduledObjectStore<OS, S>
 where
     OS: ObjectStore,
+    S: Scheduler<OS = OS>,
 {
-    scheduler: Scheduler,
     store: Arc<OS>,
+    scheduler: S,
 }
 
-impl<OS> ScheduledObjectStore<OS>
+impl<OS, S> ScheduledObjectStore<OS, S>
 where
     OS: ObjectStore,
+    S: Scheduler<OS = OS>,
 {
     pub fn new(store: OS, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let store = Arc::new(store);
-        let scheduler = Scheduler::new(5, store.clone(), metrics);
-        Self { scheduler, store }
+        let scheduler = S::new(store.clone(), metrics);
+        Self { store, scheduler }
     }
 
     pub fn inner(&self) -> &OS {
@@ -46,9 +48,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<OS> ObjectStore for ScheduledObjectStore<OS>
+impl<OS, S> ObjectStore for ScheduledObjectStore<OS, S>
 where
     OS: ObjectStore,
+    S: Scheduler<OS = OS>,
 {
     fn get_object_prefix(&self, obj_id: u64) -> String {
         self.store.get_object_prefix(obj_id)
@@ -63,12 +66,13 @@ where
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        if let Some(loc) = block_loc {
-            self.scheduler
-                .submit(path, loc.offset..loc.offset + loc.size)
-                .await
-        } else {
-            self.store.read(path, block_loc).await
+        match block_loc {
+            Some(loc) => {
+                self.scheduler
+                    .read(path, loc.offset..loc.offset + loc.size)
+                    .await
+            }
+            None => self.store.read(path, None).await,
         }
     }
 
@@ -104,9 +108,10 @@ where
         self.store.store_media_type()
     }
 
-    fn scheduled(self, _metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self>
+    fn scheduled<AS>(self, _metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self, AS>
     where
         Self: Sized,
+        AS: Scheduler<OS = Self>,
     {
         unreachable!()
     }

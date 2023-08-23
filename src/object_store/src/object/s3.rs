@@ -787,6 +787,8 @@ pub struct S3ObjectStoreConfig {
     pub req_retry_interval_ms: Option<u64>,
     pub req_retry_max_delay_ms: Option<u64>,
     pub req_retry_max_attempts: Option<usize>,
+
+    pub object_store_io_scheduler: bool,
 }
 
 impl Default for S3ObjectStoreConfig {
@@ -799,6 +801,7 @@ impl Default for S3ObjectStoreConfig {
             req_retry_interval_ms: Some(s3_objstore_config::object_store_req_retry_interval_ms()),
             req_retry_max_delay_ms: Some(s3_objstore_config::object_store_req_retry_max_delay_ms()),
             req_retry_max_attempts: Some(s3_objstore_config::object_store_req_retry_max_attempts()),
+            object_store_io_scheduler: false,
         }
     }
 }

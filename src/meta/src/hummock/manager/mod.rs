@@ -351,10 +351,16 @@ where
             .await?;
 
             // config bucket lifecycle for new cluster.
-            if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
-                && !env.opts.do_not_config_object_storage_lifecycle
-            {
-                s3.inner().inner().configure_bucket_lifecycle().await;
+            if !env.opts.do_not_config_object_storage_lifecycle {
+                match object_store.as_ref() {
+                    risingwave_object_store::object::ObjectStoreImpl::S3(s3) => {
+                        s3.inner().configure_bucket_lifecycle().await
+                    }
+                    risingwave_object_store::object::ObjectStoreImpl::ScheduledS3(ss3) => {
+                        ss3.inner().inner().configure_bucket_lifecycle().await
+                    }
+                    _ => {}
+                }
             }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);

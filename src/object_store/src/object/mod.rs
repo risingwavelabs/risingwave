@@ -40,6 +40,9 @@ pub mod object_metrics;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 
+use crate::scheduler::overlapping::Overlapping;
+use crate::scheduler::Scheduler;
+
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
 
@@ -139,9 +142,10 @@ pub trait ObjectStore: Send + Sync + 'static {
         MonitoredObjectStore::new(self, metrics)
     }
 
-    fn scheduled(self, metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self>
+    fn scheduled<S>(self, metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self, S>
     where
         Self: Sized,
+        S: Scheduler<OS = Self>,
     {
         ScheduledObjectStore::new(self, metrics)
     }
@@ -154,8 +158,10 @@ pub trait ObjectStore: Send + Sync + 'static {
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
-    // S3(MonitoredObjectStore<S3ObjectStore>),
-    S3(MonitoredObjectStore<ScheduledObjectStore<S3ObjectStore>>),
+    S3(MonitoredObjectStore<S3ObjectStore>),
+    ScheduledS3(
+        MonitoredObjectStore<ScheduledObjectStore<S3ObjectStore, Overlapping<S3ObjectStore>>>,
+    ),
 }
 
 macro_rules! dispatch_async {
@@ -182,6 +188,9 @@ macro_rules! object_store_impl_method_body {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
+                ObjectStoreImpl::ScheduledS3(s3) => {
+                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
+                },
             }
         }
     };
@@ -204,6 +213,9 @@ macro_rules! object_store_impl_method_body_slice {
                     $dispatch_macro!(opendal, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
+                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
+                },
+                ObjectStoreImpl::ScheduledS3(s3) => {
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
             }
@@ -272,6 +284,7 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::ScheduledS3(store) => store.inner.get_object_prefix(obj_id),
         }
     }
 
@@ -287,6 +300,7 @@ impl ObjectStoreImpl {
                     .write_without_content_length
             }
             ObjectStoreImpl::S3(_) => true,
+            ObjectStoreImpl::ScheduledS3(_) => true,
         }
     }
 
@@ -315,6 +329,14 @@ impl ObjectStoreImpl {
                 );
             }
             ObjectStoreImpl::S3(s) => {
+                s.set_opts(
+                    streaming_read_timeout_ms,
+                    streaming_upload_timeout_ms,
+                    read_timeout_ms,
+                    upload_timeout_ms,
+                );
+            }
+            ObjectStoreImpl::ScheduledS3(s) => {
                 s.set_opts(
                     streaming_read_timeout_ms,
                     streaming_upload_timeout_ms,
@@ -863,15 +885,31 @@ pub async fn parse_remote_object_store_with_config(
     config: Option<Arc<StorageConfig>>,
 ) -> ObjectStoreImpl {
     match url {
-        s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new(
-                s3.strip_prefix("s3://").unwrap().to_string(),
-                metrics.clone(),
-            )
-            .await
-            .scheduled(metrics.clone())
-            .monitored(metrics),
-        ),
+        s3 if s3.starts_with("s3://") => {
+            if config
+                .map(|c| c.object_store_io_scheduler)
+                .unwrap_or_default()
+            {
+                ObjectStoreImpl::ScheduledS3(
+                    S3ObjectStore::new(
+                        s3.strip_prefix("s3://").unwrap().to_string(),
+                        metrics.clone(),
+                    )
+                    .await
+                    .scheduled(metrics.clone())
+                    .monitored(metrics),
+                )
+            } else {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::new(
+                        s3.strip_prefix("s3://").unwrap().to_string(),
+                        metrics.clone(),
+                    )
+                    .await
+                    .monitored(metrics),
+                )
+            }
+        }
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
@@ -943,31 +981,63 @@ pub async fn parse_remote_object_store_with_config(
                     req_retry_max_attempts: Some(
                         storage_config.object_store_req_retry_max_attempts,
                     ),
+                    object_store_io_scheduler: storage_config.object_store_io_scheduler,
                 })
                 .unwrap_or(S3ObjectStoreConfig::default());
-
-            ObjectStoreImpl::S3(
-                // For backward compatibility, s3-compatible is still reserved.
-                // todo: remove this after this change has been applied for downstream projects.
-                S3ObjectStore::new_with_config(
-                    s3_compatible
-                        .strip_prefix("s3-compatible://")
-                        .unwrap()
-                        .to_string(),
-                    metrics.clone(),
-                    s3_object_store_config,
+            if s3_object_store_config.object_store_io_scheduler {
+                ObjectStoreImpl::ScheduledS3(
+                    // For backward compatibility, s3-compatible is still reserved.
+                    // todo: remove this after this change has been applied for downstream
+                    // projects.
+                    S3ObjectStore::new_with_config(
+                        s3_compatible
+                            .strip_prefix("s3-compatible://")
+                            .unwrap()
+                            .to_string(),
+                        metrics.clone(),
+                        s3_object_store_config,
+                    )
+                    .await
+                    .scheduled(metrics.clone())
+                    .monitored(metrics),
                 )
-                .await
-                .scheduled(metrics.clone())
-                .monitored(metrics),
-            )
+            } else {
+                ObjectStoreImpl::S3(
+                    // For backward compatibility, s3-compatible is still reserved.
+                    // todo: remove this after this change has been applied for downstream
+                    // projects.
+                    S3ObjectStore::new_with_config(
+                        s3_compatible
+                            .strip_prefix("s3-compatible://")
+                            .unwrap()
+                            .to_string(),
+                        metrics.clone(),
+                        s3_object_store_config,
+                    )
+                    .await
+                    .monitored(metrics),
+                )
+            }
         }
-        minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone())
-                .await
-                .scheduled(metrics.clone())
-                .monitored(metrics),
-        ),
+        minio if minio.starts_with("minio://") => {
+            if config
+                .map(|c| c.object_store_io_scheduler)
+                .unwrap_or_default()
+            {
+                ObjectStoreImpl::ScheduledS3(
+                    S3ObjectStore::with_minio(minio, metrics.clone())
+                        .await
+                        .scheduled(metrics.clone())
+                        .monitored(metrics),
+                )
+            } else {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::with_minio(minio, metrics.clone())
+                        .await
+                        .monitored(metrics),
+                )
+            }
+        }
         "memory" => {
             if ident == "Meta Backup" {
                 tracing::warn!("You're using in-memory remote object store for {}. This is not recommended for production environment.", ident);
