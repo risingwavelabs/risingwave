@@ -82,7 +82,7 @@ use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::HummockVersionReader;
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{StoreLocalStatistic, GLOBAL_COMPACTOR_METRICS};
 use crate::store::{NewLocalOptions, ReadOptions};
 
 struct HummockStorageShutdownGuard {
@@ -178,6 +178,7 @@ impl HummockStorage {
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
+            Arc::new(GLOBAL_COMPACTOR_METRICS.clone()),
             sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
         ));

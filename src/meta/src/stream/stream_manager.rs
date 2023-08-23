@@ -585,6 +585,7 @@ mod tests {
     };
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
+    use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
     use crate::MetaOpts;
@@ -720,6 +721,7 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
             let system_params = env.system_params_manager().get_params().await;
+            let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
@@ -753,6 +755,7 @@ mod tests {
                 env.clone(),
                 cluster_manager.clone(),
                 fragment_manager.clone(),
+                meta_metrics.clone(),
                 compactor_manager.clone(),
                 catalog_manager.clone(),
                 tx,
@@ -761,6 +764,7 @@ mod tests {
 
             let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
                 hummock_manager.clone(),
+                meta_metrics.clone(),
                 system_params.checkpoint_frequency() as usize,
             );
 
@@ -770,6 +774,7 @@ mod tests {
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
+                    meta_metrics.clone(),
                 )
                 .await?,
             );
@@ -785,6 +790,7 @@ mod tests {
                 hummock_manager.clone(),
                 source_manager.clone(),
                 sink_manager,
+                meta_metrics.clone(),
             ));
 
             let stream_manager = GlobalStreamManager::new(

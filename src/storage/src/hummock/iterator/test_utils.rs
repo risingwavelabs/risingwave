@@ -35,6 +35,7 @@ use crate::hummock::{
     DeleteRangeTombstone, FileCache, HummockValue, Sstable, SstableBuilderOptions, SstableIterator,
     SstableIteratorType, SstableStoreRef,
 };
+use crate::monitor::ObjectStoreMetrics;
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -52,7 +53,7 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::new().monitored(),
+        InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
     )))
 }
 

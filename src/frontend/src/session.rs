@@ -46,6 +46,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
+use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -73,11 +74,14 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::GLOBAL_FRONTEND_METRICS;
+use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::scheduler::{
+    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
+    GLOBAL_DISTRIBUTED_QUERY_METRICS,
+};
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
@@ -107,6 +111,10 @@ pub struct FrontendEnv {
     /// secret_key). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
+
+    pub frontend_metrics: Arc<FrontendMetrics>,
+
+    source_metrics: Arc<SourceMetrics>,
 
     batch_config: BatchConfig,
     meta_config: MetaConfig,
@@ -141,6 +149,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
+            Arc::new(DistributedQueryMetrics::for_test()),
             None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
@@ -158,8 +167,10 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
+            frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
+            source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime: Self::create_compute_runtime(),
         }
@@ -231,6 +242,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
+            Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
         );
 
@@ -264,6 +276,9 @@ impl FrontendEnv {
         meta_client.activate(&frontend_address).await?;
 
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+
+        let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
+        let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
 
         if config.server.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
@@ -320,9 +335,11 @@ impl FrontendEnv {
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
                 client_pool,
+                frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
                 meta_config,
+                source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime: Self::create_compute_runtime(),
             },
@@ -395,6 +412,10 @@ impl FrontendEnv {
 
     pub fn meta_config(&self) -> &MetaConfig {
         &self.meta_config
+    }
+
+    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.source_metrics.clone()
     }
 
     pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {
@@ -894,7 +915,8 @@ impl SessionManagerImpl {
             write_guard.insert(session.id(), session);
             write_guard.len()
         };
-        GLOBAL_FRONTEND_METRICS
+        self.env
+            .frontend_metrics
             .active_sessions
             .set(active_sessions as i64);
     }
@@ -905,7 +927,8 @@ impl SessionManagerImpl {
             write_guard.remove(session_id);
             write_guard.len()
         };
-        GLOBAL_FRONTEND_METRICS
+        self.env
+            .frontend_metrics
             .active_sessions
             .set(active_sessions as i64);
     }

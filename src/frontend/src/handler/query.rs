@@ -36,7 +36,6 @@ use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
-use crate::monitor::GLOBAL_FRONTEND_METRICS;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{
     ExecutionModeDecider, OptimizerContext, OptimizerContextRef, RelationCollectorVisitor,
@@ -47,7 +46,7 @@ use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream, GLOBAL_DISTRIBUTED_QUERY_METRICS,
+    LocalQueryExecution, LocalQueryStream,
 };
 use crate::session::SessionImpl;
 use crate::PlanRef;
@@ -410,18 +409,30 @@ async fn execute(
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => {
-                GLOBAL_FRONTEND_METRICS
+                session
+                    .env()
+                    .frontend_metrics
                     .latency_local_execution
                     .observe(query_start_time.elapsed().as_secs_f64());
 
-                GLOBAL_FRONTEND_METRICS.query_counter_local_execution.inc();
+                session
+                    .env()
+                    .frontend_metrics
+                    .query_counter_local_execution
+                    .inc();
             }
             QueryMode::Distributed => {
-                GLOBAL_DISTRIBUTED_QUERY_METRICS
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
                     .query_latency
                     .observe(query_start_time.elapsed().as_secs_f64());
 
-                GLOBAL_DISTRIBUTED_QUERY_METRICS
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
                     .completed_query_counter
                     .inc();
             }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -32,7 +31,7 @@ use crate::hummock::{
     BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
-use crate::monitor::GLOBAL_COMPACTOR_METRICS;
+use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
@@ -63,6 +62,9 @@ where
 
     current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
 
+    /// Statistics.
+    pub compactor_metrics: Arc<CompactorMetrics>,
+
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
 
@@ -84,6 +86,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         builder_factory: F,
+        compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         is_target_level_l0_or_lbase: bool,
         mut split_by_table: bool,
@@ -101,6 +104,7 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
+            compactor_metrics,
             task_progress,
             last_table_id: 0,
             is_target_level_l0_or_lbase,
@@ -116,6 +120,7 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_table_id: 0,
             is_target_level_l0_or_lbase: false,
@@ -306,34 +311,32 @@ where
                     progress.inc_ssts_sealed();
                 }
 
-                let metrics = GLOBAL_COMPACTOR_METRICS.deref();
-
                 if builder_output.bloom_filter_size != 0 {
-                    metrics
+                    self.compactor_metrics
                         .sstable_bloom_filter_size
                         .observe(builder_output.bloom_filter_size as _);
                 }
 
                 if builder_output.sst_info.file_size() != 0 {
-                    metrics
+                    self.compactor_metrics
                         .sstable_file_size
                         .observe(builder_output.sst_info.file_size() as _);
                 }
 
                 if builder_output.avg_key_size != 0 {
-                    metrics
+                    self.compactor_metrics
                         .sstable_avg_key_size
                         .observe(builder_output.avg_key_size as _);
                 }
 
                 if builder_output.avg_value_size != 0 {
-                    metrics
+                    self.compactor_metrics
                         .sstable_avg_value_size
                         .observe(builder_output.avg_value_size as _);
                 }
 
                 if builder_output.epoch_count != 0 {
-                    metrics
+                    self.compactor_metrics
                         .sstable_distinct_epoch_count
                         .observe(builder_output.epoch_count as _);
                 }
@@ -562,6 +565,7 @@ mod tests {
         let mut del_iter = agg.iter();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(CompactorMetrics::unused()),
             None,
             false,
             false,
@@ -648,6 +652,7 @@ mod tests {
         let mut del_iter = agg.iter();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(CompactorMetrics::unused()),
             None,
             false,
             false,
@@ -684,6 +689,7 @@ mod tests {
         let table_id = TableId::new(1);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(CompactorMetrics::unused()),
             None,
             false,
             false,

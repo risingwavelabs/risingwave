@@ -211,7 +211,7 @@ where
             event_sender: self.event_sender.clone(),
         };
         wl.version_safe_points.push(safe_point.id);
-        trigger_safepoint_stat(self.metrics, &wl.version_safe_points);
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
         safe_point
     }
 
@@ -222,7 +222,7 @@ where
         if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
             version_safe_points.remove(pos);
         }
-        trigger_safepoint_stat(self.metrics, &wl.version_safe_points);
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
     }
 
     /// Updates write limits for `target_groups` and sends notification.
@@ -255,7 +255,7 @@ where
             return false;
         }
         tracing::info!("Hummock stopped write is updated: {:#?}", new_write_limits);
-        trigger_write_stop_stats(self.metrics, &new_write_limits);
+        trigger_write_stop_stats(&self.metrics, &new_write_limits);
         guard.write_limit = new_write_limits;
         self.env
             .notification_manager()

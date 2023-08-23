@@ -80,7 +80,7 @@ use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
     VarTransaction,
 };
-use crate::rpc::metrics::{MetaMetrics, GLOBAL_META_METRICS};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
 
 mod compaction_group_manager;
@@ -121,7 +121,7 @@ pub struct HummockManager<S: MetaStore> {
     versioning: MonitoredRwLock<Versioning>,
     latest_snapshot: Snapshot,
 
-    metrics: &'static MetaMetrics,
+    pub metrics: Arc<MetaMetrics>,
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
@@ -258,6 +258,7 @@ where
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         catalog_manager: CatalogManagerRef<S>,
         compactor_streams_change_tx: UnboundedSender<(
@@ -270,6 +271,7 @@ where
             env,
             cluster_manager,
             fragment_manager,
+            metrics,
             compactor_manager,
             compaction_group_manager,
             catalog_manager,
@@ -283,6 +285,7 @@ where
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
@@ -300,6 +303,7 @@ where
             env,
             cluster_manager,
             fragment_manager,
+            metrics,
             compactor_manager,
             compaction_group_manager,
             catalog_manager,
@@ -313,6 +317,7 @@ where
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
         catalog_manager: CatalogManagerRef<S>,
@@ -329,11 +334,11 @@ where
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
+                metrics.object_store_metric.clone(),
                 "Version Checkpoint",
             )
             .await,
         );
-        let metrics = GLOBAL_META_METRICS.deref();
         // Make sure data dir is not used by another cluster.
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
@@ -520,7 +525,7 @@ where
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
-        trigger_write_stop_stats(self.metrics, &versioning_guard.write_limit);
+        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
         tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
@@ -579,7 +584,7 @@ where
                 Transaction::default(),
                 context_pinned_version
             )?;
-            trigger_pin_unpin_version_state(self.metrics, &versioning.pinned_versions);
+            trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
         }
 
         #[cfg(test)]
@@ -618,7 +623,7 @@ where
             Transaction::default(),
             context_pinned_version
         )?;
-        trigger_pin_unpin_version_state(self.metrics, &versioning.pinned_versions);
+        trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
 
         #[cfg(test)]
         {
@@ -680,7 +685,7 @@ where
                 Transaction::default(),
                 context_pinned_snapshot
             )?;
-            trigger_pin_unpin_snapshot_state(self.metrics, &guard.pinned_snapshots);
+            trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
         }
         Ok(HummockSnapshot::clone(&snapshot))
     }
@@ -703,7 +708,7 @@ where
                 Transaction::default(),
                 pinned_snapshots
             )?;
-            trigger_pin_unpin_snapshot_state(self.metrics, &versioning_guard.pinned_snapshots);
+            trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
         }
 
         #[cfg(test)]
@@ -756,7 +761,7 @@ where
                 Transaction::default(),
                 context_pinned_snapshot
             )?;
-            trigger_pin_unpin_snapshot_state(self.metrics, &versioning_guard.pinned_snapshots);
+            trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
         }
 
         #[cfg(test)]
@@ -852,7 +857,7 @@ where
             selector,
             table_id_to_option.clone(),
         );
-        stats.report_to_metrics(compaction_group_id, self.metrics);
+        stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
             None => {
                 return Ok(None);
@@ -940,7 +945,7 @@ where
             compact_task.set_task_status(TaskStatus::Pending);
 
             trigger_sst_stat(
-                self.metrics,
+                &self.metrics,
                 compaction.compaction_statuses.get(&compaction_group_id),
                 &current_version,
                 compaction_group_id,
@@ -1246,8 +1251,8 @@ where
                 )?;
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(self.metrics, &current_version, &versioning.version_stats);
-                trigger_delta_log_stats(self.metrics, versioning.hummock_version_deltas.len());
+                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
+                trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
 
@@ -1299,7 +1304,7 @@ where
         );
 
         trigger_sst_stat(
-            self.metrics,
+            &self.metrics,
             compaction
                 .compaction_statuses
                 .get(&compact_task.compaction_group_id),
@@ -1526,13 +1531,13 @@ where
         assert!(prev_snapshot.current_epoch < epoch);
 
         trigger_version_stat(
-            self.metrics,
+            &self.metrics,
             &versioning.current_version,
             &versioning.version_stats,
         );
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
-                self.metrics,
+                &self.metrics,
                 None,
                 &versioning.current_version,
                 *compaction_group_id,
@@ -1542,7 +1547,7 @@ where
         tracing::trace!("new committed epoch {}", epoch);
 
         self.notify_last_version_delta(versioning);
-        trigger_delta_log_stats(self.metrics, versioning.hummock_version_deltas.len());
+        trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
         self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
@@ -2112,7 +2117,7 @@ where
                                         .get_mv_id_to_internal_table_ids_mapping()
                                     {
                                         trigger_mv_stat(
-                                            hummock_manager.metrics,
+                                            &hummock_manager.metrics,
                                             &version_stats,
                                             mv_id_to_all_table_ids,
                                         );
@@ -2130,14 +2135,14 @@ where
                                             );
 
                                         trigger_split_stat(
-                                            hummock_manager.metrics,
+                                            &hummock_manager.metrics,
                                             compaction_group_config.group_id(),
                                             group_levels.member_table_ids.len(),
                                             &branched_sst,
                                         );
 
                                         trigger_lsm_stat(
-                                            hummock_manager.metrics,
+                                            &hummock_manager.metrics,
                                             compaction_group_config.compaction_config(),
                                             group_levels,
                                             compaction_group_config.group_id(),

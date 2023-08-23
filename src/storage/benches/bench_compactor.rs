@@ -22,6 +22,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
@@ -41,10 +42,10 @@ use risingwave_storage::hummock::{
     CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
     SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
 };
-use risingwave_storage::monitor::StoreLocalStatistic;
+use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored();
+    let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
     Arc::new(SstableStore::new(
@@ -201,6 +202,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         &mut builder,
         Arc::new(CompactionDeleteRanges::default()),
         &task_config,
+        Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
         None,

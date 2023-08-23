@@ -32,6 +32,7 @@ use risingwave_storage::hummock::{
     SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
     SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
 };
+use risingwave_storage::monitor::ObjectStoreMetrics;
 
 const RANGE: Range<u64> = 0..1500000;
 const VALUE: &[u8] = &[0; 400];
@@ -128,8 +129,12 @@ fn bench_builder(
         .build()
         .unwrap();
 
-    let object_store =
-        runtime.block_on(async { S3ObjectStore::new(bucket.to_string()).await.monitored() });
+    let metrics = Arc::new(ObjectStoreMetrics::unused());
+    let object_store = runtime.block_on(async {
+        S3ObjectStore::new(bucket.to_string(), metrics.clone())
+            .await
+            .monitored(metrics)
+    });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
     let sstable_store = Arc::new(SstableStore::new(
         object_store,

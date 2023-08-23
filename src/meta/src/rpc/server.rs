@@ -67,7 +67,9 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor};
+use crate::rpc::metrics::{
+    start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
+};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cloud_service::CloudServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -384,10 +386,13 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
 
+    let meta_metrics = Arc::new(GLOBAL_META_METRICS.clone());
+
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        meta_metrics.clone(),
         compactor_manager.clone(),
         catalog_manager.clone(),
         compactor_streams_change_tx,
@@ -422,6 +427,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
+        meta_metrics.clone(),
         system_params_reader.checkpoint_frequency() as usize,
     );
 
@@ -431,6 +437,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -449,6 +456,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
+        meta_metrics.clone(),
     ));
 
     {
@@ -485,6 +493,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
+        meta_metrics.clone(),
         system_params_reader.backup_storage_url(),
         system_params_reader.backup_storage_directory(),
     )
@@ -575,6 +584,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
         )
         .await,
     );
@@ -584,6 +594,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             catalog_manager,
             fragment_manager.clone(),
             hummock_manager.clone(),
+            meta_metrics.clone(),
         )
         .await,
     );

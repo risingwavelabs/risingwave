@@ -24,6 +24,7 @@ use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
@@ -41,6 +42,7 @@ pub struct SourceExecutor {
 
     // used to create reader
     column_ids: Vec<ColumnId>,
+    metrics: Arc<SourceMetrics>,
     source_id: TableId,
     split: SplitImpl,
 
@@ -116,6 +118,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         Ok(Box::new(SourceExecutor {
             connector_source,
             column_ids,
+            metrics: source.context().source_metrics(),
             source_id: TableId::new(source_node.source_id),
             split,
             schema,
@@ -146,6 +149,7 @@ impl SourceExecutor {
             u32::MAX,
             self.source_id,
             u32::MAX,
+            self.metrics,
             self.source_ctrl_opts.clone(),
             None,
         ));

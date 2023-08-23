@@ -23,6 +23,7 @@ use crate::filter_key_extractor::FilterKeyExtractorManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableObjectIdManagerRef};
+use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 
 /// A `CompactorContext` describes the context of a compactor.
@@ -36,6 +37,9 @@ pub struct CompactorContext {
 
     /// Sstable store that manages the sstables.
     pub sstable_store: SstableStoreRef,
+
+    /// Statistics.
+    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
@@ -60,6 +64,7 @@ impl CompactorContext {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        compactor_metrics: Arc<CompactorMetrics>,
         sstable_object_id_manager: SstableObjectIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Self {
@@ -77,6 +82,7 @@ impl CompactorContext {
             storage_opts,
             hummock_meta_client,
             sstable_store,
+            compactor_metrics,
             is_share_buffer_compact: true,
             compaction_executor,
             filter_key_extractor_manager,

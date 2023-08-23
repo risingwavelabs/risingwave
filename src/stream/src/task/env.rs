@@ -18,6 +18,7 @@ use hytra::TrAdder;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
 #[cfg(test)]
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -52,6 +53,9 @@ pub struct StreamEnvironment {
     /// Read the latest system parameters.
     system_params_manager: LocalSystemParamsManagerRef,
 
+    /// Metrics for source.
+    source_metrics: Arc<SourceMetrics>,
+
     /// Total memory usage in stream.
     total_mem_val: Arc<TrAdder<i64>>,
 
@@ -69,6 +73,7 @@ impl StreamEnvironment {
         state_store: StateStoreImpl,
         dml_manager: DmlManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
+        source_metrics: Arc<SourceMetrics>,
         meta_client: MetaClient,
     ) -> Self {
         StreamEnvironment {
@@ -79,6 +84,7 @@ impl StreamEnvironment {
             state_store,
             dml_manager,
             system_params_manager,
+            source_metrics,
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: Some(meta_client),
         }
@@ -97,6 +103,7 @@ impl StreamEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(),
             dml_manager: Arc::new(DmlManager::for_test()),
             system_params_manager: Arc::new(LocalSystemParamsManager::for_test()),
+            source_metrics: Arc::new(SourceMetrics::default()),
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: None,
         }
@@ -128,6 +135,10 @@ impl StreamEnvironment {
 
     pub fn system_params_manager_ref(&self) -> LocalSystemParamsManagerRef {
         self.system_params_manager.clone()
+    }
+
+    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.source_metrics.clone()
     }
 
     pub fn total_mem_usage(&self) -> Arc<TrAdder<i64>> {

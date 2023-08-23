@@ -26,7 +26,7 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
-use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
@@ -47,6 +47,9 @@ struct Inner {
     force_checkpoint: AtomicBool,
 
     checkpoint_frequency: AtomicUsize,
+
+    /// Used for recording send latency of each barrier.
+    metrics: Arc<MetaMetrics>,
 }
 
 enum QueueStatus {
@@ -108,7 +111,7 @@ impl Inner {
         Scheduled {
             command,
             notifiers: notifiers.into_iter().collect(),
-            send_latency_timer: GLOBAL_META_METRICS.barrier_send_latency.start_timer(),
+            send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
             span,
             checkpoint,
         }
@@ -130,6 +133,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// from different managers, and executing them in the barrier manager, respectively.
     pub fn new_pair(
         hummock_manager: HummockManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
         checkpoint_frequency: usize,
     ) -> (Self, ScheduledBarriers) {
         tracing::info!(
@@ -142,6 +146,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             num_uncheckpointed_barrier: AtomicUsize::new(0),
             checkpoint_frequency: AtomicUsize::new(checkpoint_frequency),
             force_checkpoint: AtomicBool::new(false),
+            metrics,
         });
 
         (

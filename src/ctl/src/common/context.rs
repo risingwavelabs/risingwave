@@ -17,13 +17,13 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use tokio::sync::OnceCell;
 
-use crate::common::hummock_service::HummockServiceOpts;
+use crate::common::hummock_service::{HummockServiceOpts, Metrics};
 use crate::common::meta_service::MetaServiceOpts;
 
 #[derive(Default)]
 pub struct CtlContext {
     meta_client: OnceCell<MetaClient>,
-    hummock: OnceCell<MonitoredStateStore<HummockStorage>>,
+    hummock: OnceCell<(MonitoredStateStore<HummockStorage>, Metrics)>,
 }
 
 impl CtlContext {
@@ -39,11 +39,23 @@ impl CtlContext {
 
     pub async fn hummock_store(
         &self,
-        mut hummock_opts: HummockServiceOpts,
+        hummock_opts: HummockServiceOpts,
     ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
+        let (hummock, _) = self.hummock_store_with_metrics(hummock_opts).await?;
+        Ok(hummock)
+    }
+
+    pub async fn hummock_store_with_metrics(
+        &self,
+        mut hummock_opts: HummockServiceOpts,
+    ) -> anyhow::Result<(MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_client().await?;
         self.hummock
-            .get_or_try_init(|| async { hummock_opts.create_hummock_store(&meta_client).await })
+            .get_or_try_init(|| async {
+                hummock_opts
+                    .create_hummock_store_with_metrics(&meta_client)
+                    .await
+            })
             .await
             .cloned()
     }

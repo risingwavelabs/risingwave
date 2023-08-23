@@ -36,6 +36,7 @@ use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
     ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
 };
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
@@ -325,6 +326,7 @@ pub async fn setup_compute_env_with_config(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager,
+        Arc::new(MetaMetrics::default()),
         compactor_manager,
         config,
         compactor_streams_change_tx,

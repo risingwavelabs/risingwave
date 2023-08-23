@@ -22,6 +22,7 @@ use prometheus::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+#[derive(Clone)]
 pub struct DistributedQueryMetrics {
     pub running_query_num: GenericGauge<AtomicI64>,
     pub rejected_query_counter: GenericCounter<AtomicU64>,
@@ -70,5 +71,10 @@ impl DistributedQueryMetrics {
             completed_query_counter,
             query_latency,
         }
+    }
+
+    /// Create a new `DistributedQueryMetrics` instance used in tests or other places.
+    pub fn for_test() -> Self {
+        GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()
     }
 }

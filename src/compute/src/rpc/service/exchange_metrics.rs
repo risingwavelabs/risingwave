@@ -19,6 +19,7 @@ use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::register_int_counter_vec_with_registry;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+#[derive(Clone)]
 pub struct ExchangeServiceMetrics {
     pub stream_fragment_exchange_bytes: GenericCounterVec<AtomicU64>,
     pub actor_sampled_serialize_duration_ns: GenericCounterVec<AtomicU64>,

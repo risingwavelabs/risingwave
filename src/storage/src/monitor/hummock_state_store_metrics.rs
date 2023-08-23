@@ -31,7 +31,7 @@ use tracing::warn;
 /// In practice, keep in mind that this represents the whole Hummock utilization of
 /// a `RisingWave` instance. More granular utilization of per `materialization view`
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
     pub bloom_filter_true_negative_counts: GenericCounterVec<AtomicU64>,
     pub bloom_filter_check_counts: GenericCounterVec<AtomicU64>,
@@ -271,6 +271,10 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
         }
+    }
+
+    pub fn unused() -> Self {
+        GLOBAL_HUMMOCK_STATE_STORE_METRICS.clone()
     }
 }
 

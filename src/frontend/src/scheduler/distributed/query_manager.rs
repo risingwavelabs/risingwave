@@ -26,11 +26,12 @@ use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
+use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::{WorkerNodeManagerRef, WorkerNodeSelector};
-use crate::scheduler::{ExecutionContextRef, SchedulerResult, GLOBAL_DISTRIBUTED_QUERY_METRICS};
+use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
@@ -129,6 +130,7 @@ pub struct QueryManager {
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
     query_execution_info: QueryExecutionInfoRef,
+    pub query_metrics: Arc<DistributedQueryMetrics>,
     disrtibuted_query_limit: Option<u64>,
 }
 
@@ -137,6 +139,7 @@ impl QueryManager {
         worker_node_manager: WorkerNodeManagerRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        query_metrics: Arc<DistributedQueryMetrics>,
         disrtibuted_query_limit: Option<u64>,
     ) -> Self {
         Self {
@@ -144,6 +147,7 @@ impl QueryManager {
             compute_client_pool,
             catalog_reader,
             query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
+            query_metrics,
             disrtibuted_query_limit,
         }
     }
@@ -154,9 +158,9 @@ impl QueryManager {
         query: Query,
     ) -> SchedulerResult<DistributedQueryStream> {
         if let Some(query_limit) = self.disrtibuted_query_limit
-            && GLOBAL_DISTRIBUTED_QUERY_METRICS.running_query_num.get() as u64 == query_limit
+            && self.query_metrics.running_query_num.get() as u64 == query_limit
         {
-            GLOBAL_DISTRIBUTED_QUERY_METRICS.rejected_query_counter.inc();
+            self.query_metrics.rejected_query_counter.inc();
             return Err(crate::scheduler::SchedulerError::QueryReachLimit(
                 QueryMode::Distributed,
                 query_limit,
@@ -188,6 +192,7 @@ impl QueryManager {
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),
+                self.query_metrics.clone(),
             )
             .await
             .map_err(|err| {

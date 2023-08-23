@@ -19,6 +19,7 @@ use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_common::config::MetaBackend;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::backup_restore::RestoreOpts;
@@ -77,7 +78,12 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
-    let object_store = parse_remote_object_store(&opts.backup_storage_url, "Meta Backup").await;
+    let object_store = parse_remote_object_store(
+        &opts.backup_storage_url,
+        Arc::new(ObjectStoreMetrics::unused()),
+        "Meta Backup",
+    )
+    .await;
     let backup_store =
         ObjectStoreMetaSnapshotStorage::new(&opts.backup_storage_directory, Arc::new(object_store))
             .await?;

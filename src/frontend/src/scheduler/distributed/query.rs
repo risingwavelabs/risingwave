@@ -31,7 +31,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn, Instrument};
 
-use super::{QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
+use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -39,10 +39,7 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{
-    ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult,
-    GLOBAL_DISTRIBUTED_QUERY_METRICS,
-};
+use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -87,6 +84,8 @@ struct QueryRunner {
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
+
+    query_metrics: Arc<DistributedQueryMetrics>,
 }
 
 impl QueryExecution {
@@ -119,6 +118,7 @@ impl QueryExecution {
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
+        query_metrics: Arc<DistributedQueryMetrics>,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -149,6 +149,7 @@ impl QueryExecution {
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
                     query_execution_info,
+                    query_metrics,
                 };
 
                 let span = tracing::info_span!(
@@ -233,7 +234,7 @@ impl QueryExecution {
 
 impl Drop for QueryRunner {
     fn drop(&mut self) {
-        GLOBAL_DISTRIBUTED_QUERY_METRICS.running_query_num.dec();
+        self.query_metrics.running_query_num.dec();
     }
 }
 
@@ -266,7 +267,7 @@ impl Debug for QueryRunner {
 
 impl QueryRunner {
     async fn run(mut self, pinned_snapshot: ReadSnapshot) {
-        GLOBAL_DISTRIBUTED_QUERY_METRICS.running_query_num.inc();
+        self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -457,7 +458,8 @@ pub(crate) mod tests {
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
-        ExecutionContext, HummockSnapshotManager, QueryExecutionInfo, ReadSnapshot,
+        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, QueryExecutionInfo,
+        ReadSnapshot,
     };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
@@ -492,6 +494,7 @@ pub(crate) mod tests {
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
+                Arc::new(DistributedQueryMetrics::for_test()),
             )
             .await
             .is_err());

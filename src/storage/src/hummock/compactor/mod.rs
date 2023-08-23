@@ -68,7 +68,6 @@ use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
     HummockError, SstableWriterFactory, StreamingSstableWriterFactory,
 };
-use crate::monitor::GLOBAL_COMPACTOR_METRICS;
 
 /// Implementation of Hummock compaction.
 pub struct Compactor {
@@ -112,11 +111,15 @@ impl Compactor {
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
-            GLOBAL_COMPACTOR_METRICS
+            self.context
+                .compactor_metrics
                 .write_build_l0_sst_duration
                 .start_timer()
         } else {
-            GLOBAL_COMPACTOR_METRICS.compact_sst_duration.start_timer()
+            self.context
+                .compactor_metrics
+                .compact_sst_duration
+                .start_timer()
         };
 
         let (split_table_outputs, table_stats_map) = if self
@@ -203,11 +206,15 @@ impl Compactor {
                         .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 if context_cloned.is_share_buffer_compact {
-                    GLOBAL_COMPACTOR_METRICS
+                    context_cloned
+                        .compactor_metrics
                         .shared_buffer_to_sstable_size
                         .observe(sst_size as _);
                 } else {
-                    GLOBAL_COMPACTOR_METRICS.compaction_upload_sst_counts.inc();
+                    context_cloned
+                        .compactor_metrics
+                        .compaction_upload_sst_counts
+                        .inc();
                 }
                 Ok::<_, HummockError>(())
             });
@@ -217,7 +224,8 @@ impl Compactor {
         try_join_all(upload_join_handles)
             .verbose_instrument_await("join")
             .await?;
-        GLOBAL_COMPACTOR_METRICS
+        self.context
+            .compactor_metrics
             .get_table_id_total_time_duration
             .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
@@ -259,6 +267,7 @@ impl Compactor {
 
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
+            self.context.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.is_target_l0_or_lbase,
             self.task_config.split_by_table,
@@ -268,6 +277,7 @@ impl Compactor {
             &mut sst_builder,
             del_agg,
             &self.task_config,
+            self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
             task_progress,
@@ -355,7 +365,8 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
             'consume_stream: loop {
                 {
                     // report
-                    GLOBAL_COMPACTOR_METRICS
+                    compactor_context
+                        .compactor_metrics
                         .compaction_event_loop_iteration_latency
                         .observe(event_loop_iteration_now.elapsed().as_millis() as _);
                     event_loop_iteration_now = Instant::now();
@@ -478,7 +489,8 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                             .expect("Clock may have gone backwards")
                             .as_millis() as u64
                             - create_at;
-                        GLOBAL_COMPACTOR_METRICS
+                        context
+                            .compactor_metrics
                             .compaction_event_consumed_latency
                             .observe(consumed_latency_ms as _);
 

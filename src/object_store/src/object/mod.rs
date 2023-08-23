@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,8 +36,6 @@ pub mod object_metrics;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
-
-use crate::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
@@ -132,11 +129,11 @@ pub trait ObjectStore: Send + Sync {
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()>;
 
-    fn monitored(self) -> MonitoredObjectStore<Self>
+    fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
     where
         Self: Sized,
     {
-        MonitoredObjectStore::new(self)
+        MonitoredObjectStore::new(self, metrics)
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
@@ -318,9 +315,13 @@ impl ObjectStoreImpl {
     }
 }
 
-fn try_update_failure_metric<T>(result: &ObjectResult<T>, operation_type: &'static str) {
+fn try_update_failure_metric<T>(
+    metrics: &Arc<ObjectStoreMetrics>,
+    result: &ObjectResult<T>,
+    operation_type: &'static str,
+) {
     if result.is_err() {
-        GLOBAL_OBJECT_STORE_METRICS
+        metrics
             .failure_count
             .with_label_values(&[operation_type])
             .inc();
@@ -340,7 +341,7 @@ fn try_update_failure_metric<T>(result: &ObjectResult<T>, operation_type: &'stat
 ///   `streaming_upload_finish`
 pub struct MonitoredStreamingUploader {
     inner: BoxedStreamingUploader,
-    object_store_metrics: &'static ObjectStoreMetrics,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
     media_type: &'static str,
@@ -351,11 +352,12 @@ impl MonitoredStreamingUploader {
     pub fn new(
         media_type: &'static str,
         handle: BoxedStreamingUploader,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_upload_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: handle,
-            object_store_metrics: GLOBAL_OBJECT_STORE_METRICS.deref(),
+            object_store_metrics,
             operation_size: 0,
             media_type,
             streaming_upload_timeout,
@@ -398,7 +400,7 @@ impl MonitoredStreamingUploader {
                 }),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -427,7 +429,7 @@ impl MonitoredStreamingUploader {
                 .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload finish timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -439,7 +441,7 @@ impl MonitoredStreamingUploader {
 type BoxedStreamingReader = Box<dyn AsyncRead + Unpin + Send + Sync>;
 pub struct MonitoredStreamingReader {
     inner: BoxedStreamingReader,
-    object_store_metrics: &'static ObjectStoreMetrics,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
     operation_size: usize,
     media_type: &'static str,
     timer: Option<HistogramTimer>,
@@ -450,16 +452,17 @@ impl MonitoredStreamingReader {
     pub fn new(
         media_type: &'static str,
         handle: BoxedStreamingReader,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_read_timeout: Option<Duration>,
     ) -> Self {
         let operation_type = "streaming_read";
-        let timer = GLOBAL_OBJECT_STORE_METRICS
+        let timer = object_store_metrics
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
         Self {
             inner: handle,
-            object_store_metrics: GLOBAL_OBJECT_STORE_METRICS.deref(),
+            object_store_metrics,
             operation_size: 0,
             media_type,
             timer: Some(timer),
@@ -499,7 +502,7 @@ impl MonitoredStreamingReader {
                 }),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 }
@@ -517,7 +520,7 @@ impl Drop for MonitoredStreamingReader {
 
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
-    object_store_metrics: &'static ObjectStoreMetrics,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
     streaming_read_timeout: Option<Duration>,
     streaming_upload_timeout: Option<Duration>,
     read_timeout: Option<Duration>,
@@ -541,10 +544,10 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - start `operation_latency` timer
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
-    pub fn new(store: OS) -> Self {
+    pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
         Self {
             inner: store,
-            object_store_metrics: GLOBAL_OBJECT_STORE_METRICS.deref(),
+            object_store_metrics,
             streaming_read_timeout: None,
             streaming_upload_timeout: None,
             read_timeout: None,
@@ -587,7 +590,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -612,10 +615,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload init timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         Ok(MonitoredStreamingUploader::new(
             media_type,
             res?,
+            self.object_store_metrics.clone(),
             self.streaming_upload_timeout,
         ))
     }
@@ -640,7 +644,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
 
         let data = res?;
         self.object_store_metrics
@@ -678,7 +682,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("readv timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
 
         let data = res?;
         let data_len = data.iter().map(|block| block.len()).sum::<usize>() as u64;
@@ -718,10 +722,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("streaming_read init timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         Ok(MonitoredStreamingReader::new(
             media_type,
             res?,
+            self.object_store_metrics.clone(),
             self.streaming_read_timeout,
         ))
     }
@@ -747,7 +752,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -772,7 +777,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -797,7 +802,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -822,7 +827,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("list timeout"))),
         };
 
-        try_update_failure_metric(&res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
 
@@ -842,14 +847,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
 pub async fn parse_remote_object_store_with_config(
     url: &str,
+    metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
     config: Option<Arc<StorageConfig>>,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string())
-                .await
-                .monitored(),
+            S3ObjectStore::new(
+                s3.strip_prefix("s3://").unwrap().to_string(),
+                metrics.clone(),
+            )
+            .await
+            .monitored(metrics),
         ),
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
@@ -867,7 +876,7 @@ pub async fn parse_remote_object_store_with_config(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(),
+                    .monitored(metrics),
             )
         }
 
@@ -877,7 +886,7 @@ pub async fn parse_remote_object_store_with_config(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(),
+                    .monitored(metrics),
             )
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
@@ -886,7 +895,7 @@ pub async fn parse_remote_object_store_with_config(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_webhdfs_engine(endpoint.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(),
+                    .monitored(metrics),
             )
         }
         azblob if azblob.starts_with("azblob://") => {
@@ -895,7 +904,7 @@ pub async fn parse_remote_object_store_with_config(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(),
+                    .monitored(metrics),
             )
         }
         fs if fs.starts_with("fs://") => {
@@ -904,7 +913,7 @@ pub async fn parse_remote_object_store_with_config(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_fs_engine(root.to_string())
                     .unwrap()
-                    .monitored(),
+                    .monitored(metrics),
             )
         }
 
@@ -933,22 +942,25 @@ pub async fn parse_remote_object_store_with_config(
                         .strip_prefix("s3-compatible://")
                         .unwrap()
                         .to_string(),
+                    metrics.clone(),
                     s3_object_store_config,
                 )
                 .await
-                .monitored(),
+                .monitored(metrics),
             )
         }
-        minio if minio.starts_with("minio://") => {
-            ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await.monitored())
-        }
+        minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
+            S3ObjectStore::with_minio(minio, metrics.clone())
+                .await
+                .monitored(metrics),
+        ),
         "memory" => {
             if ident == "Meta Backup" {
                 tracing::warn!("You're using in-memory remote object store for {}. This is not recommended for production environment.", ident);
             } else {
                 tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored())
+            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         "memory-shared" => {
             if ident == "Meta Backup" {
@@ -956,7 +968,7 @@ pub async fn parse_remote_object_store_with_config(
             } else {
                 tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored())
+            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
         other => {
             unimplemented!(
@@ -967,8 +979,12 @@ pub async fn parse_remote_object_store_with_config(
     }
 }
 
-pub async fn parse_remote_object_store(url: &str, ident: &str) -> ObjectStoreImpl {
-    parse_remote_object_store_with_config(url, ident, None).await
+pub async fn parse_remote_object_store(
+    url: &str,
+    metrics: Arc<ObjectStoreMetrics>,
+    ident: &str,
+) -> ObjectStoreImpl {
+    parse_remote_object_store_with_config(url, metrics, ident, None).await
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;

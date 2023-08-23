@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
@@ -34,6 +36,7 @@ pub struct SourceDesc {
     pub source: ConnectorSource,
     pub source_struct: SourceStruct,
     pub columns: Vec<SourceColumnDesc>,
+    pub metrics: Arc<SourceMetrics>,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -42,11 +45,13 @@ pub struct FsSourceDesc {
     pub source: FsConnectorSource,
     pub source_struct: SourceStruct,
     pub columns: Vec<SourceColumnDesc>,
+    pub metrics: Arc<SourceMetrics>,
 }
 
 #[derive(Clone)]
 pub struct SourceDescBuilder {
     columns: Vec<PbColumnCatalog>,
+    metrics: Arc<SourceMetrics>,
     row_id_index: Option<usize>,
     properties: HashMap<String, String>,
     source_info: PbStreamSourceInfo,
@@ -59,6 +64,7 @@ impl SourceDescBuilder {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         columns: Vec<PbColumnCatalog>,
+        metrics: Arc<SourceMetrics>,
         row_id_index: Option<usize>,
         properties: HashMap<String, String>,
         source_info: PbStreamSourceInfo,
@@ -68,6 +74,7 @@ impl SourceDescBuilder {
     ) -> Self {
         Self {
             columns,
+            metrics,
             row_id_index,
             properties,
             source_info,
@@ -110,7 +117,12 @@ impl SourceDescBuilder {
             source,
             source_struct,
             columns,
+            metrics: self.metrics,
         })
+    }
+
+    pub fn metrics(&self) -> Arc<SourceMetrics> {
+        self.metrics.clone()
     }
 
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
@@ -144,6 +156,7 @@ impl SourceDescBuilder {
             source,
             source_struct,
             columns,
+            metrics: self.metrics.clone(),
         })
     }
 }
@@ -243,6 +256,7 @@ pub mod test_utils {
             .collect();
         SourceDescBuilder {
             columns,
+            metrics: Default::default(),
             row_id_index,
             properties,
             source_info,

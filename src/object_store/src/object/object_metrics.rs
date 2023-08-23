@@ -25,6 +25,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 pub static GLOBAL_OBJECT_STORE_METRICS: LazyLock<ObjectStoreMetrics> =
     LazyLock::new(ObjectStoreMetrics::new);
 
+#[derive(Clone)]
 pub struct ObjectStoreMetrics {
     pub write_bytes: GenericCounter<AtomicU64>,
     pub read_bytes: GenericCounter<AtomicU64>,
@@ -105,5 +106,10 @@ impl ObjectStoreMetrics {
             failure_count,
             request_retry_count,
         }
+    }
+
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
+    pub fn unused() -> Self {
+        GLOBAL_OBJECT_STORE_METRICS.clone()
     }
 }

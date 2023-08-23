@@ -150,6 +150,11 @@ impl BatchTaskMetrics {
         metrics
     }
 
+    /// Create a new `BatchTaskMetrics` instance used in tests or other places.
+    pub fn for_test() -> Self {
+        GLOBAL_BATCH_TASK_METRICS.clone()
+    }
+
     fn clean_metrics(&self) {
         let delete_task: Vec<TaskId> = {
             let mut delete_task = self.delete_task.lock();
@@ -282,6 +287,11 @@ impl BatchExecutorMetrics {
         metrics
     }
 
+    /// Create a new `BatchTaskMetrics` instance used in tests or other places.
+    pub fn for_test() -> Self {
+        GLOBAL_BATCH_EXECUTOR_METRICS.clone()
+    }
+
     fn clean_metrics(&self) {
         let delete_task: Vec<TaskId> = {
             let mut delete_task = self.delete_task.lock();
@@ -333,6 +343,8 @@ pub type BatchMetricsWithTaskLabels = Arc<BatchMetricsWithTaskLabelsInner>;
 /// a `TaskId` so that we don't have to pass `task_id` around and repeatedly generate the same
 /// labels.
 pub struct BatchMetricsWithTaskLabelsInner {
+    task_metrics: Arc<BatchTaskMetrics>,
+    executor_metrics: Arc<BatchExecutorMetrics>,
     task_id: TaskId,
     task_labels: Vec<String>,
 }
@@ -346,15 +358,14 @@ macro_rules! def_create_executor_collector {
                     owned_task_labels.extend(executor_label);
                     let task_labels = owned_task_labels.iter().map(|s| s.as_str()).collect_vec();
 
-                    use $crate::monitor::stats::GLOBAL_BATCH_EXECUTOR_METRICS;
-
-                    let collecter = GLOBAL_BATCH_EXECUTOR_METRICS
+                    let collecter = self
+                        .executor_metrics
                         .$metric
                         .with_label_values(&task_labels);
 
-                    let metrics = GLOBAL_BATCH_EXECUTOR_METRICS.$metric.clone();
+                    let metrics = self.executor_metrics.$metric.clone();
 
-                    GLOBAL_BATCH_EXECUTOR_METRICS
+                    self.executor_metrics
                         .register_labels
                         .lock()
                         .entry(self.task_id.clone())
@@ -375,8 +386,14 @@ macro_rules! def_create_executor_collector {
 impl BatchMetricsWithTaskLabelsInner {
     for_all_executor_metrics! {def_create_executor_collector}
 
-    pub fn new(id: TaskId) -> Self {
+    pub fn new(
+        task_metrics: Arc<BatchTaskMetrics>,
+        executor_metrics: Arc<BatchExecutorMetrics>,
+        id: TaskId,
+    ) -> Self {
         Self {
+            task_metrics,
+            executor_metrics,
             task_id: id.clone(),
             task_labels: vec![id.query_id, id.stage_id.to_string(), id.task_id.to_string()],
         }
@@ -389,15 +406,16 @@ impl BatchMetricsWithTaskLabelsInner {
     pub fn task_id(&self) -> TaskId {
         self.task_id.clone()
     }
+
+    pub fn get_task_metrics(&self) -> &Arc<BatchTaskMetrics> {
+        &self.task_metrics
+    }
 }
 
 impl Drop for BatchMetricsWithTaskLabelsInner {
     fn drop(&mut self) {
-        GLOBAL_BATCH_TASK_METRICS
-            .delete_task
-            .lock()
-            .push(self.task_id());
-        GLOBAL_BATCH_EXECUTOR_METRICS
+        self.task_metrics.delete_task.lock().push(self.task_id());
+        self.executor_metrics
             .delete_task
             .lock()
             .push(self.task_id());
@@ -442,5 +460,10 @@ impl BatchManagerMetrics {
             batch_total_mem,
             batch_heartbeat_worker_num,
         }
+    }
+
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        GLOBAL_BATCH_MANAGER_METRICS.clone()
     }
 }

@@ -27,7 +27,6 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
-use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 pub struct HummockServiceImpl<S>
@@ -282,10 +281,12 @@ where
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
         let req = request.into_inner();
         let hummock_manager = self.hummock_manager.clone();
-        GLOBAL_META_METRICS
+        hummock_manager
+            .metrics
             .total_object_count
             .set(req.total_object_count as _);
-        GLOBAL_META_METRICS
+        hummock_manager
+            .metrics
             .total_object_size
             .set(req.total_object_size as _);
         // The following operation takes some time, so we do it in dedicated task and responds the

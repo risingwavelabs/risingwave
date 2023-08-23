@@ -20,6 +20,7 @@ use std::sync::Arc;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
@@ -591,9 +592,12 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store =
-                    parse_remote_object_store(hummock.strip_prefix("hummock+").unwrap(), "Hummock")
-                        .await;
+                let mut object_store = parse_remote_object_store(
+                    hummock.strip_prefix("hummock+").unwrap(),
+                    Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone()),
+                    "Hummock",
+                )
+                .await;
                 object_store.set_opts(
                     opts.object_store_streaming_read_timeout_ms,
                     opts.object_store_streaming_upload_timeout_ms,

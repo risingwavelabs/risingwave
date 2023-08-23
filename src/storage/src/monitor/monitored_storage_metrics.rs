@@ -24,7 +24,7 @@ use prometheus::{
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
     pub get_duration: HistogramVec,
     pub get_key_size: HistogramVec,
@@ -156,5 +156,9 @@ impl MonitoredStorageMetrics {
             sync_duration,
             sync_size,
         }
+    }
+
+    pub fn unused() -> Self {
+        GLOBAL_STORAGE_METRICS.clone()
     }
 }

@@ -24,10 +24,17 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 pub static GLOBAL_BACKUP_MANAGER_METRICS: LazyLock<BackupManagerMetrics> =
     LazyLock::new(BackupManagerMetrics::new);
 
+#[derive(Clone)]
 pub struct BackupManagerMetrics {
     pub job_count: IntCounter,
     pub job_latency_success: Histogram,
     pub job_latency_failure: Histogram,
+}
+
+impl Default for BackupManagerMetrics {
+    fn default() -> Self {
+        GLOBAL_BACKUP_MANAGER_METRICS.clone()
+    }
 }
 
 impl BackupManagerMetrics {

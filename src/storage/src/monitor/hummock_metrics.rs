@@ -23,7 +23,7 @@ use prometheus::{
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 /// [`HummockMetrics`] stores the performance and IO metrics of hummock storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HummockMetrics {
     pub unpin_version_before_counts: GenericCounter<AtomicU64>,
     pub pin_snapshot_counts: GenericCounter<AtomicU64>,
@@ -136,5 +136,10 @@ impl HummockMetrics {
             get_new_sst_ids_latency,
             report_compaction_task_latency,
         }
+    }
+
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
+    pub fn unused() -> Self {
+        GLOBAL_HUMMOCK_METRICS.clone()
     }
 }

@@ -14,7 +14,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ops::Deref;
 #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,7 +24,7 @@ use prometheus::local::LocalHistogram;
 use risingwave_common::catalog::TableId;
 
 use super::HummockStateStoreMetrics;
-use crate::monitor::{GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_STATE_STORE_METRICS};
+use crate::monitor::{CompactorMetrics, GLOBAL_HUMMOCK_STATE_STORE_METRICS};
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
@@ -105,8 +104,7 @@ impl StoreLocalStatistic {
         }
     }
 
-    pub fn report_compactor(&self) {
-        let metrics = GLOBAL_COMPACTOR_METRICS.deref();
+    pub fn report_compactor(&self, metrics: &CompactorMetrics) {
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
             metrics.remote_read_time.observe(t / 1000.0);
@@ -246,7 +244,7 @@ const FLUSH_LOCAL_METRICS_TIMES: usize = 32;
 
 impl LocalStoreMetrics {
     pub fn new(table_id_label: &str) -> Self {
-        let metrics = GLOBAL_HUMMOCK_STATE_STORE_METRICS.deref();
+        let metrics = &GLOBAL_HUMMOCK_STATE_STORE_METRICS;
         let cache_data_block_total = metrics
             .sst_store_block_request_counts
             .with_label_values(&[table_id_label, "data_total"])

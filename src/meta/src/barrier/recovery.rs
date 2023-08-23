@@ -35,7 +35,6 @@ use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::MigrationPlan;
-use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
@@ -58,8 +57,11 @@ where
     }
 
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
-        self.resolve_actor_info(&mut CheckpointControl::new(), &Command::barrier())
-            .await
+        self.resolve_actor_info(
+            &mut CheckpointControl::new(self.metrics.clone()),
+            &Command::barrier(),
+        )
+        .await
     }
 
     /// Clean up all dirty streaming jobs.
@@ -120,7 +122,7 @@ where
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
-        let recovery_timer = GLOBAL_META_METRICS.recovery_latency.start_timer();
+        let recovery_timer = self.metrics.recovery_latency.start_timer();
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
@@ -210,7 +212,7 @@ where
                     res?
                 };
                 if recovery_result.is_err() {
-                    GLOBAL_META_METRICS.recovery_failure_cnt.inc();
+                    self.metrics.recovery_failure_cnt.inc();
                 }
                 recovery_result
             }

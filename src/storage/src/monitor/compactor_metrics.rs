@@ -24,7 +24,7 @@ use prometheus::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompactorMetrics {
     pub compaction_upload_sst_counts: GenericCounter<AtomicU64>,
     pub compact_write_bytes: GenericCounterVec<AtomicU64>,
@@ -284,5 +284,10 @@ impl CompactorMetrics {
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
         }
+    }
+
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
+    pub fn unused() -> Self {
+        GLOBAL_COMPACTOR_METRICS.clone()
     }
 }

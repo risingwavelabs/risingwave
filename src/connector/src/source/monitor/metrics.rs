@@ -38,9 +38,19 @@ impl EnumeratorMetrics {
         .unwrap();
         EnumeratorMetrics { high_watermark }
     }
+
+    pub fn unused() -> Self {
+        Default::default()
+    }
 }
 
-#[derive(Debug)]
+impl Default for EnumeratorMetrics {
+    fn default() -> Self {
+        GLOBAL_ENUMERATOR_METRICS.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SourceMetrics {
     pub partition_input_count: GenericCounterVec<AtomicU64>,
     pub partition_input_bytes: GenericCounterVec<AtomicU64>,
@@ -96,10 +106,14 @@ impl SourceMetrics {
             latest_message_id,
         }
     }
+
+    pub fn global_ref() -> &'static Self {
+        &GLOBAL_SOURCE_METRICS
+    }
 }
 
 impl Default for SourceMetrics {
     fn default() -> Self {
-        SourceMetrics::new()
+        SourceMetrics::global_ref().clone()
     }
 }

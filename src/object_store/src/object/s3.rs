@@ -15,6 +15,7 @@
 use std::cmp;
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
@@ -44,11 +45,11 @@ use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
+use super::object_metrics::ObjectStoreMetrics;
 use super::{
     BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
     ObjectStore, StreamingUploader,
 };
-use crate::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use crate::object::{try_update_failure_metric, ObjectMetadataIter};
 
 type PartId = i32;
@@ -89,6 +90,8 @@ pub struct S3StreamingUploader {
     buf: Vec<Bytes>,
     /// Length of the data that have not been uploaded to S3.
     not_uploaded_len: usize,
+    /// To record metrics for uploading part.
+    metrics: Arc<ObjectStoreMetrics>,
 }
 
 impl S3StreamingUploader {
@@ -97,6 +100,7 @@ impl S3StreamingUploader {
         bucket: String,
         part_size: usize,
         key: String,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> S3StreamingUploader {
         Self {
             client,
@@ -108,6 +112,7 @@ impl S3StreamingUploader {
             join_handles: Default::default(),
             buf: Default::default(),
             not_uploaded_len: 0,
+            metrics,
         }
     }
 
@@ -144,13 +149,14 @@ impl S3StreamingUploader {
         let key = self.key.clone();
         let upload_id = self.upload_id.clone().unwrap();
 
-        GLOBAL_OBJECT_STORE_METRICS
+        let metrics = self.metrics.clone();
+        metrics
             .operation_size
             .with_label_values(&[operation_type])
             .observe(len as f64);
 
         self.join_handles.push(tokio::spawn(async move {
-            let _timer = GLOBAL_OBJECT_STORE_METRICS
+            let _timer = metrics
                 .operation_latency
                 .with_label_values(&["s3", operation_type])
                 .start_timer();
@@ -165,7 +171,7 @@ impl S3StreamingUploader {
                 .send()
                 .await
                 .map_err(Into::into);
-            try_update_failure_metric(&upload_output_res, operation_type);
+            try_update_failure_metric(&metrics, &upload_output_res, operation_type);
             Ok((part_id, upload_output_res?))
         }));
 
@@ -296,6 +302,8 @@ pub struct S3ObjectStore {
     client: Client,
     bucket: String,
     part_size: usize,
+    /// For S3 specific metrics.
+    metrics: Arc<ObjectStoreMetrics>,
 
     config: S3ObjectStoreConfig,
 }
@@ -334,6 +342,7 @@ impl ObjectStore for S3ObjectStore {
             self.bucket.clone(),
             self.part_size,
             path.to_string(),
+            self.metrics.clone(),
         )))
     }
 
@@ -366,7 +375,7 @@ impl ObjectStore for S3ObjectStore {
                         if let SdkError::DispatchFailure(e) = &err
                             && e.is_timeout()
                         {
-                            GLOBAL_OBJECT_STORE_METRICS
+                            self.metrics
                                 .request_retry_count
                                 .with_label_values(&["read"])
                                 .inc();
@@ -445,7 +454,7 @@ impl ObjectStore for S3ObjectStore {
                         if let SdkError::DispatchFailure(e) = &err
                             && e.is_timeout()
                         {
-                            GLOBAL_OBJECT_STORE_METRICS
+                            self.metrics
                                 .request_retry_count
                                 .with_label_values(&["streaming_read"])
                                 .inc();
@@ -530,11 +539,15 @@ impl S3ObjectStore {
     /// Creates an S3 object store from environment variable.
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
-    pub async fn new(bucket: String) -> Self {
-        Self::new_with_config(bucket, S3ObjectStoreConfig::default()).await
+    pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
     }
 
-    pub async fn new_with_config(bucket: String, config: S3ObjectStoreConfig) -> Self {
+    pub async fn new_with_config(
+        bucket: String,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: S3ObjectStoreConfig,
+    ) -> Self {
         // Customize http connector to set keepalive.
         let native_tls = || -> NativeTls {
             let mut tls = hyper_tls::native_tls::TlsConnector::builder();
@@ -605,12 +618,13 @@ impl S3ObjectStore {
             client,
             bucket,
             part_size: S3_PART_SIZE,
+            metrics,
             config,
         }
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str) -> Self {
+    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
@@ -637,6 +651,7 @@ impl S3ObjectStore {
             client,
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
+            metrics,
             config: S3ObjectStoreConfig::default(),
         }
     }

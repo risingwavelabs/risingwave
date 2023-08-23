@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
@@ -27,6 +27,10 @@ use prometheus::{
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
+use risingwave_object_store::object::object_metrics::{
+    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
 use tokio::sync::oneshot::Sender;
@@ -37,6 +41,7 @@ use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
 
+#[derive(Clone)]
 pub struct MetaMetrics {
     /// ********************************** Meta ************************************
     /// The number of workers in the cluster.
@@ -137,7 +142,7 @@ pub struct MetaMetrics {
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
-    pub time_after_last_observation: AtomicU64,
+    pub time_after_last_observation: Arc<AtomicU64>,
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
@@ -148,9 +153,14 @@ pub struct MetaMetrics {
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
 
+    /// ********************************** Object Store ************************************
+    // Object store related metrics (for backup/restore and version checkpoint)
+    pub object_store_metric: Arc<ObjectStoreMetrics>,
+
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: IntGaugeVec,
+    pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
@@ -478,6 +488,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
         let recovery_failure_cnt = register_int_counter_with_registry!(
             "recovery_failure_cnt",
@@ -499,6 +510,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -645,13 +657,15 @@ impl MetaMetrics {
             full_gc_selected_object_count,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
-            time_after_last_observation: AtomicU64::new(0),
+            time_after_last_observation: Arc::new(AtomicU64::new(0)),
             worker_num,
             meta_type,
             compact_pending_bytes,
             compact_level_compression_ratio,
             level_compact_task_cnt,
+            object_store_metric,
             source_is_up,
+            source_enumerator_metrics,
             actor_info,
             table_info,
             sink_info,
@@ -669,7 +683,7 @@ impl MetaMetrics {
 }
 impl Default for MetaMetrics {
     fn default() -> Self {
-        Self::new()
+        GLOBAL_META_METRICS.clone()
     }
 }
 
@@ -677,8 +691,8 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
     cluster_manager: ClusterManagerRef<S>,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
+    meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let meta_metrics = GLOBAL_META_METRICS.deref();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let mut monitor_interval = tokio::time::interval(interval);
@@ -726,9 +740,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
     catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
+    meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;
-    let meta_metrics = GLOBAL_META_METRICS.deref();
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {

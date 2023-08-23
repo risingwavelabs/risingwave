@@ -22,6 +22,7 @@ use prometheus::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+#[derive(Clone)]
 pub struct FrontendMetrics {
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
@@ -60,5 +61,10 @@ impl FrontendMetrics {
             latency_local_execution,
             active_sessions,
         }
+    }
+
+    /// Create a new `FrontendMetrics` instance used in tests or other places.
+    pub fn for_test() -> Self {
+        GLOBAL_FRONTEND_METRICS.clone()
     }
 }

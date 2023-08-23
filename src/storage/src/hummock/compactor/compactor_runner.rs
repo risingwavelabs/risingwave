@@ -47,7 +47,7 @@ use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
     HummockResult, MonotonicDeleteEvent, SstableBuilderOptions, SstableStoreRef,
 };
-use crate::monitor::{StoreLocalStatistic, GLOBAL_COMPACTOR_METRICS};
+use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 pub struct CompactorRunner {
     compact_task: CompactTask,
@@ -276,27 +276,32 @@ pub async fn compact(
         .iter()
         .map(|table| table.file_size)
         .sum::<u64>();
-    GLOBAL_COMPACTOR_METRICS
+    context
+        .compactor_metrics
         .compact_read_current_level
         .with_label_values(&[&group_label, &cur_level_label])
         .inc_by(select_size);
-    GLOBAL_COMPACTOR_METRICS
+    context
+        .compactor_metrics
         .compact_read_sstn_current_level
         .with_label_values(&[&group_label, &cur_level_label])
         .inc_by(select_table_infos.len() as u64);
 
     let target_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
     let next_level_label = compact_task.target_level.to_string();
-    GLOBAL_COMPACTOR_METRICS
+    context
+        .compactor_metrics
         .compact_read_next_level
         .with_label_values(&[&group_label, next_level_label.as_str()])
         .inc_by(target_level_read_bytes);
-    GLOBAL_COMPACTOR_METRICS
+    context
+        .compactor_metrics
         .compact_read_sstn_next_level
         .with_label_values(&[&group_label, next_level_label.as_str()])
         .inc_by(target_table_infos.len() as u64);
 
-    let timer = GLOBAL_COMPACTOR_METRICS
+    let timer = context
+        .compactor_metrics
         .compact_task_duration
         .with_label_values(&[
             &group_label,
@@ -448,7 +453,7 @@ pub async fn compact(
         return compact_done(compact_task, context.clone(), output_ssts, task_status);
     }
 
-    GLOBAL_COMPACTOR_METRICS.compact_task_pending_num.inc();
+    context.compactor_metrics.compact_task_pending_num.inc();
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
@@ -539,7 +544,7 @@ pub async fn compact(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    GLOBAL_COMPACTOR_METRICS.compact_task_pending_num.dec();
+    context.compactor_metrics.compact_task_pending_num.dec();
     for level in &compact_task.input_ssts {
         for table in &level.table_infos {
             context.sstable_store.delete_cache(table.get_object_id());
@@ -551,7 +556,7 @@ pub async fn compact(
 /// Fills in the compact task and tries to report the task result to meta node.
 fn compact_done(
     mut compact_task: CompactTask,
-    _context: Arc<CompactorContext>,
+    context: Arc<CompactorContext>,
     output_ssts: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
@@ -578,11 +583,13 @@ fn compact_done(
 
     let group_label = compact_task.compaction_group_id.to_string();
     let level_label = compact_task.target_level.to_string();
-    GLOBAL_COMPACTOR_METRICS
+    context
+        .compactor_metrics
         .compact_write_bytes
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compaction_write_bytes);
-    GLOBAL_COMPACTOR_METRICS
+    context
+        .compactor_metrics
         .compact_write_sstn
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
@@ -594,6 +601,7 @@ pub async fn compact_and_build_sst<F>(
     sst_builder: &mut CapacitySplitTableBuilder<F>,
     del_agg: Arc<CompactionDeleteRanges>,
     task_config: &TaskConfig,
+    compactor_metrics: Arc<CompactorMetrics>,
     mut iter: impl HummockIterator<Direction = Forward>,
     mut compaction_filter: impl CompactionFilter,
     task_progress: Option<Arc<TaskProgress>>,
@@ -808,7 +816,7 @@ where
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
     }
     iter.collect_local_statistic(&mut local_stats);
-    local_stats.report_compactor();
+    local_stats.report_compactor(compactor_metrics.as_ref());
     compaction_statistics.delta_drop_stat = table_stats_drop;
 
     Ok(compaction_statistics)

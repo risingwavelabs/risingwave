@@ -107,6 +107,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
+            source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             None,
             self.actor_ctx.error_suppressor.clone(),

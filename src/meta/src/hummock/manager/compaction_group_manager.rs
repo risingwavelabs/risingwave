@@ -358,7 +358,7 @@ impl<S: MetaStore> HummockManager<S> {
                 .get_compaction_group_levels(*group_id)
                 .get_levels()
                 .len();
-            remove_compaction_group_in_sst_stat(self.metrics, *group_id, max_level);
+            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
         }
 
         versioning.current_version = current_version;
