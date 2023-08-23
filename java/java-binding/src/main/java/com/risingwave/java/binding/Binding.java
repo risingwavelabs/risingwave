@@ -84,4 +84,6 @@ public class Binding {
     static native void streamChunkIteratorClose(long pointer);
 
     static native long streamChunkIteratorFromPretty(String str);
+
+    public static native void sendMsgToChannel(int channelId, Object msg);
 }

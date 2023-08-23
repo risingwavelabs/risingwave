@@ -39,4 +39,24 @@ public abstract class SourceHandlerFactory {
                         source, sourceId, startOffset, mutableUserProps, snapshotDone);
         return new DbzSourceHandler(config);
     }
+
+    public static void startJniSourceHandler(
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            boolean snapshotDone,
+            int channelId) {
+        // For jni.rs
+        java.lang.Thread.currentThread()
+                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+        // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
+        Map<String, String> mutableUserProps = new HashMap<>(userProps);
+        mutableUserProps.put("source.id", Long.toString(sourceId));
+        var config =
+                new DbzConnectorConfig(
+                        source, sourceId, startOffset, mutableUserProps, snapshotDone);
+        JniSourceHandler hanlder = new JniSourceHandler(config);
+        hanlder.start(channelId);
+    }
 }

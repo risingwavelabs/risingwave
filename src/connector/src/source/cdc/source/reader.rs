@@ -12,12 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::str::FromStr;
+use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use jni::{InitArgsBuilder, JavaVM, JNIVersion};
+use jni::objects::{JObject, JValue};
+use jni::sys::jint;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedSender;
+use risingwave_common::jvm_runtime::{CHANNEL_ID_GEN, JNI_CHANNEL_POOL, JVM};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 
@@ -31,6 +42,7 @@ use crate::source::{
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
+
 
 pub struct CdcSplitReader {
     source_id: u64,
@@ -96,7 +108,7 @@ impl SplitReader for CdcSplitReader {
 
 impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn into_data_stream(self) {
+    async fn ____into_data_stream(self) {
         let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
             anyhow!("connector node endpoint not specified or unable to connect to connector node")
         })?;
@@ -153,4 +165,112 @@ impl CdcSplitReader {
             }
         }
     }
+
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn into_data_stream(self) {
+        // rewrite the hostname and port for the split
+        let mut properties = self.conn_props.props.clone();
+
+        // For citus, we need to rewrite the table.name to capture sharding tables
+        if self.server_addr.is_some() {
+            let addr = self.server_addr.unwrap();
+            let host_addr = HostAddr::from_str(&addr)
+                .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
+            properties.insert("hostname".to_string(), host_addr.host);
+            properties.insert("port".to_string(), host_addr.port.to_string());
+            // rewrite table name with suffix to capture all shards in the split
+            let mut table_name = properties
+                .remove("table.name")
+                .ok_or_else(|| anyhow!("missing field 'table.name'"))?;
+            table_name.push_str("_[0-9]+");
+            properties.insert("table.name".into(), table_name);
+        }
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let channel_id = CHANNEL_ID_GEN.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut guard = JNI_CHANNEL_POOL.write().unwrap();
+            guard.insert(channel_id, tx);
+        }
+
+        let source_type = self.conn_props.get_source_type_pb()?;
+
+        // let cdc_stream = cdc_client
+        //     .start_source_stream(
+        //         self.source_id,
+        //         self.conn_props.get_source_type_pb()?,
+        //         self.start_offset,
+        //         properties,
+        //         self.snapshot_done,
+        //     )
+        //     .await
+        //     .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
+        // pin_mut!(cdc_stream);
+
+        tokio::task::spawn_blocking(move || {
+            let mut env = JVM.attach_current_thread_as_daemon().unwrap();
+
+            env.find_class("com/risingwave/proto/ConnectorServiceProto$SourceType").inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+            let source_type_arg = JValue::from(source_type as i32);
+            let st = env.call_static_method("com/risingwave/proto/ConnectorServiceProto$SourceType", "forNumber", "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;", &[source_type_arg]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+            let st = env.call_static_method("com/risingwave/connector/api/source/SourceTypeE", "valueOf", "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;", &[(&st).into()]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+
+            let source_id_arg = JValue::from(self.source_id as i64);
+
+
+            let source_type = env.find_class("com/risingwave/connector/api/source/SourceTypeE").unwrap();
+            let string_class = env.find_class("java/lang/String").unwrap();
+            let start_offset = match self.start_offset {
+                Some(start_offset) => {
+                    let start_offset = env.new_string(start_offset).unwrap();
+                    env.call_method(start_offset, "toString", "()Ljava/lang/String;", &[]).unwrap()
+                },
+                None => {
+                    jni::objects::JValueGen::Object(JObject::null())
+                }
+            };
+
+            let mut user_prop = properties;
+
+            let hashmap_class = "java/util/HashMap";
+            let hashmap_constructor_signature = "()V";
+            let hashmap_put_signature = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
+
+            let java_map = env.new_object(hashmap_class, hashmap_constructor_signature, &[]).unwrap();
+            for (key, value) in user_prop.iter() {
+                let key = env.new_string(key.to_string()).unwrap();
+                let value = env.new_string(value.to_string()).unwrap();
+                let args = [
+                    JValue::Object(&key),
+                    JValue::Object(&value),
+                ];
+                env.call_method(&java_map, "put", hashmap_put_signature, &args).unwrap();
+            }
+
+            let snapshot_done = JValue::from(self.snapshot_done);
+
+            let channel_id = JValue::from(channel_id as i32);
+
+            let _ = env.call_static_method(
+                "com/risingwave/connector/source/core/SourceHandlerFactory",
+                "startJniSourceHandler",
+                "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZI)V",
+                &[(&st).into(), source_id_arg, (&start_offset).into(), JValue::Object(&java_map), snapshot_done, channel_id]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+
+            println!("call jni cdc start source success");
+        });
+
+        while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
+            if events.is_empty() {
+                continue;
+            }
+            let mut msgs = Vec::with_capacity(events.len());
+            for event in events {
+                msgs.push(SourceMessage::from(event));
+            }
+            yield msgs;
+        }
+    }
 }
+
+

@@ -98,6 +98,7 @@ tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
 uuid = "1.4.1"
+jni = { version = "0.21.1", features = ["invocation"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
