@@ -23,7 +23,7 @@ use futures::stream::select_all;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::memcmp_encoding;
@@ -65,6 +65,34 @@ pub(super) fn new_empty_partition_cache() -> PartitionCache {
     cache
 }
 
+pub(super) fn shrink_partition_cache(
+    this_partition_key: &OwnedRow,
+    range_cache: &mut PartitionCache,
+    recently_accessed_range: RangeInclusive<StateKey>,
+) {
+    tracing::debug!(
+        this_partition_key=?this_partition_key,
+        recently_accessed_range=?recently_accessed_range,
+        "shrinking range cache"
+    );
+
+    let (start, end) = recently_accessed_range.into_inner();
+    let (left_removed, right_removed) = range_cache.retain_range(&start.into()..=&end.into());
+    if range_cache.is_empty() {
+        if !left_removed.is_empty() || !right_removed.is_empty() {
+            range_cache.insert(CacheKey::Smallest, OwnedRow::empty());
+            range_cache.insert(CacheKey::Largest, OwnedRow::empty());
+        }
+    } else {
+        if !left_removed.is_empty() {
+            range_cache.insert(CacheKey::Smallest, OwnedRow::empty());
+        }
+        if !right_removed.is_empty() {
+            range_cache.insert(CacheKey::Largest, OwnedRow::empty());
+        }
+    }
+}
+
 /// A wrapper of [`PartitionCache`] that provides helper methods to manipulate the cache.
 /// By putting this type inside `private` module, we can avoid misuse of the internal fields and
 /// methods.
@@ -98,6 +126,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         order_key_indices: &'a [usize],
         input_pk_indices: &'a [usize],
     ) -> Self {
+        // TODO(rc): move the calculation to executor?
         let mut projection = Vec::with_capacity(
             partition_key_indices.len() + order_key_indices.len() + input_pk_indices.len(),
         );
@@ -112,6 +141,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 projection.push(proj_idx);
             }
         }
+        projection.shrink_to_fit();
 
         Self {
             this_partition_key,
@@ -395,7 +425,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
-        // range once we have state table reverse iterator.
+        // range once we have STATE TABLE REVERSE ITERATOR.
         // self.extend_cache_leftward_by_n(table, range.start()).await?;
 
         // prefetch rows after the end of the range
@@ -497,6 +527,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 }))
                 .await?
                 .into_iter()
+                .map(|stream| {
+                    // XXX(rc): A dirty hack to workaround the vnode prefix returned by table
+                    // iterator. See https://github.com/risingwavelabs/risingwave/issues/11673.
+                    stream.map(|result: StreamExecutorResult<(bytes::Bytes, OwnedRow)>| {
+                        result.map(|(mut k, v)| (k.split_off(VirtualNode::SIZE), v))
+                    })
+                })
                 .map(Box::pin)
                 .collect();
 
@@ -595,6 +632,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 }))
                 .await?
                 .into_iter()
+                .map(|stream| {
+                    // XXX(rc): A dirty hack to workaround the vnode prefix returned by table
+                    // iterator. See https://github.com/risingwavelabs/risingwave/issues/11673.
+                    stream.map(|result: StreamExecutorResult<(bytes::Bytes, OwnedRow)>| {
+                        result.map(|(mut k, v)| (k.split_off(VirtualNode::SIZE), v))
+                    })
+                })
                 .map(Box::pin)
                 .collect();
 
@@ -652,10 +696,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .into_owned_row()
                 .into(),
         })
-    }
-
-    pub fn shrink_cache_to_range(&mut self, range: RangeInclusive<&StateKey>) {
-        todo!()
     }
 }
 

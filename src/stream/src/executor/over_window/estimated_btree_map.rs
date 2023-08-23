@@ -38,7 +38,6 @@ impl<K, V> EstimatedBTreeMap<K, V> {
         self.inner.len()
     }
 
-    #[expect(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }

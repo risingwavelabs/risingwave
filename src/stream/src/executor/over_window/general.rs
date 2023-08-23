@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{btree_map, BTreeMap, HashSet};
 use std::marker::PhantomData;
+use std::ops::RangeInclusive;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -33,7 +34,8 @@ use risingwave_storage::StateStore;
 
 use super::delta_btree_map::Change;
 use super::over_partition::{
-    new_empty_partition_cache, CacheKey, OverPartition, PartitionCache, PartitionDelta,
+    new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
+    PartitionDelta,
 };
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
@@ -79,6 +81,8 @@ struct ExecutorInner<S: StateStore> {
 struct ExecutionVars<S: StateStore> {
     /// partition key => partition range cache.
     cached_partitions: ManagedLruCache<OwnedRow, PartitionCache>,
+    /// partition key => recently accessed range.
+    recently_accessed_ranges: BTreeMap<DefaultOrdered<OwnedRow>, RangeInclusive<StateKey>>,
     _phantom: PhantomData<S>,
 }
 
@@ -352,7 +356,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             );
 
             // Build changes for current partition.
-            let part_changes =
+            let (part_changes, accessed_range) =
                 Self::build_changes_for_partition(this, &mut partition, delta).await?;
 
             for (key, record) in part_changes {
@@ -387,6 +391,27 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 // Apply the change record.
                 partition.write_record(&mut this.state_table, key, record);
             }
+
+            // Update recently accessed range for later shrinking cache.
+            if let Some(accessed_range) = accessed_range {
+                match vars.recently_accessed_ranges.entry(part_key) {
+                    btree_map::Entry::Vacant(vacant) => {
+                        vacant.insert(accessed_range);
+                    }
+                    btree_map::Entry::Occupied(mut occupied) => {
+                        let recently_accessed_range = occupied.get_mut();
+                        let min_start = accessed_range
+                            .start()
+                            .min(recently_accessed_range.start())
+                            .clone();
+                        let max_end = accessed_range
+                            .end()
+                            .max(recently_accessed_range.end())
+                            .clone();
+                        *recently_accessed_range = min_start..=max_end;
+                    }
+                }
+            }
         }
 
         // Yield remaining changes to downstream.
@@ -399,7 +424,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
         this: &ExecutorInner<S>,
         partition: &mut OverPartition<'_, S>,
         delta: PartitionDelta,
-    ) -> StreamExecutorResult<BTreeMap<StateKey, Record<OwnedRow>>> {
+    ) -> StreamExecutorResult<(
+        BTreeMap<StateKey, Record<OwnedRow>>,
+        Option<RangeInclusive<StateKey>>,
+    )> {
         assert!(!delta.is_empty(), "if there's no delta, we won't be here");
 
         let mut part_changes = BTreeMap::new();
@@ -426,6 +454,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
         }
 
+        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
+
         for (first_frame_start, first_curr_key, last_curr_key, last_frame_end) in affected_ranges {
             assert!(first_frame_start <= first_curr_key);
             assert!(first_curr_key <= last_curr_key);
@@ -434,6 +464,23 @@ impl<S: StateStore> OverWindowExecutor<S> {
             assert!(first_curr_key.is_normal());
             assert!(last_curr_key.is_normal());
             assert!(last_frame_end.is_normal());
+
+            if let Some(accessed_range) = accessed_range.as_mut() {
+                let min_start = first_frame_start
+                    .as_normal_expect()
+                    .min(accessed_range.start())
+                    .clone();
+                let max_end = last_frame_end
+                    .as_normal_expect()
+                    .max(accessed_range.end())
+                    .clone();
+                *accessed_range = min_start..=max_end;
+            } else {
+                accessed_range = Some(
+                    first_frame_start.as_normal_expect().clone()
+                        ..=last_frame_end.as_normal_expect().clone(),
+                );
+            }
 
             let mut states =
                 WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?);
@@ -516,7 +563,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             } {}
         }
 
-        Ok(part_changes)
+        Ok((part_changes, accessed_range))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -535,6 +582,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         let mut vars = ExecutionVars {
             cached_partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
+            recently_accessed_ranges: Default::default(),
             _phantom: PhantomData::<S>,
         };
 
@@ -569,6 +617,18 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             this.state_table.update_vnode_bitmap(vnode_bitmap);
                         if cache_may_stale {
                             vars.cached_partitions.clear();
+                        }
+                    }
+
+                    for (part_key, recently_accessed_range) in
+                        std::mem::take(&mut vars.recently_accessed_ranges)
+                    {
+                        if let Some(mut range_cache) = vars.cached_partitions.get_mut(&part_key.0) {
+                            shrink_partition_cache(
+                                &part_key.0,
+                                &mut range_cache,
+                                recently_accessed_range,
+                            );
                         }
                     }
 
