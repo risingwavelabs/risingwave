@@ -94,11 +94,7 @@ impl CdcBackfillExecutor {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
-        let pk_order = self
-            .upstream_table
-            .pk_serializer()
-            .get_order_types()
-            .to_vec();
+        let pk_order = self.upstream_table.pk_order_types().to_vec();
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
         let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);

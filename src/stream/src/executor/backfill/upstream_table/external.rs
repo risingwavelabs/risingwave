@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
 
@@ -34,8 +33,7 @@ pub struct ExternalStorageTable {
     /// todo: the schema of the external table defined in the CREATE TABLE DDL
     schema: Schema,
 
-    /// Used for serializing and deserializing the primary key.
-    pk_serializer: OrderedRowSerde,
+    pk_order_types: Vec<OrderType>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table.
@@ -53,23 +51,17 @@ impl ExternalStorageTable {
         }: SchemaTableName,
         table_reader: ExternalTableReaderImpl,
         schema: Schema,
-        order_types: Vec<OrderType>,
+        pk_order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         output_indices: Vec<usize>,
     ) -> Self {
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|i| schema.fields[*i].data_type.clone())
-            .collect();
-        let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-
         Self {
             table_id,
             table_name,
             schema_name,
             table_reader,
             schema,
-            pk_serializer,
+            pk_order_types,
             pk_indices,
             output_indices,
         }
@@ -79,8 +71,8 @@ impl ExternalStorageTable {
         self.table_id
     }
 
-    pub fn pk_serializer(&self) -> &OrderedRowSerde {
-        &self.pk_serializer
+    pub fn pk_order_types(&self) -> &[OrderType] {
+        &self.pk_order_types
     }
 
     pub fn schema(&self) -> &Schema {
