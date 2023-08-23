@@ -35,7 +35,6 @@ use crate::utils::{ColIndexMappingRewriteExt, Condition};
 pub struct Scan {
     pub table_name: String,
     pub is_sys_table: bool,
-    pub is_cdc_table: bool,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
@@ -218,7 +217,6 @@ impl Scan {
         Self::new(
             index_name.to_string(),
             false,
-            false,
             new_output_col_idx,
             index_table_desc,
             vec![],
@@ -233,7 +231,6 @@ impl Scan {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         table_name: String,
-        is_cdc_table: bool,
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
@@ -262,7 +259,6 @@ impl Scan {
         Self {
             table_name,
             is_sys_table,
-            is_cdc_table,
             required_col_idx,
             output_col_idx,
             table_desc,

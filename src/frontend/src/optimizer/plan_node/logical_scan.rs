@@ -64,7 +64,6 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         is_sys_table: bool,
-        is_cdc_table: bool,
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
@@ -73,7 +72,6 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            is_cdc_table,
             is_sys_table,
             (0..table_desc.columns.len()).collect(),
             table_desc,
@@ -92,10 +90,6 @@ impl LogicalScan {
 
     pub fn is_sys_table(&self) -> bool {
         self.core.is_sys_table
-    }
-
-    pub fn is_cdc_table(&self) -> bool {
-        self.core.is_cdc_table
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -248,7 +242,6 @@ impl LogicalScan {
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
-            false,
             self.is_sys_table(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
@@ -269,7 +262,6 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::Scan::new(
             self.table_name().to_string(),
-            false,
             self.is_sys_table(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
@@ -285,7 +277,6 @@ impl LogicalScan {
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::Scan::new(
             self.table_name().to_string(),
-            false,
             self.is_sys_table(),
             output_col_idx,
             self.core.table_desc.clone(),
