@@ -38,7 +38,7 @@ pub(super) async fn handle_cancel(
         .into_iter()
         .map(|id| Row::new(vec![Some(id.to_string().into())]))
         .collect_vec();
-    return Ok(PgResponse::builder(StatementType::CANCEL_COMMAND)
+    Ok(PgResponse::builder(StatementType::CANCEL_COMMAND)
         .values(
             rows.into(),
             vec![PgFieldDescriptor::new(
@@ -47,5 +47,5 @@ pub(super) async fn handle_cancel(
                 DataType::Varchar.type_len(),
             )],
         )
-        .into());
+        .into())
 }
