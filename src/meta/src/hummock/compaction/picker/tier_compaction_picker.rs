@@ -136,6 +136,7 @@ impl TierCompactionPicker {
             if self.strict_check {
                 let tier_sub_level_compact_level_count =
                     self.config.level0_overlapping_sub_level_compact_level_count as usize;
+
                 if select_level_inputs.len() < tier_sub_level_compact_level_count
                     && waiting_enough_files
                 {
@@ -363,5 +364,43 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(1, ret.input_levels.len());
+    }
+
+    #[test]
+    fn test_strict_check() {
+        let l0 = generate_l0_overlapping_sublevels(vec![
+            vec![
+                generate_table(4, 1, 100, 300, 1),
+                generate_table(5, 1, 200, 220, 1),
+            ],
+            vec![
+                generate_table(6, 1, 100, 300, 1),
+                generate_table(7, 1, 200, 220, 1),
+            ],
+        ]);
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![],
+            ..Default::default()
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .max_compaction_bytes(500000)
+                .level0_overlapping_sub_level_compact_level_count(100)
+                .build(),
+        );
+
+        let mut local_stats = LocalPickerStatistic::default();
+        let mut picker = TierCompactionPicker::new(config.clone(), true);
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
+
+        let mut picker = TierCompactionPicker::new(config, false);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        assert_eq!(2, ret.input_levels.len());
     }
 }

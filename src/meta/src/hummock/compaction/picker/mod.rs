@@ -32,7 +32,7 @@ pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPick
 
 use crate::hummock::level_handler::LevelHandler;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
     pub skip_by_write_amp_limit: u64,
     pub skip_by_count_limit: u64,
