@@ -128,6 +128,6 @@ echo "--- Querying source"
 ./risedev psql -c "SELECT * FROM kafka_source;"
 
 echo "--- Running cleanup"
-#./risedev k
-#pkill risingwave
-#./risedev clean-data
+./risedev k
+pkill risingwave
+./risedev clean-data
