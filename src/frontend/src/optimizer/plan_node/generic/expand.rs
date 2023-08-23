@@ -136,4 +136,8 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
             .inverse()
             .expect("must be invertible")
     }
+
+    pub fn decompose(self) -> (PlanRef, Vec<Vec<usize>>) {
+        (self.input, self.column_subsets)
+    }
 }

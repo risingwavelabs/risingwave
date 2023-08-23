@@ -325,11 +325,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            ignore_range_tombstone: false,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
@@ -458,12 +457,12 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             async move {
                 let read_options = ReadOptions {
                     prefix_hint,
-                    ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
                     prefetch_options,
                     cache_policy,
+                    ..Default::default()
                 };
                 let pk_serializer = match self.output_row_in_key_indices.is_empty() {
                     true => None,
