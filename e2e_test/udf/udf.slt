@@ -294,6 +294,9 @@ statement ok
 drop function hex_to_dec;
 
 statement ok
+drop function decimal_add;
+
+statement ok
 drop function array_access;
 
 statement ok
