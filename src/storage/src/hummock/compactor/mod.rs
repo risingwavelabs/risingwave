@@ -528,9 +528,13 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                             context.sstable_store.clone(),
                                         )
                                         .await{
-                                            Ok(vacuum_task) => Vacuum::report_vacuum_task(vacuum_task, meta_client).await,
-                                            Err(e) => {tracing::warn!("Failed to vacuum task: {:#?}", e); false},
-                                        };
+                                            Ok(vacuum_task) => {
+                                                Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to vacuum task: {:#?}", e)
+                                            }
+                                        }
                                     }
                                     ResponseEvent::FullScanTask(full_scan_task) => {
                                         Vacuum::full_scan(
