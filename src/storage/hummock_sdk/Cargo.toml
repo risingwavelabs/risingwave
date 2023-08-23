@@ -16,10 +16,10 @@ normal = ["workspace-hack"]
 [dependencies]
 bytes = "1"
 hex = "0.4"
-itertools = "0.10"
-parse-display = "0.6"
-risingwave_common = { path = "../../common" }
-risingwave_pb = { path = "../../prost" }
+itertools = "0.11"
+parse-display = "0.8"
+risingwave_common = { workspace = true }
+risingwave_pb = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

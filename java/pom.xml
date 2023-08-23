@@ -13,6 +13,7 @@
         <module>java-binding</module>
         <module>common-utils</module>
         <module>java-binding-integration-test</module>
+        <module>java-binding-benchmark</module>
         <module>connector-node/connector-api</module>
         <module>connector-node/risingwave-sink-iceberg</module>
         <module>connector-node/risingwave-sink-deltalake</module>

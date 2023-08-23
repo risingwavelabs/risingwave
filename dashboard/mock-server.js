@@ -26,10 +26,6 @@ app.get("/actors", (req, res, next) => {
   res.json(require("./mock/actors.json"))
 })
 
-app.get("/fragments", (req, res, next) => {
-  res.json(require("./mock/fragments.json"))
-})
-
 app.get("/fragments2", (req, res, next) => {
   res.json(require("./mock/fragments2.json"))
 })
@@ -72,6 +68,10 @@ app.get("/clusters/2", (req, res, next) => {
 
 app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
+})
+
+app.get("/metrics/actor/back_pressures", (req, res, next) => {
+  res.json(require("./mock/actor_back_pressures.json"))
 })
 
 app.get("/monitor/await_tree/1", (req, res, next) => {

@@ -49,8 +49,14 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compaction_group_id: u64,
         table_id: u32,
         level: u32,
+        sst_ids: Vec<u64>,
     ) -> Result<()>;
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()>;
+    async fn report_full_scan_task(
+        &self,
+        filtered_object_ids: Vec<HummockSstableObjectId>,
+        total_object_count: u64,
+        total_object_size: u64,
+    ) -> Result<()>;
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
 
     async fn subscribe_compaction_event(

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod backup_service;
+pub mod cloud_service;
 pub mod cluster_service;
 pub mod ddl_service;
 pub mod health_service;
@@ -22,6 +23,7 @@ pub mod meta_member_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod serving_service;
+pub mod sink_coordination_service;
 pub mod stream_service;
 pub mod system_params_service;
 pub mod telemetry_service;

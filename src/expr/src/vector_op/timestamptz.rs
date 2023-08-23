@@ -26,7 +26,7 @@ use crate::{ExprError, Result};
 pub fn time_zone_err(inner_err: String) -> ExprError {
     ExprError::InvalidParam {
         name: "time_zone",
-        reason: inner_err,
+        reason: inner_err.into(),
     }
 }
 
@@ -59,7 +59,8 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
             reason: format!(
                 "fail to interpret local timestamp \"{}\" in time zone \"{}\"",
                 input, time_zone
-            ),
+            )
+            .into(),
         })?;
     let usec = instant_local.timestamp_micros();
     Ok(Timestamptz::from_micros(usec))

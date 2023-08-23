@@ -17,7 +17,6 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -26,16 +25,18 @@ use risingwave_pb::hummock::SstableInfo;
 use super::utils::CompressionAlgorithm;
 use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, MonotonicDeleteEvent, SstableMeta, SstableWriter,
-    DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::sstable::FilterBuilder;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, Xor16FilterBuilder};
+use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder, DEFAULT_BLOCK_SIZE};
 use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
+pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
@@ -48,17 +49,19 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
+    pub max_sst_size: u64,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
     fn from(options: &StorageOpts) -> SstableBuilderOptions {
-        let capacity = (options.sstable_size_mb as usize) * (1 << 20);
+        let capacity: usize = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
+            max_sst_size: options.compactor_max_sst_size,
         }
     }
 }
@@ -71,6 +74,7 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         }
     }
 }
@@ -111,7 +115,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     last_full_key: Vec<u8>,
-    last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
@@ -127,10 +130,13 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
+    range_tombstone_size: usize,
 
     filter_builder: F,
 
     epoch_set: BTreeSet<u64>,
+
+    memory_limiter: Option<Arc<MemoryLimiter>>,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -141,6 +147,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
             Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            None,
         )
     }
 }
@@ -152,6 +159,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         filter_builder: F,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
         Self {
             options: options.clone(),
@@ -168,7 +176,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
-            last_extract_key: vec![],
             monotonic_deletes: vec![],
             sstable_id,
             filter_key_extractor,
@@ -176,24 +183,51 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             total_key_count: 0,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
+            range_tombstone_size: 0,
             epoch_set: BTreeSet::default(),
+            memory_limiter,
+        }
+    }
+
+    pub fn add_monotonic_deletes(&mut self, events: Vec<MonotonicDeleteEvent>) {
+        for event in events {
+            self.add_monotonic_delete(event);
         }
     }
 
     /// Add kv pair to sstable.
-    pub fn add_monotonic_deletes(&mut self, monotonic_deletes: Vec<MonotonicDeleteEvent>) {
-        let mut last_table_id = TableId::default();
-        for monotonic_delete in monotonic_deletes
-            .iter()
-            .filter(|monotonic_delete| monotonic_delete.new_epoch != HummockEpoch::MAX)
-        {
-            if last_table_id != monotonic_delete.event_key.left_user_key.table_id {
-                last_table_id = monotonic_delete.event_key.left_user_key.table_id;
-                self.table_ids
-                    .insert(monotonic_delete.event_key.left_user_key.table_id.table_id());
-            }
+    pub fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) {
+        let table_id = event.event_key.left_user_key.table_id.table_id();
+        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            self.table_ids.insert(table_id);
         }
-        self.monotonic_deletes.extend(monotonic_deletes);
+        if event.new_epoch == HummockEpoch::MAX
+            && self.monotonic_deletes.last().map_or(true, |last| {
+                last.new_epoch == HummockEpoch::MAX
+                    && last.event_key.left_user_key.table_id
+                        == event.event_key.left_user_key.table_id
+            })
+        {
+            // This range would never delete any key so we can merge it with last range.
+            return;
+        }
+        if event.new_epoch != HummockEpoch::MAX {
+            self.epoch_set.insert(event.new_epoch);
+        }
+        self.stale_key_count += 1;
+        self.total_key_count += 1;
+        self.range_tombstone_size += event.encoded_size();
+        self.monotonic_deletes.push(event);
+    }
+
+    pub fn last_range_tombstone_epoch(&self) -> HummockEpoch {
+        self.monotonic_deletes
+            .last()
+            .map_or(HummockEpoch::MAX, |delete| delete.new_epoch)
+    }
+
+    pub fn last_range_tombstone(&self) -> Option<&MonotonicDeleteEvent> {
+        self.monotonic_deletes.last()
     }
 
     /// Add kv pair to sstable.
@@ -238,19 +272,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
-                self.last_extract_key.clear();
-            }
-            let mut extract_key = user_key(&self.raw_key);
-            extract_key = self.filter_key_extractor.extract(extract_key);
-
-            // add bloom_filter check
-            // 1. not empty_key
-            // 2. extract_key key is not duplicate
-            if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
-                // avoid duplicate add to bloom filter
-                self.filter_builder.add_key(extract_key, table_id);
-                self.last_extract_key.clear();
-                self.last_extract_key.extend_from_slice(extract_key);
+                if !self.block_builder.is_empty() {
+                    self.build_block().await?;
+                }
+            } else if self.block_builder.approximate_len() >= self.options.block_capacity {
+                self.build_block().await?;
             }
         } else {
             self.stale_key_count += 1;
@@ -274,6 +300,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             })
         }
 
+        let table_id = full_key.user_key.table_id.table_id();
+        let mut extract_key = user_key(&self.raw_key);
+        extract_key = self.filter_key_extractor.extract(extract_key);
+        // add bloom_filter check
+        if !extract_key.is_empty() {
+            self.filter_builder.add_key(extract_key, table_id);
+        }
         self.block_builder.add(full_key, self.raw_value.as_ref());
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
@@ -283,11 +316,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.raw_key.clear();
         self.raw_value.clear();
-
-        if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block().await?;
-        }
-
         Ok(())
     }
 
@@ -315,8 +343,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.build_block().await?;
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
+
+        assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
+
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            debug_assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
+            assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
             if monotonic_delete.event_key.is_exclude_left_key {
                 if largest_key.is_empty()
                     || !KeyComparator::encoded_greater_than_unencoded(
@@ -348,6 +379,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
+            assert_ne!(monotonic_delete.new_epoch, HummockEpoch::MAX);
             if smallest_key.is_empty()
                 || !KeyComparator::encoded_less_than_unencoded(
                     user_key(&smallest_key),
@@ -361,10 +393,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 .encode();
             }
         }
-        self.total_key_count += self.monotonic_deletes.len() as u64;
-        self.stale_key_count += self.monotonic_deletes.len() as u64;
         let bloom_filter = if self.options.bloom_false_positive > 0.0 {
-            self.filter_builder.finish()
+            self.filter_builder.finish(self.memory_limiter.clone())
         } else {
             vec![]
         };
@@ -386,7 +416,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             meta_offset,
             monotonic_tombstone_events: self.monotonic_deletes,
         };
-        meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
+
+        // FIXME: just workaround
+        let encoded_size_u32 = u32::try_from(meta.encoded_size()).unwrap();
+        let meta_offset_u32 = u32::try_from(meta_offset).unwrap();
+        meta.estimated_size = encoded_size_u32.checked_add(meta_offset_u32).unwrap();
 
         // Expand the epoch of the whole sst by tombstone epoch
         let (tombstone_min_epoch, tombstone_max_epoch) = {
@@ -490,11 +524,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.writer.data_len()
             + self.block_builder.approximate_len()
             + self.filter_builder.approximate_len()
+            + self.range_tombstone_size
     }
 
     async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
+            self.block_metas.pop();
             return Ok(());
         }
 
@@ -502,6 +538,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
+        self.filter_builder
+            .switch_block(self.memory_limiter.clone());
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())
@@ -520,6 +558,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.approximate_len() >= self.options.capacity
     }
 
+    pub fn reach_max_sst_size(&self) -> bool {
+        self.approximate_len() as u64 >= self.options.max_sst_size
+    }
+
     fn finalize_last_table_stats(&mut self) {
         if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
@@ -533,12 +575,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use std::collections::Bound;
+
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::UserKey;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
@@ -552,7 +597,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: 0.001,
-            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
 
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -567,7 +612,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -628,7 +673,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
-            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
 
         // build remote table
@@ -648,7 +693,15 @@ pub(super) mod tests {
             let full_key = test_key_of(i);
             if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
-                assert!(table.may_match_hash(hash));
+                let key_ref = full_key.user_key.as_ref();
+                assert!(
+                    table.may_match_hash(
+                        &(Bound::Included(key_ref), Bound::Included(key_ref)),
+                        hash
+                    ),
+                    "failed at {}",
+                    i
+                );
             }
         }
     }
@@ -658,5 +711,6 @@ pub(super) mod tests {
         test_with_bloom_filter::<Xor16FilterBuilder>(false).await;
         test_with_bloom_filter::<Xor16FilterBuilder>(true).await;
         test_with_bloom_filter::<Xor8FilterBuilder>(true).await;
+        test_with_bloom_filter::<BlockedXor16FilterBuilder>(true).await;
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::ops::Range;
@@ -149,6 +150,16 @@ pub struct Block {
 
     /// Restart points.
     restart_points: Vec<RestartPoint>,
+}
+
+impl Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Block")
+            .field("data_len", &self.data_len)
+            .field("table_id", &self.table_id)
+            .field("restart_points", &self.restart_points)
+            .finish()
+    }
 }
 
 impl Block {

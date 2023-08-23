@@ -19,9 +19,9 @@ clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 prometheus = { version = "0.13" }
 regex = "1"
-risingwave_rt = { path = "../../utils/runtime" }
+risingwave_rt = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-serde_with = "2"
+serde_with = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tokio-stream = { version = "0.1", features = ["fs"] }

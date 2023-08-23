@@ -168,7 +168,9 @@ enum PeekDirection {
 impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
     /// Get the cursor position type.
     pub fn position(&self) -> PositionType {
-        let Some((key, _)) = self.curr_key_value else { return PositionType::Ghost; };
+        let Some((key, _)) = self.curr_key_value else {
+            return PositionType::Ghost;
+        };
         if self.delta.contains_key(key) {
             assert!(matches!(self.delta.get(key).unwrap(), Change::Insert(_)));
             if self.snapshot.contains_key(key) {

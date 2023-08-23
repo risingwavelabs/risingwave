@@ -81,6 +81,28 @@ enum JoinType {
   RIGHT_ANTI = 8;
 }
 
+// https://github.com/tokio-rs/prost/issues/80
+enum FormatType {
+  FORMAT_TYPE_UNSPECIFIED = 0;
+  FORMAT_TYPE_NATIVE = 1;
+  FORMAT_TYPE_DEBEZIUM = 2;
+  FORMAT_TYPE_DEBEZIUM_MONGO = 3;
+  FORMAT_TYPE_MAXWELL = 4;
+  FORMAT_TYPE_CANAL = 5;
+  FORMAT_TYPE_UPSERT = 6;
+  FORMAT_TYPE_PLAIN = 7;
+}
+
+enum EncodeType {
+  ENCODE_TYPE_UNSPECIFIED = 0;
+  ENCODE_TYPE_NATIVE = 1;
+  ENCODE_TYPE_AVRO = 2;
+  ENCODE_TYPE_CSV = 3;
+  ENCODE_TYPE_PROTOBUF = 4;
+  ENCODE_TYPE_JSON = 5;
+  ENCODE_TYPE_BYTES = 6;
+}
+
 enum RowFormatType {
   ROW_UNSPECIFIED = 0;
   JSON = 1;
@@ -105,4 +127,11 @@ message IndexAndExpr {
 
 message DefaultColumns {
   repeated IndexAndExpr default_columns = 1;
+}
+
+// The cardinality of the output rows of a plan node. Bounds are inclusive.
+message Cardinality {
+  uint64 lo = 1;
+  // Unbounded if not set.
+  optional uint64 hi = 2;
 }

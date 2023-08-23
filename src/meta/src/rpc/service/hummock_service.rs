@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
+use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -232,7 +232,7 @@ where
         }
 
         // get internal_table_id by fragment_manager
-        if request.table_id >= NON_RESERVED_PG_CATALOG_TABLE_ID as u32 {
+        if request.table_id >= NON_RESERVED_SYS_CATALOG_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
@@ -247,7 +247,7 @@ where
         assert!(option
             .internal_table_id
             .iter()
-            .all(|table_id| *table_id >= (NON_RESERVED_PG_CATALOG_TABLE_ID as u32)),);
+            .all(|table_id| *table_id >= (NON_RESERVED_SYS_CATALOG_ID as u32)),);
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
@@ -279,14 +279,20 @@ where
         &self,
         request: Request<ReportFullScanTaskRequest>,
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
-        let vacuum_manager = self.vacuum_manager.clone();
+        let req = request.into_inner();
+        let hummock_manager = self.hummock_manager.clone();
+        hummock_manager
+            .metrics
+            .total_object_count
+            .set(req.total_object_count as _);
+        hummock_manager
+            .metrics
+            .total_object_size
+            .set(req.total_object_size as _);
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match vacuum_manager
-                .complete_full_gc(request.into_inner().object_ids)
-                .await
-            {
+            match hummock_manager.complete_full_gc(req.object_ids).await {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }
@@ -302,7 +308,7 @@ where
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.vacuum_manager.start_full_gc(Duration::from_secs(
+        self.hummock_manager.start_full_gc(Duration::from_secs(
             request.into_inner().sst_retention_time_sec,
         ))?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))

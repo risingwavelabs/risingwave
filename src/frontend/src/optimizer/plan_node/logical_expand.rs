@@ -62,6 +62,10 @@ impl LogicalExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.core.column_subsets
     }
+
+    pub fn decompose(self) -> (PlanRef, Vec<Vec<usize>>) {
+        self.core.decompose()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
@@ -98,9 +102,11 @@ impl PlanTreeNodeUnary for LogicalExpand {
         });
         mapping.push(Some(2 * new_input_col_num));
 
+        let expand = Self::new(input, column_subsets);
+        let output_col_num = expand.schema().len();
         (
-            Self::new(input, column_subsets),
-            ColIndexMapping::new(mapping),
+            expand,
+            ColIndexMapping::with_target_size(mapping, output_col_num),
         )
     }
 }

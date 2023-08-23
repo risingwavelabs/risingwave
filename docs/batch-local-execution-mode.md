@@ -12,7 +12,7 @@ The query engine of RisingWave supports two types of queries: highly concurrent 
 | Result Set	    | Small	         | Small, Medium, Large	 |
 | Use Scenarios	 | Dashboard	     | Adhoc analysis	       |
 
-Our distributed query processing engine is designed for complex adhoc queries, and it can’t meet the latency/QPS 
+Our distributed query processing engine is designed for complex adhoc queries, and it can’t meet the latency/QPS
 requirement of point queries, and in this article we introduce local execution mode for point queries.
 
 ## Design
@@ -49,13 +49,13 @@ The overall process will be quite similar to distributed processing, but with a 
 
 ### Monitoring/Management
 
-Local execution mode will not go through query management mentioned in  batch query manager to reduce latency as 
+Local execution mode will not go through query management mentioned in  batch query manager to reduce latency as
 much as possible.
 
 ### How to switch between local/distributed execution modes?
 
-As mentioned in the first paragraph, the main use case for local execution mode is determined(dashboard/reporting), so 
-currently we just expose a session configuration(`query_mode`) to user. In future we may use optimizer to determined 
+As mentioned in the first paragraph, the main use case for local execution mode is determined(dashboard/reporting), so
+currently we just expose a session configuration(`query_mode`) to user. In future we may use optimizer to determined
 it if required.
 
 ### RPC execution in local mode

@@ -40,6 +40,7 @@
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_option_inspect)]
+#![feature(negative_impls)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -66,6 +67,7 @@ pub mod system_param;
 pub mod telemetry;
 pub mod transaction;
 
+pub mod format;
 pub mod metrics;
 pub mod test_utils;
 pub mod types;

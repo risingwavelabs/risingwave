@@ -376,7 +376,7 @@ pub fn sqrt_f64(expr: F64) -> Result<F64> {
     if expr < F64::from(0.0) {
         return Err(ExprError::InvalidParam {
             name: "sqrt input",
-            reason: "input cannot be negative value".to_string(),
+            reason: "input cannot be negative value".into(),
         });
     }
     // Edge cases: nan, inf, negative zero should return itself.
@@ -394,12 +394,12 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
             Some(res) => Ok(Decimal::from(res)),
             None => Err(ExprError::InvalidParam {
                 name: "sqrt input",
-                reason: "input cannot be negative value".to_string(),
+                reason: "input cannot be negative value".into(),
             }),
         },
         Decimal::NegativeInf => Err(ExprError::InvalidParam {
             name: "sqrt input",
-            reason: "input cannot be negative value".to_string(),
+            reason: "input cannot be negative value".into(),
         }),
     }
 }
@@ -422,6 +422,21 @@ pub fn sign_f64(input: F64) -> F64 {
 #[function("sign(decimal) -> decimal")]
 pub fn sign_dec(input: Decimal) -> Decimal {
     input.sign()
+}
+
+#[function("scale(decimal) -> int32")]
+pub fn decimal_scale(d: Decimal) -> Option<i32> {
+    d.scale()
+}
+
+#[function("min_scale(decimal) -> int32")]
+pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
+    d.normalize().scale()
+}
+
+#[function("trim_scale(decimal) -> decimal")]
+pub fn decimal_trim_scale(d: Decimal) -> Decimal {
+    d.normalize()
 }
 
 #[cfg(test)]

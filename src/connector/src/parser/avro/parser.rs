@@ -25,7 +25,7 @@ use url::Url;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
@@ -118,7 +118,6 @@ impl AvroParserConfig {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
         if avro_config.use_schema_registry {
-            let kafka_topic = &avro_config.topic;
             let client = Client::new(url, &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
             let upsert_primary_key_column_name =
@@ -127,17 +126,23 @@ impl AvroParserConfig {
                 } else {
                     None
                 };
+            let (subject_key, subject_value) = get_subject_by_strategy(
+                &avro_config.name_strategy,
+                avro_config.topic.as_str(),
+                avro_config.key_record_name.as_deref(),
+                avro_config.record_name.as_deref(),
+                enable_upsert,
+            )?;
+            tracing::debug!(
+                "infer key subject {}, value subject {}",
+                subject_key,
+                subject_value
+            );
 
             Ok(Self {
-                schema: resolver
-                    .get_by_subject_name(&format!("{}-value", kafka_topic))
-                    .await?,
+                schema: resolver.get_by_subject_name(&subject_value).await?,
                 key_schema: if enable_upsert {
-                    Some(
-                        resolver
-                            .get_by_subject_name(&format!("{}-key", kafka_topic))
-                            .await?,
-                    )
+                    Some(resolver.get_by_subject_name(&subject_key).await?)
                 } else {
                     None
                 },
@@ -214,9 +219,9 @@ mod test {
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, EncodingType, ParserProperties, SourceStreamChunkBuilder,
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::{SourceColumnDesc, SourceFormat};
+    use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -290,7 +295,11 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
+            &info,
+            &HashMap::new(),
+        )?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 
@@ -320,7 +329,7 @@ mod test {
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
-        let input_data = Some(writer.into_inner().unwrap());
+        let input_data = writer.into_inner().unwrap();
         let columns = build_rw_columns();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {

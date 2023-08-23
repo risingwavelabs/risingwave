@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
@@ -157,6 +158,21 @@ impl DatabaseManager {
         )
     }
 
+    pub fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
+        self.tables
+            .values()
+            .map(|table| {
+                (
+                    table.id,
+                    (
+                        table.name.clone(),
+                        table.table_type().as_str_name().to_string(),
+                    ),
+                )
+            })
+            .collect()
+    }
+
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
         if self.tables.values().any(|x| {
             x.database_id == relation_key.0
@@ -244,10 +260,22 @@ impl DatabaseManager {
             .collect()
     }
 
-    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+    pub fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
         self.tables
             .values()
-            .filter(|table| table.schema_id == schema_id)
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type != TableType::Table as i32
+            })
+            .map(|table| table.id)
+            .collect_vec()
+    }
+
+    pub fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type == TableType::Table as i32
+            })
             .map(|table| table.id)
             .collect_vec()
     }

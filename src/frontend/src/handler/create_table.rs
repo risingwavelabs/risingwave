@@ -29,8 +29,8 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
-    TableConstraint,
+    ColumnDef, ColumnOption, DataType as AstDataType, Encode, Format, ObjectName, SourceSchemaV2,
+    SourceWatermark, TableConstraint,
 };
 
 use super::RwPgResponse;
@@ -155,9 +155,9 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             ..
         } = column;
 
-        let data_type = data_type.clone().ok_or(ErrorCode::InvalidInputSyntax(
-            "data type is not specified".into(),
-        ))?;
+        let data_type = data_type
+            .clone()
+            .ok_or_else(|| ErrorCode::InvalidInputSyntax("data type is not specified".into()))?;
         if let Some(collation) = collation {
             return Err(ErrorCode::NotImplemented(
                 format!("collation \"{}\"", collation),
@@ -411,11 +411,22 @@ pub(crate) async fn gen_create_table_plan_with_source(
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    source_schema: SourceSchema,
+    source_schema: SourceSchemaV2,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+    if append_only
+        && source_schema.format != Format::Plain
+        && source_schema.format != Format::Native
+    {
+        return Err(ErrorCode::BindError(format!(
+            "Append only table does not support format {}.",
+            source_schema.format
+        ))
+        .into());
+    }
+
     let session = context.session_ctx();
     let mut properties = context.with_options().inner().clone().into_iter().collect();
     validate_compatibility(&source_schema, &mut properties)?;
@@ -593,6 +604,8 @@ fn gen_table_plan_inner(
         watermark_descs: watermark_descs.clone(),
         definition: "".to_string(),
         connection_id,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
@@ -658,7 +671,7 @@ pub async fn handle_create_table(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
-    source_schema: Option<SourceSchema>,
+    source_schema: Option<SourceSchemaV2>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     notice: Option<String>,
@@ -667,6 +680,10 @@ pub async fn handle_create_table(
     // TODO(st1page): refactor it
     if let Some(notice) = notice {
         session.notice_to_user(notice)
+    }
+
+    if append_only {
+        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
     match session.check_relation_name_duplicated(table_name.clone()) {
@@ -679,7 +696,7 @@ pub async fn handle_create_table(
         Ok(_) => {}
     };
 
-    if source_schema == Some(SourceSchema::Json) && columns.is_empty() {
+    if let Some(s) = &source_schema && s.row_encode == Encode::Json && columns.is_empty() {
         return Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "schema definition is required for ENCODE JSON".to_owned(),
         )));
@@ -737,13 +754,11 @@ pub async fn handle_create_table(
 
 pub fn check_create_table_with_source(
     with_options: &WithOptions,
-    source_schema: Option<SourceSchema>,
-) -> Result<Option<SourceSchema>> {
+    source_schema: Option<SourceSchemaV2>,
+) -> Result<Option<SourceSchemaV2>> {
     if with_options.inner().contains_key(UPSTREAM_SOURCE_KEY) {
         source_schema.as_ref().ok_or_else(|| {
-            ErrorCode::InvalidInputSyntax(
-                "Please specify a source schema using ROW FORMAT".to_owned(),
-            )
+            ErrorCode::InvalidInputSyntax("Please specify a source schema using FORMAT".to_owned())
         })?;
     }
     Ok(source_schema)
@@ -878,7 +893,8 @@ mod tests {
                 columns: column_defs,
                 constraints,
                 ..
-            } = ast.remove(0) else {
+            } = ast.remove(0)
+            else {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {

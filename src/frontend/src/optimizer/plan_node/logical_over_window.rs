@@ -361,7 +361,7 @@ pub struct LogicalOverWindow {
 }
 
 impl LogicalOverWindow {
-    fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
+    pub fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
         let core = OverWindow::new(calls, input);
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
@@ -486,17 +486,26 @@ impl LogicalOverWindow {
                         )
                         .into());
                     }
-                    const_offset
-                        .unwrap()?
-                        .map(|v| *v.as_int64() as usize)
-                        .unwrap_or(1usize)
+                    const_offset.unwrap()?.map(|v| *v.as_int64()).unwrap_or(1)
                 } else {
-                    1usize
+                    1
                 };
-                let frame = if window_function.kind == WindowFuncKind::Lag {
-                    Frame::rows(FrameBound::Preceding(offset), FrameBound::Preceding(offset))
+                let sign = if window_function.kind == WindowFuncKind::Lag {
+                    -1
                 } else {
-                    Frame::rows(FrameBound::Following(offset), FrameBound::Following(offset))
+                    1
+                };
+                let abs_offset = offset.unsigned_abs() as usize;
+                let frame = if sign * offset <= 0 {
+                    Frame::rows(
+                        FrameBound::Preceding(abs_offset),
+                        FrameBound::Preceding(abs_offset),
+                    )
+                } else {
+                    Frame::rows(
+                        FrameBound::Following(abs_offset),
+                        FrameBound::Following(abs_offset),
+                    )
                 };
 
                 (WindowFuncKind::Aggregate(AggKind::FirstValue), frame)
@@ -596,6 +605,10 @@ impl LogicalOverWindow {
         } else {
             LogicalProject::with_out_col_idx(cur_node.into(), out_fields.into_iter()).into()
         }
+    }
+
+    pub fn decompose(self) -> (PlanRef, Vec<PlanWindowFunction>) {
+        self.core.decompose()
     }
 }
 

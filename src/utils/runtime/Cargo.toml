@@ -16,17 +16,22 @@ normal = ["workspace-hack"]
 
 [dependencies]
 await-tree = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 console = "0.15"
-console-subscriber = "0.1.8"
+console-subscriber = "0.1.10"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
-opentelemetry-otlp = { version = "0.12" }
-opentelemetry-semantic-conventions = "0.11"
+opentelemetry-otlp = { version = "0.13" }
+opentelemetry-semantic-conventions = "0.12"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
-pprof = { version = "0.11", features = ["flamegraph"] }
+pprof = { version = "0.12", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
-risingwave_common = { path = "../../common" }
+risingwave_common = { workspace = true }
+risingwave_variables = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -38,9 +43,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs"
 ] }
 tracing = "0.1"
-tracing-opentelemetry = "0.19"
+tracing-opentelemetry = "0.20"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }

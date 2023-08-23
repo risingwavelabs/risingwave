@@ -30,6 +30,6 @@ pub fn jsonb_array_length(v: JsonbRef<'_>) -> Result<i32> {
         .map(|n| n as i32)
         .map_err(|e| ExprError::InvalidParam {
             name: "",
-            reason: e,
+            reason: e.into(),
         })
 }

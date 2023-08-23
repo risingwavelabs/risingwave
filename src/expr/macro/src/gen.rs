@@ -50,9 +50,13 @@ impl FunctionAttr {
     /// Generate a descriptor of the function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    pub fn generate_descriptor(
+        &self,
+        user_fn: &UserFunctionAttr,
+        build_fn: bool,
+    ) -> Result<TokenStream2> {
         if self.is_table_function {
-            return self.generate_table_function_descriptor(build_fn);
+            return self.generate_table_function_descriptor(user_fn, build_fn);
         }
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
@@ -65,11 +69,12 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", self.user_fn.name);
+            let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_fn()?
+            self.generate_build_fn(user_fn)?
         };
+        let deprecated = self.deprecated;
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
@@ -79,14 +84,15 @@ impl FunctionAttr {
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
                     build: #build_fn,
+                    deprecated: #deprecated,
                 }) };
             }
         })
     }
 
-    fn generate_build_fn(&self) -> Result<TokenStream2> {
+    fn generate_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
         let num_args = self.args.len();
-        let fn_name = format_ident!("{}", self.user_fn.name);
+        let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = format_ident!("{}", self.ident_name());
         let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
@@ -113,7 +119,7 @@ impl FunctionAttr {
             .args
             .iter()
             .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
-        let annotation: TokenStream2 = match self.user_fn.core_return_type.as_str() {
+        let annotation: TokenStream2 = match user_fn.core_return_type.as_str() {
             // add type annotation for functions that return generic types
             "T" | "T1" | "T2" | "T3" => format!(": Option<{}>", types::owned_type(&self.ret))
                 .parse()
@@ -133,7 +139,7 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let generic = if self.ret == "boolean" && self.user_fn.generic == 3 {
+        let generic = if self.ret == "boolean" && user_fn.generic == 3 {
             // XXX: for generic compare functions, we need to specify the compatible type
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
@@ -146,23 +152,23 @@ impl FunctionAttr {
             Some(_) => quote! { &self.const_arg, },
             None => quote! {},
         };
-        let context = match self.user_fn.context {
+        let context = match user_fn.context {
             true => quote! { &self.context, },
             false => quote! {},
         };
-        let writer = match self.user_fn.writer {
+        let writer = match user_fn.write {
             true => quote! { &mut writer, },
             false => quote! {},
         };
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(#(#inputs,)* #const_arg #context #writer) };
-        output = match self.user_fn.return_type_kind {
+        output = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
             ReturnTypeKind::Result => quote! { Some(#output?) },
             ReturnTypeKind::ResultOption => quote! { #output? },
         };
-        if !self.user_fn.arg_option {
+        if !user_fn.arg_option {
             output = quote! {
                 match (#(#inputs,)*) {
                     (#(Some(#inputs),)*) => #output,
@@ -171,7 +177,7 @@ impl FunctionAttr {
             };
         };
         // output: Option<impl ScalarRef or Scalar>
-        let append_output = match self.user_fn.writer {
+        let append_output = match user_fn.write {
             true => quote! {{
                 let mut writer = builder.writer().begin();
                 if #output.is_some() {
@@ -181,7 +187,7 @@ impl FunctionAttr {
                     builder.append_null();
                 }
             }},
-            false if self.user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 builder.append(#output.as_ref().map(|s| s.as_ref()));
             },
             false => quote! {
@@ -189,12 +195,12 @@ impl FunctionAttr {
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
         };
-        let row_output = match self.user_fn.writer {
+        let row_output = match user_fn.write {
             true => quote! {{
                 let mut writer = String::new();
                 #output.map(|_| writer.into())
             }},
-            false if self.user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 #output.map(|s| s.as_ref().into())
             },
             false => quote! {{
@@ -209,9 +215,7 @@ impl FunctionAttr {
                 let c = #fn_name(#(#arrays),*);
                 Ok(Arc::new(c.into()))
             }
-        } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
-            && self.user_fn.is_pure()
-        {
+        } else if (types::is_primitive(&self.ret) || self.ret == "boolean") && user_fn.is_pure() {
             // SIMD optimization for primitive types
             match self.args.len() {
                 0 => quote! {
@@ -329,7 +333,11 @@ impl FunctionAttr {
     /// Generate a descriptor of the aggregate function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_agg_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    pub fn generate_agg_descriptor(
+        &self,
+        user_fn: &UserFunctionAttr,
+        build_fn: bool,
+    ) -> Result<TokenStream2> {
         let name = self.name.clone();
 
         let mut args = Vec::with_capacity(self.args.len());
@@ -342,10 +350,10 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", self.user_fn.name);
+            let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_agg_build_fn()?
+            self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
             #[ctor::ctor]
@@ -362,69 +370,97 @@ impl FunctionAttr {
     }
 
     /// Generate build function for aggregate function.
-    fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
-        let ret_variant: TokenStream2 = types::variant(&self.ret).parse().unwrap();
+    fn generate_agg_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
         let ret_owned: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
         let state_type: TokenStream2 = match &self.state {
-            Some(state) => state.parse().unwrap(),
-            None => types::owned_type(&self.ret).parse().unwrap(),
+            Some(state) if state != "ref" => state.parse().unwrap(),
+            _ => types::owned_type(&self.ret).parse().unwrap(),
         };
-        let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
-        let args = quote! { #(#args),* };
-        let let_arrays = self.args.iter().enumerate().map(|(i, arg)| {
-            let array = format_ident!("a{i}");
-            let variant: TokenStream2 = types::variant(arg).parse().unwrap();
-            quote! {
-                let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
-                    bail!("input type mismatch. expect: {}", stringify!(#variant));
-                };
-            }
-        });
-        let let_values = (0..self.args.len()).map(|i| {
-            let v = format_ident!("v{i}");
-            let a = format_ident!("a{i}");
-            quote! { let #v = #a.value_at(row_id); }
-        });
+        let let_arrays = self
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                let array = format_ident!("a{i}");
+                let variant: TokenStream2 = types::variant(arg).parse().unwrap();
+                quote! {
+                    let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
+                        bail!("input type mismatch. expect: {}", stringify!(#variant));
+                    };
+                }
+            })
+            .collect_vec();
+        let let_values = (0..self.args.len())
+            .map(|i| {
+                let v = format_ident!("v{i}");
+                let a = format_ident!("a{i}");
+                quote! { let #v = unsafe { #a.value_at_unchecked(row_id) }; }
+            })
+            .collect_vec();
         let let_state = match &self.state {
-            Some(_) => quote! { self.state.take() },
-            None => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
+            Some(s) if s == "ref" => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
+            _ => quote! { self.state.take() },
         };
         let assign_state = match &self.state {
-            Some(_) => quote! { state },
-            None => quote! { state.map(|x| x.to_owned_scalar()) },
+            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar()) },
+            _ => quote! { state },
         };
         let init_state = match &self.init_state {
-            Some(s) => s.parse().unwrap(),
+            Some(s) => format!("Some({s})").parse().unwrap(),
             _ => quote! { None },
         };
-        let fn_name = format_ident!("{}", self.user_fn.name);
-        let mut next_state = quote! { #fn_name(state, #args) };
-        next_state = match self.user_fn.return_type_kind {
+        let fn_name = format_ident!("{}", user_fn.name);
+        let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
+        let args = quote! { #(#args,)* };
+        let retract = match user_fn.retract {
+            true => quote! { matches!(op, Op::Delete | Op::UpdateDelete) },
+            false => quote! {},
+        };
+        let check_retract = match user_fn.retract {
+            true => quote! {},
+            false => {
+                let msg = format!("aggregate function {} only supports append", self.name);
+                quote! { assert_eq!(op, Op::Insert, #msg); }
+            }
+        };
+        let mut next_state = quote! { #fn_name(state, #args #retract) };
+        next_state = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { Some(#next_state) },
             ReturnTypeKind::Option => next_state,
             ReturnTypeKind::Result => quote! { Some(#next_state?) },
             ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
-        if !self.user_fn.arg_option {
-            if self.args.len() > 1 {
-                todo!("multiple arguments are not supported for non-option function");
-            }
-            let first_state = match &self.init_state {
-                Some(_) => quote! { unreachable!() },
-                _ => quote! { Some(v0.into()) },
-            };
-            next_state = quote! {
-                match (state, v0) {
-                    (Some(state), Some(v0)) => #next_state,
-                    (None, Some(v0)) => #first_state,
-                    (state, None) => state,
+        if !user_fn.arg_option {
+            match self.args.len() {
+                0 => {
+                    next_state = quote! {
+                        match state {
+                            Some(state) => #next_state,
+                            None => state,
+                        }
+                    };
                 }
-            };
+                1 => {
+                    let first_state = match &self.init_state {
+                        Some(_) => quote! { unreachable!() },
+                        _ => quote! { Some(v0.into()) },
+                    };
+                    next_state = quote! {
+                        match (state, v0) {
+                            (Some(state), Some(v0)) => #next_state,
+                            (None, Some(v0)) => #first_state,
+                            (state, None) => state,
+                        }
+                    };
+                }
+                _ => todo!("multiple arguments are not supported for non-option function"),
+            }
         }
 
         Ok(quote! {
             |agg| {
                 use std::collections::HashSet;
+                use std::ops::Range;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
@@ -444,34 +480,77 @@ impl FunctionAttr {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
-                    async fn update_multi(
-                        &mut self,
-                        input: &DataChunk,
-                        start_row_id: usize,
-                        end_row_id: usize,
-                    ) -> Result<()> {
+                    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
                         #(#let_arrays)*
                         let mut state = #let_state;
-                        for row_id in start_row_id..end_row_id {
-                            if !input.vis().is_set(row_id) {
-                                continue;
+                        match input.vis() {
+                            Vis::Bitmap(bitmap) => {
+                                for row_id in bitmap.iter_ones() {
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
                             }
-                            #(#let_values)*
-                            state = #next_state;
+                            Vis::Compact(_) => {
+                                for row_id in 0..input.capacity() {
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
+                            }
                         }
                         self.state = #assign_state;
                         Ok(())
                     }
-                    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-                        let ArrayBuilderImpl::#ret_variant(builder) = builder else {
-                            bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
-                        };
-                        #[allow(clippy::mem_replace_option_with_none)]
-                        match std::mem::replace(&mut self.state, #init_state) {
-                            Some(state) => builder.append(Some(<#ret_owned>::from(state).as_scalar_ref())),
-                            None => builder.append_null(),
+                    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+                        assert!(range.end <= input.capacity());
+                        #(#let_arrays)*
+                        let mut state = #let_state;
+                        match input.vis() {
+                            Vis::Bitmap(bitmap) => {
+                                for row_id in bitmap.iter_ones() {
+                                    if row_id < range.start {
+                                        continue;
+                                    } else if row_id >= range.end {
+                                        break;
+                                    }
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
+                            }
+                            Vis::Compact(_) => {
+                                for row_id in range {
+                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
+                            }
                         }
+                        self.state = #assign_state;
                         Ok(())
+                    }
+                    fn reset(&mut self) {
+                        self.state = #init_state;
+                    }
+                    fn get_state(&self) -> Datum {
+                        self.state.clone().map(|s| s.into())
+                    }
+                    fn set_state(&mut self, state: Datum) {
+                        self.state = state.map(|s| s.try_into().unwrap());
+                    }
+                    fn get_output(&self) -> Result<Datum> {
+                        // FIXME: avoid copy state
+                        Ok(self.state.clone().map(|s| <#ret_owned>::from(s).into()))
+                    }
+                    fn output(&mut self) -> Result<Datum> {
+                        #[allow(clippy::mem_replace_option_with_none)]
+                        let state = std::mem::replace(&mut self.state, #init_state);
+                        Ok(state.map(|s| <#ret_owned>::from(s).into()))
                     }
                     fn estimated_size(&self) -> usize {
                         EstimateSize::estimated_size(self)
@@ -479,7 +558,7 @@ impl FunctionAttr {
                 }
 
                 Ok(Box::new(Agg {
-                    return_type: agg.return_type,
+                    return_type: agg.return_type.clone(),
                     state: #init_state,
                 }))
             }
@@ -489,7 +568,11 @@ impl FunctionAttr {
     /// Generate a descriptor of the table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    fn generate_table_function_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    fn generate_table_function_descriptor(
+        &self,
+        user_fn: &UserFunctionAttr,
+        build_fn: bool,
+    ) -> Result<TokenStream2> {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
@@ -501,10 +584,10 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::table_function::FuncSign };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", self.user_fn.name);
+            let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_table_function()?
+            self.generate_build_table_function(user_fn)?
         };
         let type_infer_fn = if let Some(func) = &self.type_infer {
             func.parse().unwrap()
@@ -533,10 +616,10 @@ impl FunctionAttr {
         })
     }
 
-    fn generate_build_table_function(&self) -> Result<TokenStream2> {
+    fn generate_build_table_function(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
         let num_args = self.args.len();
         let return_types = output_types(&self.ret);
-        let fn_name = format_ident!("{}", self.user_fn.name);
+        let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = format_ident!("{}", self.ident_name());
         let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
@@ -602,15 +685,15 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match self.user_fn.return_type_kind {
+        let iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { iter },
             ReturnTypeKind::Option => quote! { iter.flatten() },
             ReturnTypeKind::Result => quote! { iter? },
             ReturnTypeKind::ResultOption => quote! { value?.flatten() },
         };
-        let iterator_item_type = self.user_fn.iterator_item_kind.clone().ok_or_else(|| {
+        let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(
-                self.user_fn.return_type_span,
+                user_fn.return_type_span,
                 "expect `impl Iterator` in return type",
             )
         })?;
@@ -635,6 +718,7 @@ impl FunctionAttr {
                 #(let #const_child = #const_child.eval_const()?;)*
 
                 #[derive(Debug)]
+                #[allow(non_camel_case_types)]
                 struct #struct_name {
                     return_type: DataType,
                     chunk_size: usize,

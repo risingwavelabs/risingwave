@@ -40,6 +40,10 @@ impl SystemParamsReader {
         self.prost.checkpoint_frequency.unwrap()
     }
 
+    pub fn parallel_compact_size_mb(&self) -> u32 {
+        self.prost.parallel_compact_size_mb.unwrap()
+    }
+
     pub fn sstable_size_mb(&self) -> u32 {
         self.prost.sstable_size_mb.unwrap()
     }
@@ -66,6 +70,10 @@ impl SystemParamsReader {
 
     pub fn backup_storage_directory(&self) -> &str {
         self.prost.backup_storage_directory.as_ref().unwrap()
+    }
+
+    pub fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
+        self.prost.max_concurrent_creating_streaming_jobs.unwrap()
     }
 
     pub fn telemetry_enabled(&self) -> bool {

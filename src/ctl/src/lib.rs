@@ -71,10 +71,8 @@ enum Commands {
     Trace,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
-    Profile {
-        #[clap(short, long = "sleep")]
-        sleep: u64,
-    },
+    #[clap(subcommand)]
+    Profile(ProfileCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -139,6 +137,9 @@ enum HummockCommands {
     ListVersion {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
+
+        #[clap(long = "verbose_key_range", default_value_t = false)]
+        verbose_key_range: bool,
     },
 
     /// list hummock version deltas in the meta store
@@ -173,6 +174,9 @@ enum HummockCommands {
 
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
+
+        #[clap(short, long = "sst-ids")]
+        sst_ids: Vec<u64>,
     },
     /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
     /// sst_retention_time_sec.
@@ -258,7 +262,7 @@ enum TableCommands {
 }
 
 #[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
 pub struct ScaleResizeCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
@@ -274,9 +278,15 @@ pub struct ScaleResizeCommands {
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host, ..."
     )]
     include_workers: Option<Vec<String>>,
+
+    /// The target parallelism, currently, it is used to limit the target parallelism and only
+    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
+    /// with exclude/include_workers.
+    #[clap(long)]
+    target_parallelism: Option<u32>,
 
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
@@ -400,6 +410,30 @@ enum MetaCommands {
         #[clap(long, default_value_t = false)]
         ignore_not_found: bool,
     },
+
+    /// Validate source interface for the cloud team
+    ValidateSource {
+        /// With properties in json format
+        /// If privatelink is used, specify `connection.id` instead of `connection.name`
+        #[clap(long)]
+        props: String,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum ProfileCommands {
+    /// CPU profile
+    Cpu {
+        /// The time to active profiling for (in seconds)
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
+    /// Heap profile
+    Heap {
+        /// The output directory of the dumped file
+        #[clap(long = "dir")]
+        dir: String,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -417,8 +451,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
             cmd_impl::hummock::disable_commit_epoch(context).await?
         }
-        Commands::Hummock(HummockCommands::ListVersion { verbose }) => {
-            cmd_impl::hummock::list_version(context, verbose).await?;
+        Commands::Hummock(HummockCommands::ListVersion {
+            verbose,
+            verbose_key_range,
+        }) => {
+            cmd_impl::hummock::list_version(context, verbose, verbose_key_range).await?;
         }
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,
@@ -440,12 +477,14 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compaction_group_id,
             table_id,
             level,
+            sst_ids,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
                 table_id,
                 level,
+                sst_ids,
             )
             .await?
         }
@@ -556,8 +595,16 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             yes,
             ignore_not_found,
         }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
+        Commands::Meta(MetaCommands::ValidateSource { props }) => {
+            cmd_impl::meta::validate_source(context, props).await?
+        }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
-        Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
+        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
+            cmd_impl::profile::cpu_profile(context, sleep).await?
+        }
+        Commands::Profile(ProfileCommands::Heap { dir }) => {
+            cmd_impl::profile::heap_profile(context, dir).await?
+        }
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
         }
