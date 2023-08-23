@@ -19,7 +19,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use pgwire::pg_server::SessionId;
-use risingwave_pb::meta::CreatingJobInfo;
+use risingwave_pb::meta::cancel_creating_jobs_request::{
+    CreatingJobInfo, CreatingJobInfos, PbJobs,
+};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, SchemaId};
@@ -126,7 +128,9 @@ impl StreamingJobTracker {
         let client = self.meta_client.clone();
         tokio::spawn(async move {
             client
-                .cancel_creating_jobs(jobs.into_iter().map(|job| job.info).collect_vec())
+                .cancel_creating_jobs(PbJobs::Infos(CreatingJobInfos {
+                    infos: jobs.into_iter().map(|job| job.info).collect_vec(),
+                }))
                 .await
         });
     }
