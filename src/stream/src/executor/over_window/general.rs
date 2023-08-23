@@ -488,7 +488,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             // Populate window states with the affected range of rows.
             {
                 let mut cursor = part_with_delta
-                    .find(&first_frame_start)
+                    .find(first_frame_start)
                     .expect("first frame start key must exist");
                 while {
                     let (key, row) = cursor
@@ -516,7 +516,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
                 states.just_slide_forward();
             }
-            let mut curr_key_cursor = part_with_delta.find(&first_curr_key).unwrap();
+            let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
             assert_eq!(
                 states.curr_key(),
                 curr_key_cursor.key().map(CacheKey::as_normal_expect)

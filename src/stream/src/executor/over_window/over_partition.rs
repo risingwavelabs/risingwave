@@ -114,10 +114,10 @@ pub(super) struct OverPartition<'a, S: StateStore> {
 const MAGIC_BATCH_SIZE: usize = 512;
 
 impl<'a, S: StateStore> OverPartition<'a, S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         this_partition_key: &'a OwnedRow,
         cache: &'a mut PartitionCache,
-
         calls: &'a [WindowFuncCall],
         has_unbounded_frame: bool,
         partition_key_indices: &'a [usize],
@@ -268,7 +268,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             self.extend_cache_to_boundary(table).await?;
         } else {
             // ensure the cache covers all delta (if possible)
-            self.extend_cache_by_range(table, &delta_first..=&delta_last)
+            self.extend_cache_by_range(table, delta_first..=delta_last)
                 .await?;
         }
 
@@ -515,7 +515,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         {
             let pk_range = (
                 Bound::Included(self.this_partition_key.into_owned_row()),
-                Bound::Excluded(self.state_key_to_table_pk(&range_to_exclusive)?),
+                Bound::Excluded(self.state_key_to_table_pk(range_to_exclusive)?),
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
@@ -648,7 +648,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
                 if !Row::eq(
                     self.this_partition_key,
-                    &(&row).project(self.partition_key_indices),
+                    (&row).project(self.partition_key_indices),
                 ) {
                     // we've reached the end of this partition
                     break;
@@ -689,10 +689,10 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         Ok(StateKey {
             order_key: memcmp_encoding::encode_row(
                 full_row.project(self.order_key_indices),
-                &self.order_key_order_types,
+                self.order_key_order_types,
             )?,
             pk: full_row
-                .project(&self.input_pk_indices)
+                .project(self.input_pk_indices)
                 .into_owned_row()
                 .into(),
         })
@@ -795,7 +795,7 @@ fn find_affected_ranges<'cache>(
             .iter()
             .map(|call| match &call.frame.bounds {
                 FrameBounds::Rows(start, _end) => {
-                    let mut cursor = part_with_delta.find(&first_curr_key).unwrap();
+                    let mut cursor = part_with_delta.find(first_curr_key).unwrap();
                     for _ in 0..start.n_preceding_rows().unwrap() {
                         cursor.move_prev();
                         if cursor.position().is_ghost() {
@@ -838,7 +838,7 @@ fn find_affected_ranges<'cache>(
             .iter()
             .map(|call| match &call.frame.bounds {
                 FrameBounds::Rows(_start, end) => {
-                    let mut cursor = part_with_delta.find(&last_curr_key).unwrap();
+                    let mut cursor = part_with_delta.find(last_curr_key).unwrap();
                     for _ in 0..end.n_following_rows().unwrap() {
                         cursor.move_next();
                         if cursor.position().is_ghost() {
