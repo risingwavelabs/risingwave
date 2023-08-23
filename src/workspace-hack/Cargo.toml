@@ -20,9 +20,9 @@ publish = false
 [dependencies]
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
-aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
-aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-s3 = { version = "0.29" }
+aws-smithy-client = { version = "0.56", default-features = false, features = ["rustls"] }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
@@ -82,6 +82,7 @@ regex-syntax = { version = "0.7" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rustls = { version = "0.21" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
@@ -108,9 +109,9 @@ uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 auto_enums = { version = "0.8", features = ["futures03"] }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
-aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
-aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-s3 = { version = "0.29" }
+aws-smithy-client = { version = "0.56", default-features = false, features = ["rustls"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
@@ -172,6 +173,7 @@ regex-syntax = { version = "0.7" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rustls = { version = "0.21" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }

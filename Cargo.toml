@@ -60,17 +60,17 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 await-tree = "0.1.1"
-aws-config = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
-aws-sdk-kinesis = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-client = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.55"
-aws-smithy-types = "0.55"
-aws-endpoint = "0.55"
-aws-types = "0.55"
+aws-config = { version = "0.56", default-features = false, features = ["rt-tokio"] }
+aws-credential-types = { version = "0.56", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-kinesis = { version = "0.29", default-features = false, features = ["rt-tokio"] }
+aws-sdk-s3 = { version = "0.29", default-features = false, features = ["rt-tokio"] }
+aws-sdk-ec2 = { version = "0.29", default-features = false, features = ["rt-tokio"] }
+aws-sdk-sqs = { version = "0.29", default-features = false, features = ["rt-tokio"] }
+aws-smithy-client = { version = "0.56", default-features = false, features = ["rt-tokio"] }
+aws-smithy-http = "0.56"
+aws-smithy-types = "0.56"
+aws-endpoint = "0.56"
+aws-types = "0.56"
 etcd-client = { package = "madsim-etcd-client", version = "0.3" }
 futures-async-stream = "0.2"
 hytra = "0.1"
