@@ -23,7 +23,9 @@ use futures::future::join_all;
 use itertools::Itertools;
 use prometheus::Registry;
 use regex::Regex;
-use risingwave_common::monitor::connection::ConnectionMetrics;
+use risingwave_common::monitor::connection::{
+    monitored_tcp_incoming, ConnectionMetrics, TcpConfig,
+};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -303,7 +305,7 @@ pub async fn start_service_as_election_follower(
     let connection_metrics = ConnectionMetrics::new(registry.clone());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::new(
         registry.clone(),
-        connection_metrics,
+        connection_metrics.clone(),
     ));
 
     let health_srv = HealthServiceImpl::new();
@@ -315,24 +317,36 @@ pub async fn start_service_as_election_follower(
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
-        .serve_with_shutdown(address_info.listen_addr, async move {
-            tokio::select! {
-                // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down services"),
-                        Err(_) => tracing::error!("Service shutdown sender dropped")
-                    }
+        .serve_with_incoming_shutdown(
+            monitored_tcp_incoming(
+                address_info.listen_addr,
+                "meta-follower-service",
+                connection_metrics,
+                TcpConfig {
+                    tcp_nodelay: false,
+                    keepalive_duration: None,
                 },
-                // shutdown service if follower becomes leader
-                res = follower_shutdown_rx => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down follower services"),
-                        Err(_) => tracing::error!("Follower service shutdown sender dropped")
-                    }
-                },
-            }
-        })
+            )
+            .unwrap(),
+            async move {
+                tokio::select! {
+                    // shutdown service if all services should be shut down
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown sender dropped")
+                        }
+                    },
+                    // shutdown service if follower becomes leader
+                    res = follower_shutdown_rx => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down follower services"),
+                            Err(_) => tracing::error!("Follower service shutdown sender dropped")
+                        }
+                    },
+                }
+            },
+        )
         .await
         .unwrap();
 }
@@ -438,7 +452,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             }),
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
-            compute_clients: ComputeClientPool::new(1, connection_metrics),
+            compute_clients: ComputeClientPool::new(1, connection_metrics.clone()),
             meta_store: env.meta_store_ref(),
         };
         let task = tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -739,20 +753,32 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .serve_with_shutdown(address_info.listen_addr, async move {
-            tokio::select! {
-                res = svc_shutdown_rx.changed() => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down services"),
-                        Err(_) => tracing::error!("Service shutdown receiver dropped")
-                    }
-                    shutdown_all.await;
+        .serve_with_incoming_shutdown(
+            monitored_tcp_incoming(
+                address_info.listen_addr,
+                "meta-leader-service",
+                connection_metrics,
+                TcpConfig {
+                    tcp_nodelay: false,
+                    keepalive_duration: None,
                 },
-                _ = idle_recv => {
-                    shutdown_all.await;
-                },
-            }
-        })
+            )
+            .unwrap(),
+            async move {
+                tokio::select! {
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown receiver dropped")
+                        }
+                        shutdown_all.await;
+                    },
+                    _ = idle_recv => {
+                        shutdown_all.await;
+                    },
+                }
+            },
+        )
         .await
         .unwrap();
 

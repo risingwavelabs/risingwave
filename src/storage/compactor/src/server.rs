@@ -21,7 +21,9 @@ use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption,
 };
-use risingwave_common::monitor::connection::ConnectionMetrics;
+use risingwave_common::monitor::connection::{
+    monitored_tcp_incoming, ConnectionMetrics, TcpConfig,
+};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -93,7 +95,7 @@ pub async fn compactor_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let object_metrics = Arc::new(ObjectStoreMetrics::new(
         registry.clone(),
-        connection_metrics,
+        connection_metrics.clone(),
     ));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
@@ -247,22 +249,34 @@ pub async fn compactor_serve(
         tonic::transport::Server::builder()
             .add_service(CompactorServiceServer::new(compactor_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))
-            .serve_with_shutdown(listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
-                            }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
-                        }
+            .serve_with_incoming_shutdown(
+                monitored_tcp_incoming(
+                    listen_addr,
+                    "compactor-service",
+                    connection_metrics,
+                    TcpConfig {
+                        tcp_nodelay: false,
+                        keepalive_duration: None,
                     },
-                }
-            })
+                )
+                .unwrap(),
+                async move {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = &mut shutdown_recv => {
+                            for (join_handle, shutdown_sender) in sub_tasks {
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                }
+                            }
+                        },
+                    }
+                },
+            )
             .await
             .unwrap();
     });
