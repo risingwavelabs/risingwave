@@ -8,9 +8,9 @@ from risingwave.udf import udf, UdfServer
 
 
 
-@udf(input_types=["INT", "INT"], result_type="INT")
-def udf_sum(x: int, y: int) -> int:
-    if y==2:
+@udf(input_types=["INT", "VARCHAR"], result_type="INT")
+def udf_sum(x: int, y: str) -> int:
+    if y=='mfa+':
         return x
     else:
         return -x

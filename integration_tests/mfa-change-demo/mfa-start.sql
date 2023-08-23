@@ -1,6 +1,6 @@
 create source if not exists actionhistory (
     userid varchar,
-    eventype int, -- 2 is mfa+ , 1 is mfa- , other is other
+    eventype varchar, -- mfa+,mfa-,other
     timestamp timestamp,
     changenum int,
 ) with (
@@ -10,7 +10,7 @@ create source if not exists actionhistory (
 )
 FORMAT PLAIN ENCODE JSON;
 
-create materialized view user_action_mfa as select * from actionhistory where eventype in (1,2);
+create materialized view user_action_mfa as select * from actionhistory where eventype in ('mfa+','mfa-');
 
 create materialized view user_mfa_change_count as
       select userid , count(*) as count, window_start
