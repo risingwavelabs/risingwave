@@ -46,7 +46,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
 };
-use crate::monitor::GLOBAL_HUMMOCK_STATE_STORE_METRICS;
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -155,6 +155,7 @@ impl HummockEventHandler {
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<CompactorContext>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_data_file_cache_levels: HashSet<u32>,
     ) -> Self {
         let (version_update_notifier_tx, _) =
@@ -163,17 +164,17 @@ impl HummockEventHandler {
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_opts(
             &compactor_context.storage_opts,
-            GLOBAL_HUMMOCK_STATE_STORE_METRICS
-                .uploader_uploading_task_size
-                .clone(),
+            state_store_metrics.uploader_uploading_task_size.clone(),
         );
         let max_preload_wait_time_mill = compactor_context.storage_opts.max_preload_wait_time_mill;
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_store = compactor_context.sstable_store.clone();
+        let metrics = compactor_context.compactor_metrics.clone();
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
         let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
+            state_store_metrics,
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
                 spawn(flush_imms(
@@ -188,6 +189,7 @@ impl HummockEventHandler {
         );
         let cache_refill_policy_config = CacheRefillPolicyConfig {
             sstable_store,
+            metrics,
             max_preload_wait_time_mill,
             refill_data_file_cache_levels,
         };

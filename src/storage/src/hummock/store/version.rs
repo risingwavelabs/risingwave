@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::collections::vec_deque::VecDeque;
 use std::collections::HashSet;
 use std::iter::once;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -53,7 +52,6 @@ use crate::hummock::{
 };
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
-    GLOBAL_HUMMOCK_STATE_STORE_METRICS,
 };
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
@@ -516,17 +514,24 @@ pub struct HummockVersionReader {
     sstable_store: SstableStoreRef,
 
     /// Statistics
-    state_store_metrics: &'static HummockStateStoreMetrics,
+    state_store_metrics: Arc<HummockStateStoreMetrics>,
 }
 
 /// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
 /// `streaming_query`
 impl HummockVersionReader {
-    pub fn new(sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        sstable_store: SstableStoreRef,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
         Self {
             sstable_store,
-            state_store_metrics: GLOBAL_HUMMOCK_STATE_STORE_METRICS.deref(),
+            state_store_metrics,
         }
+    }
+
+    pub fn stats(&self) -> &Arc<HummockStateStoreMetrics> {
+        &self.state_store_metrics
     }
 }
 
@@ -542,7 +547,8 @@ impl HummockVersionReader {
     ) -> StorageResult<Option<Bytes>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
-        let mut stats_guard = GetLocalMetricsGuard::new(read_options.table_id);
+        let mut stats_guard =
+            GetLocalMetricsGuard::new(self.state_store_metrics.clone(), read_options.table_id);
         let local_stats = &mut stats_guard.local_stats;
         local_stats.found_key = true;
 
@@ -927,10 +933,13 @@ impl HummockVersionReader {
             + local_stats.overlapping_iter_count
             + local_stats.non_overlapping_iter_count;
 
-        Ok(
-            HummockStorageIterator::new(user_iter, read_options.table_id, local_stats)
-                .into_stream(),
+        Ok(HummockStorageIterator::new(
+            user_iter,
+            self.state_store_metrics.clone(),
+            read_options.table_id,
+            local_stats,
         )
+        .into_stream())
     }
 
     // Note: this method will not check the kv tomestones and delete range tomestones
@@ -942,7 +951,8 @@ impl HummockVersionReader {
     ) -> StorageResult<bool> {
         let table_id = read_options.table_id;
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
-        let mut stats_guard = MayExistLocalMetricsGuard::new(table_id);
+        let mut stats_guard =
+            MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
 
         // 1. check staging data
         for imm in &imms {

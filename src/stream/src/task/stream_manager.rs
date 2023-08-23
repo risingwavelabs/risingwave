@@ -429,9 +429,10 @@ impl LocalStreamManagerCore {
 
     #[cfg(test)]
     fn for_test() -> Self {
+        use risingwave_storage::monitor::MonitoredStorageMetrics;
         let streaming_metrics = Arc::new(StreamingMetrics::unused());
         Self::new_inner(
-            StateStoreImpl::shared_in_memory_store(),
+            StateStoreImpl::shared_in_memory_store(Arc::new(MonitoredStorageMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
             StreamingConfig::default(),

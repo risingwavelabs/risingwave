@@ -93,6 +93,7 @@ impl BatchEnvironment {
     pub fn for_test() -> Self {
         use risingwave_rpc_client::ComputeClientPool;
         use risingwave_source::dml_manager::DmlManager;
+        use risingwave_storage::monitor::MonitoredStorageMetrics;
 
         use crate::monitor::BatchManagerMetrics;
 
@@ -104,7 +105,9 @@ impl BatchEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
-            state_store: StateStoreImpl::shared_in_memory_store(),
+            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
+                MonitoredStorageMetrics::unused(),
+            )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
             dml_manager: Arc::new(DmlManager::for_test()),

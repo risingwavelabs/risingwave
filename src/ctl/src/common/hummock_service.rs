@@ -128,12 +128,24 @@ For `./risedev apply-compose-deploy` users,
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             Arc::new(opts),
-            Arc::new(MonitoredHummockMetaClient::new(meta_client.clone())),
+            Arc::new(MonitoredHummockMetaClient::new(
+                meta_client.clone(),
+                metrics.hummock_metrics.clone(),
+            )),
+            metrics.state_store_metrics.clone(),
+            metrics.object_store_metrics.clone(),
+            metrics.storage_metrics.clone(),
+            metrics.compactor_metrics.clone(),
         )
         .await?;
 
         if let Some(hummock_state_store) = state_store_impl.as_hummock() {
-            Ok((hummock_state_store.clone().monitored(), metrics))
+            Ok((
+                hummock_state_store
+                    .clone()
+                    .monitored(metrics.storage_metrics.clone()),
+                metrics,
+            ))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }

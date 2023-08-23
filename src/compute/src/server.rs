@@ -53,7 +53,10 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
-use risingwave_storage::monitor::{monitor_cache, GLOBAL_COMPACTOR_METRICS};
+use risingwave_storage::monitor::{
+    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
+    GLOBAL_HUMMOCK_STATE_STORE_METRICS, GLOBAL_OBJECT_STORE_METRICS, GLOBAL_STORAGE_METRICS,
+};
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::GLOBAL_STREAMING_METRICS;
@@ -168,15 +171,22 @@ pub async fn compute_node_serve(
     monitor_process();
 
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
     let streaming_metrics = Arc::new(GLOBAL_STREAMING_METRICS.clone());
-    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
 
     // Initialize state store.
-    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(meta_client.clone()));
+    let state_store_metrics = Arc::new(GLOBAL_HUMMOCK_STATE_STORE_METRICS.clone());
+    let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let storage_metrics = Arc::new(GLOBAL_STORAGE_METRICS.clone());
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
+        meta_client.clone(),
+        hummock_metrics.clone(),
+    ));
 
     let mut join_handle_vec = vec![];
 
@@ -184,6 +194,10 @@ pub async fn compute_node_serve(
         state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
+        state_store_metrics.clone(),
+        object_store_metrics,
+        storage_metrics.clone(),
+        compactor_metrics.clone(),
     )
     .await
     .unwrap();

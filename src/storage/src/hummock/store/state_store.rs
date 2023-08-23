@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -43,9 +43,7 @@ use crate::hummock::utils::{
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::mem_table::{merge_stream, KeyOp, MemTable};
-use crate::monitor::{
-    IterLocalMetricsGuard, StoreLocalStatistic, GLOBAL_HUMMOCK_STATE_STORE_METRICS,
-};
+use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
@@ -82,6 +80,8 @@ pub struct LocalHummockStorage {
     memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
+
+    stats: Arc<HummockStateStoreMetrics>,
 
     write_limiter: WriteLimiterRef,
 }
@@ -353,16 +353,16 @@ impl LocalHummockStorage {
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
-        let stats = GLOBAL_HUMMOCK_STATE_STORE_METRICS.deref();
         let epoch = write_options.epoch;
         let table_id = write_options.table_id;
 
         let table_id_label = table_id.to_string();
-        stats
+        self.stats
             .write_batch_tuple_counts
             .with_label_values(&[table_id_label.as_str()])
             .inc_by(kv_pairs.len() as _);
-        let timer = stats
+        let timer = self
+            .stats
             .write_batch_duration
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
@@ -422,7 +422,7 @@ impl LocalHummockStorage {
 
         timer.observe_duration();
 
-        stats
+        self.stats
             .write_batch_size
             .with_label_values(&[table_id_label.as_str()])
             .observe(imm_size as _);
@@ -441,6 +441,7 @@ impl LocalHummockStorage {
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
     ) -> Self {
+        let stats = hummock_version_reader.stats().clone();
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
             epoch: None,
@@ -453,6 +454,7 @@ impl LocalHummockStorage {
             event_sender,
             memory_limiter,
             hummock_version_reader,
+            stats,
             write_limiter,
         }
     }
@@ -508,12 +510,13 @@ impl StateStoreIter for HummockStorageIterator {
 impl HummockStorageIterator {
     pub fn new(
         inner: UserIterator<HummockStorageIteratorPayload>,
+        metrics: Arc<HummockStateStoreMetrics>,
         table_id: TableId,
         local_stats: StoreLocalStatistic,
     ) -> Self {
         Self {
             inner,
-            stats_guard: IterLocalMetricsGuard::new(table_id, local_stats),
+            stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
     }
 }

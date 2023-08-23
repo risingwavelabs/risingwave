@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
+use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -26,10 +27,10 @@ use tracing_futures::Instrument;
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
+use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
-use crate::monitor::{MonitoredStorageMetrics, GLOBAL_STORAGE_METRICS};
 use crate::store::*;
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -40,32 +41,35 @@ pub struct MonitoredStateStore<S> {
     #[cfg(all(not(madsim), feature = "hm-trace"))]
     inner: Box<TracedStateStore<S>>,
 
-    storage_metrics: &'static MonitoredStorageMetrics,
+    storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
-    pub fn new(inner: S) -> Self {
+    pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         #[cfg(all(not(madsim), feature = "hm-trace"))]
         let inner = TracedStateStore::new_global(inner);
         Self {
             inner: Box::new(inner),
-            storage_metrics: GLOBAL_STORAGE_METRICS.deref(),
+            storage_metrics,
         }
     }
 
     #[cfg(all(not(madsim), feature = "hm-trace"))]
-    pub fn new_from_local(inner: TracedStateStore<S>) -> Self {
+    pub fn new_from_local(
+        inner: TracedStateStore<S>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
+    ) -> Self {
         Self {
             inner: Box::new(inner),
-            storage_metrics: GLOBAL_STORAGE_METRICS.deref(),
+            storage_metrics,
         }
     }
 
     #[cfg(not(all(not(madsim), feature = "hm-trace")))]
-    pub fn new_from_local(inner: S) -> Self {
+    pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
-            storage_metrics: GLOBAL_STORAGE_METRICS.deref(),
+            storage_metrics,
         }
     }
 }
@@ -115,7 +119,7 @@ impl<S> MonitoredStateStore<S> {
                 total_items: 0,
                 total_size: 0,
                 scan_time: Instant::now(),
-                storage_metrics: GLOBAL_STORAGE_METRICS.deref(),
+                storage_metrics: self.storage_metrics.clone(),
                 table_id,
             },
         };
@@ -315,7 +319,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
-    fn monitored(self) -> MonitoredStateStore<Self> {
+    fn monitored(
+        self,
+        _storage_metrics: Arc<MonitoredStorageMetrics>,
+    ) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }
 
@@ -332,6 +339,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
                 .new_local(option)
                 .instrument_await("store_new_local")
                 .await,
+            self.storage_metrics.clone(),
         )
     }
 
@@ -360,7 +368,7 @@ struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
     scan_time: Instant,
-    storage_metrics: &'static MonitoredStorageMetrics,
+    storage_metrics: Arc<MonitoredStorageMetrics>,
 
     table_id: TableId,
 }

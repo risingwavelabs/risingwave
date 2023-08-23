@@ -42,7 +42,9 @@ use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
-use risingwave_storage::monitor::{monitor_cache, GLOBAL_COMPACTOR_METRICS};
+use risingwave_storage::monitor::{
+    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
+};
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -86,8 +88,14 @@ pub async fn compactor_serve(
 
     // Boot compactor
     monitor_process();
+    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
-    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(meta_client.clone()));
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
+        meta_client.clone(),
+        hummock_metrics.clone(),
+    ));
 
     let state_store_url = system_params_reader.state_store();
 
@@ -129,7 +137,7 @@ pub async fn compactor_serve(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
-        Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone()),
+        object_metrics,
         "Hummock",
         Some(Arc::new(config.storage.clone())),
     )
@@ -190,7 +198,7 @@ pub async fn compactor_serve(
         storage_opts,
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
-        compactor_metrics: Arc::new(GLOBAL_COMPACTOR_METRICS.clone()),
+        compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
