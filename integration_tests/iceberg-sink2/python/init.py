@@ -65,7 +65,7 @@ def init_risingwave_mv(args):
         CREATE SINK s1
         AS SELECT * FROM bid
         WITH (
-            connector='iceberg_v2',
+            connector='iceberg',
             type='append-only',
             force_append_only = 'true',
             warehouse.path = 's3a://renjie-iceberg-bench/wh',

@@ -281,7 +281,7 @@ def test_elasticsearch_sink(param):
 
 def test_iceberg_sink(param):
     prop = {
-        "connector": "iceberg",
+        "connector": "iceberg_java",
         "type": "append-only",
         "warehouse.path": "s3a://bucket",
         "s3.endpoint": "http://127.0.0.1:9000",
@@ -295,7 +295,7 @@ def test_iceberg_sink(param):
 
 def test_upsert_iceberg_sink(param):
     prop = {
-        "connector": "iceberg",
+        "connector": "iceberg_java",
         "type": "upsert",
         "warehouse.path": "s3a://bucket",
         "s3.endpoint": "http://127.0.0.1:9000",
