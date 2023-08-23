@@ -1423,10 +1423,16 @@ impl Parser {
                         let expr2 = self.parse_expr()?;
                         Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else {
-                        self.expected(
-                            "[NOT] TRUE or [NOT] FALSE or [NOT] NULL or [NOT] DISTINCT FROM after IS",
-                            self.peek_token(),
-                        )
+                        let negated = self.parse_keyword(Keyword::NOT);
+
+                        if self.parse_keyword(Keyword::JSON) {
+                            self.parse_is_json(expr, negated)
+                        } else {
+                            self.expected(
+                                "[NOT] { TRUE | FALSE | UNKNOWN | NULL | DISTINCT FROM | JSON } after IS",
+                                self.peek_token(),
+                            )
+                        }
                     }
                 }
                 Keyword::AT => {
@@ -1540,6 +1546,38 @@ impl Parser {
         } else {
             Ok(new_expr)
         }
+    }
+
+    /// Parses the optional constraints following the `IS [NOT] JSON` predicate
+    pub fn parse_is_json(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
+        let item_type = match self.peek_token().token {
+            Token::Word(w) => match w.keyword {
+                Keyword::VALUE => Some(JsonPredicateType::Value),
+                Keyword::ARRAY => Some(JsonPredicateType::Array),
+                Keyword::OBJECT => Some(JsonPredicateType::Object),
+                Keyword::SCALAR => Some(JsonPredicateType::Scalar),
+                _ => None,
+            },
+            _ => None,
+        };
+        if item_type.is_some() {
+            self.next_token();
+        }
+        let item_type = item_type.unwrap_or_default();
+
+        let unique_keys = self.parse_one_of_keywords(&[Keyword::WITH, Keyword::WITHOUT]);
+        if unique_keys.is_some() {
+            self.expect_keyword(Keyword::UNIQUE)?;
+            _ = self.parse_keyword(Keyword::KEYS);
+        }
+        let unique_keys = unique_keys.is_some_and(|w| w == Keyword::WITH);
+
+        Ok(Expr::IsJson {
+            expr: Box::new(expr),
+            negated,
+            item_type,
+            unique_keys,
+        })
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator

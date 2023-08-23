@@ -6601,6 +6601,7 @@ dependencies = [
  "risingwave_udf",
  "rust_decimal",
  "self_cell",
+ "serde",
  "serde_json",
  "sha1",
  "sha2",
