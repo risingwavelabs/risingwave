@@ -76,20 +76,6 @@ pub struct StreamChunk {
     ops: Arc<[Op]>,
     data: DataChunk,
 }
-/// Offset of ingested event from upstream system
-/// Typically used in the CDC backfill process.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Offset(String);
-
-impl Offset {
-    pub fn new(value: String) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> &str {
-        self.0.as_str()
-    }
-}
 
 impl Default for StreamChunk {
     /// Create a 0-row-0-col `StreamChunk`. Only used in some existing tests.
