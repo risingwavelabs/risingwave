@@ -320,7 +320,7 @@ pub async fn start_service_as_election_follower(
         .serve_with_incoming_shutdown(
             monitored_tcp_incoming(
                 address_info.listen_addr,
-                "meta-follower-service",
+                "grpc-meta-follower-service",
                 connection_metrics,
                 TcpConfig {
                     tcp_nodelay: false,
@@ -756,7 +756,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .serve_with_incoming_shutdown(
             monitored_tcp_incoming(
                 address_info.listen_addr,
-                "meta-leader-service",
+                "grpc-meta-leader-service",
                 connection_metrics,
                 TcpConfig {
                     tcp_nodelay: false,

@@ -180,7 +180,7 @@ impl ConnectorClient {
             #[cfg(not(madsim))]
             {
                 endpoint.connect_with_connector_lazy(monitored_hyper_https_connector(
-                    "connector-client",
+                    "grpc-connector-client",
                     connection_metrics,
                     TcpConfig {
                         tcp_nodelay: true,

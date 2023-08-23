@@ -252,7 +252,7 @@ pub async fn compactor_serve(
             .serve_with_incoming_shutdown(
                 monitored_tcp_incoming(
                     listen_addr,
-                    "compactor-service",
+                    "grpc-compactor-node-service",
                     connection_metrics,
                     TcpConfig {
                         tcp_nodelay: false,

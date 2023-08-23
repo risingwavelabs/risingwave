@@ -45,7 +45,7 @@ impl StreamClient {
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect_with_connector(monitored_hyper_https_connector(
-                "stream-client",
+                "grpc-stream-client",
                 metrics,
                 TcpConfig {
                     tcp_nodelay: false,

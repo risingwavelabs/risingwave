@@ -264,15 +264,16 @@ where
 #[derive(Clone)]
 pub struct ConnectionMetrics {
     connection_count: GenericGaugeVec<AtomicI64>,
+    connection_create_rate: GenericCounterVec<AtomicU64>,
     connection_err_rate: GenericCounterVec<AtomicU64>,
 
     read_rate: GenericCounterVec<AtomicU64>,
-    read_err_rate: GenericCounterVec<AtomicU64>,
     reader_count: GenericGaugeVec<AtomicI64>,
 
     write_rate: GenericCounterVec<AtomicU64>,
-    write_err_rate: GenericCounterVec<AtomicU64>,
     writer_count: GenericGaugeVec<AtomicI64>,
+
+    io_err_rate: GenericCounterVec<AtomicU64>,
 }
 
 impl ConnectionMetrics {
@@ -281,6 +282,14 @@ impl ConnectionMetrics {
         let connection_count = register_int_gauge_vec_with_registry!(
             "connection_count",
             "The number of current existing connection",
+            &labels,
+            registry,
+        )
+        .unwrap();
+
+        let connection_create_rate = register_int_counter_vec_with_registry!(
+            "connection_create_rate",
+            "Rate on creating new connection",
             &labels,
             registry,
         )
@@ -302,14 +311,6 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let read_err_rate = register_int_counter_vec_with_registry!(
-            "connection_read_err_rate",
-            "Read err rate of a connection",
-            &["connection_type", "uri", "error_kind"],
-            registry,
-        )
-        .unwrap();
-
         let reader_count = register_int_gauge_vec_with_registry!(
             "connection_reader_count",
             "The number of current existing reader",
@@ -326,14 +327,6 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let write_err_rate = register_int_counter_vec_with_registry!(
-            "connection_write_err_rate",
-            "Write err rate of a connection",
-            &["connection_type", "uri", "error_kind"],
-            registry,
-        )
-        .unwrap();
-
         let writer_count = register_int_gauge_vec_with_registry!(
             "connection_writer_count",
             "The number of current existing writer",
@@ -342,15 +335,23 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
+        let io_err_rate = register_int_counter_vec_with_registry!(
+            "connection_io_err_rate",
+            "IO err rate of a connection",
+            &["connection_type", "uri", "op_type", "error_kind"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             connection_count,
+            connection_create_rate,
             connection_err_rate,
             read_rate,
-            read_err_rate,
             reader_count,
             write_rate,
-            write_err_rate,
             writer_count,
+            io_err_rate,
         }
     }
 
@@ -428,22 +429,25 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
     fn new_connection_monitor(&self, endpoint: String) -> Self::ConnectionMonitor {
         let labels = [self.connection_type.as_str(), endpoint.as_str()];
         let read_rate = self.metrics.read_rate.with_label_values(&labels);
-        let read_err_rate = self.metrics.read_err_rate.clone();
         let reader_count = self.metrics.reader_count.with_label_values(&labels);
         let write_rate = self.metrics.write_rate.with_label_values(&labels);
-        let write_err_rate = self.metrics.write_err_rate.clone();
         let writer_count = self.metrics.writer_count.with_label_values(&labels);
+        let io_err_rate = self.metrics.io_err_rate.clone();
         let connection_count = self.metrics.connection_count.with_label_values(&labels);
+
+        self.metrics
+            .connection_create_rate
+            .with_label_values(&labels)
+            .inc();
 
         MonitorAsyncReadWriteImpl::new(
             endpoint,
             self.connection_type.clone(),
             read_rate,
-            read_err_rate,
             reader_count,
             write_rate,
-            write_err_rate,
             writer_count,
+            io_err_rate,
             connection_count,
         )
     }
@@ -461,14 +465,14 @@ pub struct MonitorAsyncReadWriteImpl {
     connection_type: String,
 
     read_rate: GenericCounter<AtomicU64>,
-    read_err_rate: GenericCounterVec<AtomicU64>,
     reader_count_guard: GenericGauge<AtomicI64>,
     is_eof: bool,
 
     write_rate: GenericCounter<AtomicU64>,
-    write_err_rate: GenericCounterVec<AtomicU64>,
     writer_count_guard: GenericGauge<AtomicI64>,
     is_shutdown: bool,
+
+    io_err_rate: GenericCounterVec<AtomicU64>,
 
     connection_count_guard: GenericGauge<AtomicI64>,
 }
@@ -478,11 +482,10 @@ impl MonitorAsyncReadWriteImpl {
         endpoint: String,
         connection_type: String,
         read_rate: GenericCounter<AtomicU64>,
-        read_err_rate: GenericCounterVec<AtomicU64>,
         reader_count: GenericGauge<AtomicI64>,
         write_rate: GenericCounter<AtomicU64>,
-        write_err_rate: GenericCounterVec<AtomicU64>,
         writer_count: GenericGauge<AtomicI64>,
+        io_err_rate: GenericCounterVec<AtomicU64>,
         connection_count: GenericGauge<AtomicI64>,
     ) -> Self {
         reader_count.inc();
@@ -492,13 +495,12 @@ impl MonitorAsyncReadWriteImpl {
             endpoint,
             connection_type,
             read_rate,
-            read_err_rate,
             reader_count_guard: reader_count,
             is_eof: false,
             write_rate,
-            write_err_rate,
             writer_count_guard: writer_count,
             is_shutdown: false,
+            io_err_rate,
             connection_count_guard: connection_count,
         }
     }
@@ -531,8 +533,13 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
-        self.read_err_rate
-            .with_label_values(&[self.endpoint.as_str(), err.kind().to_string().as_str()])
+        self.io_err_rate
+            .with_label_values(&[
+                self.connection_type.as_str(),
+                self.endpoint.as_str(),
+                "read",
+                err.kind().to_string().as_str(),
+            ])
             .inc();
     }
 
@@ -550,10 +557,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
-        self.write_err_rate
+        self.io_err_rate
             .with_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
+                "write",
                 err.kind().to_string().as_str(),
             ])
             .inc();

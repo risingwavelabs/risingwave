@@ -63,7 +63,7 @@ impl ComputeClient {
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect_with_connector(monitored_hyper_https_connector(
-                "compute-client",
+                "grpc-compute-client",
                 metrics,
                 TcpConfig {
                     tcp_nodelay: true,

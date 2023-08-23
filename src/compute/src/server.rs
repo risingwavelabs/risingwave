@@ -441,7 +441,7 @@ pub async fn compute_node_serve(
             .serve_with_incoming_shutdown(
                 monitored_tcp_incoming(
                     listen_addr,
-                    "compute-node-service",
+                    "grpc-compute-node-service",
                     connection_metrics.clone(),
                     TcpConfig {
                         tcp_nodelay: true,
