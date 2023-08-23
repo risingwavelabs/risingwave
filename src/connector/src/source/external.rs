@@ -421,29 +421,28 @@ impl MySqlExternalTableReader {
     // we need to rewrite the comparison conditions by our own.
     // (a, b) > (x, y) => ('a' > x) OR (('a' = x) AND ('b' > y))
     fn filter_expression(columns: &[String]) -> String {
-        let expr;
         let mut conditions = vec![];
         // push the first condition
         conditions.push(format!("({} > :{})", columns[0], columns[0]));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
-            for j in 0..(i - 1) {
+            for (j, item) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!("{} = :{}", columns[j], columns[j]));
+                    condition.push_str(&format!("({} = :{})", item, item));
                 } else {
-                    condition.push_str(&format!(" AND {} = :{}", columns[j], columns[j]));
+                    condition.push_str(&format!(" AND ({} = :{})", item, item));
                 }
             }
             // '>' condition
-            condition.push_str(&format!(" AND {} > :{}", columns[i - 1], columns[i - 1]));
+            condition.push_str(&format!(" AND ({} > :{})", columns[i - 1], columns[i - 1]));
             conditions.push(format!("({})", condition));
         }
-        if columns.len() > 1 {
-            expr = conditions.join(" OR ");
+        let expr = if columns.len() > 1 {
+            conditions.join(" OR ")
         } else {
-            expr = conditions.join("");
-        }
+            conditions.join("")
+        };
         expr
     }
 }
@@ -524,6 +523,16 @@ mod tests {
     use crate::source::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
     };
+
+    #[test]
+    fn test_mysql_filter_expr() {
+        let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(
+            expr,
+            "(aa > :aa) OR ((aa = :aa) AND (bb > :bb)) OR ((aa = :aa) AND (bb = :bb) AND (cc > :cc))"
+        );
+    }
 
     #[test]
     fn test_mysql_binlog_offset() {
