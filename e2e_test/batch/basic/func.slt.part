@@ -443,3 +443,23 @@ select regexp_matches('abcabc', NULL);
 query T
 select regexp_matches('abcabc', 'a', NULL);
 ----
+
+query T
+select regexp_replace('foobarbaz', 'b..', 'X');
+----
+fooXbaz
+
+query T
+select regexp_replace('foobarbaz', 'b..', 'X', 'g');
+----
+fooXX
+
+query T
+select regexp_replace('foobarbaz', 'b(..)', 'X\1Y', 'g');
+----
+fooXarYXazY
+
+query T
+select regexp_replace('foobarbazabc', 'b(..)', 'X\1Y', 'g');
+----
+fooXarYXazYabc
