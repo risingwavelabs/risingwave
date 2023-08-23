@@ -129,21 +129,14 @@ fn to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
     write!(writer, "{}", format).unwrap();
 }
 
-// #[function("to_char(timestamptz, varchar, varchar) -> varchar")]
-pub fn to_char_timestamptz(
+#[function(
+    "to_char(timestamptz, varchar, varchar) -> varchar",
+    prebuild = "ChronoPattern::from_datum($1)?"
+)]
+fn to_char_timestamptz(
     data: Timestamptz,
-    tmpl: &str,
     zone: &str,
-    writer: &mut dyn Write,
-) -> Result<()> {
-    let pattern = compile_pattern_to_chrono(tmpl);
-    to_char_timestamptz_const_tmpl(data, &pattern, zone, writer)
-}
-
-pub fn to_char_timestamptz_const_tmpl(
-    data: Timestamptz,
     tmpl: &ChronoPattern,
-    zone: &str,
     writer: &mut dyn Write,
 ) -> Result<()> {
     let format = data
