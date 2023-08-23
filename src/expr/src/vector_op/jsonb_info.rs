@@ -33,3 +33,24 @@ pub fn jsonb_array_length(v: JsonbRef<'_>) -> Result<i32> {
             reason: e.into(),
         })
 }
+
+#[function("is_json(varchar) -> boolean")]
+pub fn is_json_value(s: &str) -> bool {
+    serde_json::from_str::<serde::de::IgnoredAny>(s).is_ok()
+}
+
+#[function("is_json(varchar, varchar) -> boolean")]
+pub fn is_json_type(s: &str, t: &str) -> bool {
+    serde_json::from_str::<serde::de::IgnoredAny>(s).is_ok_and(|_| {
+        let s = s.trim_start();
+        match t {
+            "ARRAY" => s.starts_with('['),
+            "OBJECT" => s.starts_with('{'),
+            "SCALAR" => !s.starts_with('[') && !s.starts_with('{'),
+            // forward compatible in case we always pass the default later
+            "VALUE" => true,
+            // After #11134, validate during expr build and pass enum to avoid this
+            _ => unreachable!(),
+        }
+    })
+}
