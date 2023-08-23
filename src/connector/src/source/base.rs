@@ -124,6 +124,7 @@ pub struct SourceContext {
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
+    cdc_backfill: bool,
 }
 impl SourceContext {
     pub fn new(
@@ -133,6 +134,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
+        cdc_backfill: bool,
     ) -> Self {
         Self {
             connector_client,
@@ -144,6 +146,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             error_suppressor: None,
+            cdc_backfill,
         }
     }
 
@@ -154,6 +157,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
+        cdc_backfill: bool,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
     ) -> Self {
         let mut ctx = Self::new(
@@ -163,6 +167,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_client,
+            cdc_backfill,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx
@@ -195,6 +200,10 @@ impl SourceContext {
             ])
             .inc();
         Ok(())
+    }
+
+    pub fn cdc_backfill_enabled(&self) -> bool {
+        self.cdc_backfill
     }
 }
 

@@ -27,6 +27,7 @@ public final class ValidatorUtils {
     static final Logger LOG = LoggerFactory.getLogger(ValidatorUtils.class);
 
     static final String VALIDATE_SQL_FILE = "validate_sql.properties";
+    static final String INTERNAL_COLUMN_PREFIX = "_rw_";
 
     public static RuntimeException failedPrecondition(String description) {
         return Status.FAILED_PRECONDITION.withDescription(description).asRuntimeException();

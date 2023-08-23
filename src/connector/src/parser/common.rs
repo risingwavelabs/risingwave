@@ -16,7 +16,7 @@ use std::borrow::Cow;
 
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp};
 use rust_decimal::Decimal as RustDecimal;
 use simd_json::{BorrowedValue, ValueAccess};
@@ -40,7 +40,7 @@ pub(crate) fn json_object_smart_get_value<'a, 'b>(
 
 pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Datum> {
     let mut datums = vec![];
-    for i in 0..mysql_row.len() {
+    for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let datum = {
             match rw_field.data_type {
@@ -73,8 +73,13 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                     v.map(|v| ScalarImpl::from(Decimal::from(v)))
                 }
                 DataType::Varchar => {
-                    let v = mysql_row.take::<String, _>(i);
-                    v.map(ScalarImpl::from)
+                    // snapshot data doesn't contain offset, just fill None
+                    if rw_field.name.as_str() == OFFSET_COLUMN_NAME {
+                        None
+                    } else {
+                        let v = mysql_row.take::<String, _>(i);
+                        v.map(ScalarImpl::from)
+                    }
                 }
                 DataType::Date => {
                     let v = mysql_row.take::<NaiveDate, _>(i);

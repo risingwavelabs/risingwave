@@ -188,12 +188,16 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
-                var pgDataType = schema.get(e.getKey().toLowerCase());
-                if (pgDataType == null) {
+                // skip validate internal columns
+                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                    continue;
+                }
+                var dataType = schema.get(e.getKey().toLowerCase());
+                if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(pgDataType, e.getValue())) {
+                if (!isDataTypeCompatible(dataType, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }

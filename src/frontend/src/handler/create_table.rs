@@ -475,12 +475,14 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let table_type = ExternalTableType::from_properties(&properties);
     if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
-        // TODO: Add a column for storing the event offset
-        // let offset_column =
+        // Add a column for storing the event offset
+        let offset_column = ColumnCatalog::offset_column();
+        let _offset_index = columns.len();
+        columns.push(offset_column);
+
         const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
-        // configure debezium connector only emit changelogs from latest offset
+        // debezium connector will only consume changelogs from latest offset on this mode
         properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), "rw_cdc_backfill".into());
-        // properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), "never".into());
 
         let pk_column_indices = {
             let mut id_to_idx = HashMap::new();

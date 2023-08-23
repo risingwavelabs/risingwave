@@ -28,9 +28,9 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::stream_chunk::{Offset, StreamChunkMeta};
 use risingwave_common::array::{
-    Array, DataChunk, F64Array, SerialArray, StreamChunk, StreamChunkTestExt,
+    Array, ArrayBuilder, DataChunk, F64Array, SerialArray, StreamChunk, StreamChunkTestExt,
+    Utf8ArrayBuilder,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
@@ -168,19 +168,18 @@ impl MockOffsetGenExecutor {
 
             match msg {
                 Message::Chunk(chunk) => {
-                    let mut offsets = vec![];
-                    let (ops, columns, vis) = chunk.into_inner();
+                    let mut offset_builder = Utf8ArrayBuilder::new(chunk.cardinality());
+                    let (ops, mut columns, vis) = chunk.into_inner();
                     assert!(vis.as_visibility().is_none());
 
                     for _ in 0..ops.len() {
-                        offsets.push(Offset::new(self.next_offset()?));
+                        let offset_str = self.next_offset()?;
+                        offset_builder.append(Some(&offset_str));
                     }
-                    yield Message::Chunk(StreamChunk::new_with_meta(
-                        ops,
-                        columns,
-                        vis.into_visibility(),
-                        Some(StreamChunkMeta { offsets }),
-                    ));
+
+                    let offsets = offset_builder.finish();
+                    columns.push(offsets.into_ref());
+                    yield Message::Chunk(StreamChunk::new(ops, columns, vis.into_visibility()));
                 }
                 Message::Barrier(barrier) => {
                     yield Message::Barrier(barrier);
@@ -218,8 +217,9 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let schema = Schema::new(vec![
         Field::unnamed(DataType::Int64), // primary key
         Field::unnamed(DataType::Float64),
+        Field::unnamed(DataType::Varchar),
     ]);
-    let column_ids = vec![0.into(), 1.into()];
+    let column_ids = vec![0.into(), 1.into(), 2.into()];
 
     let pk_indices = vec![0];
 
@@ -257,7 +257,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ActorContext::create(0x1a),
         external_table,
         Box::new(mock_offset_executor),
-        vec![0, 1],
+        vec![0, 1, 2],
         None,
         schema.clone(),
         vec![0],

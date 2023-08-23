@@ -128,7 +128,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source_ctrl_opts,
                 )?))
             } else {
-                let source_exec = SourceExecutor::new(
+                let mut source_exec = SourceExecutor::new(
                     params.actor_context.clone(),
                     schema.clone(),
                     params.pk_indices.clone(),
@@ -167,11 +167,13 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                          (0..table_desc.columns.len()).collect_vec(),
                     );
 
+                    // enable the flag
+                    source_exec.enable_cdc_backfill();
                     let cdc_backfill = CdcBackfillExecutor::new(
                         params.actor_context.clone(),
                         external_table,
                         Box::new(source_exec),
-                        (0..source.columns.len()).collect_vec(),
+                        (0..source.columns.len()).collect_vec(),    // eliminate the last column (_rw_offset)
                         None,
                         schema.clone(),
                         pk_indices,

@@ -138,11 +138,6 @@ message StreamChunk {
   uint32 cardinality = 1;
   repeated Op ops = 2;
   repeated Array columns = 3;
-  StreamChunkMeta meta = 4;
-}
-
-message StreamChunkMeta {
-  repeated string offsets = 1;
 }
 
 message Epoch {

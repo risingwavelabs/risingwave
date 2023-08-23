@@ -29,7 +29,7 @@ use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
-    get_chunk_last_binlog_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
+    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -250,7 +250,7 @@ impl CdcBackfillExecutor {
 
                                             // record the consumed binlog offset that will be
                                             // persisted later
-                                            consumed_binlog_offset = get_chunk_last_binlog_offset(
+                                            consumed_binlog_offset = get_cdc_chunk_last_offset(
                                                 upstream_table_reader.inner().table_reader(),
                                                 &chunk,
                                             )?;
@@ -296,7 +296,7 @@ impl CdcBackfillExecutor {
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
-                                    let chunk_binlog_offset = get_chunk_last_binlog_offset(
+                                    let chunk_binlog_offset = get_cdc_chunk_last_offset(
                                         upstream_table_reader.inner().table_reader(),
                                         &chunk,
                                     )?;

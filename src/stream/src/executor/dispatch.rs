@@ -616,8 +616,6 @@ impl Dispatcher for HashDataDispatcher {
 
             // Apply output indices after calculating the vnode.
             let chunk = chunk.project(&self.output_indices);
-
-            // TODO: handle chunk metadata
             for ((vnode, &op), visible) in vnodes
                 .iter()
                 .copied()
@@ -660,12 +658,8 @@ impl Dispatcher for HashDataDispatcher {
             for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
-                let new_stream_chunk = StreamChunk::new_with_meta(
-                    ops.clone(),
-                    chunk.columns().into(),
-                    Some(vis_map),
-                    chunk.meta().cloned(),
-                );
+                let new_stream_chunk =
+                    StreamChunk::new(ops.clone(), chunk.columns().into(), Some(vis_map));
                 if new_stream_chunk.cardinality() > 0 {
                     event!(
                         tracing::Level::TRACE,

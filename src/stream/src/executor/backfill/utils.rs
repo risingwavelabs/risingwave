@@ -20,7 +20,6 @@ use await_tree::InstrumentAwait;
 use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
-use risingwave_common::array::stream_chunk::StreamChunkMeta;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -30,9 +29,10 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::{zip_eq_fast, ZipEqDebug};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::external::{
     BinlogOffset, ExternalTableReader, ExternalTableReaderImpl,
 };
@@ -211,48 +211,47 @@ fn mark_cdc_chunk_inner(
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
-    let (data, ops, meta) = chunk.into_parts_with_meta();
+    let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
 
-    if let Some(StreamChunkMeta { offsets }) = meta {
-        let binlog_offsets = offsets
-            .into_iter()
-            .map(|offset| table_reader.parse_binlog_offset(offset.value()))
-            .try_collect::<Vec<_>>()?;
+    // if let Some(StreamChunkMeta { offsets }) = meta {
+    //     let binlog_offsets = offsets
+    //         .into_iter()
+    //         .map(|offset| table_reader.parse_binlog_offset(offset.value()))
+    //         .try_collect::<Vec<_>>()?;
 
-        for v in
-            zip_eq_fast(data.rows_with_holes(), binlog_offsets.iter()).map(|(row, event_offset)| {
-                let visible = match row {
-                    None => false,
-                    Some(row) => {
-                        // filter changelog events with binlog range
-                        let in_binlog_range = if let Some(binlog_low) = &last_binlog_offset {
-                            binlog_low <= event_offset
-                        } else {
-                            true
-                        };
-
-                        if in_binlog_range {
-                            let lhs = row.project(pk_in_output_indices);
-                            let rhs = current_pos.project(pk_in_output_indices);
-                            let order =
-                                cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                            match order {
-                                Ordering::Less | Ordering::Equal => true,
-                                Ordering::Greater => false,
-                            }
-                        } else {
-                            false
-                        }
-                    }
+    let offset_col_idx = data.dimension() - 1;
+    for v in data.rows_with_holes().map(|row| {
+        let offset_datum = row.datum_at(offset_col_idx).unwrap();
+        let event_offset = table_reader.parse_binlog_offset(offset_datum.into_utf8())?;
+        let visible = match row {
+            None => false,
+            Some(row) => {
+                // filter changelog events with binlog range
+                let in_binlog_range = if let Some(binlog_low) = &last_binlog_offset {
+                    binlog_low <= &event_offset
+                } else {
+                    true
                 };
 
-                visible
-            })
-        {
-            new_visibility.append(v);
-        }
+                if in_binlog_range {
+                    let lhs = row.project(pk_in_output_indices);
+                    let rhs = current_pos.project(pk_in_output_indices);
+                    let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                    match order {
+                        Ordering::Less | Ordering::Equal => true,
+                        Ordering::Greater => false,
+                    }
+                } else {
+                    false
+                }
+            }
+        };
+        Ok::<_, ConnectorError>(visible)
+    }) {
+        new_visibility.append(v?);
     }
+    // }
 
     let (columns, _) = data.into_parts();
     Ok(StreamChunk::new(
@@ -427,17 +426,16 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
         .into_owned_row()
 }
 
-pub(crate) fn get_chunk_last_binlog_offset(
+pub(crate) fn get_cdc_chunk_last_offset(
     table_reader: &ExternalTableReaderImpl,
     chunk: &StreamChunk,
 ) -> StreamExecutorResult<Option<BinlogOffset>> {
-    if let Some(meta) = chunk.meta() {
-        assert!(!meta.offsets.is_empty());
-        let off = meta.offsets.last().unwrap();
-        Ok(Some(table_reader.parse_binlog_offset(off.value())?))
-    } else {
-        Ok(None)
-    }
+    let row = chunk.rows().last().unwrap().1;
+    let offset_col = row.iter().last().unwrap();
+    let output = offset_col.map(|scalar| {
+        Ok::<_, ConnectorError>(table_reader.parse_binlog_offset(scalar.into_utf8()))?
+    });
+    output.transpose().map_err(|e| e.into())
 }
 
 // NOTE(kwannoel): ["None" ..] encoding should be appropriate to mark

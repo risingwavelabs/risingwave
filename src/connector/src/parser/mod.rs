@@ -25,9 +25,8 @@ use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
-use risingwave_common::array::stream_chunk::{Offset, StreamChunkMeta};
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
+use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
@@ -72,7 +71,6 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
-    offset_builder: Vec<Offset>,
 }
 
 impl SourceStreamChunkBuilder {
@@ -86,7 +84,6 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
-            offset_builder: Vec::with_capacity(cap),
         }
     }
 
@@ -95,35 +92,19 @@ impl SourceStreamChunkBuilder {
             descs: &self.descs,
             builders: &mut self.builders,
             op_builder: &mut self.op_builder,
-            offset_builder: &mut self.offset_builder,
-            row_offset: None,
-        }
-    }
-
-    pub fn row_writer_with_offset(&mut self, offset: Offset) -> SourceStreamChunkRowWriter<'_> {
-        SourceStreamChunkRowWriter {
-            descs: &self.descs,
-            builders: &mut self.builders,
-            op_builder: &mut self.op_builder,
-            offset_builder: &mut self.offset_builder,
-            row_offset: Some(offset),
         }
     }
 
     /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
-        let mut chunk = StreamChunk::new(
+        StreamChunk::new(
             self.op_builder,
             self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
             None,
-        );
-        if !self.offset_builder.is_empty() {
-            chunk.set_meta(StreamChunkMeta::new(self.offset_builder));
-        }
-        chunk
+        )
     }
 
     /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
@@ -150,8 +131,6 @@ pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
-    offset_builder: &'a mut Vec<Offset>,
-    row_offset: Option<Offset>,
 }
 
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
@@ -192,9 +171,6 @@ impl OpAction for OpActionInsert {
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Insert);
-        if let Some(offset) = writer.row_offset.clone() {
-            writer.offset_builder.push(offset)
-        }
     }
 }
 
@@ -218,9 +194,6 @@ impl OpAction for OpActionDelete {
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Delete);
-        if let Some(offset) = writer.row_offset.clone() {
-            writer.offset_builder.push(offset)
-        }
     }
 }
 
@@ -247,11 +220,6 @@ impl OpAction for OpActionUpdate {
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::UpdateDelete);
         writer.op_builder.push(Op::UpdateInsert);
-        // use same offsets for update delete and update insert event
-        if let Some(offset) = &writer.row_offset {
-            writer.offset_builder.push(offset.clone());
-            writer.offset_builder.push(offset.clone());
-        }
     }
 }
 
@@ -270,7 +238,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_meta {
+                if desc.is_meta || desc.is_offset {
                     return Ok(());
                 }
                 let output = if desc.is_row_id {
@@ -472,13 +440,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             split_offset_mapping.insert(msg.split_id, msg_offset.clone());
 
             let old_op_num = builder.op_num();
-
             match parser
-                .parse_one_with_txn(
-                    msg.key,
-                    msg.payload,
-                    builder.row_writer_with_offset(Offset::new(msg_offset)),
-                )
+                .parse_one_with_txn(msg.key, msg.payload, builder.row_writer())
                 .await
             {
                 Ok(Either::Left(WriteGuard(_))) => {
@@ -490,24 +453,42 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         *len += new_op_num - old_op_num;
                     }
 
+                    // fill in meta column for specific source and offset column if needed
                     for _ in old_op_num..new_op_num {
+                        let f =
+                            |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                                if desc.is_meta && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                                    match desc.name.as_str() {
+                                        KAFKA_TIMESTAMP_COLUMN_NAME => {
+                                            Some(kafka_meta.timestamp.map(|ts| {
+                                                risingwave_common::cast::i64_to_timestamptz(ts)
+                                                    .unwrap()
+                                                    .into()
+                                            }))
+                                        }
+                                        _ => {
+                                            unreachable!(
+                                                "kafka will not have this meta column: {}",
+                                                desc.name
+                                            )
+                                        }
+                                    }
+                                } else if desc.is_offset {
+                                    assert_eq!(desc.name.as_str(), OFFSET_COLUMN_NAME);
+                                    Some(Some(msg_offset.as_str().into()))
+                                } else {
+                                    // None will be ignored by `fulfill_meta_column`
+                                    None
+                                }
+                            };
+
                         // TODO: support more kinds of SourceMeta
-                        if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                            let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                        if !desc.is_meta {
-                            return None;
+                        if let SourceMeta::Kafka(_) = &msg.meta {
+                            builder.row_writer().fulfill_meta_column(f)?;
                         }
-                        match desc.name.as_str() {
-                            KAFKA_TIMESTAMP_COLUMN_NAME => Some(kafka_meta.timestamp.map(|ts| {
-                                risingwave_common::cast::i64_to_timestamptz(ts)
-                                    .unwrap()
-                                    .into()
-                            })),
-                            _ => {
-                                unreachable!("kafka will not have this meta column: {}", desc.name)
-                            }
-                        }
-                    };
+
+                        // fill the offset column
+                        if parser.source_ctx().cdc_backfill_enabled() {
                             builder.row_writer().fulfill_meta_column(f)?;
                         }
                     }
