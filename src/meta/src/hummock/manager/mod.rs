@@ -2415,8 +2415,8 @@ where
                     )
                     .await;
                 match ret {
-                    Ok(_) => {
-                        tracing::info!("move state table [{}] from group-{} success, Allow split by table: false", table_id, parent_group_id);
+                    Ok(new_group_id) => {
+                        tracing::info!("move state table [{}] from group-{} to group-{} success, Allow split by table: false", table_id, parent_group_id, new_group_id);
                         return;
                     }
                     Err(e) => {
