@@ -255,7 +255,7 @@ impl Compactor {
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
-            sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
+            sstable_object_id_manager: self.context.sstable_object_id_manager,
             limiter: self.context.memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,

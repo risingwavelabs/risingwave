@@ -28,7 +28,7 @@ use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::{filter_key_extractor::FilterKeyExtractorImpl, hummock::GetObjectId};
 use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
 };
@@ -41,7 +41,7 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 
 pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
-    pub sstable_object_id_manager: SstableObjectIdManagerRef,
+    pub sstable_object_id_manager:  Box<dyn GetObjectId + Send + Sync>,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,

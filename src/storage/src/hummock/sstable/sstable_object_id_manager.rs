@@ -31,6 +31,10 @@ use crate::hummock::{HummockError, HummockResult};
 
 pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
 
+#[async_trait::async_trait]
+pub trait GetObjectId:  Send+ Sync{
+    async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableObjectId> ;
+}
 /// 1. Caches SST object ids fetched from meta.
 /// 2. Maintains GC watermark SST object id.
 ///
@@ -59,15 +63,7 @@ impl SstableObjectIdManager {
         }
     }
 
-    /// Returns a new SST id.
-    /// The id is guaranteed to be monotonic increasing.
-    pub async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableObjectId> {
-        self.map_next_sst_object_id(|available_sst_object_ids| {
-            available_sst_object_ids.get_next_sst_object_id()
-        })
-        .await
-    }
-
+   
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
     async fn map_next_sst_object_id<F>(
@@ -189,6 +185,19 @@ impl SstableObjectIdManager {
             let _ = notify.send(success);
         }
     }
+}
+
+#[async_trait::async_trait]
+impl GetObjectId for SstableObjectIdManager{
+    /// Returns a new SST id.
+    /// The id is guaranteed to be monotonic increasing.
+    async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableObjectId> {
+        self.map_next_sst_object_id(|available_sst_object_ids| {
+            available_sst_object_ids.get_next_sst_object_id()
+        })
+        .await
+    }
+
 }
 
 #[async_trait::async_trait]
