@@ -438,12 +438,11 @@ impl MySqlExternalTableReader {
             condition.push_str(&format!(" AND ({} > :{})", columns[i - 1], columns[i - 1]));
             conditions.push(format!("({})", condition));
         }
-        let expr = if columns.len() > 1 {
+        if columns.len() > 1 {
             conditions.join(" OR ")
         } else {
             conditions.join("")
-        };
-        expr
+        }
     }
 }
 
