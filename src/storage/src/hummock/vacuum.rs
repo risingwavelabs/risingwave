@@ -31,14 +31,12 @@ impl Vacuum {
     /// Wrapper method that warns on any error and doesn't propagate it.
     /// Returns false if any error.
     pub async fn handle_vacuum_task(
-        vacuum_task: VacuumTask,
         sstable_store: SstableStoreRef,
-    ) -> HummockResult<VacuumTask> {
-        tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_object_ids);
-        sstable_store
-            .delete_list(&vacuum_task.sstable_object_ids)
-            .await?;
-        Ok(vacuum_task)
+        sstable_object_ids: &[u64],
+    ) -> HummockResult<()> {
+        tracing::info!("Try to vacuum SSTs {:?}", sstable_object_ids);
+        sstable_store.delete_list(sstable_object_ids).await?;
+        Ok(())
     }
 
     pub async fn report_vacuum_task(
