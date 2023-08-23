@@ -293,7 +293,6 @@ mod tests {
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
             // ignored the error, and fill None at v2.
-            // assert!(parser.parse_inner(Some(payload), writer).await.is_err());
             parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
