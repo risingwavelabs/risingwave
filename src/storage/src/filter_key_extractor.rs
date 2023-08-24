@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use dyn_clone::DynClone;
 use futures::Future;
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -259,7 +260,6 @@ impl StateTableAccessor for FakeRemoteTableAccessor {
         )))
     }
 }
-#[derive(Clone)]
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
     table_accessor: Box<dyn StateTableAccessor>,
@@ -337,7 +337,6 @@ impl FilterKeyExtractorManagerInner {
 
 /// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
-#[derive(Clone)]
 pub struct FilterKeyExtractorManager {
     inner: FilterKeyExtractorManagerInner,
 }
@@ -374,29 +373,22 @@ impl FilterKeyExtractorManager {
     pub fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
         self.inner.sync(filter_key_extractor_map)
     }
-
-    
 }
 #[async_trait::async_trait]
-pub trait AcquireFilterKeyExtractor: Clone + Send + Sync + 'static{
-    async fn acquire(
-        &self,
-        table_id_set: HashSet<u32>,
-    ) ->  Box<dyn Future<Output = HummockResult<FilterKeyExtractorImpl>>+ Send>; 
+pub trait AcquireFilterKeyExtractor: DynClone + Send + Sync + 'static {
+    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl>;
 }
 
+dyn_clone::clone_trait_object!(AcquireFilterKeyExtractor);
+
 #[async_trait::async_trait]
-impl AcquireFilterKeyExtractor for FilterKeyExtractorManager{
+impl AcquireFilterKeyExtractor for FilterKeyExtractorManagerRef {
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// `table_id` does not util version update (notify), and retry to get
-    async fn acquire(
-        &self,
-        table_id_set: HashSet<u32>,
-    ) -> HummockResult<FilterKeyExtractorImpl> {
+    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
         self.inner.acquire(table_id_set).await
     }
-    
 }
 pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
 
@@ -424,8 +416,8 @@ mod tests {
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-        MultiFilterKeyExtractor, AcquireFilterKeyExtractor,
+        AcquireFilterKeyExtractor, FilterKeyExtractorImpl, FilterKeyExtractorManager,
+        FullKeyFilterKeyExtractor, MultiFilterKeyExtractor,
     };
 
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {

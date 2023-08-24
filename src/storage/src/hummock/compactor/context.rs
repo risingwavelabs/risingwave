@@ -19,7 +19,7 @@ use parking_lot::RwLock;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
-use crate::filter_key_extractor::{FilterKeyExtractorManagerRef, AcquireFilterKeyExtractor};
+use crate::filter_key_extractor::FilterKeyExtractorManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableObjectIdManagerRef};
@@ -46,7 +46,7 @@ pub struct CompactorContext {
 
     pub compaction_executor: Arc<CompactionExecutor>,
 
-    pub filter_key_extractor_manager: Box<dyn AcquireFilterKeyExtractor>,
+    pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
     pub memory_limiter: Arc<MemoryLimiter>,
 
