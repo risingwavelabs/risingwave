@@ -79,7 +79,7 @@ impl CreateStreamingJobContext {
 pub enum CreatingState {
     Failed { reason: MetaError },
     // sender is used to notify the canceling result.
-    Canceling(oneshot::Sender<()>),
+    Canceling { finish_tx: oneshot::Sender<()> },
     Created,
 }
 
@@ -121,7 +121,7 @@ impl CreatingStreamingJobInfo {
                 && let Some(shutdown_tx) = job.shutdown_tx.take()
             {
                 let (tx, rx) = oneshot::channel();
-                if shutdown_tx.send(CreatingState::Canceling(tx)).await.is_ok() {
+                if shutdown_tx.send(CreatingState::Canceling{finish_tx: tx}).await.is_ok() {
                     receivers.insert(job_id, rx);
                 } else {
                     tracing::warn!("failed to send canceling state");
@@ -258,7 +258,7 @@ where
                     CreatingState::Failed { reason } => {
                         return Err(reason);
                     }
-                    CreatingState::Canceling(sender) => {
+                    CreatingState::Canceling { finish_tx } => {
                         if let Ok(table_fragments) = self
                             .fragment_manager
                             .select_table_fragments_by_table_id(&table_id)
@@ -313,7 +313,7 @@ where
                                     .run_command(Command::CancelStreamingJob(table_fragments))
                                     .await?;
                             }
-                            let _ = sender.send(()).inspect_err(|_| {
+                            let _ = finish_tx.send(()).inspect_err(|_| {
                                 tracing::warn!("failed to notify cancelled: {table_id}")
                             });
                             return Err(MetaError::cancelled("create".into()));
@@ -545,6 +545,7 @@ where
         Ok(())
     }
 
+    /// Cancel streaming jobs and return the canceled table ids.
     pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) -> Vec<TableId> {
         if table_ids.is_empty() {
             return vec![];
