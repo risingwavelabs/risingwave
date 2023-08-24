@@ -883,13 +883,11 @@ pub async fn parse_remote_object_store_with_config(
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
     config: Option<Arc<StorageConfig>>,
+    scheduled: bool,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => {
-            if config
-                .map(|c| c.object_store_io_scheduler)
-                .unwrap_or_default()
-            {
+            if scheduled {
                 ObjectStoreImpl::ScheduledS3(
                     S3ObjectStore::new(
                         s3.strip_prefix("s3://").unwrap().to_string(),
@@ -1067,8 +1065,9 @@ pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
+    scheduled: bool,
 ) -> ObjectStoreImpl {
-    parse_remote_object_store_with_config(url, metrics, ident, None).await
+    parse_remote_object_store_with_config(url, metrics, ident, None, scheduled).await
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;

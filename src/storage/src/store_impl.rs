@@ -614,6 +614,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
+                    opts.object_store_io_scheduler,
                 )
                 .await;
                 object_store.set_opts(

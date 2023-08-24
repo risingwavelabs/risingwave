@@ -140,6 +140,7 @@ pub async fn compactor_serve(
         object_metrics,
         "Hummock",
         Some(Arc::new(config.storage.clone())),
+        false,
     )
     .await;
     object_store.set_opts(

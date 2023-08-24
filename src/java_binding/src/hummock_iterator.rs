@@ -74,6 +74,7 @@ impl HummockJavaBindingIterator {
                 &read_plan.object_store_url,
                 Arc::new(ObjectStoreMetrics::unused()),
                 "Hummock",
+                false,
             )
             .await,
         );

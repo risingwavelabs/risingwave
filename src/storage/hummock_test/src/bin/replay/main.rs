@@ -100,7 +100,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
 
     let object_store =
-        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
+        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock", false).await;
 
     let sstable_store = {
         Arc::new(SstableStore::new(
