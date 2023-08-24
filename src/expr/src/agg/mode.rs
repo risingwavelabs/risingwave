@@ -80,18 +80,18 @@ struct State {
 
 impl AggStateDyn for State {}
 
-impl Mode {
-    fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {
+impl State {
+    fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         let datum = datum_ref.to_owned_datum();
-        if datum.is_some() && state.cur_item == datum {
-            state.cur_item_freq += 1;
+        if datum.is_some() && self.cur_item == datum {
+            self.cur_item_freq += 1;
         } else if datum.is_some() {
-            state.cur_item = datum;
-            state.cur_item_freq = 1;
+            self.cur_item = datum;
+            self.cur_item_freq = 1;
         }
-        if state.cur_item_freq > state.cur_mode_freq {
-            state.cur_mode = state.cur_item.clone();
-            state.cur_mode_freq = state.cur_item_freq;
+        if self.cur_item_freq > self.cur_mode_freq {
+            self.cur_mode = self.cur_item.clone();
+            self.cur_mode_freq = self.cur_item_freq;
         }
     }
 }
@@ -107,9 +107,9 @@ impl AggregateFunction for Mode {
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
-        let state = state.downcast_mut();
+        let state = state.downcast_mut::<State>();
         for (_, row) in input.rows() {
-            self.add_datum(state, row.datum_at(0));
+            state.add_datum(row.datum_at(0));
         }
         Ok(())
     }
@@ -120,9 +120,9 @@ impl AggregateFunction for Mode {
         input: &StreamChunk,
         range: Range<usize>,
     ) -> Result<()> {
-        let state = state.downcast_mut();
+        let state = state.downcast_mut::<State>();
         for (_, row) in input.rows_in(range) {
-            self.add_datum(state, row.datum_at(0));
+            state.add_datum(row.datum_at(0));
         }
         Ok(())
     }
