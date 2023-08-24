@@ -386,6 +386,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     &monotonic_delete.event_key.left_user_key,
                 )
             {
+                assert!(!monotonic_delete.event_key.is_exclude_left_key);
                 smallest_key = FullKey::from_user_key(
                     monotonic_delete.event_key.left_user_key.clone(),
                     HummockEpoch::MAX,
