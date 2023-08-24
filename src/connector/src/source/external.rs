@@ -298,7 +298,7 @@ impl MySqlExternalTableReader {
         })?;
 
         let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}",
+            "mysql://{}:{}@{}:{}/{}?timezone=UTC",
             config.username, config.password, config.host, config.port, config.database
         );
         let pool = mysql_async::Pool::from_url(database_url)?;
@@ -343,6 +343,10 @@ impl MySqlExternalTableReader {
             .get_conn()
             .await
             .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
+
+        // Set session timezone to UTC
+        conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
+
         if start_pk.is_none() {
             let mut result_set = conn.query_iter(sql).await?;
             let rs_stream = result_set.stream::<mysql_async::Row>().await?;
