@@ -38,7 +38,7 @@ pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
-pub use self::common::mysql_row_to_datums;
+pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
@@ -59,6 +59,7 @@ mod csv_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
+mod mysql;
 mod plain_parser;
 mod protobuf;
 mod schema_registry;
