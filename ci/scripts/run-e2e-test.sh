@@ -23,7 +23,19 @@ done
 shift $((OPTIND -1))
 
 cluster_start() {
+  if [[ $mode == "standalone" ]]; then
+    ./ci/scripts/start-standalone.sh
+  else
     cargo make ci-start "$mode"
+  fi
+}
+
+cluster_stop() {
+  if [[ $mode == "standalone" ]]; then
+    ./ci/scripts/stop-standalone.sh
+  else
+    cargo make ci-kill
+  fi
 }
 
 download_and_prepare_rw "$profile" common
@@ -44,7 +56,7 @@ cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
 echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -70,7 +82,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
 echo "--- e2e, $mode, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -78,7 +90,7 @@ cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
 echo "--- e2e, $mode, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -89,7 +101,7 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
   -u root
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
 if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     echo "--- e2e, ci-delete-range-test"
@@ -104,7 +116,7 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
-    cargo make ci-kill
+    cluster_stop
 fi
 
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
@@ -143,7 +155,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
-    cargo make ci-kill
+    cluster_stop
 fi
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
