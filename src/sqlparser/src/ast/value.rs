@@ -211,3 +211,25 @@ impl fmt::Display for TrimWhereField {
         })
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum JsonPredicateType {
+    #[default]
+    Value,
+    Array,
+    Object,
+    Scalar,
+}
+
+impl fmt::Display for JsonPredicateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use JsonPredicateType::*;
+        f.write_str(match self {
+            Value => "",
+            Array => " ARRAY",
+            Object => " OBJECT",
+            Scalar => " SCALAR",
+        })
+    }
+}

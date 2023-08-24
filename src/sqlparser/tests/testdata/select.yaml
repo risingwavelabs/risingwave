@@ -117,3 +117,18 @@
 - input: select 'apple' !~~* 'app%'
   formatted_sql: SELECT 'apple' NOT ILIKE 'app%'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: NotILike, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS JSON;
+  formatted_sql: SELECT '123' IS JSON
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS JSON VALUE WITHOUT UNIQUE KEYS;
+  formatted_sql: SELECT '123' IS JSON
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON ARRAY WITH UNIQUE KEYS;
+  formatted_sql: SELECT '123' IS NOT JSON ARRAY WITH UNIQUE KEYS
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Array, unique_keys: true })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON OBJECT WITH UNIQUE;
+  formatted_sql: SELECT '123' IS NOT JSON OBJECT WITH UNIQUE KEYS
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Object, unique_keys: true })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON SCALAR WITHOUT UNIQUE;
+  formatted_sql: SELECT '123' IS NOT JSON SCALAR
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Scalar, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
