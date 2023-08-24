@@ -2,5 +2,5 @@
 
 set -euo pipefail
 
-pkill risingwave
+pkill standalone
 cargo make ci-kill
