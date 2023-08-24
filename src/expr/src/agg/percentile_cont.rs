@@ -92,7 +92,7 @@ impl AggregateFunction for PercentileCont {
         DataType::Float64
     }
 
-    fn init_state(&self) -> AggregateState {
+    fn create_state(&self) -> AggregateState {
         AggregateState::Any(Box::<State>::default())
     }
 

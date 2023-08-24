@@ -79,7 +79,7 @@ impl StatelessSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut states = aggs.iter().map(|agg| agg.init_state()).collect_vec();
+        let mut states = aggs.iter().map(|agg| agg.create_state()).collect_vec();
 
         #[for_await]
         for msg in input {
@@ -102,7 +102,7 @@ impl StatelessSimpleAggExecutor {
                             .zip_eq_fast(builders.iter_mut())
                         {
                             let data = agg.get_result(state).await?;
-                            *state = agg.init_state();
+                            *state = agg.create_state();
                             trace!("append: {:?}", data);
                             builder.append(data);
                         }

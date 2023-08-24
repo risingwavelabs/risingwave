@@ -36,8 +36,8 @@ impl AggregateFunction for Projection {
         self.inner.return_type()
     }
 
-    fn init_state(&self) -> AggregateState {
-        self.inner.init_state()
+    fn create_state(&self) -> AggregateState {
+        self.inner.create_state()
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {

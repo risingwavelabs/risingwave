@@ -76,7 +76,7 @@ impl AggState {
             AggStateStorage::Value => {
                 let state = match prev_output {
                     Some(prev) => AggregateState::Datum(prev.clone()),
-                    None => agg_func.init_state(),
+                    None => agg_func.create_state(),
                 };
                 Self::Value(state)
             }
@@ -140,7 +140,7 @@ impl AggState {
     pub fn reset(&mut self, func: &BoxedAggregateFunction) {
         if let Self::Value(state) = self {
             // now only value states need to be reset
-            *state = func.init_state();
+            *state = func.create_state();
         }
     }
 }

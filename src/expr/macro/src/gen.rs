@@ -356,10 +356,10 @@ impl FunctionAttr {
             Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar().into()) },
             _ => quote! { state.map(|s| s.into()) },
         };
-        let init_state = self.init_state.as_ref().map(|state| {
+        let create_state = self.init_state.as_ref().map(|state| {
             let state: TokenStream2 = state.parse().unwrap();
             quote! {
-                fn init_state(&self) -> AggregateState {
+                fn create_state(&self) -> AggregateState {
                     AggregateState::Datum(Some(#state.into()))
                 }
             }
@@ -436,7 +436,7 @@ impl FunctionAttr {
                         self.return_type.clone()
                     }
 
-                    #init_state
+                    #create_state
 
                     async fn update(&self, state0: &mut AggregateState, input: &StreamChunk) -> Result<()> {
                         #(#let_arrays)*

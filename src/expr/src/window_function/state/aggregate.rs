@@ -153,7 +153,7 @@ impl AggregatorWrapper<'_> {
             .collect::<Vec<_>>();
         let chunk = StreamChunk::from(DataChunk::new(columns, n_values));
 
-        let mut state = self.agg.init_state();
+        let mut state = self.agg.create_state();
         self.agg
             .update(&mut state, &chunk)
             .now_or_never()

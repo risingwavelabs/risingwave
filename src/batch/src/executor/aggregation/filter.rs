@@ -41,8 +41,8 @@ impl AggregateFunction for Filter {
         self.inner.return_type()
     }
 
-    fn init_state(&self) -> AggregateState {
-        self.inner.init_state()
+    fn create_state(&self) -> AggregateState {
+        self.inner.create_state()
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -86,7 +86,7 @@ mod tests {
             condition.into(),
             build(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
-        let mut state = agg.init_state();
+        let mut state = agg.create_state();
 
         let chunk = StreamChunk::from_pretty(
             " I
@@ -115,7 +115,7 @@ mod tests {
             expr.into(),
             build(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
-        let mut state = agg.init_state();
+        let mut state = agg.create_state();
 
         let chunk = StreamChunk::from_pretty(
             " I
@@ -147,7 +147,7 @@ mod tests {
             expr.into(),
             build(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
-        let mut state = agg.init_state();
+        let mut state = agg.create_state();
 
         let chunk = StreamChunk::from_pretty(
             " I

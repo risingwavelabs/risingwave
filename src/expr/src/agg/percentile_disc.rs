@@ -117,7 +117,7 @@ impl AggregateFunction for PercentileDisc {
         self.return_type.clone()
     }
 
-    fn init_state(&self) -> AggregateState {
+    fn create_state(&self) -> AggregateState {
         AggregateState::Any(Box::<State>::default())
     }
 

@@ -109,7 +109,7 @@ impl SortAggExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut left_capacity = self.output_size_limit;
-        let mut agg_states = self.aggs.iter().map(|agg| agg.init_state()).collect_vec();
+        let mut agg_states = self.aggs.iter().map(|agg| agg.create_state()).collect_vec();
         let (mut group_builders, mut agg_builders) =
             Self::create_builders(&self.group_key, &self.aggs);
         let mut curr_group = if self.group_key.is_empty() {
@@ -225,7 +225,7 @@ impl SortAggExecutor {
         {
             let result = agg.get_result(state).await?;
             builder.append(result);
-            *state = agg.init_state();
+            *state = agg.create_state();
         }
         Ok(())
     }

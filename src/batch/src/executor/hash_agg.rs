@@ -230,7 +230,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 let mut new_group = false;
                 let states = groups.entry(key).or_insert_with(|| {
                     new_group = true;
-                    self.aggs.iter().map(|agg| agg.init_state()).collect()
+                    self.aggs.iter().map(|agg| agg.create_state()).collect()
                 });
 
                 // TODO: currently not a vectorized implementation

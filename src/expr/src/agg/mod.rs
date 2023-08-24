@@ -44,8 +44,8 @@ pub trait AggregateFunction: Send + Sync + 'static {
     /// Returns the return type of the aggregate function.
     fn return_type(&self) -> DataType;
 
-    /// Returns the initial state of the aggregate function.
-    fn init_state(&self) -> AggregateState {
+    /// Creates an initial state of the aggregate function.
+    fn create_state(&self) -> AggregateState {
         AggregateState::Datum(None)
     }
 
