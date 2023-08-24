@@ -403,6 +403,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
     }
 
+    pub fn get_source_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+        source_id: &SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        self.get_schema_by_id(db_id, schema_id)?
+            .get_source_by_id(source_id)
+            .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
+    }
+
     /// Refer to [`SearchPath`].
     pub fn first_valid_schema(
         &self,
