@@ -410,7 +410,9 @@ impl Decimal {
     pub const MAX_PRECISION: u8 = 28;
 
     pub fn scale(&self) -> Option<i32> {
-        let Decimal::Normalized(d) = self else { return None };
+        let Decimal::Normalized(d) = self else {
+            return None;
+        };
         Some(d.scale() as _)
     }
 
@@ -428,7 +430,9 @@ impl Decimal {
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
     pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
-        let Self::Normalized(mut d) = self else { return Some(*self) };
+        let Self::Normalized(mut d) = self else {
+            return Some(*self);
+        };
 
         // First, move the decimal point to the left so that we can reuse `round`. This is more
         // efficient than division.

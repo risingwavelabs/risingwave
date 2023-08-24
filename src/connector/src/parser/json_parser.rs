@@ -292,7 +292,8 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
-            assert!(parser.parse_inner(Some(payload), writer).await.is_err());
+            // ignored the error, and fill None at v2.
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
         // Parse a correct record.
@@ -304,8 +305,10 @@ mod tests {
 
         let chunk = builder.finish();
         assert!(chunk.valid());
+        assert_eq!(chunk.cardinality(), 3);
 
-        assert_eq!(chunk.cardinality(), 2);
+        let row_vec = chunk.rows().collect_vec();
+        assert_eq!(row_vec[1].1.datum_at(1), None);
     }
 
     #[tokio::test]
@@ -391,6 +394,46 @@ mod tests {
         ];
         assert_eq!(row, expected.into());
     }
+
+    #[tokio::test]
+    async fn test_json_parse_struct_from_string() {
+        let descs = vec![ColumnDesc::new_struct(
+            "struct",
+            0,
+            "",
+            vec![
+                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
+                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
+            ],
+        )]
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
+        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let payload = br#"
+        {
+            "struct": "{\"varchar\": \"varchar\", \"boolean\": true}"
+        }
+        "#
+        .to_vec();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.into_owned_row().into_inner();
+
+        let expected = vec![Some(ScalarImpl::Struct(StructValue::new(vec![
+            Some(ScalarImpl::Utf8("varchar".into())),
+            Some(ScalarImpl::Bool(true)),
+        ])))];
+        assert_eq!(row, expected.into());
+    }
+
     #[tokio::test]
     async fn test_json_upsert_parser() {
         let items = [

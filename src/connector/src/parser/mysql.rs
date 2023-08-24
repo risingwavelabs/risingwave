@@ -14,7 +14,6 @@
 
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
-use mysql_common::value::Value;
 use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,

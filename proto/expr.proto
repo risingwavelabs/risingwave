@@ -69,6 +69,7 @@ message ExprNode {
     SUBSTR = 202;
     LENGTH = 203;
     LIKE = 204;
+    I_LIKE = 279;
     UPPER = 205;
     LOWER = 206;
     TRIM = 207;
@@ -205,6 +206,7 @@ message ExprNode {
     JSONB_ACCESS_STR = 601;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
+    IS_JSON = 604;
 
     // Non-pure functions below (> 1000)
     // ------------------------

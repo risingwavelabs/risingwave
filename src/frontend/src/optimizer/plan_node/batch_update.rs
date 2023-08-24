@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -73,11 +74,18 @@ impl ToBatchPb for BatchUpdate {
             .map(|x| x.to_expr_proto())
             .collect();
 
+        let update_column_indices = self
+            .logical
+            .update_column_indices
+            .iter()
+            .map(|i| *i as _)
+            .collect_vec();
         NodeBody::Update(UpdateNode {
             exprs,
             table_id: self.logical.table_id.table_id(),
             table_version_id: self.logical.table_version_id,
             returning: self.logical.returning,
+            update_column_indices,
         })
     }
 }
