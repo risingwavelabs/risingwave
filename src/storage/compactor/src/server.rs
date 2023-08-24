@@ -21,7 +21,6 @@ use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption,
 };
-use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -87,7 +86,6 @@ pub async fn compactor_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
-    monitor_process();
     let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());

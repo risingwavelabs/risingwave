@@ -12,27 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Once;
-
 use prometheus::core::{Collector, Desc};
-use prometheus::{proto, IntCounter, IntGauge, Opts};
+use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
 #[cfg(target_os = "linux")]
 use super::{CLOCK_TICK, PAGESIZE};
-use crate::monitor::GLOBAL_METRICS_REGISTRY;
 use crate::util::resource_util;
 
 /// Monitors current process.
-pub fn monitor_process() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let pc = ProcessCollector::new();
-        GLOBAL_METRICS_REGISTRY.register(Box::new(pc)).unwrap()
-    })
+pub fn monitor_process(registry: &Registry) {
+    let pc = ProcessCollector::new();
+    registry.register(Box::new(pc)).unwrap()
 }
 
 /// A collector to collect process metrics.
-pub struct ProcessCollector {
+struct ProcessCollector {
     descs: Vec<Desc>,
     cpu_total: IntCounter,
     vsize: IntGauge,
@@ -47,7 +41,7 @@ impl Default for ProcessCollector {
 }
 
 impl ProcessCollector {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let mut descs = Vec::new();
 
         let cpu_total = IntCounter::with_opts(Opts::new(
