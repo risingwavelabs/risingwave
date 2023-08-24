@@ -3,10 +3,13 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-while getopts 'p:' opt; do
+while getopts 'pm:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
+            ;;
+        m )
+            mode=$OPTARG
             ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
@@ -18,6 +21,14 @@ while getopts 'p:' opt; do
     esac
 done
 shift $((OPTIND -1))
+
+cluster_start() {
+    cargo make ci-start "$mode"
+}
+
+cluster_stop() {
+    cargo make ci-kill
+}
 
 download_and_prepare_rw "$profile" common
 
