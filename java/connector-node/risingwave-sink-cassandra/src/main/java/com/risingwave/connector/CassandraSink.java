@@ -1,16 +1,18 @@
-// Copyright 2023 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector;
 
@@ -97,13 +99,13 @@ public class CassandraSink extends SinkWriterBase {
     public void write(Iterator<SinkRow> rows) {
         System.out.println(this.config.getType());
         if (this.config.getType().equals("append-only")) {
-            write_apend_only(rows);
+            write_append_only(rows);
         } else {
             write_upsert(rows);
         }
     }
 
-    private void write_apend_only(Iterator<SinkRow> rows) {
+    private void write_append_only(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
             SinkRow row = rows.next();
             Data.Op op = row.getOp();
