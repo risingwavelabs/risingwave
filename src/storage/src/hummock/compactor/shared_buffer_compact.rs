@@ -466,6 +466,7 @@ impl SharedBufferCompactRunner {
                 split_weight_by_vnode,
                 use_block_based_filter,
             },
+            false,
         );
         Self {
             compactor,

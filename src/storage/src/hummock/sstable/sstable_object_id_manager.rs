@@ -17,7 +17,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as MMutex};
 
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -28,12 +28,11 @@ use sync_point::sync_point;
 use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
-
 pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
 
 #[async_trait::async_trait]
-pub trait GetObjectId:  Send+ Sync{
-    async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableObjectId> ;
+pub trait GetObjectId: Send + Sync {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId>;
 }
 /// 1. Caches SST object ids fetched from meta.
 /// 2. Maintains GC watermark SST object id.
@@ -63,7 +62,6 @@ impl SstableObjectIdManager {
         }
     }
 
-   
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
     async fn map_next_sst_object_id<F>(
@@ -103,7 +101,7 @@ impl SstableObjectIdManager {
             // Fetch new ids.
             sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
-            let this = self.clone();
+            let this: Arc<SstableObjectIdManager> = self.clone();
             tokio::spawn(async move {
                 let new_sst_ids = match this
                     .hummock_meta_client
@@ -188,16 +186,43 @@ impl SstableObjectIdManager {
 }
 
 #[async_trait::async_trait]
-impl GetObjectId for SstableObjectIdManager{
+impl GetObjectId for Arc<SstableObjectIdManager> {
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableObjectId> {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
         self.map_next_sst_object_id(|available_sst_object_ids| {
             available_sst_object_ids.get_next_sst_object_id()
         })
         .await
     }
+}
 
+/// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
+pub struct SharedComapctorObjectIdManager {
+    output_object_ids: MMutex<Vec<u64>>,
+}
+
+impl SharedComapctorObjectIdManager {
+    pub fn new(output_object_ids: Vec<u64>) -> Self {
+        Self {
+            output_object_ids: MMutex::new(output_object_ids),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl GetObjectId for SharedComapctorObjectIdManager {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
+        let mut output_object_ids = self.output_object_ids.lock().unwrap();
+
+        if let Some(first_element) = output_object_ids.pop() {
+            Ok(first_element)
+        } else {
+            return Err(HummockError::meta_error(
+                "Output object id moves backwards. run out",
+            ));
+        }
+    }
 }
 
 #[async_trait::async_trait]
