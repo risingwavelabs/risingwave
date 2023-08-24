@@ -21,6 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.proto.Data;
+import com.risingwave.proto.Data.DataType.TypeName;
 import io.grpc.Status;
 import java.net.InetSocketAddress;
 import java.util.*;
@@ -33,13 +34,10 @@ public class CassandraSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(CassandraSink.class);
     private final CqlSession session;
     private final List<SinkRow> updateRowCache = new ArrayList<>(1);
-    private final PreparedStatement insertStmt;
-    private final PreparedStatement updateStmt;
-    private final PreparedStatement deleteStmt;
+    private final HashMap<String, PreparedStatement> stmtMap;
     private final List<String> nonKeyColumns;
     private final BatchStatementBuilder batchBuilder;
     private final CassandraConfig config;
-    private final List<Integer> primaryKeyIndexes;
 
     public CassandraSink(TableSchema tableSchema, CassandraConfig config) {
         super(tableSchema);
@@ -68,12 +66,6 @@ public class CassandraSink extends SinkWriterBase {
         }
 
         this.config = config;
-
-        primaryKeyIndexes = new ArrayList<Integer>();
-        for (String primaryKey : tableSchema.getPrimaryKeys()) {
-            primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
-        }
-
         this.batchBuilder =
                 BatchStatement.builder(DefaultBatchType.LOGGED).setKeyspace(config.getKeyspace());
 
@@ -84,19 +76,27 @@ public class CassandraSink extends SinkWriterBase {
                         .filter(c -> !tableSchema.getPrimaryKeys().contains(c))
                         .collect(Collectors.toList());
 
+        this.stmtMap = new HashMap<>();
         // prepare statement for insert
-        this.insertStmt = session.prepare(createInsertStatement(config.getTable(), tableSchema));
+        this.stmtMap.put(
+                "insert", session.prepare(createInsertStatement(config.getTable(), tableSchema)));
+        if (config.getType().equals("upsert")) {
+            // prepare statement for update-insert/update-delete
+            this.stmtMap.put(
+                    "update",
+                    session.prepare(createUpdateStatement(config.getTable(), tableSchema)));
 
-        // prepare statement for update-insert/update-delete
-        this.updateStmt = session.prepare(createUpdateStatement(config.getTable(), tableSchema));
-
-        // prepare the delete statement
-        this.deleteStmt = session.prepare(createDeleteStatement(config.getTable(), tableSchema));
+            // prepare the delete statement
+            this.stmtMap.put(
+                    "delete",
+                    session.prepare(createDeleteStatement(config.getTable(), tableSchema)));
+        }
     }
 
     @Override
     public void write(Iterator<SinkRow> rows) {
-        if (this.config.getType() == "append-only") {
+        System.out.println(this.config.getType());
+        if (this.config.getType().equals("append-only")) {
             write_apend_only(rows);
         } else {
             write_upsert(rows);
@@ -109,7 +109,7 @@ public class CassandraSink extends SinkWriterBase {
             Data.Op op = row.getOp();
             switch (op) {
                 case INSERT:
-                    batchBuilder.addStatement(bindInsertStatement(insertStmt, row));
+                    batchBuilder.addStatement(bindInsertStatement(this.stmtMap.get("insert"), row));
                     break;
                 case UPDATE_DELETE:
                     break;
@@ -131,7 +131,7 @@ public class CassandraSink extends SinkWriterBase {
             Data.Op op = row.getOp();
             switch (op) {
                 case INSERT:
-                    batchBuilder.addStatement(bindInsertStatement(insertStmt, row));
+                    batchBuilder.addStatement(bindInsertStatement(this.stmtMap.get("insert"), row));
                     break;
                 case UPDATE_DELETE:
                     updateRowCache.clear();
@@ -144,10 +144,11 @@ public class CassandraSink extends SinkWriterBase {
                                 .withDescription("UPDATE_INSERT without UPDATE_DELETE")
                                 .asRuntimeException();
                     }
-                    batchBuilder.addStatement(bindUpdateInsertStatement(updateStmt, old, row));
+                    batchBuilder.addStatement(
+                            bindUpdateInsertStatement(this.stmtMap.get("update"), old, row));
                     break;
                 case DELETE:
-                    batchBuilder.addStatement(bindDeleteStatement(deleteStmt, row));
+                    batchBuilder.addStatement(bindDeleteStatement(this.stmtMap.get("delete"), row));
                     break;
                 default:
                     throw Status.INTERNAL
@@ -204,13 +205,29 @@ public class CassandraSink extends SinkWriterBase {
     }
 
     private BoundStatement bindInsertStatement(PreparedStatement stmt, SinkRow row) {
-        return stmt.bind(IntStream.range(0, row.size()).mapToObj(row::get).toArray());
+        TableSchema schema = getTableSchema();
+        return stmt.bind(
+                IntStream.range(0, row.size())
+                        .mapToObj(
+                                (index) ->
+                                        CassandraUtil.convertRow(
+                                                row.get(index),
+                                                schema.getColumnDescs()
+                                                        .get(index)
+                                                        .getDataType()
+                                                        .getTypeName()))
+                        .toArray());
     }
 
     private BoundStatement bindDeleteStatement(PreparedStatement stmt, SinkRow row) {
+        TableSchema schema = getTableSchema();
+        Map<String, TypeName> columnDescs = schema.getColumnTypes();
         return stmt.bind(
                 getTableSchema().getPrimaryKeys().stream()
-                        .map(key -> getTableSchema().getFromRow(key, row))
+                        .map(
+                                key ->
+                                        CassandraUtil.convertRow(
+                                                schema.getFromRow(key, row), columnDescs.get(key)))
                         .toArray());
     }
 
@@ -219,18 +236,25 @@ public class CassandraSink extends SinkWriterBase {
         TableSchema schema = getTableSchema();
         int numKeys = schema.getPrimaryKeys().size();
         int numNonKeys = updateRow.size() - numKeys;
+        Map<String, TypeName> columnDescs = schema.getColumnTypes();
         Object[] values = new Object[numNonKeys + numKeys];
 
         // bind "SET" clause
         Iterator<String> nonKeyIter = nonKeyColumns.iterator();
         for (int i = 0; i < numNonKeys; i++) {
-            values[i] = schema.getFromRow(nonKeyIter.next(), insertRow);
+            String name = nonKeyIter.next();
+            values[i] =
+                    CassandraUtil.convertRow(
+                            schema.getFromRow(name, insertRow), columnDescs.get(name));
         }
 
         // bind "WHERE" clause
         Iterator<String> keyIter = schema.getPrimaryKeys().iterator();
         for (int i = 0; i < numKeys; i++) {
-            values[numNonKeys + i] = schema.getFromRow(keyIter.next(), updateRow);
+            String name = keyIter.next();
+            values[numNonKeys + i] =
+                    CassandraUtil.convertRow(
+                            schema.getFromRow(name, updateRow), columnDescs.get(name));
         }
         return stmt.bind(values);
     }

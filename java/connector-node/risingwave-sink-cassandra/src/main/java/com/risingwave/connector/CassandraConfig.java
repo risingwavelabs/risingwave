@@ -35,18 +35,18 @@ public class CassandraConfig extends CommonSinkConfig {
     /** Required */
     private String datacenter;
 
-    @JsonProperty(value = "username")
+    @JsonProperty(value = "cassandra.username")
     private String username;
 
-    @JsonProperty(value = "password")
+    @JsonProperty(value = "cassandra.password")
     private String password;
 
     @JsonCreator
     public CassandraConfig(
-            @JsonProperty(value = "url") String url,
-            @JsonProperty(value = "keyspace") String keyspace,
-            @JsonProperty(value = "table") String table,
-            @JsonProperty(value = "datacenter") String datacenter,
+            @JsonProperty(value = "cassandra.url") String url,
+            @JsonProperty(value = "cassandra.keyspace") String keyspace,
+            @JsonProperty(value = "cassandra.table") String table,
+            @JsonProperty(value = "cassandra.datacenter") String datacenter,
             @JsonProperty(value = "type") String type) {
         this.url = url;
         this.keyspace = keyspace;
