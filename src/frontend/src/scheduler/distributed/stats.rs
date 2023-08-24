@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicI64, AtomicU64, GenericCounter, GenericGauge};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram,
+    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -31,11 +30,10 @@ pub struct DistributedQueryMetrics {
 }
 
 pub static GLOBAL_DISTRIBUTED_QUERY_METRICS: LazyLock<DistributedQueryMetrics> =
-    LazyLock::new(DistributedQueryMetrics::new);
+    LazyLock::new(|| DistributedQueryMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl DistributedQueryMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let running_query_num = register_int_gauge_with_registry!(
             "distributed_running_query_num",
             "The number of running query of distributed execution mode",

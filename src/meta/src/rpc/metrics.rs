@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -24,7 +23,7 @@ use prometheus::{
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
@@ -174,11 +173,11 @@ pub struct MetaMetrics {
     pub table_write_throughput: IntCounterVec,
 }
 
-pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> = LazyLock::new(MetaMetrics::new);
+pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
+    LazyLock::new(|| MetaMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl MetaMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",

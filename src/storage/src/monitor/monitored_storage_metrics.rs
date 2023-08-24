@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram,
-    HistogramVec,
+    HistogramVec, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -43,12 +42,10 @@ pub struct MonitoredStorageMetrics {
 }
 
 pub static GLOBAL_STORAGE_METRICS: LazyLock<MonitoredStorageMetrics> =
-    LazyLock::new(MonitoredStorageMetrics::new);
+    LazyLock::new(|| MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl MonitoredStorageMetrics {
-    #[allow(clippy::new_without_default)]
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         // ----- get -----
         let opts = histogram_opts!(
             "state_store_get_key_size",

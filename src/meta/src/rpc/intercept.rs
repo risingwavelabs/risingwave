@@ -12,29 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::Future;
 use hyper::Body;
 use tower::{Layer, Service};
 
-use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::rpc::metrics::MetaMetrics;
 
 #[derive(Clone)]
-pub struct MetricsMiddlewareLayer;
+pub struct MetricsMiddlewareLayer {
+    metrics: Arc<MetaMetrics>,
+}
+
+impl MetricsMiddlewareLayer {
+    pub fn new(metrics: Arc<MetaMetrics>) -> Self {
+        Self { metrics }
+    }
+}
 
 impl<S> Layer<S> for MetricsMiddlewareLayer {
     type Service = MetricsMiddleware<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        MetricsMiddleware { inner: service }
+        MetricsMiddleware {
+            inner: service,
+            metrics: self.metrics.clone(),
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct MetricsMiddleware<S> {
     inner: S,
+    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> Service<hyper::Request<Body>> for MetricsMiddleware<S>
@@ -58,7 +70,7 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
-        let metrics = GLOBAL_META_METRICS.deref();
+        let metrics = self.metrics.clone();
 
         async move {
             let path = req.uri().path();

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
@@ -24,7 +23,7 @@ use prometheus::core::{
 };
 use prometheus::{
     exponential_buckets, opts, proto, GaugeVec, Histogram, HistogramOpts, HistogramVec,
-    IntCounterVec, IntGauge, IntGaugeVec,
+    IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -59,13 +58,11 @@ macro_rules! def_task_metrics {
 for_all_task_metrics!(def_task_metrics);
 
 pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
-    LazyLock::new(BatchTaskMetrics::new);
+    LazyLock::new(|| BatchTaskMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl BatchTaskMetrics {
-    #[allow(clippy::new_without_default)]
     /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let task_labels = vec!["query_id", "stage_id", "task_id"];
         let mut descs = Vec::with_capacity(8);
 
@@ -233,12 +230,10 @@ macro_rules! def_executor_metrics {
 for_all_executor_metrics!(def_executor_metrics);
 
 pub static GLOBAL_BATCH_EXECUTOR_METRICS: LazyLock<BatchExecutorMetrics> =
-    LazyLock::new(BatchExecutorMetrics::new);
+    LazyLock::new(|| BatchExecutorMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl BatchExecutorMetrics {
-    #[allow(clippy::new_without_default)]
-    fn new() -> Self {
-        let register = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(register: &Registry) -> Self {
         let executor_labels = vec!["query_id", "stage_id", "task_id", "executor_id"];
         let mut descs = Vec::with_capacity(2);
 
@@ -430,12 +425,10 @@ pub struct BatchManagerMetrics {
 }
 
 pub static GLOBAL_BATCH_MANAGER_METRICS: LazyLock<BatchManagerMetrics> =
-    LazyLock::new(BatchManagerMetrics::new);
+    LazyLock::new(|| BatchManagerMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl BatchManagerMetrics {
-    #[allow(clippy::new_without_default)]
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
         let batch_total_mem = TrAdderGauge::new(
             "batch_total_mem",

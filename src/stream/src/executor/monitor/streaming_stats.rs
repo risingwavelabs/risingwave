@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
@@ -21,7 +20,7 @@ use prometheus::{
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntGauge,
+    HistogramVec, IntCounter, IntGauge, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -131,12 +130,10 @@ pub struct StreamingMetrics {
 }
 
 pub static GLOBAL_STREAMING_METRICS: LazyLock<StreamingMetrics> =
-    LazyLock::new(StreamingMetrics::new);
+    LazyLock::new(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl StreamingMetrics {
-    #[allow(clippy::new_without_default)]
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",

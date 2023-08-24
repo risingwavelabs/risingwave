@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{
@@ -21,7 +20,7 @@ use prometheus::core::{
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, HistogramVec,
-    IntGauge, Opts,
+    IntGauge, Opts, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tracing::warn;
@@ -71,11 +70,10 @@ pub struct HummockStateStoreMetrics {
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: LazyLock<HummockStateStoreMetrics> =
-    LazyLock::new(HummockStateStoreMetrics::new);
+    LazyLock::new(|| HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl HummockStateStoreMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
@@ -389,6 +387,9 @@ impl Collector for StateStoreCollector {
 pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
     let collector = Box::new(StateStoreCollector::new(memory_collector));
     if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
-        warn!("unable to monitor cache: {:?}", e);
+        warn!(
+            "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
+            e
+        );
     }
 }

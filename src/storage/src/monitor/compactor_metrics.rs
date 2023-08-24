@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
@@ -20,7 +19,7 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_counter_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge,
+    register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -55,11 +54,10 @@ pub struct CompactorMetrics {
 }
 
 pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
-    LazyLock::new(CompactorMetrics::new);
+    LazyLock::new(|| CompactorMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl CompactorMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let opts = histogram_opts!(
             "compactor_shared_buffer_to_sstable_size",
             "Histogram of batch size compacted from shared buffer to remote storage",

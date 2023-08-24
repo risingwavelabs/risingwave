@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
+    Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 pub static GLOBAL_OBJECT_STORE_METRICS: LazyLock<ObjectStoreMetrics> =
-    LazyLock::new(ObjectStoreMetrics::new);
+    LazyLock::new(|| ObjectStoreMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 #[derive(Clone)]
 pub struct ObjectStoreMetrics {
@@ -36,8 +36,7 @@ pub struct ObjectStoreMetrics {
 }
 
 impl ObjectStoreMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         let read_bytes = register_int_counter_with_registry!(
             "object_store_read_bytes",
             "Total bytes of requests read from object store",

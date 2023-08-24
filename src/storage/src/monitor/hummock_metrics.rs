@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, Histogram,
+    register_int_counter_with_registry, Histogram, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -38,11 +37,11 @@ pub struct HummockMetrics {
     pub report_compaction_task_latency: Histogram,
 }
 
-pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> = LazyLock::new(HummockMetrics::new);
+pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> =
+    LazyLock::new(|| HummockMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl HummockMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
+    fn new(registry: &Registry) -> Self {
         // ----- Hummock -----
         // gRPC count
         let unpin_version_before_counts = register_int_counter_with_registry!(

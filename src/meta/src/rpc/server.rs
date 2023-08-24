@@ -299,7 +299,9 @@ pub async fn start_service_as_election_follower(
 
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
-        .layer(MetricsMiddlewareLayer)
+        .layer(MetricsMiddlewareLayer::new(Arc::new(
+            GLOBAL_META_METRICS.clone(),
+        )))
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
@@ -695,7 +697,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
-        .layer(MetricsMiddlewareLayer)
+        .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))

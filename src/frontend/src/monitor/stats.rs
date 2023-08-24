@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
     register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, IntGauge,
+    Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -29,12 +29,11 @@ pub struct FrontendMetrics {
     pub active_sessions: IntGauge,
 }
 
-pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> = LazyLock::new(FrontendMetrics::new);
+pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> =
+    LazyLock::new(|| FrontendMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl FrontendMetrics {
-    fn new() -> Self {
-        let registry = GLOBAL_METRICS_REGISTRY.deref();
-
+    fn new(registry: &Registry) -> Self {
         let query_counter_local_execution = register_int_counter_with_registry!(
             "frontend_query_counter_local_execution",
             "Total query number of local execution mode",
