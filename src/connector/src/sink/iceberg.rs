@@ -44,10 +44,15 @@ use super::{
 };
 use crate::deserialize_bool_from_string;
 use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
-pub const ICEBERG_SINK: &str = "iceberg_v2";
+pub const ICEBERG_SINK: &str = "iceberg";
+pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
+
+pub type RemoteIcebergSink = CoordinatedRemoteSink;
+pub type RemoteIcebergConfig = RemoteConfig;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

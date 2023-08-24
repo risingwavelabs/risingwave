@@ -21,9 +21,11 @@ import static org.junit.Assert.assertEquals;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.risingwave.connector.IcebergSinkCoordinator;
 import com.risingwave.connector.UpsertIcebergSinkWriter;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
+import com.risingwave.proto.ConnectorServiceProto;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -121,16 +123,17 @@ public class UpsertIcebergSinkPartitionTest {
         Configuration hadoopConf = new Configuration();
         HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
+        Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+        IcebergSinkCoordinator coordinator = new IcebergSinkCoordinator(icebergTable);
         UpsertIcebergSinkWriter sink =
                 new UpsertIcebergSinkWriter(
-                        tableSchema,
-                        hadoopCatalog,
-                        hadoopCatalog.loadTable(tableIdentifier),
-                        FileFormat.PARQUET);
+                        tableSchema, hadoopCatalog, icebergTable, FileFormat.PARQUET);
 
         try {
+            sink.beginEpoch(233);
             sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa")));
-            sink.barrier(true);
+            ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();
+            coordinator.commit(233, Collections.singletonList(metadata));
 
             Record record1 = GenericRecord.create(icebergTableSchema);
             record1.setField("id", 1);
@@ -140,11 +143,13 @@ public class UpsertIcebergSinkPartitionTest {
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
+            sink.beginEpoch(234);
             sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb")));
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
-            sink.barrier(true);
+            metadata = sink.barrier(true).get();
+            coordinator.commit(234, Collections.singletonList(metadata));
 
             Record record2 = GenericRecord.create(icebergTableSchema);
             record2.setField("id", 2);
@@ -166,14 +171,14 @@ public class UpsertIcebergSinkPartitionTest {
         Configuration hadoopConf = new Configuration();
         HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
+        Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+        IcebergSinkCoordinator coordinator = new IcebergSinkCoordinator(icebergTable);
         UpsertIcebergSinkWriter sink =
                 new UpsertIcebergSinkWriter(
-                        tableSchema,
-                        hadoopCatalog,
-                        hadoopCatalog.loadTable(tableIdentifier),
-                        FileFormat.PARQUET);
+                        tableSchema, hadoopCatalog, icebergTable, FileFormat.PARQUET);
 
         try {
+            sink.beginEpoch(233);
             sink.write(
                     Iterators.forArray(
                             new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa"),
@@ -181,7 +186,8 @@ public class UpsertIcebergSinkPartitionTest {
                             new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice", "aaa"),
                             new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare", "ccc"),
                             new ArraySinkRow(Op.DELETE, 2, "Bob", "bbb")));
-            sink.barrier(true);
+            ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();
+            coordinator.commit(233, Collections.singletonList(metadata));
 
             Record record1 = GenericRecord.create(icebergTableSchema);
             record1.setField("id", 1);
@@ -191,12 +197,14 @@ public class UpsertIcebergSinkPartitionTest {
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
+            sink.beginEpoch(234);
             sink.write(
                     Iterators.forArray(
                             new ArraySinkRow(Op.UPDATE_DELETE, 1, "Clare", "ccc"),
                             new ArraySinkRow(Op.UPDATE_INSERT, 1, "Alice", "aaa"),
                             new ArraySinkRow(Op.DELETE, 1, "Alice", "aaa")));
-            sink.barrier(true);
+            metadata = sink.barrier(true).get();
+            coordinator.commit(234, Collections.singletonList(metadata));
 
             validateTableWithIceberg(Sets.newHashSet());
             validateTableWithSpark(Sets.newHashSet());
