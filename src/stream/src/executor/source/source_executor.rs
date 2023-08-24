@@ -196,10 +196,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 state.push(recover_state);
             }
         }
-        println!(
-            "#### Actor {:?} apply state {:?}, latest: {:?}",
-            self.actor_ctx.id, state, boot_state
-        );
         self.replace_stream_reader_with_target_state(source_desc, stream, state)
             .await?;
         Ok(())
@@ -624,8 +620,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .collect::<Vec<&str>>(),
                         )
                         .inc_by(chunk.cardinality() as u64);
-                    let (_, columns, _) = chunk.clone().into_inner();
-                    println!("SOURCE CHUNK: {:?}", columns);
                     yield Message::Chunk(chunk);
                 }
             }

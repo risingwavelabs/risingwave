@@ -56,7 +56,7 @@ alter source s1 add column v2 varchar;
 statement ok
 alter source s2 add column v4 int;
 
-statement ok 
+statement ok
 alter table t add column v2 varchar;
 
 statement ok

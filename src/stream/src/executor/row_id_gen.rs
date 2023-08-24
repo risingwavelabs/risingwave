@@ -109,7 +109,6 @@ impl RowIdGenExecutor {
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     columns[self.row_id_index] =
                         self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
-                    println!("ROWID: {:?}", columns);
                     yield Message::Chunk(StreamChunk::new(ops, columns, bitmap.into_visibility()));
                 }
                 Message::Barrier(barrier) => {

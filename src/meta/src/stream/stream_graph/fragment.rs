@@ -389,7 +389,7 @@ impl StreamFragmentGraph {
     }
 
     /// Remove the source fragment from graph. Return the dispatch strategy from source fragment to
-    /// downstream. Used only for `replace_table` and uniqueness of the edge is ensured.
+    /// downstream. Used only for `replace_table` and the uniqueness of the edge is ensured.
     pub fn remove_source_fragment(&mut self) -> DispatchStrategy {
         let source_fragment_id = self
             .fragments
