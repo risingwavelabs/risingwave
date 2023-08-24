@@ -174,10 +174,10 @@
   stream_plan: |-
     StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, a1, stream.b1], pk_columns: [stream._row_id, id2, a1, stream.b1], pk_conflict: NoCheck }
     └─StreamTemporalJoin { type: LeftOuter, predicate: stream.a1 = idx2.a2 AND stream.b1 = idx2.b2, output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream._row_id, stream.b1] }
-      ├─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
+      ├─StreamExchange { dist: HashShard(stream.a1) }
       │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
-      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2, idx2.b2) }
-        └─StreamTableScan { table: idx2, columns: [idx2.a2, idx2.b2, idx2.id2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.a2, idx2.b2) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
+        └─StreamTableScan { table: idx2, columns: [idx2.a2, idx2.b2, idx2.id2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.a2) }
 - name: temporal join with an index (index column size = 1)
   sql: |
     create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
@@ -213,10 +213,10 @@
   stream_plan: |-
     StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, a1, stream.b1], pk_columns: [stream._row_id, id2, a1, stream.b1], pk_conflict: NoCheck }
     └─StreamTemporalJoin { type: LeftOuter, predicate: stream.a1 = idx.a2 AND stream.b1 = idx.b2, output: [stream.id1, stream.a1, idx.id2, idx.a2, stream._row_id, stream.b1] }
-      ├─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
+      ├─StreamExchange { dist: HashShard(stream.a1) }
       │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
-      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx.a2, idx.b2) }
-        └─StreamTableScan { table: idx, columns: [idx.id2, idx.a2, idx.b2], pk: [idx.id2], dist: UpstreamHashShard(idx.a2, idx.b2) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx.a2) }
+        └─StreamTableScan { table: idx, columns: [idx.id2, idx.a2, idx.b2], pk: [idx.id2], dist: UpstreamHashShard(idx.a2) }
 - name: index selection for temporal join (with two indexes) and should choose the index with a longer prefix..
   sql: |
     create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
@@ -227,10 +227,10 @@
   stream_plan: |-
     StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, a1, stream.b1], pk_columns: [stream._row_id, id2, a1, stream.b1], pk_conflict: NoCheck }
     └─StreamTemporalJoin { type: LeftOuter, predicate: stream.a1 = idx2.a2 AND stream.b1 = idx2.b2, output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream._row_id, stream.b1] }
-      ├─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
+      ├─StreamExchange { dist: HashShard(stream.a1) }
       │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
-      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2, idx2.b2) }
-        └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.a2, idx2.b2) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
+        └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.a2) }
 - name: index selection for temporal join (with three indexes) and should choose primary table.
   sql: |
     create table stream(id1 int, a1 int, b1 int, c1 int) APPEND ONLY;
