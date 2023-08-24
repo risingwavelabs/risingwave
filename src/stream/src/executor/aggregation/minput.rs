@@ -186,7 +186,7 @@ impl MaterializedInputState {
             let mut cache_filler = self.cache.begin_syncing();
 
             let all_data_iter = state_table
-                .iter_with_pk_prefix(
+                .iter_row_with_pk_prefix(
                     group_key.map(GroupKey::table_pk),
                     PrefetchOptions {
                         exhaust_iter: cache_filler.capacity().is_none(),

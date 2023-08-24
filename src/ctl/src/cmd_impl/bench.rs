@@ -103,7 +103,7 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                     };
                     loop {
                         let stream = state_table
-                            .iter(PrefetchOptions::new_for_exhaust_iter())
+                            .iter_row(PrefetchOptions::new_for_exhaust_iter())
                             .await?;
                         pin_mut!(stream);
                         iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

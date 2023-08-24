@@ -83,7 +83,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(&group_key, Default::default())
+            .iter_row_with_pk_prefix(&group_key, Default::default())
             .await?;
         pin_mut!(state_table_iter);
 
@@ -120,7 +120,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         let cache = &mut topn_cache.high;
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(
+            .iter_row_with_pk_prefix(
                 &group_key,
                 PrefetchOptions {
                     exhaust_iter: cache_size_limit == usize::MAX,
@@ -168,7 +168,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(
+            .iter_row_with_pk_prefix(
                 &group_key,
                 PrefetchOptions {
                     exhaust_iter: topn_cache.limit == usize::MAX,

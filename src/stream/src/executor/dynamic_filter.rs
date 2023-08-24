@@ -232,7 +232,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter(Default::default()).await?;
+        let rhs_stream = self.right_table.iter_row(Default::default()).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
@@ -387,7 +387,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         // TODO: prefetching for append-only case.
                         let streams = futures::future::try_join_all(
                             self.left_table.vnodes().iter_vnodes().map(|vnode| {
-                                self.left_table.iter_with_pk_range(
+                                self.left_table.iter_row_with_pk_range(
                                     &range,
                                     vnode,
                                     PrefetchOptions::new_for_exhaust_iter(),

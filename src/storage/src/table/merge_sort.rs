@@ -18,19 +18,18 @@ use std::error::Error;
 
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::row::OwnedRow;
 
 pub trait MergeSortKey = Eq + PartialEq + Ord + PartialOrd;
 
-struct Node<K: MergeSortKey, S> {
+struct Node<K: MergeSortKey, V, S> {
     stream: S,
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
-    peeked: (K, OwnedRow),
+    peeked: (K, V),
 }
 
-impl<K: MergeSortKey, S> PartialEq for Node<K, S> {
+impl<K: MergeSortKey, V, S> PartialEq for Node<K, V, S> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.0 == other.peeked.0 {
             true => unreachable!("primary key from different iters should be unique"),
@@ -38,27 +37,28 @@ impl<K: MergeSortKey, S> PartialEq for Node<K, S> {
         }
     }
 }
-impl<K: MergeSortKey, S> Eq for Node<K, S> {}
+impl<K: MergeSortKey, V, S> Eq for Node<K, V, S> {}
 
-impl<K: MergeSortKey, S> PartialOrd for Node<K, S> {
+impl<K: MergeSortKey, V, S> PartialOrd for Node<K, V, S> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<K: MergeSortKey, S> Ord for Node<K, S> {
+impl<K: MergeSortKey, V, S> Ord for Node<K, V, S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
         self.peeked.0.cmp(&other.peeked.0).reverse()
     }
 }
 
-#[try_stream(ok=(K, OwnedRow), error=E)]
-pub async fn merge_sort<'a, K, E, R>(streams: Vec<R>)
+#[try_stream(ok=(K, V), error=E)]
+pub async fn merge_sort<'a, K, V, E, R>(streams: Vec<R>)
 where
     K: MergeSortKey + 'a,
+    V: 'a,
     E: Error + 'a,
-    R: Stream<Item = Result<(K, OwnedRow), E>> + 'a + Unpin,
+    R: Stream<Item = Result<(K, V), E>> + 'a + Unpin,
 {
     let mut heap = BinaryHeap::new();
     for mut stream in streams {
@@ -80,6 +80,7 @@ where
 #[cfg(test)]
 mod tests {
     use futures_async_stream::for_await;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
 
     use super::*;

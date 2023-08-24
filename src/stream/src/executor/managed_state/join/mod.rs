@@ -405,11 +405,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter_fut = self
                 .state
                 .table
-                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
+                .iter_row_and_key_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
             let degree_table_iter_fut = self
                 .degree_state
                 .table
-                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
+                .iter_row_and_key_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -438,12 +438,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter = self
                 .state
                 .table
-                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .iter_row_and_key_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
                 .await?;
 
             #[for_await]
-            for row in table_iter {
-                let row: OwnedRow = row?;
+            for entry in table_iter {
+                let row = entry?.1;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)

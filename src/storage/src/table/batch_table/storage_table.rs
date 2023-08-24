@@ -722,7 +722,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
+            let (_, key) = parse_raw_key_to_vnode_and_key(raw_key);
 
             let full_row = self.row_deserializer.deserialize(&value)?;
             let result_row_in_value = self
@@ -733,7 +733,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                 Some(key_output_indices) => {
                     let result_row_in_key = match self.pk_serializer.clone() {
                         Some(pk_serializer) => {
-                            let pk = pk_serializer.deserialize(key)?;
+                            let pk = pk_serializer.deserialize(key.as_ref())?;
 
                             pk.project(&self.output_row_in_key_indices).into_owned_row()
                         }

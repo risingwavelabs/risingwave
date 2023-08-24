@@ -244,7 +244,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut cache_for_partition = BTreeMap::new();
         let table_iter = this
             .state_table
-            .iter_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
+            .iter_row_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
             .await?;
 
         #[for_await]

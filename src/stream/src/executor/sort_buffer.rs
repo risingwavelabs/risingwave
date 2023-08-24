@@ -22,13 +22,12 @@ use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
-use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::StateStore;
@@ -202,7 +201,7 @@ impl<S: StateStore> SortBuffer<S> {
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_key_and_val_with_pk_range(
+                buffer_table.iter_row_and_key_with_pk_range(
                     &pk_range,
                     vnode,
                     PrefetchOptions {
@@ -230,7 +229,7 @@ impl<S: StateStore> SortBuffer<S> {
 /// Merge the key part and value part of a row into a full row. This is needed for state table with
 /// non-None value indices.
 fn key_value_to_full_row<S: StateStore>(
-    (key, value): (Bytes, OwnedRow),
+    ((_vnode, key), value): ((VirtualNode, Bytes), OwnedRow),
     table: &StateTable<S>,
 ) -> StreamExecutorResult<OwnedRow> {
     let Some(val_indices) = table.value_indices() else {
@@ -246,9 +245,10 @@ fn key_value_to_full_row<S: StateStore>(
     assert!(indices.iter().copied().eq(0..len));
 
     let mut row = vec![None; len];
-    let key = deserialize_pk_with_vnode(&key, table.pk_serde())
-        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?
-        .1;
+    let key = table
+        .pk_serde()
+        .deserialize(key.as_ref())
+        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?;
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }
