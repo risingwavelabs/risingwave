@@ -691,22 +691,21 @@ impl Parser {
                 self.expect_token(&Token::RParen)?;
                 if self.peek_token() == Token::Period && matches!(expr, Expr::Nested(_)) {
                     self.parse_struct_selection(expr)
-                } else if self.peek_token() == Token::Arrow && let Some(args) = {
-                    match expr.clone() {
-                        Expr::Row(args) => Some(args),
-                        Expr::Nested(arg) => Some(vec![*arg]),
-                        _ => None,
+                } else if self.peek_token() == Token::Arrow
+                    && let Some(args) = {
+                        match expr.clone() {
+                            Expr::Row(args) => Some(args),
+                            Expr::Nested(arg) => Some(vec![*arg]),
+                            _ => None,
+                        }
                     }
-                } {
-                    let args: Vec<_> = args.into_iter().map(|arg| {
-                        let Expr::Identifier(name) = arg else {
-                            return parser_err!(format!(
-                                "Expected `Ident` as lambda function arg, found: {}", arg
-                            ));
-                        };
-
-                        Ok(name)
-                    }).try_collect()?;
+                    && let Some(args) = args.into_iter().map(|arg| {
+                        match arg {
+                            Expr::Identifier(name) => Some(name),
+                            _ => None,
+                        }
+                    }).collect::<Option<Vec<_>>>()
+                {
                     self.expect_token(&Token::Arrow)?;
                     let body = self.parse_expr()?;
                     Ok(Expr::LambdaFunction { args, body: Box::new(body) })
