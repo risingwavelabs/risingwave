@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use futures::Future;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
@@ -258,7 +259,7 @@ impl StateTableAccessor for FakeRemoteTableAccessor {
         )))
     }
 }
-
+#[derive(Clone)]
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
     table_accessor: Box<dyn StateTableAccessor>,
@@ -336,6 +337,7 @@ impl FilterKeyExtractorManagerInner {
 
 /// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
+#[derive(Clone)]
 pub struct FilterKeyExtractorManager {
     inner: FilterKeyExtractorManagerInner,
 }
@@ -373,17 +375,29 @@ impl FilterKeyExtractorManager {
         self.inner.sync(filter_key_extractor_map)
     }
 
+    
+}
+#[async_trait::async_trait]
+pub trait AcquireFilterKeyExtractor: Clone + Send + Sync + 'static{
+    async fn acquire(
+        &self,
+        table_id_set: HashSet<u32>,
+    ) ->  Box<dyn Future<Output = HummockResult<FilterKeyExtractorImpl>>+ Send>; 
+}
+
+#[async_trait::async_trait]
+impl AcquireFilterKeyExtractor for FilterKeyExtractorManager{
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// `table_id` does not util version update (notify), and retry to get
-    pub async fn acquire(
+    async fn acquire(
         &self,
         table_id_set: HashSet<u32>,
     ) -> HummockResult<FilterKeyExtractorImpl> {
         self.inner.acquire(table_id_set).await
     }
+    
 }
-
 pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
 
 #[cfg(test)]
@@ -411,7 +425,7 @@ mod tests {
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-        MultiFilterKeyExtractor,
+        MultiFilterKeyExtractor, AcquireFilterKeyExtractor,
     };
 
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
