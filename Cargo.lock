@@ -4177,29 +4177,6 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=6d342a9#6d342a98df0916ad115e06fd848a8f460730253f"
-dependencies = [
- "async-channel",
- "async-trait",
- "futures-channel",
- "futures-util",
- "libc",
- "log",
- "madsim",
- "rdkafka-sys",
- "serde",
- "serde_derive",
- "serde_json",
- "slab",
- "spin 0.9.8",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "madsim-rdkafka"
 version = "0.2.22"
 source = "git+https://github.com/madsim-rs/madsim.git?rev=f01e3ca#f01e3cacfeebfec9893a3f94a57386d1c7ba4dc5"
 dependencies = [
@@ -6298,7 +6275,7 @@ dependencies = [
  "google-cloud-pubsub",
  "indicatif",
  "itertools 0.11.0",
- "madsim-rdkafka 0.2.22",
+ "madsim-rdkafka",
  "madsim-tokio",
  "redis",
  "regex",
@@ -6727,7 +6704,7 @@ dependencies = [
  "google-cloud-pubsub",
  "icelake",
  "itertools 0.11.0",
- "madsim-rdkafka 0.2.22",
+ "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -7242,7 +7219,7 @@ dependencies = [
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
- "madsim-rdkafka 0.2.22",
+ "madsim-rdkafka",
  "madsim-tokio",
  "paste",
  "pin-project",
@@ -9860,7 +9837,7 @@ dependencies = [
  "libc",
  "lock_api",
  "log",
- "madsim-rdkafka 0.2.14-alpha",
+ "madsim-rdkafka",
  "madsim-tokio",
  "memchr",
  "miniz_oxide",
