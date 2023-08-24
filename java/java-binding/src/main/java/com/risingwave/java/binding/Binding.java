@@ -14,11 +14,11 @@
 
 package com.risingwave.java.binding;
 
-import io.questdb.jar.jni.JarJniLoader;
+// import io.questdb.jar.jni.JarJniLoader;
 
 public class Binding {
     static {
-        JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
+        //        JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
     }
 
     public static native int vnodeCount();
@@ -85,5 +85,5 @@ public class Binding {
 
     static native long streamChunkIteratorFromPretty(String str);
 
-    public static native void sendMsgToChannel(int channelId, Object msg);
+    public static native void sendMsgToChannel(long channelPtr, Object msg);
 }

@@ -14,10 +14,12 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::mem::forget;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -27,8 +29,8 @@ use jni::{InitArgsBuilder, JavaVM, JNIVersion};
 use jni::objects::{JObject, JValue};
 use jni::sys::jint;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
-use risingwave_common::jvm_runtime::{CHANNEL_ID_GEN, JNI_CHANNEL_POOL, JVM};
+use tokio::time::sleep;
+use risingwave_common::jvm_runtime::{JVM, MyPtr};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 
@@ -186,26 +188,15 @@ impl CdcSplitReader {
             properties.insert("table.name".into(), table_name);
         }
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let channel_id = CHANNEL_ID_GEN.fetch_add(1, Ordering::Relaxed);
-        {
-            let mut guard = JNI_CHANNEL_POOL.write().unwrap();
-            guard.insert(channel_id, tx);
-        }
+        let (tx, mut rx) = mpsc::channel(1024);
+
+        let tx: Box<MyPtr> = Box::new(MyPtr {
+            ptr: tx,
+            num: 123456,
+        });
 
         let source_type = self.conn_props.get_source_type_pb()?;
 
-        // let cdc_stream = cdc_client
-        //     .start_source_stream(
-        //         self.source_id,
-        //         self.conn_props.get_source_type_pb()?,
-        //         self.start_offset,
-        //         properties,
-        //         self.snapshot_done,
-        //     )
-        //     .await
-        //     .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
-        // pin_mut!(cdc_stream);
 
         tokio::task::spawn_blocking(move || {
             let mut env = JVM.attach_current_thread_as_daemon().unwrap();
@@ -249,18 +240,34 @@ impl CdcSplitReader {
 
             let snapshot_done = JValue::from(self.snapshot_done);
 
-            let channel_id = JValue::from(channel_id as i32);
+            let channel_ptr = Box::into_raw(tx) as i64;
+            println!("channel_ptr = {}", channel_ptr);
+            let channel_ptr = JValue::from(channel_ptr);
 
             let _ = env.call_static_method(
                 "com/risingwave/connector/source/core/SourceHandlerFactory",
                 "startJniSourceHandler",
-                "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZI)V",
-                &[(&st).into(), source_id_arg, (&start_offset).into(), JValue::Object(&java_map), snapshot_done, channel_id]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+                "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZJ)V",
+                &[(&st).into(), source_id_arg, (&start_offset).into(), JValue::Object(&java_map), snapshot_done, channel_ptr]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
 
             println!("call jni cdc start source success");
         });
 
+        // loop {
+        //     let GetEventStreamResponse { events, .. } = rx.recv().unwrap();
+        //     println!("recieve events {:?}", events.len());
+        //     if events.is_empty() {
+        //         continue;
+        //     }
+        //     let mut msgs = Vec::with_capacity(events.len());
+        //     for event in events {
+        //         msgs.push(SourceMessage::from(event));
+        //     }
+        //     yield msgs;
+        // }
+
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
+            println!("recieve events {:?}", events.len());
             if events.is_empty() {
                 continue;
             }

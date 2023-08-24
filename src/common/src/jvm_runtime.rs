@@ -7,15 +7,7 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::sync::atomic::AtomicI32;
 use jni::{InitArgsBuilder, JavaVM, JNIVersion};
-use tokio::sync::mpsc::UnboundedSender;
-
-pub static JNI_CHANNEL_POOL: LazyLock<RwLock<HashMap<i32, UnboundedSender<GetEventStreamResponse>>>> = LazyLock::new(|| {
-    RwLock::new(HashMap::new())
-});
-
-pub static CHANNEL_ID_GEN: LazyLock<Arc<AtomicI32>> = LazyLock::new(|| {
-    Arc::new(AtomicI32::new(0))
-});
+use tokio::sync::mpsc::{Sender, UnboundedSender};
 
 pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
     let dir_path = "/Users/dylan/Desktop/workspace/risingwave/.risingwave/bin/connector-node/libs/";
@@ -65,3 +57,15 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
 
     Arc::new(jvm)
 });
+
+
+pub struct MyPtr {
+    pub ptr: Sender<GetEventStreamResponse>,
+    pub num: u64,
+}
+
+impl Drop for MyPtr {
+    fn drop(&mut self) {
+        println!("drop MyPtr, num = {}", self.num);
+    }
+}

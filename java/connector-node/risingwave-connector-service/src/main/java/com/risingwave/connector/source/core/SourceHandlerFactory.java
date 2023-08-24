@@ -46,7 +46,7 @@ public abstract class SourceHandlerFactory {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            int channelId) {
+            long channelPtr) {
         // For jni.rs
         java.lang.Thread.currentThread()
                 .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
@@ -57,6 +57,6 @@ public abstract class SourceHandlerFactory {
                 new DbzConnectorConfig(
                         source, sourceId, startOffset, mutableUserProps, snapshotDone);
         JniSourceHandler hanlder = new JniSourceHandler(config);
-        hanlder.start(channelId);
+        hanlder.start(channelPtr);
     }
 }

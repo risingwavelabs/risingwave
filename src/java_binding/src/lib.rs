@@ -17,9 +17,10 @@
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
+#![feature(result_option_inspect)]
 
-mod hummock_iterator;
-mod stream_chunk_iterator;
+pub mod hummock_iterator;
+pub mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
@@ -45,9 +46,9 @@ use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
-use risingwave_common::jvm_runtime::JNI_CHANNEL_POOL;
+use tokio::sync::mpsc::UnboundedSender;
+use risingwave_common::jvm_runtime::MyPtr;
 use risingwave_pb::connector_service::{CdcMessage, GetEventStreamResponse};
-use risingwave_pb::hummock::GetEpochResponse;
 
 use crate::stream_chunk_iterator::{StreamChunkIterator, StreamChunkRow};
 
@@ -822,14 +823,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel<'a>(
     mut env: EnvParam<'a>,
-    channel_id: jint,
+    channel: Pointer<'a, MyPtr>,
     mut msg: JObject<'a>,
 ) {
-    let guard = JNI_CHANNEL_POOL.read().unwrap();
-    println!("JNI_CHANNEL_POOL len = {}", guard.len());
-    let channel = guard.get(&channel_id).unwrap();
 
-    let source_id = env.env.call_method(&mut msg, "getSourceId", "()L", &[]).unwrap();
+    println!("channel_ptr = {}, num = {}", channel.pointer, channel.as_ref().num);
+    // let channel: &mut UnboundedSender<GetEventStreamResponse> = unsafe { &mut *(channel_ptr.pointer as *mut UnboundedSender<GetEventStreamResponse>) };
+
+    let source_id = env.env.call_method(&mut msg, "getSourceId", "()J", &[]).unwrap();
     let source_id = source_id.j().unwrap();
 
     let events_list = env.env.call_method(&mut msg, "getEventsList", "()Ljava/util/List;", &[]).unwrap();
@@ -868,7 +869,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
         };
         let offset: String = env.get_string(&JString::from(offset)).unwrap().into();
 
-        println!("channel_id = {:?}, source_id = {:?}, payload = {:?}, partition = {:?}, offset = {:?}", channel_id, source_id, payload, partition, offset);
+        println!("source_id = {:?}, payload = {:?}, partition = {:?}, offset = {:?}", source_id, payload, partition, offset);
         events.push(CdcMessage {
             payload,
             partition,
@@ -879,9 +880,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
         source_id: source_id as u64,
         events,
     };
-    let _ = channel.send(get_event_stream_response);
+    println!("before send");
+    let _ = channel.as_ref().ptr.blocking_send(get_event_stream_response).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+    println!("send successfully");
 }
-
 
 #[cfg(test)]
 mod tests {

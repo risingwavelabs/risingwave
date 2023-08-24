@@ -32,6 +32,7 @@ pub mod server;
 pub mod telemetry;
 
 use std::collections::HashMap;
+use std::ffi::c_void;
 use std::fs;
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
@@ -188,13 +189,16 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 }
 
 use std::future::Future;
-use std::ops::Deref;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::pin::Pin;
-use jni::{InitArgsBuilder, JavaVM, JNIEnv, JNIVersion};
-use jni::objects::{JObject, JString, JValue};
-use jni::sys::{jint, jobject};
-use risingwave_common::jvm_runtime::JVM;
+use jni::{InitArgsBuilder, JavaVM, JNIEnv, JNIVersion, NativeMethod};
+use jni::objects::{JClass, JObject, JString, JValue, JValueGen};
+use jni::strings::JNIString;
+use jni::sys::{jint, jlong, jobject};
+use risingwave_common::jvm_runtime::{JVM, MyPtr};
+use risingwave_pb::connector_service::{CdcMessage, GetEventStreamResponse};
 
 use crate::server::compute_node_serve;
 
@@ -255,6 +259,148 @@ fn rust_hashmap_to_java_hashmap<'a>(env: &'a mut JNIEnv, hashmap: &HashMap<&str,
     Ok(map)
 }
 
+#[repr(C)]
+pub struct EnvParam<'a> {
+    env: JNIEnv<'a>,
+    class: JClass<'a>,
+}
+
+impl<'a> Deref for EnvParam<'a> {
+    type Target = JNIEnv<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.env
+    }
+}
+
+impl<'a> DerefMut for EnvParam<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.env
+    }
+}
+
+impl<'a> EnvParam<'a> {
+    pub fn get_class(&self) -> &JClass<'a> {
+        &self.class
+    }
+}
+
+#[repr(transparent)]
+pub struct Pointer<'a, T> {
+    pointer: jlong,
+    _phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T> Default for Pointer<'a, T> {
+    fn default() -> Self {
+        Self {
+            pointer: 0,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<T> From<T> for Pointer<'static, T> {
+    fn from(value: T) -> Self {
+        Pointer {
+            pointer: Box::into_raw(Box::new(value)) as jlong,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> Pointer<'static, T> {
+    fn null() -> Self {
+        Pointer {
+            pointer: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T> Pointer<'a, T> {
+    fn as_ref(&self) -> &'a T {
+        debug_assert!(self.pointer != 0);
+        unsafe { &*(self.pointer as *const T) }
+    }
+
+    fn as_mut(&mut self) -> &'a mut T {
+        debug_assert!(self.pointer != 0);
+        unsafe { &mut *(self.pointer as *mut T) }
+    }
+
+    fn drop(self) {
+        debug_assert!(self.pointer != 0);
+        unsafe { drop(Box::from_raw(self.pointer as *mut T)) }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel<'a>(
+    mut env: EnvParam<'a>,
+    channel: Pointer<'a, MyPtr>,
+    mut msg: JObject<'a>,
+) {
+
+    println!("channel_ptr = {}, num = {}", channel.pointer, channel.as_ref().num);
+    // let channel: &mut UnboundedSender<GetEventStreamResponse> = unsafe { &mut *(channel_ptr.pointer as *mut UnboundedSender<GetEventStreamResponse>) };
+
+    let source_id = env.env.call_method(&mut msg, "getSourceId", "()J", &[]).unwrap();
+    let source_id = source_id.j().unwrap();
+
+    let events_list = env.env.call_method(&mut msg, "getEventsList", "()Ljava/util/List;", &[]).unwrap();
+    let mut events_list = match events_list {
+        JValueGen::Object(obj) => obj,
+        _ => unreachable!()
+    };
+
+
+    let size = env.env.call_method(&mut events_list, "size", "()I", &[]).unwrap().i().unwrap();
+    let mut events = Vec::with_capacity(size as usize);
+    for i in 0..size {
+        let java_element = env.call_method(&mut events_list, "get", "(I)Ljava/lang/Object;", &[JValue::from(i as i32)]).unwrap();
+        let mut java_element = match java_element {
+            JValueGen::Object(obj) => obj,
+            _ => unreachable!()
+        };
+        let payload = env.call_method(&mut java_element, "getPayload", "()Ljava/lang/String;", &[]).unwrap();
+        let mut payload = match payload {
+            JValueGen::Object(obj) => obj,
+            _ => unreachable!()
+        };
+        let payload: String = env.get_string(&JString::from(payload)).unwrap().into();
+
+        let partition = env.call_method(&mut java_element, "getPartition", "()Ljava/lang/String;", &[]).unwrap();
+        let mut partition = match partition {
+            JValueGen::Object(obj) => obj,
+            _ => unreachable!()
+        };
+        let partition: String = env.get_string(&JString::from(partition)).unwrap().into();
+
+        let offset = env.call_method(&mut java_element, "getOffset", "()Ljava/lang/String;", &[]).unwrap();
+        let mut offset = match offset {
+            JValueGen::Object(obj) => obj,
+            _ => unreachable!()
+        };
+        let offset: String = env.get_string(&JString::from(offset)).unwrap().into();
+
+        println!("source_id = {:?}, payload = {:?}, partition = {:?}, offset = {:?}", source_id, payload, partition, offset);
+        events.push(CdcMessage {
+            payload,
+            partition,
+            offset,
+        })
+    }
+    let get_event_stream_response = GetEventStreamResponse {
+        source_id: source_id as u64,
+        events,
+    };
+    println!("before send");
+    let _ = channel.as_ref().ptr.blocking_send(get_event_stream_response).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+    println!("send successfully");
+}
+
+
 
 fn run_jvm() {
     let mut env = JVM.attach_current_thread_as_daemon().unwrap();
@@ -267,6 +413,19 @@ fn run_jvm() {
 
     let string_class = env.find_class("java/lang/String").unwrap();
     let jarray = env.new_object_array(0, string_class, JObject::null()).unwrap();
+
+    let fn_ptr = Java_com_risingwave_java_binding_Binding_sendMsgToChannel as *const fn (
+        EnvParam<'static>,
+        Pointer<'static, MyPtr>,
+        JObject<'static>
+    );
+
+    let binding_class = env.find_class("com/risingwave/java/binding/Binding").unwrap();
+    env.register_native_methods(binding_class, &[NativeMethod {
+        name: JNIString::from("sendMsgToChannel"),
+        sig: JNIString::from("(JLjava/lang/Object;)V"),
+        fn_ptr: fn_ptr as *mut c_void,
+    }]).unwrap();
 
     let _ = env.call_static_method("com/risingwave/connector/ConnectorService", "main", "([Ljava/lang/String;)V", &[JValue::Object(&jarray)]).inspect_err(|e| eprintln!("{:?}", e));
 }

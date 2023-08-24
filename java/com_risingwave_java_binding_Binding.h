@@ -226,10 +226,10 @@ JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIter
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    sendMsgToChannel
- * Signature: (ILjava/lang/Object;)V
+ * Signature: (JLjava/lang/Object;)V
  */
 JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_sendMsgToChannel
-  (JNIEnv *, jclass, jint, jobject);
+  (JNIEnv *, jclass, jlong, jobject);
 
 #ifdef __cplusplus
 }

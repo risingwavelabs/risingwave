@@ -18,7 +18,6 @@ import com.risingwave.connector.api.source.CdcEngineRunner;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.metrics.ConnectorNodeMetrics;
-import io.grpc.Context;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,49 +34,57 @@ public class JniSourceHandler {
 
     class OnReadyHandler implements Runnable {
         private final CdcEngineRunner runner;
-        private final int channelId;
+        private final long channelPtr;
 
-        public OnReadyHandler(CdcEngineRunner runner, int channelId) {
+        public OnReadyHandler(CdcEngineRunner runner, long channelPtr) {
             this.runner = runner;
-            this.channelId = channelId;
+            this.channelPtr = channelPtr;
         }
 
         @Override
         public void run() {
             while (runner.isRunning()) {
                 try {
-                    if (Context.current().isCancelled()) {
-                        LOG.info(
-                                "Engine#{}: Connection broken detected, stop the engine",
-                                config.getSourceId());
-                        runner.stop();
-                        return;
-                    }
+                    LOG.info("Engine#{}: loop step 1 ", config.getSourceId());
+                    //                    if (Context.current().isCancelled()) {
+                    //                        LOG.info(
+                    //                                "Engine#{}: Connection broken detected, stop
+                    // the engine",
+                    //                                config.getSourceId());
+                    //                        runner.stop();
+                    //                        return;
+                    //                    }
+
+                    LOG.info("Engine#{}: loop step 2 ", config.getSourceId());
 
                     // check whether the send queue has room for new messages
                     // Thread will block on the channel to get output from engine
                     var resp =
                             runner.getEngine().getOutputChannel().poll(500, TimeUnit.MILLISECONDS);
+                    LOG.info("Engine#{}: loop step 3 ", config.getSourceId());
                     if (resp != null) {
                         ConnectorNodeMetrics.incSourceRowsReceived(
                                 config.getSourceType().toString(),
                                 String.valueOf(config.getSourceId()),
                                 resp.getEventsCount());
-                        LOG.debug(
+                        LOG.info(
                                 "Engine#{}: emit one chunk {} events to network ",
                                 config.getSourceId(),
                                 resp.getEventsCount());
 
-                        Binding.sendMsgToChannel(channelId, resp);
+                        Binding.sendMsgToChannel(channelPtr, resp);
+                        Thread.sleep(10000);
                     }
-                } catch (Exception e) {
+
+                    LOG.info("Engine#{}: loop step 4 ", config.getSourceId());
+                } catch (Throwable e) {
                     LOG.error("Poll engine output channel fail. ", e);
                 }
             }
         }
     }
 
-    public void start(int channelId) {
+    public void start(long channelPtr) {
         var runner = DbzCdcEngineRunner.newCdcEngineRunnerV2(config);
         if (runner == null) {
             return;
@@ -88,7 +95,7 @@ public class JniSourceHandler {
             runner.start();
             LOG.info("Start consuming events of table {}", config.getSourceId());
 
-            final OnReadyHandler onReadyHandler = new OnReadyHandler(runner, channelId);
+            final OnReadyHandler onReadyHandler = new OnReadyHandler(runner, channelPtr);
 
             onReadyHandler.run();
 
