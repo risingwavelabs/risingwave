@@ -111,7 +111,7 @@ mod tests {
     use mysql_async::Row as MySqlRow;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, ScalarImpl, ToText};
+    use risingwave_common::types::{DataType, ToText};
     use tokio_stream::StreamExt;
 
     use crate::parser::mysql_row_to_datums;
@@ -146,10 +146,10 @@ mod tests {
             if let Ok(ro) = row && ro.is_some() {
                 let owned_row = ro.unwrap();
                 let d = owned_row.datum_at(2);
-                d.map(|scalar| {
+                if let Some(scalar) = d {
                     let v = scalar.into_timestamptz();
                     println!("timestamp: {}", v.to_text());
-                });
+                }
             }
         }
     }
