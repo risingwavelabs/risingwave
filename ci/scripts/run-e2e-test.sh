@@ -22,9 +22,15 @@ while getopts 'p:m:' opt; do
 done
 shift $((OPTIND -1))
 
+if [[ $mode == "standalone" ]]; then
+  source ci/scripts/start-standalone.sh
+  source ci/scripts/stop-standalone.sh
+fi
+
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
-    ./ci/scripts/start-standalone.sh
+    start_standalone >"$PREFIX_LOG"/standalone.log 2>&1 &
+    cargo make ci-start standalone-minio-etcd-compactor
   else
     cargo make ci-start "$mode"
   fi
@@ -32,9 +38,10 @@ cluster_start() {
 
 cluster_stop() {
   if [[ $mode == "standalone" ]]; then
-    ./ci/scripts/stop-standalone.sh
+    stop_standalone
   else
     cargo make ci-kill
+    pkill "standalone"
   fi
 }
 
