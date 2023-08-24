@@ -525,9 +525,7 @@ where
         current_state: &mut [Datum],
     ) -> StreamExecutorResult<()> {
         // Backwards compatibility with no state table in backfill.
-        let Some(table) = table else {
-            return Ok(())
-        };
+        let Some(table) = table else { return Ok(()) };
         utils::persist_state(
             epoch,
             table,

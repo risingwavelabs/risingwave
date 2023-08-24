@@ -34,7 +34,7 @@ done
 has_trailing_spaces=false
 
 for file in $(git grep --cached -Il '' -- ':!src/tests/regress/data'); do
-    lines=$(egrep -rnIH "[[:space:]]+$" "$file" | cut -f-2 -d ":" || echo "")
+    lines=$(grep -E -rnIH "[[:space:]]+$" "$file" | cut -f-2 -d ":" || echo "")
     if [ ! -z "$lines" ]; then
         if [[ $has_trailing_spaces == false ]]; then
             echo -e "\nLines containing trailing whitespace:\n"

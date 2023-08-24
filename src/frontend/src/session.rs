@@ -1098,7 +1098,10 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             .iter()
             .map(to_pg_field)
             .collect()),
-        Statement::ShowObjects(show_object) => match show_object {
+        Statement::ShowObjects {
+            object: show_object,
+            ..
+        } => match show_object {
             ShowObject::Columns { table: _ } => Ok(vec![
                 PgFieldDescriptor::new(
                     "Name".to_owned(),
