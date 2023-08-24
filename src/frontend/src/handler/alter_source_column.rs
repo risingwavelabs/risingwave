@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{SourceEncode, SourceStruct};
 use risingwave_source::source_desc::extract_source_struct;
-use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
+use risingwave_sqlparser::ast::{
+    AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
+};
+use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::bind_sql_columns;
-use super::util::alter_definition_add_column;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::Binder;
@@ -107,6 +110,27 @@ pub async fn handle_alter_source_column(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
+}
+
+/// `alter_definition_add_column` adds a new column to the definition of the relation.
+#[inline(always)]
+pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> Result<String> {
+    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
+    let mut stmt = ast
+        .into_iter()
+        .exactly_one()
+        .expect("should contains only one statement");
+
+    match &mut stmt {
+        Statement::CreateSource {
+            stmt: CreateSourceStatement { columns, .. },
+        } => {
+            columns.push(column);
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(stmt.to_string())
 }
 
 #[cfg(test)]

@@ -33,10 +33,7 @@ use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
-use risingwave_sqlparser::ast::{
-    display_comma_separated, ColumnDef, CreateSourceStatement, Statement,
-};
-use risingwave_sqlparser::parser::Parser;
+use risingwave_sqlparser::ast::display_comma_separated;
 
 use crate::catalog::IndexCatalog;
 use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
@@ -259,27 +256,6 @@ pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option
         .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
 }
-
-/// `alter_definition_add_column` adds a new column to the definition of the relation.
-pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> RwResult<String> {
-    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt = ast
-        .into_iter()
-        .exactly_one()
-        .expect("should contains only one statement");
-
-    match &mut stmt {
-        Statement::CreateSource {
-            stmt: CreateSourceStatement { columns, .. },
-        } => {
-            columns.push(column);
-        }
-        _ => unreachable!(),
-    }
-
-    Ok(stmt.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
