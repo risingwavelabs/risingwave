@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-while getopts 'pm:' opt; do
+while getopts 'p:m:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
