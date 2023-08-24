@@ -667,6 +667,8 @@ impl ConfigMap {
             Ok(self.row_security.to_string())
         } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
             Ok(self.standard_conforming_strings.to_string())
+        } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
+            Ok(self.cdc_backfill.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -843,6 +845,11 @@ impl ConfigMap {
                 name: StandardConformingStrings::entry_name().to_lowercase(),
                 setting: self.standard_conforming_strings.to_string(),
                 description: String::from("Unused in RisingWave"),
+            },
+            VariableInfo{
+                name: CdcBackfill::entry_name().to_lowercase(),
+                setting: self.cdc_backfill.to_string(),
+                description: String::from("Enable backfill for CDC table to allow lock-free and incremental snapshot"),
             }
         ]
     }
