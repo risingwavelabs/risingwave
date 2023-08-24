@@ -105,7 +105,12 @@ pub async fn handle_alter_materialized_view_to_table(
             }
         }
 
-        let pk_index = materialize.input().logical_pk().to_vec();
+        let pk_index = original_table
+            .pk()
+            .iter()
+            .map(|col| col.column_index)
+            .collect_vec();
+
         let dml = StreamDml::new(materialize.input(), false, cols);
         let exchange = StreamExchange::new(dml.into(), HashShard(pk_index));
         let materialize = materialize.clone_with_input(exchange.into());
