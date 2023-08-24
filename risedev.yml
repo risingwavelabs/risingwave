@@ -145,7 +145,7 @@ profile:
         persist-data: true
       - use: connector-node
 
-  standalone-minio-etcd:
+  standalone-minio-etcd-compactor:
     steps:
       - use: minio
       - use: etcd
@@ -155,6 +155,7 @@ profile:
         user-managed: true
       - use: frontend
         user-managed: true
+      - use: compactor
 
   standalone-full-peripherals-without-kafka:
     steps:
