@@ -581,7 +581,7 @@ fn run_compactor_thread(
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     });
-    start_compactor(compactor_context.clone())
+    start_compactor(compactor_context.clone(), false)
 }
 
 #[cfg(test)]

@@ -390,6 +390,30 @@ impl AcquireFilterKeyExtractor for FilterKeyExtractorManagerRef {
         self.inner.acquire(table_id_set).await
     }
 }
+
+#[derive(Clone)]
+pub struct SharedFilterKeyExtractor {
+    id_to_table: HashMap<u32, Table>,
+}
+
+impl SharedFilterKeyExtractor {
+    pub fn new(id_to_table: HashMap<u32, Table>) -> Self {
+        Self { id_to_table }
+    }
+}
+#[async_trait::async_trait]
+impl AcquireFilterKeyExtractor for SharedFilterKeyExtractor {
+    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        for table_id in table_id_set {
+            if let Some(table) = self.id_to_table.get(&table_id) {
+                let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
+                multi_filter_key_extractor.register(table_id, key_extractor);
+            }
+        }
+        Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
+    }
+}
 pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
 
 #[cfg(test)]
