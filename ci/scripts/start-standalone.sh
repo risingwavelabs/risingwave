@@ -8,7 +8,7 @@ PREFIX_LOG=$RW_PREFIX/log
 
 start_standalone() {
   RUST_BACKTRACE=1 \
-  "$PREFIX_BIN"/risingwave standalone \
+  "$PREFIX_BIN"/risingwave/standalone \
                  --meta-opts=" \
                     --listen-addr 127.0.0.1:5690 \
                     --advertise-addr 127.0.0.1:5690 \
