@@ -93,7 +93,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_merge_sstable_counts",
             "Number of child iterators merged into one MergeIterator",
-            vec![1.0, 10.0, 50.0, 100.0, 500.0, 1000.0, 10000.0]
+            vec![1.0, 10.0, 100.0, 1000.0, 10000.0]
         );
         let iter_merge_sstable_counts =
             register_histogram_vec_with_registry!(opts, &["table_id", "type"], registry).unwrap();
