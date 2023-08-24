@@ -58,10 +58,12 @@ pub struct ComputeClient {
 
 impl ComputeClient {
     pub async fn new(addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &addr))?
+        let endpoint = Endpoint::from_shared(format!("http://{}", &addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .connect_timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(5));
+        #[cfg(not(madsim))]
+        let channel = endpoint
             .connect_with_connector(monitored_hyper_https_connector(
                 "grpc-compute-client",
                 metrics,
@@ -71,6 +73,8 @@ impl ComputeClient {
                 },
             ))
             .await?;
+        #[cfg(madsim)]
+        let channel = endpoint.connect().await?;
         Ok(Self::with_channel(addr, channel))
     }
 

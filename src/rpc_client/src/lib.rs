@@ -153,7 +153,7 @@ where
         if let Some(client) = clients.get(&addr) {
             return Ok(client.clone());
         }
-        let client = S::new_client(addr.clone()).await?;
+        let client = S::new_client(addr.clone(), self.connection_metrics.clone()).await?;
         clients.insert(addr, client.clone());
         Ok(client)
     }

@@ -41,9 +41,11 @@ impl RpcClient for StreamClient {
 
 impl StreamClient {
     async fn new(host_addr: HostAddr, metrics: ConnectionMetrics) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+        let endpoint = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .connect_timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(5));
+        #[cfg(not(madsim))]
+        let channel = endpoint
             .connect_with_connector(monitored_hyper_https_connector(
                 "grpc-stream-client",
                 metrics,
@@ -52,8 +54,11 @@ impl StreamClient {
                     keepalive_duration: None,
                 },
             ))
-            .await?
-            .tracing_injected();
+            .await?;
+        #[cfg(madsim)]
+        let channel = endpoint.connect().await?;
+
+        let channel = channel.tracing_injected();
 
         Ok(Self(StreamServiceClient::new(channel)))
     }

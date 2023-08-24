@@ -646,7 +646,11 @@ impl S3ObjectStore {
         #[cfg(not(madsim))]
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
-                .force_path_style(true);
+                .force_path_style(true)
+                .http_connector(Self::http_connector(
+                    &S3ObjectStoreConfig::default(),
+                    &metrics,
+                ));
 
         let config = builder
             .region(Region::new("custom"))
@@ -655,10 +659,6 @@ impl S3ObjectStore {
                 access_key_id,
                 secret_access_key,
                 None,
-            ))
-            .http_connector(Self::http_connector(
-                &S3ObjectStoreConfig::default(),
-                &metrics,
             ))
             .build();
         let client = Client::from_conf(config);

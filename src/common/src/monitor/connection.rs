@@ -16,12 +16,15 @@ use std::any::type_name;
 use std::cmp::Ordering;
 use std::future::Future;
 use std::io::{Error, IoSlice};
+#[cfg(not(madsim))]
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures::{FutureExt, Stream};
+use futures::FutureExt;
+#[cfg(not(madsim))]
+use futures::Stream;
 use http::Uri;
 use hyper::client::connect::Connection;
 use hyper::client::HttpConnector;
@@ -34,6 +37,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+#[cfg(not(madsim))]
 use tonic::transport::server::{Connected, TcpConnectInfo, TcpIncoming};
 use tracing::{info, warn};
 
@@ -187,6 +191,7 @@ impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
     }
 }
 
+#[cfg(not(madsim))]
 impl<C: Connected, M> Connected for MonitoredConnection<C, M> {
     type ConnectInfo = C::ConnectInfo;
 
@@ -234,6 +239,7 @@ where
     }
 }
 
+#[cfg(not(madsim))]
 impl<Con, E, C: Stream<Item = Result<Con, E>>, M: MonitorNewConnection> Stream
     for MonitoredConnection<C, M>
 where
@@ -398,6 +404,7 @@ pub fn monitor_connector<C>(
     )
 }
 
+#[cfg(not(madsim))]
 pub fn monitored_tcp_incoming(
     listen_addr: SocketAddr,
     connection_type: impl Into<String>,
