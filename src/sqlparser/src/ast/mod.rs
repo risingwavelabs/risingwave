@@ -831,7 +831,12 @@ pub enum ShowObject {
     Function { schema: Option<Ident> },
     Indexes { table: ObjectName },
     Cluster,
+    Jobs,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct JobIdents(pub Vec<u32>);
 
 impl fmt::Display for ShowObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -867,6 +872,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Cluster => {
                 write!(f, "CLUSTER")
             }
+            ShowObject::Jobs => write!(f, "JOBS"),
         }
     }
 }
@@ -1142,6 +1148,8 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    /// CANCEL JOBS COMMAND
+    CancelJobs(JobIdents),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
@@ -1758,6 +1766,10 @@ impl fmt::Display for Statement {
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::CancelJobs(jobs) => {
+                write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
                 Ok(())
             }
         }
