@@ -18,7 +18,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use regex::{Regex, RegexBuilder};
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue, Utf8Array,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
+    Utf8Array, Utf8ArrayBuilder,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -703,10 +704,39 @@ impl Expression for RegexpReplaceExpression {
         self.return_type.clone()
     }
 
-    async fn eval(&self, _input: &DataChunk) -> Result<ArrayRef> {
-        // let text_arr = self.source.eval_checked(input).await?;
-        // let text_arr = text_arr.as_utf8();
-        unimplemented!()
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        // Get the source text column first
+        let source_column = self.source.eval_checked(input).await?;
+        let source_column = source_column.as_utf8();
+
+        let row_len = input.capacity();
+        let vis = input.vis();
+        let mut builder = Utf8ArrayBuilder::new(row_len);
+
+        for row_idx in 0..row_len {
+            // If not visible, just append the `None`
+            if !vis.is_set(row_idx) {
+                builder.append(None);
+                continue;
+            }
+
+            // Try to get the source text for this column
+            let source = match source_column.value_at(row_idx) {
+                Some(s) => s,
+                None => {
+                    builder.append(None);
+                    continue;
+                }
+            };
+
+            if let Some(ret) = self.match_row(Some(source)) {
+                builder.append(Some(&ret));
+            } else {
+                builder.append(None);
+            }
+        }
+
+        Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
