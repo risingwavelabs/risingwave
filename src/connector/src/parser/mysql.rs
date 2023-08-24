@@ -88,7 +88,7 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                     v.map(|v| ScalarImpl::from(JsonbVal::from(v)))
                 }
                 _ => {
-                    // Interval, Struct, List are not supported
+                    // Interval, Struct, List, Int256 are not supported
                     tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to Null");
                     None
                 }
