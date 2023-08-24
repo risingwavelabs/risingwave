@@ -464,6 +464,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }

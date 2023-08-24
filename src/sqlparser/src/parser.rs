@@ -2981,8 +2981,13 @@ impl Parser {
             } else {
                 return self.expected("TO after RENAME", self.peek_token());
             }
+        } else if self.parse_keyword(Keyword::ADD) {
+            let _ = self.parse_keyword(Keyword::COLUMN);
+            let _if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
+            let column_def = self.parse_column_def()?;
+            AlterSourceOperation::AddColumn { column_def }
         } else {
-            return self.expected("RENAME after ALTER SOURCE", self.peek_token());
+            return self.expected("RENAME | ADD COLUMN after ALTER SOURCE", self.peek_token());
         };
 
         Ok(Statement::AlterSource {
