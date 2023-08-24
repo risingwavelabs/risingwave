@@ -541,7 +541,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
         let data_len = utils::checked_into_u32(self.writer.data_len());
-        block_meta.len = data_len.checked_sub(block_meta.offset).unwrap();
+        block_meta.len = data_len.checked_sub(block_meta.offset).expect(&format!(
+            "data_len should >= meta_offset, found data_len={}, meta_offset={}",
+            data_len, block_meta.offset
+        ));
         self.block_builder.clear();
         Ok(())
     }
