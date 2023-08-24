@@ -68,7 +68,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (dev mode)"
-    command: "ci/scripts/e2e-test.sh -p ci-dev"
+    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     depends_on:
       - "build-dev"
       - "build-other"
@@ -89,7 +89,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (release mode)"
-    command: "ci/scripts/e2e-test.sh -p ci-release"
+    command: "ci/scripts/e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
     depends_on:
       - "build-release"
       - "build-other"
