@@ -74,6 +74,7 @@ public class SinkCoordinatorStreamObserver
                                 .setCommit(
                                         ConnectorServiceProto.SinkCoordinatorStreamResponse
                                                 .CommitResponse.newBuilder()
+                                                .setEpoch(request.getCommit().getEpoch())
                                                 .build())
                                 .build());
 
@@ -92,7 +93,7 @@ public class SinkCoordinatorStreamObserver
 
     @Override
     public void onError(Throwable throwable) {
-        LOG.error("coordinator stream receive error %s", throwable);
+        LOG.error("coordinator stream receive error {}", throwable.toString());
         cleanUp();
         this.responseObserver.onError(
                 Status.INTERNAL.withDescription("stopped with error").asException());

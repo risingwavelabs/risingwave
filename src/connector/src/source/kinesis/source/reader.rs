@@ -118,7 +118,12 @@ impl KinesisSplitReader {
         self.new_shard_iter().await?;
         loop {
             if self.shard_iter.is_none() {
-                tracing::warn!("shard iterator is none unexpectedly, renew it");
+                tracing::warn!(
+                    "shard iterator is none unexpectedly, may reach the end of shard {}, latest seq {}, retrying in one second",
+                    self.shard_id,
+                    self.latest_offset.as_ref().unwrap_or(&"None".to_string())
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 self.new_shard_iter().await?;
             }
             match self.get_records().await {
