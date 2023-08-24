@@ -863,9 +863,7 @@ fn narrow_category<'a>(
                 .all(|(formal, category)| {
                     // category.is_none() means the actual argument is non-null and skipped category
                     // selection.
-                    let Some(selected) = category else {
-                        return true;
-                    };
+                    let Some(selected) = category else { return true };
                     *formal == *selected
                         || !is_preferred(*selected) && implicit_ok(*formal, *selected, false)
                 })

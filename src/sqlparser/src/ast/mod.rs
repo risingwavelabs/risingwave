@@ -322,7 +322,10 @@ pub enum Expr {
     /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
     AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
-    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
+    UnaryOp {
+        op: UnaryOperator,
+        expr: Box<Expr>,
+    },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
     Cast {
         expr: Box<Expr>,
@@ -341,7 +344,10 @@ pub enum Expr {
         time_zone: String,
     },
     /// EXTRACT(DateTimeField FROM <expr>)
-    Extract { field: String, expr: Box<Expr> },
+    Extract {
+        field: String,
+        expr: Box<Expr>,
+    },
     /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
     Substring {
         expr: Box<Expr>,
@@ -379,11 +385,16 @@ pub enum Expr {
     /// A literal value, such as string, number, date or NULL
     Value(Value),
     /// Parameter Symbol e.g. `$1`, `$1::int`
-    Parameter { index: u64 },
+    Parameter {
+        index: u64,
+    },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
-    TypedString { data_type: DataType, value: String },
+    TypedString {
+        data_type: DataType,
+        value: String,
+    },
     /// Scalar function call e.g. `LEFT(foo, 5)`
     Function(Function),
     /// `CASE [<operand>] WHEN <condition> THEN <result> ... [ELSE <result>] END`
@@ -416,12 +427,19 @@ pub enum Expr {
     /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
     ArraySubquery(Box<Query>),
     /// A subscript expression `arr[1]`
-    ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
+    ArrayIndex {
+        obj: Box<Expr>,
+        index: Box<Expr>,
+    },
     /// A slice expression `arr[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
+    },
+    LambdaFunction {
+        args: Vec<Ident>,
+        body: Box<Expr>,
     },
 }
 
@@ -610,16 +628,9 @@ impl fmt::Display for Expr {
                 }
                 write!(f, "FROM {})", expr)
             }
-            Expr::Row(exprs) => write!(
-                f,
-                "ROW({})",
-                exprs
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice()
-                    .join(", ")
-            ),
+            Expr::Row(exprs) => {
+                write!(f, "ROW({})", exprs.iter().map(|v| v.to_string()).join(", "))
+            }
             Expr::ArrayIndex { obj, index } => {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
@@ -638,6 +649,14 @@ impl fmt::Display for Expr {
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
             Expr::ArraySubquery(s) => write!(f, "ARRAY ({})", s),
+            Expr::LambdaFunction { args, body } => {
+                write!(
+                    f,
+                    "({}) -> {}",
+                    args.iter().map(ToString::to_string).join(", "),
+                    body
+                )
+            }
         }
     }
 }

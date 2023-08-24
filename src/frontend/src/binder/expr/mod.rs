@@ -18,8 +18,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
-    TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, Ident, ObjectName, Query,
+    StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
@@ -76,7 +76,15 @@ impl Binder {
         })
     }
 
-    fn bind_expr_inner(&mut self, expr: Expr) -> Result<ExprImpl> {
+    fn bind_expr_inner(&mut self, mut expr: Expr) -> Result<ExprImpl> {
+        // Hack: To resolve the ambiguity of `->` operator, we rewrite `Expr::LambdaFunction` to
+        // `Expr::BinaryOp("->")` if a lambda function is not expected here.
+        if !self.context.expect_lambda_function
+            && let Expr::LambdaFunction { args, body } = expr.clone()
+            && let Ok([arg]) = <[Ident; 1]>::try_from(args)
+        {
+            expr = Expr::BinaryOp { left: Box::new(Expr::Identifier(arg)), op: BinaryOperator::Arrow, right: body }
+        }
         match expr {
             // literal
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),

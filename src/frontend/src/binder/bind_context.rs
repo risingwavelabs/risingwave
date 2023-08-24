@@ -79,6 +79,11 @@ pub struct BindContext {
     /// Map the cte's name to its Relation::Subquery.
     /// The `ShareId` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<(ShareId, BoundQuery, TableAlias)>>,
+
+    /// Whether a lambda function is expected in the binding context. If not, we may need to
+    /// consider treat `Expr::LambdaFunction` as a jsonb access call. This is a workaround for the
+    /// ambiguity in the parser.
+    pub expect_lambda_function: bool,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.

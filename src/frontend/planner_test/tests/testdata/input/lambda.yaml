@@ -1,0 +1,11 @@
+# A normal json access case which is wrongly treated as a lambda function in parser.
+# We should correct it in binder.
+- sql: |
+    create table t (v1 jsonb);
+    select jsonb_typeof((v1)->'x') from t;
+  expected_outputs:
+  - logical_plan
+- sql: |
+    select array_transform(array[1,2,3], (x) -> x * 2)
+  expected_outputs:
+  - binder_error

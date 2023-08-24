@@ -156,7 +156,7 @@ pub enum Token {
     PGSquareRoot,
     /// `||/` , a cube root math operator in PostgreSQL
     PGCubeRoot,
-    /// `->`, access JSON object field or array element in PostgreSQL
+    /// `->`, access JSON object field or array element or define lambda function in PostgreSQL
     Arrow,
     /// `->>`, access JSON object field or array element as text in PostgreSQL
     LongArrow,
