@@ -486,7 +486,7 @@ impl BlockBuilder {
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
-            let offset = utils::checked_into_u32!(self.buf.len());
+            let offset = utils::checked_into_u32(self.buf.len());
 
             self.restart_points.push(offset);
 
@@ -566,7 +566,7 @@ impl BlockBuilder {
         }
 
         self.buf
-            .put_u32_le(utils::checked_into_u32!(self.restart_points.len()));
+            .put_u32_le(utils::checked_into_u32(self.restart_points.len()));
         for RestartPoint {
             offset,
             key_len_type,
@@ -583,9 +583,9 @@ impl BlockBuilder {
             self.buf.put_u8(value);
         }
 
-        self.buf.put_u32_le(utils::checked_into_u32!(self
-            .restart_points_type_index
-            .len()));
+        self.buf.put_u32_le(utils::checked_into_u32(
+            self.restart_points_type_index.len(),
+        ));
 
         self.buf.put_u32_le(self.table_id.unwrap());
         match self.compression_algorithm {

@@ -293,7 +293,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
-                offset: utils::checked_into_u32!(self.writer.data_len()),
+                offset: utils::checked_into_u32(self.writer.data_len()),
                 len: 0,
                 smallest_key: full_key.encode(),
                 uncompressed_size: 0,
@@ -409,7 +409,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             block_metas: self.block_metas,
             bloom_filter,
             estimated_size: 0,
-            key_count: utils::checked_into_u32!(self.total_key_count),
+            key_count: utils::checked_into_u32(self.total_key_count),
             smallest_key,
             largest_key,
             version: VERSION,
@@ -417,8 +417,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             monotonic_tombstone_events: self.monotonic_deletes,
         };
 
-        let encoded_size_u32 = utils::checked_into_u32!(meta.encoded_size());
-        let meta_offset_u32 = utils::checked_into_u32!(meta_offset);
+        let encoded_size_u32 = utils::checked_into_u32(meta.encoded_size());
+        let meta_offset_u32 = utils::checked_into_u32(meta_offset);
         meta.estimated_size = encoded_size_u32.checked_add(meta_offset_u32).unwrap();
 
         // Expand the epoch of the whole sst by tombstone epoch
@@ -535,12 +535,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let block_meta = self.block_metas.last_mut().unwrap();
         block_meta.uncompressed_size =
-            utils::checked_into_u32!(self.block_builder.uncompressed_block_size());
+            utils::checked_into_u32(self.block_builder.uncompressed_block_size());
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
-        let data_len = utils::checked_into_u32!(self.writer.data_len());
+        let data_len = utils::checked_into_u32(self.writer.data_len());
         block_meta.len = data_len.checked_sub(block_meta.offset).unwrap();
         self.block_builder.clear();
         Ok(())
