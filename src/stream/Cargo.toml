@@ -68,6 +68,7 @@ tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
+parse-display = "0.8"
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }

@@ -577,12 +577,12 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
-// Note this is not exactly the same as EowcOverWindowNode in terms of future extension, so better to split as 2 different nodes.
 message OverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
+  string partition_cache_policy = 5;
 }
 
 message StreamNode {

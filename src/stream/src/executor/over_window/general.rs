@@ -34,8 +34,8 @@ use risingwave_storage::StateStore;
 
 use super::delta_btree_map::Change;
 use super::over_partition::{
-    new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
-    PartitionDelta,
+    new_empty_partition_cache, shrink_partition_cache, CacheKey, CachePolicy, OverPartition,
+    PartitionCache, PartitionDelta,
 };
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
@@ -63,7 +63,6 @@ struct ExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     calls: Vec<WindowFuncCall>,
-    has_unbounded_frame: bool,
     partition_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
@@ -76,6 +75,7 @@ struct ExecutorInner<S: StateStore> {
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+    cache_policy: CachePolicy,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -147,6 +147,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
     pub watermark_epoch: AtomicU64Ref,
 
     pub chunk_size: usize,
+    pub cache_policy: CachePolicy,
 }
 
 impl<S: StateStore> OverWindowExecutor<S> {
@@ -162,6 +163,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
         };
 
         let has_unbounded_frame = args.calls.iter().any(|call| call.frame.is_unbounded());
+        let cache_policy = if has_unbounded_frame {
+            // For unbounded frames, we finally need all entries of the partition in the cache,
+            // so for simplicity we just use full cache policy for these cases.
+            CachePolicy::Full
+        } else {
+            args.cache_policy
+        };
 
         let order_key_data_types = args
             .order_key_indices
@@ -179,7 +187,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     identity: format!("OverWindowExecutor {:X}", args.executor_id),
                 },
                 calls: args.calls,
-                has_unbounded_frame,
                 partition_key_indices: args.partition_key_indices,
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
@@ -189,6 +196,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
                 chunk_size: args.chunk_size,
+                cache_policy,
             },
         }
     }
@@ -346,8 +354,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let mut partition = OverPartition::new(
                 &part_key,
                 &mut cache,
+                this.cache_policy,
                 &this.calls,
-                this.has_unbounded_frame,
                 &this.partition_key_indices,
                 &this.order_key_data_types,
                 &this.order_key_order_types,
@@ -393,7 +401,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
 
             // Update recently accessed range for later shrinking cache.
-            if let Some(accessed_range) = accessed_range {
+            if !this.cache_policy.is_full() && let Some(accessed_range) = accessed_range {
                 match vars.recently_accessed_ranges.entry(part_key) {
                     btree_map::Entry::Vacant(vacant) => {
                         vacant.insert(accessed_range);
@@ -620,15 +628,19 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         }
                     }
 
-                    for (part_key, recently_accessed_range) in
-                        std::mem::take(&mut vars.recently_accessed_ranges)
-                    {
-                        if let Some(mut range_cache) = vars.cached_partitions.get_mut(&part_key.0) {
-                            shrink_partition_cache(
-                                &part_key.0,
-                                &mut range_cache,
-                                recently_accessed_range,
-                            );
+                    if !this.cache_policy.is_full() {
+                        for (part_key, recently_accessed_range) in
+                            std::mem::take(&mut vars.recently_accessed_ranges)
+                        {
+                            if let Some(mut range_cache) =
+                                vars.cached_partitions.get_mut(&part_key.0)
+                            {
+                                shrink_partition_cache(
+                                    &part_key.0,
+                                    &mut range_cache,
+                                    recently_accessed_range,
+                                );
+                            }
                         }
                     }
 

@@ -19,9 +19,11 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
+use enum_as_inner::EnumAsInner;
 use futures::stream::select_all;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
+use parse_display::{Display, FromStr};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -39,6 +41,19 @@ use super::sentinel::KeyWithSentinel;
 use crate::executor::over_window::delta_btree_map::DeltaBTreeMap;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::StreamExecutorResult;
+
+#[derive(Debug, Clone, Copy, Display, FromStr, EnumAsInner)]
+#[display(style = "snake_case")]
+pub enum CachePolicy {
+    /// Cache all entries.
+    Full,
+    /// Cache only recently accessed range of entries.
+    Recent,
+    /// Cache only the first N entries in recently accessed range.
+    RecentStart,
+    /// Cache only the last N entries in recently accessed range.
+    RecentEnd,
+}
 
 pub(super) type CacheKey = KeyWithSentinel<StateKey>;
 
@@ -99,9 +114,9 @@ pub(super) fn shrink_partition_cache(
 pub(super) struct OverPartition<'a, S: StateStore> {
     this_partition_key: &'a OwnedRow,
     range_cache: &'a mut PartitionCache,
+    cache_policy: CachePolicy,
 
     calls: &'a [WindowFuncCall],
-    has_unbounded_frame: bool,
     partition_key_indices: &'a [usize],
     order_key_data_types: &'a [DataType],
     order_key_order_types: &'a [OrderType],
@@ -118,8 +133,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     pub fn new(
         this_partition_key: &'a OwnedRow,
         cache: &'a mut PartitionCache,
+        cache_policy: CachePolicy,
         calls: &'a [WindowFuncCall],
-        has_unbounded_frame: bool,
         partition_key_indices: &'a [usize],
         order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
@@ -146,9 +161,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         Self {
             this_partition_key,
             range_cache: cache,
+            cache_policy,
 
             calls,
-            has_unbounded_frame,
             partition_key_indices,
             order_key_data_types,
             order_key_order_types,
@@ -262,9 +277,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
-        if self.has_unbounded_frame {
-            // for unbounded frame, we finally need all entries of the partition in the cache, so
-            // for simplicity we just load all entries at once
+        if self.cache_policy.is_full() {
+            // ensure everything is in the cache
             self.extend_cache_to_boundary(table).await?;
         } else {
             // ensure the cache covers all delta (if possible)
