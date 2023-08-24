@@ -18,18 +18,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
-use risedev::{
-    generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService,
-    ZooKeeperService, RISEDEV_SESSION_NAME,
-};
+use risedev::{generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService, RISEDEV_SESSION_NAME, FrontendConfig, ComputeNodeConfig, MetaNodeConfig, StandaloneConfig, StandaloneService};
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
 
@@ -60,6 +54,43 @@ impl ProgressManager {
             pa.finish();
         }
     }
+}
+
+/// Check if there's standalone service, if yes, then we need to construct the configuration.
+fn process_standalone_services(services: Vec<ServiceConfig>) -> Result<Vec<ServiceConfig>> {
+    let mut frontend_standalone = None;
+    let mut compute_node_standalone = None;
+    let mut meta_node_standalone = None;
+    let mut other_services = vec![];
+    for service in services.into_iter() {
+         match service {
+            FrontendService { config: c @ FrontendConfig { standalone: false, .. } } => {
+                frontend_standalone = Some(c);
+            }
+            ComputeNodeService { config: c @ ComputeNodeConfig { standalone: false, .. } } => {
+                compute_node_standalone = Some(c);
+            }
+            MetaNodeService { config: c @ MetaNodeConfig { standalone: false, .. } } => {
+                meta_node_standalone = Some(c);
+            }
+            _ => other_services.push(service),
+         }
+    }
+    let standalone_service = match (frontend_standalone, compute_node_standalone, meta_node_standalone) {
+        (Some(f), Some(c), Some(m)) => Some(ServiceConfig::Standalone(StandaloneServiceConfig {
+            frontend: f,
+            compute_node: c,
+            meta_node: m,
+        })),
+        (None, None, None) => None,
+        _ => bail!("All frontend, compute and meta nodes must be standalone, or none at all.\
+         frontend: {:?}, compute: {:?}, meta: {:?}",
+            frontend_standalone, compute_node_standalone, meta_node_standalone),
+    };
+    if let Some(s) = standalone_service {
+        other_services.push(s);
+    }
+    Ok(other_services)
 }
 
 fn task_main(
@@ -115,6 +146,12 @@ fn task_main(
             ServiceConfig::OpenDal(_) => None,
             ServiceConfig::RedPanda(_) => None,
             ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Standalone(c) => {
+                ports.push((c.frontend_config.port, c.frontend_config.id.clone()));
+                ports.push((c.compute_node_config.port, c.compute_node_config.id.clone()));
+                ports.push((c.meta_node_config.port, c.meta_node_config.id.clone()));
+                None
+            }
         };
 
         if let Some(x) = listen_info {
@@ -349,6 +386,43 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("connector grpc://{}:{}", c.address, c.port));
+            }
+            ServiceConfig::Standalone(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = StandaloneService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.frontend_config.address.clone(), c.frontend_config.port, c.frontend_config.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("api postgres://{}:{}/", c.frontend_config.address, c.frontend_config.port));
+
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.compute_node_config.address.clone(), c.compute_node_config.port, c.compute_node_config.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("compute api grpc://{}:{}/", c.compute_node_config.address, c.compute_node_config.port));
+
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.meta_node_config.address.clone(), c.meta_node_config.port, c.meta_node_config.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb.set_message(format!(
+                    "meta api grpc://{}:{}/, dashboard http://{}:{}/",
+                    c.meta_node_config.address, c.meta_node_config.port, c.meta_node_config.address, c.meta_node_config.dashboard_port
+                ));
+
+                writeln!(
+                    log_buffer,
+                    "* Run {} to start Postgres interactive shell.",
+                    style(format_args!(
+                        "psql -h localhost -p {} -d dev -U root",
+                        c.port
+                    ))
+                    .blue()
+                    .bold()
+                )?;
             }
         }
 

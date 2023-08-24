@@ -821,6 +821,25 @@ profile:
       - use: prometheus
       - use: grafana
 
+  ci-standalone:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        standalone: true
+      - use: compute-node
+        standalone: true
+      - use: frontend
+        standalone: true
+      - use: compactor
+      # use: prometheus
+      # use: grafana
+      # use: zookeeper
+      # persist-data: true
+      # - use: kafka
+      # persist-data: true
+      # - use: connector-node
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"

@@ -42,6 +42,37 @@ pub struct ComputeNodeConfig {
     pub total_memory_bytes: usize,
     pub parallelism: usize,
     pub role: String,
+
+    /// Part of standalone process.
+    pub standalone: bool,
+}
+
+impl ComputeNodeConfig {
+    fn get_arg_strs(&self) -> Result<Vec<String>> {
+        let mut args = vec![];
+            args.push("--listen-addr".to_string());
+            args.push(format!("{}:{}", self.listen_address, self.port));
+            args.push("--prometheus-listener-addr".to_string());
+            args.push(format!(
+                "{}:{}",
+                self.listen_address, self.exporter_port
+            ));
+            args.push("--advertise-addr".to_string());
+            args.push(format!("{}:{}", self.address, self.port));
+            args.push("--metrics-level".to_string());
+            args.push("1".to_string());
+            args.push("--async-stack-trace".to_string());
+            args.push(self.async_stack_trace.to_string());
+            args.push("--connector-rpc-endpoint".to_string());
+            args.push(self.connector_rpc_endpoint.to_string());
+            args.push("--parallelism".to_string());
+            args.push(self.parallelism.to_string());
+            args.push("--total-memory-bytes".to_string());
+            args.push(self.total_memory_bytes.to_string());
+            args.push("--role".to_string());
+            args.push(self.role.to_string());
+        Ok(args)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,6 +105,15 @@ pub struct MetaNodeConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub enable_in_memory_kv_state_backend: bool,
+
+    /// Part of standalone process.
+    pub standalone: bool,
+}
+
+impl FrontendConfig {
+    fn get_arg_strs(&self) -> Vec<String> {
+
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -95,6 +135,32 @@ pub struct FrontendConfig {
     pub provide_tempo: Option<Vec<TempoConfig>>,
 
     pub user_managed: bool,
+
+    /// Part of standalone process.
+    pub standalone: bool,
+}
+
+impl FrontendConfig {
+    pub fn get_arg_strs(&self) -> Vec<String> {
+        let mut args = vec![];
+            args.push("--listen-addr".to_string());
+            args.push(format!("{}:{}", self.listen_address, self.port));
+            args.push("--advertise-addr".to_string());
+            args.push(format!("{}:{}", self.address, self.port));
+            args.push("--prometheus-listener-addr".to_string());
+            args.push(format!(
+                "{}:{}",
+                self.listen_address, self.exporter_port
+            ));
+            args.push("--health-check-listener-addr".to_string());
+            args.push(format!(
+                "{}:{}",
+                self.listen_address, self.health_check_port
+            ));
+            args.push("--metrics-level".to_string());
+            args.push("1".to_string());
+        args
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -331,6 +397,16 @@ pub struct ConnectorNodeConfig {
     pub address: String,
 }
 
+/// This is manually constructed, no need to derive serde for it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StandaloneConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub frontend_config: FrontendConfig,
+    pub meta_node_config: MetaNodeConfig,
+    pub compute_node_config: ComputeNodeConfig,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -351,6 +427,7 @@ pub enum ServiceConfig {
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
     ConnectorNode(ConnectorNodeConfig),
+    Standalone(StandaloneConfig),
 }
 
 impl ServiceConfig {

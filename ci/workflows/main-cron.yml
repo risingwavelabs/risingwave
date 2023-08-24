@@ -356,7 +356,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
-    command: "ci/scripts/e2e-test.sh -p ci-release -m standalone-full-cluster"
+    command: "ci/scripts/e2e-test.sh -p ci-release -m ci-standalone"
     depends_on:
       - "build"
     plugins:
