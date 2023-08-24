@@ -895,8 +895,7 @@ where
             self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact
-            to target_level {}  cost time: {:?}",
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
                 compact_task.input_ssts[0].level_idx,
