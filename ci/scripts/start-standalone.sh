@@ -40,5 +40,5 @@ start_standalone() {
                    --meta-addr http://127.0.0.1:5690"
 }
 
-cargo make ci-start standalone-minio-etcd-compactor
-start_standalone
+cargo make ci-start standalone-minio-etcd-compactor &
+start_standalone >"$PREFIX_LOG"/standalone.log 2>&1 &
