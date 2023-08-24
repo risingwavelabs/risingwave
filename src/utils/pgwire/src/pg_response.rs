@@ -91,6 +91,7 @@ pub enum StatementType {
     COMMIT,
     ROLLBACK,
     SET_TRANSACTION,
+    CANCEL_COMMAND,
 }
 
 impl std::fmt::Display for StatementType {
@@ -320,6 +321,7 @@ impl StatementType {
                 | StatementType::INSERT_RETURNING
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
+                | StatementType::CANCEL_COMMAND
         )
     }
 
