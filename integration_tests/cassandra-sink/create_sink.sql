@@ -8,4 +8,4 @@ FROM
     cassandra.keyspace  = 'mykeyspace',
     cassandra.table = 'demo_test',
     cassandra.datacenter = 'datacenter1',
-)
+);

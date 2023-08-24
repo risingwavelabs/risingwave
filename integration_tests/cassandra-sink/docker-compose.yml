@@ -1,13 +1,12 @@
 ---
 version: "3"
 services:
-  services:
   cassandra:
     image: cassandra:4.0
     ports:
       - 9042:9042
     volumes:
-      - ~/cassandra-sink:/var/lib/cassandra-sink
+      - ./cassandra-sql:/opt/cassandra/cassandra-sql
     environment:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
   compactor-0:
@@ -34,6 +33,10 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: meta-node-0
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: connector-node
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml

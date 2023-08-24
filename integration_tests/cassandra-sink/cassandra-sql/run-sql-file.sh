@@ -1,3 +1,3 @@
 set -ex
 
-cqlsh < /var/lib/cassandra-sink/$1.sql
+cqlsh < /opt/cassandra/cassandra-sql/$1.sql
