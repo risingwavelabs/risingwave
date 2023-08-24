@@ -21,7 +21,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
-    KAFKA_TIMESTAMP_COLUMN_NAME,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -1065,6 +1065,7 @@ pub async fn handle_create_source(
         initialized_at_epoch: None,
         created_at_epoch: None,
         optional_associated_table_id: None,
+        version: INITIAL_SOURCE_VERSION_ID,
     };
 
     let catalog_writer = session.catalog_writer()?;

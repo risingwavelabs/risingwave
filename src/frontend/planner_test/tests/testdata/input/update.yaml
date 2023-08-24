@@ -57,3 +57,16 @@
   expected_outputs:
   - logical_plan
   - batch_plan
+
+- name: update table with generated columns
+  sql: |
+    create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
+    update t set v2 = 3;
+  expected_outputs:
+  - batch_plan
+- name: update generated column
+  sql: |
+    create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
+    update t set v1 = 3;
+  expected_outputs:
+  - binder_error
