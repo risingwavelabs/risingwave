@@ -940,6 +940,9 @@ template:
 
     role: both
 
+    # Whether to use in Standalone process
+    standalone: false
+
   meta-node:
     # Meta-node advertise address
     address: "127.0.0.1"
@@ -991,6 +994,9 @@ template:
 
     # Whether to enable in-memory pure KV state backend
     enable-in-memory-kv-state-backend: false
+
+    # Whether to use in Standalone process
+    standalone: false
 
   prometheus:
     # Advertise address of Prometheus
@@ -1065,6 +1071,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # Whether to use in Standalone process
+    standalone: false
 
   compactor:
     # Compactor advertise address
