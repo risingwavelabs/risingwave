@@ -30,4 +30,6 @@ echo "--- Run doctest"
 cargo test --doc
 
 echo "--- Run audit check"
-cargo audit
+cargo audit \
+  --ignore RUSTSEC-2023-0052 # https://github.com/risingwavelabs/risingwave/issues/11842
+
