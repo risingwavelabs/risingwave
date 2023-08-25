@@ -19,11 +19,12 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
@@ -33,7 +34,7 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
-type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher, A>;
+type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
 
 /// A dispatcher to help create specialized hash agg executor.
 impl HashKeyDispatcher for HashAggExecutorBuilder {
@@ -41,7 +42,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(
-            self.agg_init_states,
+            self.aggs,
             self.group_key_columns,
             self.group_key_types,
             self.schema,
@@ -59,7 +60,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 }
 
 pub struct HashAggExecutorBuilder {
-    agg_init_states: Vec<BoxedAggState>,
+    aggs: Vec<BoxedAggregateFunction>,
     group_key_columns: Vec<usize>,
     group_key_types: Vec<DataType>,
     child: BoxedExecutor,
@@ -81,7 +82,7 @@ impl HashAggExecutorBuilder {
         mem_context: MemoryContext,
         shutdown_rx: ShutdownToken,
     ) -> Result<BoxedExecutor> {
-        let agg_init_states: Vec<_> = hash_agg_node
+        let aggs: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
             .map(|agg| AggCall::from_protobuf(agg).and_then(|agg| build_agg(&agg)))
@@ -103,12 +104,12 @@ impl HashAggExecutorBuilder {
         let fields = group_key_types
             .iter()
             .cloned()
-            .chain(agg_init_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let builder = HashAggExecutorBuilder {
-            agg_init_states,
+            aggs,
             group_key_columns,
             group_key_types,
             child,
@@ -153,8 +154,8 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub struct HashAggExecutor<K> {
-    /// Factories to construct aggregator for each groups
-    agg_init_states: Vec<BoxedAggState>,
+    /// Aggregate functions.
+    aggs: Vec<BoxedAggregateFunction>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// Data types of group key columns
@@ -171,7 +172,7 @@ pub struct HashAggExecutor<K> {
 
 impl<K> HashAggExecutor<K> {
     pub fn new(
-        agg_init_states: Vec<BoxedAggState>,
+        aggs: Vec<BoxedAggregateFunction>,
         group_key_columns: Vec<usize>,
         group_key_types: Vec<DataType>,
         schema: Schema,
@@ -182,7 +183,7 @@ impl<K> HashAggExecutor<K> {
         shutdown_rx: ShutdownToken,
     ) -> Self {
         HashAggExecutor {
-            agg_init_states,
+            aggs,
             group_key_columns,
             group_key_types,
             schema,
@@ -229,15 +230,15 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 let mut new_group = false;
                 let states = groups.entry(key).or_insert_with(|| {
                     new_group = true;
-                    self.agg_init_states.clone()
+                    self.aggs.iter().map(|agg| agg.create_state()).collect()
                 });
 
                 // TODO: currently not a vectorized implementation
-                for state in states {
+                for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
                     if !new_group {
                         memory_usage_diff -= state.estimated_size() as i64;
                     }
-                    state.update_range(&chunk, row_id..row_id + 1).await?;
+                    agg.update_range(state, &chunk, row_id..row_id + 1).await?;
                     memory_usage_diff += state.estimated_size() as i64;
                 }
             }
@@ -256,7 +257,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .collect();
 
             let mut agg_builders: Vec<_> = self
-                .agg_init_states
+                .aggs
                 .iter()
                 .map(|agg| agg.return_type().create_array_builder(cardinality))
                 .collect();
@@ -268,8 +269,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 has_next = true;
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
-                for (aggregator, builder) in states.iter_mut().zip_eq_fast(&mut agg_builders) {
-                    builder.append(aggregator.output()?);
+                for ((agg, state), builder) in (self.aggs.iter())
+                    .zip_eq_fast(states)
+                    .zip_eq_fast(&mut agg_builders)
+                {
+                    let result = agg.get_result(state).await?;
+                    builder.append(result);
                 }
             }
             if !has_next {
@@ -389,7 +394,7 @@ mod tests {
             diff_executor_output(actual_exec, expect_exec).await;
 
             // check estimated memory usage = 4 groups x state size
-            assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
+            assert_eq!(mem_context.get_bytes_used() as usize, 4 * 24);
         }
 
         // Ensure that agg memory counter has been dropped.

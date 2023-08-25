@@ -88,7 +88,9 @@ impl Expression for SomeAllExpression {
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
-        let DataType::List(datatype) = arr_right_inner.data_type() else { unreachable!() };
+        let DataType::List(datatype) = arr_right_inner.data_type() else {
+            unreachable!()
+        };
         let capacity = arr_right_inner
             .iter()
             .flatten()

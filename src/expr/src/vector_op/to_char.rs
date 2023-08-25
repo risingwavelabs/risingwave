@@ -17,7 +17,10 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use risingwave_common::types::Timestamp;
+use risingwave_common::types::{Timestamp, Timestamptz};
+
+use super::timestamptz::time_zone_err;
+use crate::Result;
 
 type Pattern<'a> = Vec<chrono::format::Item<'a>>;
 
@@ -50,6 +53,10 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
         ("hh12", "%I"),
         ("HH", "%I"),
         ("hh", "%I"),
+        ("AM", "%p"),
+        ("PM", "%p"),
+        ("am", "%P"),
+        ("pm", "%P"),
         ("MI", "%M"),
         ("mi", "%M"),
         ("SS", "%S"),
@@ -105,4 +112,28 @@ pub fn to_char_timestamp(data: Timestamp, tmpl: &str, writer: &mut dyn Write) {
     let pattern = compile_pattern_to_chrono(tmpl);
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
+}
+
+// #[function("to_char(timestamptz, varchar, varchar) -> varchar")]
+pub fn to_char_timestamptz(
+    data: Timestamptz,
+    tmpl: &str,
+    zone: &str,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let pattern = compile_pattern_to_chrono(tmpl);
+    to_char_timestamptz_const_tmpl(data, &pattern, zone, writer)
+}
+
+pub fn to_char_timestamptz_const_tmpl(
+    data: Timestamptz,
+    tmpl: &ChronoPattern,
+    zone: &str,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let format = data
+        .to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?)
+        .format_with_items(tmpl.borrow_dependent().iter());
+    write!(writer, "{}", format).unwrap();
+    Ok(())
 }

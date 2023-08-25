@@ -48,8 +48,8 @@ use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
-pub const ICEBERG_SINK: &str = "iceberg_v2";
-pub const REMOTE_ICEBERG_SINK: &str = "iceberg";
+pub const ICEBERG_SINK: &str = "iceberg";
+pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
 
 pub type RemoteIcebergSink = CoordinatedRemoteSink;
 pub type RemoteIcebergConfig = RemoteConfig;
