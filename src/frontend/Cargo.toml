@@ -17,7 +17,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-schema = "45"
+arrow-schema = "46"
 async-recursion = "1.0.4"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }

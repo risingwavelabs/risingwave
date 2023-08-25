@@ -17,8 +17,8 @@ normal = ["workspace-hack", "ctor"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-array = "45"
-arrow-schema = "45"
+arrow-array = "46"
+arrow-schema = "46"
 async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }

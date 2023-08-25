@@ -11,10 +11,10 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-arrow-array = "45"
-arrow-flight = "45"
-arrow-schema = "45"
-arrow-select = "45"
+arrow-array = "46"
+arrow-flight = "46"
+arrow-schema = "46"
+arrow-select = "46"
 futures-util = "0.3.28"
 static_assertions = "1"
 thiserror = "1"
