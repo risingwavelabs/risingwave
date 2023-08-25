@@ -275,23 +275,23 @@ pub(crate) mod tests {
                 },
             )]);
             compact_task.current_epoch_time = 0;
-        compact_task.input_ssts = group
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .map(|level| InputLevel {
-                level_idx: 0,
-                level_type: level.level_type,
-                table_infos: level.table_infos.clone(),
-            })
-            .collect();
-        compact_task.input_ssts.push(InputLevel {
-            level_idx: group.levels.last().unwrap().level_idx,
-            table_infos: group.levels.last().unwrap().table_infos.clone(),
-            level_type: group.levels.last().unwrap().level_type,
-        });
+            compact_task.input_ssts = group
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .map(|level| InputLevel {
+                    level_idx: 0,
+                    level_type: level.level_type,
+                    table_infos: level.table_infos.clone(),
+                })
+                .collect();
+            compact_task.input_ssts.push(InputLevel {
+                level_idx: group.levels.last().unwrap().level_idx,
+                table_infos: group.levels.last().unwrap().table_infos.clone(),
+                level_type: group.levels.last().unwrap().level_type,
+            });
             let (_tx, rx) = tokio::sync::oneshot::channel();
             let (mut result_task, task_stats) =
                 compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;

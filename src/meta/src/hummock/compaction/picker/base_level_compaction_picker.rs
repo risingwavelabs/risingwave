@@ -23,7 +23,6 @@ use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::include_sst_picker::L0IncludeSstPicker;
-use crate::hummock::compaction::picker::MinOverlappingPicker;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -50,10 +49,6 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-
-        let target_level = levels.get_level(self.target_level);
-
         if let Some(ret) = self.pick_base_trivial_move(
             l0,
             levels.get_level(self.target_level),
@@ -68,7 +63,10 @@ impl CompactionPicker for LevelCompactionPicker {
             l0,
             levels.get_level(self.target_level),
             level_handlers,
-        );
+            stats,
+        ) {
+            return Some(ret);
+        }
 
         if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], stats) {
             return Some(ret);
@@ -612,6 +610,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
     }
+
     #[test]
     fn test_selecting_key_range_overlap() {
         // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
@@ -1042,11 +1041,9 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        // println!("ret.input_levels: {:?}", ret.input_levels);
         // 1. trivial_move
-        assert_eq!(2, ret.input_levels.len());
-        assert!(ret.input_levels[1].table_infos.is_empty());
-        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(3, ret.input_levels.len());
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
         ret.add_pending_task(0, &mut levels_handler);
         let sst = generate_table(5, 1, 1000, 2000, 1);
         levels.l0.as_mut().unwrap().sub_levels[0].total_file_size += sst.file_size;
@@ -1057,8 +1054,8 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         println!("ret.input_levels: {:?}", ret.input_levels);
-        assert_eq!(3, ret.input_levels.len());
-        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(2, ret.input_levels.len());
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
     }
 
     #[test]
