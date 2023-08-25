@@ -360,6 +360,7 @@ steps:
     depends_on:
       - "build"
       - "build-other"
+      - "docslt"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
