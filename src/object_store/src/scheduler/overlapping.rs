@@ -546,6 +546,14 @@ mod tests {
         ensure_send_sync::<TaskManager>();
     }
 
+    fn data(range: Range<usize>) -> Bytes {
+        let mut buf = BytesMut::new();
+        for i in range.start..range.end {
+            buf.put_u8(i as u8);
+        }
+        buf.freeze()
+    }
+
     #[tokio::test]
     async fn test_task_manager() {
         let mut tm = TaskManager::new(Arc::new(ObjectStoreMetrics::unused()));
@@ -575,21 +583,21 @@ mod tests {
         assert_eq!(&path, "2");
         assert_eq!(ranges, vec![15..20, 30..35]);
 
-        let tasks = tm.finish("1", 0..20, Ok(vec![b'x'; 20].into()));
+        let tasks = tm.finish("1", 0..20, Ok(data(0..20)));
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].range, 0..20);
 
         assert_pending(&mut h1).await;
         assert_pending(&mut h3).await;
         join_all(tasks.into_iter().map(|task| task.finish())).await;
-        assert_ready(&mut h1, vec![b'x'; 10]).await;
-        assert_ready(&mut h3, vec![b'x'; 15]).await;
+        assert_ready(&mut h1, data(0..10)).await;
+        assert_ready(&mut h3, data(5..20)).await;
 
-        let tasks = tm.finish("2", 15..20, Ok(vec![b'x'; 5].into()));
+        let tasks = tm.finish("2", 15..20, Ok(data(15..20)));
         assert_eq!(tasks.len(), 0);
-        let tasks = tm.finish("2", 30..35, Ok(vec![b'x'; 5].into()));
+        let tasks = tm.finish("2", 30..35, Ok(data(30..35)));
         assert_eq!(tasks.len(), 0);
-        let tasks = tm.finish("2", 20..30, Ok(vec![b'x'; 10].into()));
+        let tasks = tm.finish("2", 20..30, Ok(data(20..30)));
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].range, 20..30);
         assert_eq!(tasks[1].range, 15..35);
@@ -597,15 +605,15 @@ mod tests {
         assert_pending(&mut h4).await;
         assert_pending(&mut h5).await;
         join_all(tasks.into_iter().map(|task| task.finish())).await;
-        assert_ready(&mut h4, vec![b'x'; 10]).await;
-        assert_ready(&mut h5, vec![b'x'; 20]).await;
+        assert_ready(&mut h4, data(20..30)).await;
+        assert_ready(&mut h5, data(15..35)).await;
 
-        let tasks = tm.finish("2", 0..10, Ok(vec![b'x'; 10].into()));
+        let tasks = tm.finish("2", 0..10, Ok(data(0..10)));
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].range, 0..10);
 
         assert_pending(&mut h2).await;
         join_all(tasks.into_iter().map(|task| task.finish())).await;
-        assert_ready(&mut h2, vec![b'x'; 10]).await;
+        assert_ready(&mut h2, data(0..10)).await;
     }
 }

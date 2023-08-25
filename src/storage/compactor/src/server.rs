@@ -100,11 +100,10 @@ pub async fn compactor_serve(
     let state_store_url = system_params_reader.state_store();
 
     let storage_memory_config = extract_storage_memory_config(&config);
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
-        &config,
-        &system_params_reader,
-        &storage_memory_config,
-    )));
+    let mut storage_opts =
+        StorageOpts::from((&config, &system_params_reader, &storage_memory_config));
+    storage_opts.object_store_io_scheduler = false;
+    let storage_opts: Arc<StorageOpts> = Arc::new(storage_opts);
 
     let total_memory_available_bytes =
         (resource_util::memory::total_memory_available_bytes() as f64
@@ -139,9 +138,10 @@ pub async fn compactor_serve(
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        Arc::new((&config.storage).into()),
+        storage_opts.clone(),
     )
     .await;
+    // TODO(MrCroxx): remove this?
     object_store.set_opts(
         storage_opts.object_store_streaming_read_timeout_ms,
         storage_opts.object_store_streaming_upload_timeout_ms,
