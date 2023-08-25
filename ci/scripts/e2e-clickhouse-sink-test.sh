@@ -41,21 +41,19 @@ sleep 1
 
 # check sink destination using shell
 if cat ./query_result.csv | sort | awk -F "," '{
-if ($1 == 1 && $2 == 50 && $3 == "1-50") c1++;
- if ($1 == 13 && $2 == 2 && $3 == "13-2") c2++;
-  if ($1 == 21 && $2 == 2 && $3 == "21-2") c3++;
-   if ($1 == 2 && $2 == 2 && $3 == "2-2") c4++;
-    if ($1 == 3 && $2 == 2 && $3 == "3-2") c5++;
-     if ($1 == 5 && $2 == 2 && $3 == "5-2") c6++;
-      if ($1 == 8 && $2 == 2 && $3 == "8-2") c7++; }
+if ($1 == 1 && $2 == 50 && $3 == "\"1-50\"") c1++;
+ if ($1 == 13 && $2 == 2 && $3 == "\"13-2\"") c2++;
+  if ($1 == 2 && $2 == 2 && $3 == "\"2-2\"") c3++;
+   if ($1 == 21 && $2 == 2 && $3 == "\"21-2\"") c4++;
+    if ($1 == 3 && $2 == 2 && $3 == "\"3-2\"") c5++;
+     if ($1 == 5 && $2 == 2 && $3 == "\"5-2\"") c6++;
+      if ($1 == 8 && $2 == 2 && $3 == "\"8-2\"") c7++; }
        END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 1 && c7 == 1); }'; then
-  echo "Iceberg sink check passed"
+  echo "Clickhouse sink check passed"
 else
   echo "The output is not as expected."
   exit 1
 fi
 
 echo "--- Kill cluster"
-pkill -f "clickhouse server"
 cargo make ci-kill
-pkill -f connector-node
