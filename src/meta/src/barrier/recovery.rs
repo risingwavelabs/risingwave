@@ -266,7 +266,7 @@ where
 
         let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_parallel_units
             .into_iter()
-            .partition(|(worker, _)| expired_workers.contains(&worker));
+            .partition(|(worker, _)| expired_workers.contains(worker));
 
         let mut to_migrate_parallel_units: BTreeSet<_> = expired_inuse_workers
             .into_iter()
