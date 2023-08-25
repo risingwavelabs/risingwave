@@ -208,6 +208,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     private void validatePrivileges() throws SQLException {
         boolean isSuperUser = false;
         if (this.isAwsRds) {
+            // check privileges for aws rds postgres
             boolean hasReplicationRole;
             try (var stmt =
                     jdbcConnection.prepareStatement(
@@ -233,6 +234,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         "Postgres user must be superuser or replication role to start walsender.");
             }
         } else {
+            // check privileges for standalone postgres
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.superuser.check"))) {
