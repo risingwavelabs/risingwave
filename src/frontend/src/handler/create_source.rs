@@ -706,12 +706,20 @@ pub(super) fn bind_source_watermark(
             let col_name = source_watermark.column.real_value();
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
-            let expr = binder.bind_expr(source_watermark.expr)?.to_expr_proto();
-
-            Ok::<_, RwError>(WatermarkDesc {
-                watermark_idx: watermark_idx as u32,
-                expr: Some(expr),
-            })
+            let expr = binder.bind_expr(source_watermark.expr)?;
+            let watermark_col_type = column_catalogs[watermark_idx].data_type();
+            let watermark_expr_type = &expr.return_type();
+            if watermark_col_type != watermark_expr_type {
+                Err(RwError::from(ErrorCode::BindError(
+                    format!("The return value type of the watermark expression must be identical to the watermark column data type. Current data type of watermark return value: `{}`, column `{}`",watermark_expr_type, watermark_col_type),
+                )))
+            } else {
+                let expr_proto = expr.to_expr_proto();
+                Ok::<_, RwError>(WatermarkDesc {
+                    watermark_idx: watermark_idx as u32,
+                    expr: Some(expr_proto),
+                })
+            }
         })
         .try_collect()?;
     Ok(watermark_descs)
