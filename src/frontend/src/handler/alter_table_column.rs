@@ -98,7 +98,7 @@ pub async fn handle_alter_table_column(
                 .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
             {
                 Err(ErrorCode::InvalidInputSyntax(
-                    "alter table add generated columns is not supported".to_string(),
+                    "alter table add generated columns is not supported".to_owned(),
                 ))?
             }
 
@@ -118,9 +118,9 @@ pub async fn handle_alter_table_column(
                 ))?
             }
             if original_catalog.has_associated_source() {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot remove column of table with source"
-                )))?
+                Err(ErrorCode::InvalidInputSyntax(
+                    "cannot remove column of table with source".to_owned(),
+                ))?
             }
 
             // Locate the column by name and remove it.
