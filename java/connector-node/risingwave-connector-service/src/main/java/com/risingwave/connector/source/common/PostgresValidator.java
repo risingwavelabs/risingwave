@@ -222,7 +222,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         var members = (String[]) memberof.getArray();
                         hashSet.addAll(Arrays.asList(members));
                     }
-                    LOG.info("memberof: {}", hashSet);
+                    LOG.info("rds memberof: {}", hashSet);
                 }
                 isSuperUser = hashSet.contains("rds_superuser");
                 hasReplicationRole = hashSet.contains("rds_replication");
