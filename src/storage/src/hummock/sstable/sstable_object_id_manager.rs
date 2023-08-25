@@ -14,10 +14,10 @@
 
 use std::cmp;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as MMutex};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -32,7 +32,7 @@ pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
 
 #[async_trait::async_trait]
 pub trait GetObjectId: Send + Sync {
-    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId>;
+    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId>;
 }
 /// 1. Caches SST object ids fetched from meta.
 /// 2. Maintains GC watermark SST object id.
@@ -101,7 +101,7 @@ impl SstableObjectIdManager {
             // Fetch new ids.
             sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
-            let this: Arc<SstableObjectIdManager> = self.clone();
+            let this = self.clone();
             tokio::spawn(async move {
                 let new_sst_ids = match this
                     .hummock_meta_client
@@ -189,7 +189,7 @@ impl SstableObjectIdManager {
 impl GetObjectId for Arc<SstableObjectIdManager> {
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
+    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
         self.map_next_sst_object_id(|available_sst_object_ids| {
             available_sst_object_ids.get_next_sst_object_id()
         })
@@ -199,28 +199,22 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 
 /// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
 pub struct SharedComapctorObjectIdManager {
-    output_object_ids: MMutex<Vec<u64>>,
+    output_object_ids: VecDeque<u64>,
 }
 
 impl SharedComapctorObjectIdManager {
-    pub fn new(output_object_ids: Vec<u64>) -> Self {
-        Self {
-            output_object_ids: MMutex::new(output_object_ids),
-        }
+    pub fn new(output_object_ids: VecDeque<u64>) -> Self {
+        Self { output_object_ids }
     }
 }
 
 #[async_trait::async_trait]
 impl GetObjectId for SharedComapctorObjectIdManager {
-    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
-        let mut output_object_ids = self.output_object_ids.lock().unwrap();
-
-        if let Some(first_element) = output_object_ids.pop() {
+    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
+        if let Some(first_element) = self.output_object_ids.pop_front() {
             Ok(first_element)
         } else {
-            return Err(HummockError::meta_error(
-                "Output object id moves backwards. run out",
-            ));
+            return Err(HummockError::meta_error("Output object id runs out"));
         }
     }
 }
@@ -317,10 +311,14 @@ impl SstObjectIdTrackerInner {
 #[cfg(test)]
 mod test {
 
+    use std::collections::VecDeque;
+
     use risingwave_common::try_match_expand;
 
     use crate::hummock::sstable::sstable_object_id_manager::AutoTrackerId;
-    use crate::hummock::{SstObjectIdTracker, TrackerId};
+    use crate::hummock::{
+        GetObjectId, SharedComapctorObjectIdManager, SstObjectIdTracker, TrackerId,
+    };
 
     #[tokio::test]
     async fn test_object_id_tracker_basic() {
@@ -389,5 +387,19 @@ mod test {
 
         object_id_tacker.remove_tracker(auto_id_3);
         assert!(object_id_tacker.tracking_object_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_shared_comapctor_object_id_manager() {
+        let mut pre_allocated_object_ids: VecDeque<_> = VecDeque::new();
+        pre_allocated_object_ids.extend(vec![1, 3, 5]);
+        let mut object_id_manager = SharedComapctorObjectIdManager::new(pre_allocated_object_ids);
+        assert_eq!(object_id_manager.get_new_sst_object_id().await.unwrap(), 1);
+
+        assert_eq!(object_id_manager.get_new_sst_object_id().await.unwrap(), 3);
+
+        assert_eq!(object_id_manager.get_new_sst_object_id().await.unwrap(), 5);
+
+        assert!(object_id_manager.get_new_sst_object_id().await.is_err());
     }
 }

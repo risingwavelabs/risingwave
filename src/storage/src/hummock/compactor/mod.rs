@@ -21,7 +21,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -260,7 +260,7 @@ impl Compactor {
     fn get_object_id_manager(&self) -> Box<dyn GetObjectId> {
         // todo(wcy-fdu): handle shared case
         match self.is_shared_compactor {
-            true => Box::new(SharedComapctorObjectIdManager::new(vec![])),
+            true => Box::new(SharedComapctorObjectIdManager::new(VecDeque::new())),
             false => Box::new(self.context.sstable_object_id_manager.clone()),
         }
     }
