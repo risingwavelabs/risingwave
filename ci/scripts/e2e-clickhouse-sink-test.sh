@@ -36,12 +36,11 @@ sleep 2
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
 sleep 1
-mkdir -p clickhouse-query
-./clickhouse client --host=clickhouse-server --port=9000 --query="select * from demo_test INTO OUTFILE './clickhouse-query/query_result.csv' FORMAT CSVWithNamesAndTypes;"
+./clickhouse client --host=clickhouse-server --port=9000 --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
 
 
 # check sink destination using shell
-if cat ./clickhouse-query/*.csv | sort | awk -F "," '{
+if cat ./query_result.csv | sort | awk -F "," '{
 if ($1 == 1 && $2 == 50 && $3 == "1-50") c1++;
  if ($1 == 13 && $2 == 2 && $3 == "13-2") c2++;
   if ($1 == 21 && $2 == 2 && $3 == "21-2") c3++;
