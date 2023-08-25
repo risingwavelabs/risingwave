@@ -15,19 +15,20 @@
 use risingwave_common::bail;
 use risingwave_expr_macro::aggregate;
 
-#[aggregate("string_agg(varchar, varchar) -> varchar", state = "String")]
+#[aggregate("string_agg(varchar, varchar) -> varchar")]
 fn string_agg(
-    state: Option<String>,
+    state: Option<Box<str>>,
     value: Option<&str>,
     delimiter: Option<&str>,
-) -> Option<String> {
+) -> Option<Box<str>> {
     let Some(value) = value else { return state };
-    let Some(mut state) = state else {
+    let Some(state) = state else {
         return Some(value.into());
     };
+    let mut state = String::from(state);
     state += delimiter.unwrap_or("");
     state += value;
-    Some(state)
+    Some(state.into())
 }
 
 #[cfg(test)]
