@@ -36,9 +36,9 @@ where
     OS: ObjectStore,
     S: Scheduler<OS = OS>,
 {
-    pub fn new(store: OS, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub fn new(store: OS, metrics: Arc<ObjectStoreMetrics>, config: S::C) -> Self {
         let store = Arc::new(store);
-        let scheduler = S::new(store.clone(), metrics);
+        let scheduler = S::new(store.clone(), metrics, config);
         Self { store, scheduler }
     }
 
@@ -108,7 +108,11 @@ where
         self.store.store_media_type()
     }
 
-    fn scheduled<AS>(self, _metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self, AS>
+    fn scheduled<AS>(
+        self,
+        _metrics: Arc<ObjectStoreMetrics>,
+        _config: AS::C,
+    ) -> ScheduledObjectStore<Self, AS>
     where
         Self: Sized,
         AS: Scheduler<OS = Self>,

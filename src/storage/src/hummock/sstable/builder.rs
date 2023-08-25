@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -31,7 +32,6 @@ use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtrac
 use crate::hummock::sstable::FilterBuilder;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder, DEFAULT_BLOCK_SIZE};
-use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;

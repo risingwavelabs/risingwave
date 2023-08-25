@@ -30,6 +30,7 @@ use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, StorageConfig,
 };
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
     GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl, USE_TRACE,
@@ -42,7 +43,6 @@ use risingwave_storage::filter_key_extractor::{
 };
 use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
-use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
 
 // use a large offset to avoid collision with real sstables
@@ -100,7 +100,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
 
     let object_store =
-        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock", false).await;
+        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
 
     let sstable_store = {
         Arc::new(SstableStore::new(

@@ -27,8 +27,9 @@ pub mod range_map;
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync + 'static {
     type OS: ObjectStore;
+    type C;
 
-    fn new(store: Arc<Self::OS>, metrics: Arc<ObjectStoreMetrics>) -> Self;
+    fn new(store: Arc<Self::OS>, metrics: Arc<ObjectStoreMetrics>, config: Self::C) -> Self;
 
     async fn read(&self, path: &str, range: Range<usize>) -> ObjectResult<Bytes>;
 }

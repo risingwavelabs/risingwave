@@ -57,7 +57,6 @@ pub mod storage_value;
 #[macro_use]
 pub mod store;
 pub mod error;
-pub mod opts;
 pub mod store_impl;
 pub mod table;
 pub mod write_batch;

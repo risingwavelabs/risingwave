@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -25,7 +26,6 @@ use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
-use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -156,7 +156,6 @@ For `./risedev apply-compose-deploy` users,
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Hummock",
-            false,
         )
         .await;
 

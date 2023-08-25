@@ -37,8 +37,6 @@ use crate::object::{BlockLocation, ObjectError, ObjectResult, ObjectStore};
 
 pub type Sequence = u64;
 
-const PLUGGING: Duration = Duration::from_millis(5);
-
 #[derive(Debug)]
 pub struct TaskHandle {
     rx: oneshot::Receiver<ObjectResult<Bytes>>,
@@ -342,6 +340,11 @@ unsafe impl Send for TaskManager {}
 unsafe impl Sync for TaskManager {}
 
 #[derive(Debug)]
+pub struct OverlappingConfig {
+    pub plugging: Duration,
+}
+
+#[derive(Debug)]
 pub struct Overlapping<OS>
 where
     OS: ObjectStore,
@@ -358,7 +361,12 @@ impl<OS> Overlapping<OS>
 where
     OS: ObjectStore,
 {
-    pub fn new(bits: usize, store: Arc<OS>, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub fn new(
+        bits: usize,
+        store: Arc<OS>,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: OverlappingConfig,
+    ) -> Self {
         let len = 1 << bits;
         let mut task_managers = Vec::with_capacity(len);
         let mut notifies = Vec::with_capacity(len);
@@ -375,6 +383,7 @@ where
                 notify,
                 store: store.clone(),
                 metrics: metrics.clone(),
+                plugging: config.plugging,
             });
         }
 
@@ -389,6 +398,7 @@ where
             task_managers,
             notifies,
             metrics,
+
             _marker: PhantomData,
         }
     }
@@ -430,6 +440,7 @@ where
     notify: Arc<Notify>,
     store: Arc<OS>,
     metrics: Arc<ObjectStoreMetrics>,
+    plugging: Duration,
 }
 
 impl<OS> Runner<OS>
@@ -445,7 +456,7 @@ where
                 Some(enqueue) => {
                     let elapsed = enqueue.elapsed();
                     if elapsed < Duration::from_millis(5) {
-                        tokio::time::sleep(PLUGGING - elapsed).await;
+                        tokio::time::sleep(self.plugging - elapsed).await;
                     }
                     let launch = self.task_manager.lock().launch().unwrap();
                     self.launch(launch).await;
@@ -487,10 +498,11 @@ impl<OS> Scheduler for Overlapping<OS>
 where
     OS: ObjectStore,
 {
+    type C = OverlappingConfig;
     type OS = OS;
 
-    fn new(store: Arc<Self::OS>, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        Self::new(5, store, metrics)
+    fn new(store: Arc<Self::OS>, metrics: Arc<ObjectStoreMetrics>, config: Self::C) -> Self {
+        Self::new(5, store, metrics, config)
     }
 
     async fn read(&self, path: &str, range: Range<usize>) -> ObjectResult<Bytes> {

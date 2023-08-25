@@ -28,6 +28,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -51,7 +52,6 @@ use risingwave_storage::hummock::{
     CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
-use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
@@ -195,7 +195,6 @@ async fn compaction_test(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
-        false,
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(

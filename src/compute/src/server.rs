@@ -25,6 +25,7 @@ use risingwave_common::config::{
     STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -55,7 +56,6 @@ use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
-use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};

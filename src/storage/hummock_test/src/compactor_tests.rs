@@ -26,6 +26,7 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
+    use risingwave_common::storage_opts::StorageOpts;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -57,7 +58,6 @@ pub(crate) mod tests {
         SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
-    use risingwave_storage::opts::StorageOpts;
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::*;
 

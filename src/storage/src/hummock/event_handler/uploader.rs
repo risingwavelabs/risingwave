@@ -27,6 +27,7 @@ use itertools::Itertools;
 use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::catalog::TableId;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
 use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
@@ -41,7 +42,6 @@ use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::HummockStateStoreMetrics;
-use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
@@ -1024,6 +1024,7 @@ mod tests {
     use futures::FutureExt;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::storage_opts::StorageOpts;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
@@ -1049,7 +1050,6 @@ mod tests {
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
     use crate::monitor::HummockStateStoreMetrics;
-    use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
     const INITIAL_EPOCH: HummockEpoch = 5;

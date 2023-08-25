@@ -31,9 +31,9 @@ use tracing::log::error;
 
 mod block_cache;
 pub use block_cache::*;
+use risingwave_common::storage_opts::StorageOpts;
 
 use crate::hummock::store::state_store::LocalHummockStorage;
-use crate::opts::StorageOpts;
 
 mod file_cache;
 pub use file_cache::*;

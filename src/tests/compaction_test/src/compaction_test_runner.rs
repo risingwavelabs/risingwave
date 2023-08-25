@@ -29,6 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, MetaConfig, NoOverride,
 };
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
@@ -41,7 +42,6 @@ use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
-use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 

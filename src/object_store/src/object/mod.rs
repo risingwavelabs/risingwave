@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use prometheus::HistogramTimer;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::storage_opts::StorageOpts;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub mod mem;
@@ -40,7 +40,7 @@ pub mod object_metrics;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 
-use crate::scheduler::overlapping::Overlapping;
+use crate::scheduler::overlapping::{Overlapping, OverlappingConfig};
 use crate::scheduler::Scheduler;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
@@ -142,12 +142,16 @@ pub trait ObjectStore: Send + Sync + 'static {
         MonitoredObjectStore::new(self, metrics)
     }
 
-    fn scheduled<S>(self, metrics: Arc<ObjectStoreMetrics>) -> ScheduledObjectStore<Self, S>
+    fn scheduled<S>(
+        self,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: S::C,
+    ) -> ScheduledObjectStore<Self, S>
     where
         Self: Sized,
         S: Scheduler<OS = Self>,
     {
-        ScheduledObjectStore::new(self, metrics)
+        ScheduledObjectStore::new(self, metrics, config)
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
@@ -878,23 +882,29 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 }
 
-pub async fn parse_remote_object_store_with_config(
+pub async fn parse_remote_object_store_with_opts(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
-    config: Option<Arc<StorageConfig>>,
-    scheduled: bool,
+    opts: Arc<StorageOpts>,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => {
-            if scheduled {
+            if opts.object_store_io_scheduler {
                 ObjectStoreImpl::ScheduledS3(
                     S3ObjectStore::new(
                         s3.strip_prefix("s3://").unwrap().to_string(),
                         metrics.clone(),
                     )
                     .await
-                    .scheduled(metrics.clone())
+                    .scheduled(
+                        metrics.clone(),
+                        OverlappingConfig {
+                            plugging: Duration::from_millis(
+                                opts.object_store_io_scheduler_plugging_ms,
+                            ),
+                        },
+                    )
                     .monitored(metrics),
                 )
             } else {
@@ -966,22 +976,17 @@ pub async fn parse_remote_object_store_with_config(
         }
 
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
-            let s3_object_store_config = config
-                .map(|storage_config| S3ObjectStoreConfig {
-                    keepalive_ms: storage_config.object_store_keepalive_ms,
-                    recv_buffer_size: storage_config.object_store_recv_buffer_size,
-                    send_buffer_size: storage_config.object_store_send_buffer_size,
-                    nodelay: storage_config.object_store_nodelay,
-                    req_retry_interval_ms: Some(storage_config.object_store_req_retry_interval_ms),
-                    req_retry_max_delay_ms: Some(
-                        storage_config.object_store_req_retry_max_delay_ms,
-                    ),
-                    req_retry_max_attempts: Some(
-                        storage_config.object_store_req_retry_max_attempts,
-                    ),
-                    object_store_io_scheduler: storage_config.object_store_io_scheduler,
-                })
-                .unwrap_or(S3ObjectStoreConfig::default());
+            let s3_object_store_config = S3ObjectStoreConfig {
+                keepalive_ms: opts.object_store_keepalive_ms,
+                recv_buffer_size: opts.object_store_recv_buffer_size,
+                send_buffer_size: opts.object_store_send_buffer_size,
+                nodelay: opts.object_store_nodelay,
+                req_retry_interval_ms: Some(opts.object_store_req_retry_interval_ms),
+                req_retry_max_delay_ms: Some(opts.object_store_req_retry_max_delay_ms),
+                req_retry_max_attempts: Some(opts.object_store_req_retry_max_attempts),
+                object_store_io_scheduler: opts.object_store_io_scheduler,
+            };
+
             if s3_object_store_config.object_store_io_scheduler {
                 ObjectStoreImpl::ScheduledS3(
                     // For backward compatibility, s3-compatible is still reserved.
@@ -996,7 +1001,14 @@ pub async fn parse_remote_object_store_with_config(
                         s3_object_store_config,
                     )
                     .await
-                    .scheduled(metrics.clone())
+                    .scheduled(
+                        metrics.clone(),
+                        OverlappingConfig {
+                            plugging: Duration::from_millis(
+                                opts.object_store_io_scheduler_plugging_ms,
+                            ),
+                        },
+                    )
                     .monitored(metrics),
                 )
             } else {
@@ -1018,14 +1030,18 @@ pub async fn parse_remote_object_store_with_config(
             }
         }
         minio if minio.starts_with("minio://") => {
-            if config
-                .map(|c| c.object_store_io_scheduler)
-                .unwrap_or_default()
-            {
+            if opts.object_store_io_scheduler {
                 ObjectStoreImpl::ScheduledS3(
                     S3ObjectStore::with_minio(minio, metrics.clone())
                         .await
-                        .scheduled(metrics.clone())
+                        .scheduled(
+                            metrics.clone(),
+                            OverlappingConfig {
+                                plugging: Duration::from_millis(
+                                    opts.object_store_io_scheduler_plugging_ms,
+                                ),
+                            },
+                        )
                         .monitored(metrics),
                 )
             } else {
@@ -1065,9 +1081,8 @@ pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
-    scheduled: bool,
 ) -> ObjectStoreImpl {
-    parse_remote_object_store_with_config(url, metrics, ident, None, scheduled).await
+    parse_remote_object_store_with_opts(url, metrics, ident, Arc::new(StorageOpts::default())).await
 }
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;

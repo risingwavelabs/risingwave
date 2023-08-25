@@ -17,8 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::parse_remote_object_store_with_opts;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{
@@ -37,7 +38,6 @@ use crate::monitor::{
     CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
-use crate::opts::StorageOpts;
 use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
@@ -610,11 +610,11 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store = parse_remote_object_store(
+                let mut object_store = parse_remote_object_store_with_opts(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
-                    opts.object_store_io_scheduler,
+                    opts.clone(),
                 )
                 .await;
                 object_store.set_opts(

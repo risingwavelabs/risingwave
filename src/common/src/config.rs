@@ -541,6 +541,8 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::object_store_io_scheduler")]
     pub object_store_io_scheduler: bool,
+    #[serde(default = "default::storage::object_store_io_scheduler_plugging_ms")]
+    pub object_store_io_scheduler_plugging_ms: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -998,6 +1000,10 @@ pub mod default {
 
         pub fn object_store_io_scheduler() -> bool {
             false
+        }
+
+        pub fn object_store_io_scheduler_plugging_ms() -> u64 {
+            0
         }
     }
 

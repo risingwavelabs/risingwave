@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -39,7 +40,6 @@ use crate::hummock::{
     SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
-use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
 
 pub fn default_opts_for_test() -> StorageOpts {

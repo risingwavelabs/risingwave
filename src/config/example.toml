@@ -105,6 +105,7 @@ compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 object_store_io_scheduler = false
+object_store_io_scheduler_plugging_ms = 0
 
 [storage.data_file_cache]
 dir = ""

@@ -63,6 +63,7 @@ pub mod memory;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
+pub mod storage_opts;
 pub mod system_param;
 pub mod telemetry;
 pub mod transaction;

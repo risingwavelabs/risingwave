@@ -19,10 +19,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
+use risingwave_common::storage_opts::StorageOpts;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
-use crate::opts::StorageOpts;
 
 pub struct ConflictDetector {
     // epoch -> key-sets

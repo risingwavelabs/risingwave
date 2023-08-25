@@ -369,8 +369,7 @@ async fn create_snapshot_store(
     config: &StoreConfig,
     metric: Arc<ObjectStoreMetrics>,
 ) -> MetaResult<BoxedMetaSnapshotStorage> {
-    let object_store =
-        Arc::new(parse_remote_object_store(&config.0, metric, "Meta Backup", false).await);
+    let object_store = Arc::new(parse_remote_object_store(&config.0, metric, "Meta Backup").await);
     let store = ObjectStoreMetaSnapshotStorage::new(&config.1, object_store).await?;
     Ok(Box::new(store))
 }

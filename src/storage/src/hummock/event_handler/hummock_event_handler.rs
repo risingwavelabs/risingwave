@@ -22,6 +22,7 @@ use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -47,7 +48,6 @@ use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
 };
 use crate::monitor::HummockStateStoreMetrics;
-use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
 #[derive(Clone)]

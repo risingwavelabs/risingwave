@@ -22,6 +22,7 @@ use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -30,7 +31,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_object_store::object::parse_remote_object_store_with_config;
+use risingwave_object_store::object::parse_remote_object_store_with_opts;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -44,7 +45,6 @@ use risingwave_storage::hummock::{
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
 };
-use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tracing::info;
@@ -133,14 +133,13 @@ pub async fn compactor_serve(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = parse_remote_object_store_with_config(
+    let mut object_store = parse_remote_object_store_with_opts(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        Some(Arc::new(config.storage.clone())),
-        false,
+        Arc::new((&config.storage).into()),
     )
     .await;
     object_store.set_opts(

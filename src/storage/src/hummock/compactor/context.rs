@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use risingwave_common::storage_opts::StorageOpts;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
@@ -24,7 +25,6 @@ use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableObjectIdManagerRef};
 use crate::monitor::CompactorMetrics;
-use crate::opts::StorageOpts;
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
