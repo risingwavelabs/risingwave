@@ -54,7 +54,7 @@ chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 if [[ "$mode" == "standalone" ]]; then
   run_sql() {
-    psql -h localhost -p 4566 -d dev -U root -f "$@"
+    psql -h localhost -p 4566 -d dev -U root -c "$@"
   }
 
   echo "--- e2e, standalone, cluster-persistence-test"
