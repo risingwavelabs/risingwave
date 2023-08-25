@@ -493,7 +493,6 @@ pub struct SourceMessage {
     pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
-
     pub meta: SourceMeta,
 }
 

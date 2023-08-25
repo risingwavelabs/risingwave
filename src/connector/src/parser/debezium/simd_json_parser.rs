@@ -597,7 +597,6 @@ mod tests {
                     column_id: 7.into(),
                     fields: vec![],
                     is_row_id: false,
-                    is_offset: false,
                     is_meta: false,
                     is_pk: false,
                 },

@@ -14,9 +14,7 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME,
-};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::types::DataType;
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
@@ -29,7 +27,6 @@ pub struct SourceColumnDesc {
     pub fields: Vec<ColumnDesc>,
     /// Now `skip_parse` is used to indicate whether the column is a row id column.
     pub is_row_id: bool,
-    pub is_offset: bool,
 
     pub is_meta: bool,
     // `is_pk` is used to indicate whether the column is part of the primary key columns.
@@ -51,7 +48,6 @@ impl SourceColumnDesc {
             column_id,
             fields: vec![],
             is_row_id: false,
-            is_offset: false,
             is_meta: false,
             is_pk: false,
         }
@@ -72,7 +68,6 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             column_id: c.column_id,
             fields: c.field_descs.clone(),
             is_row_id: c.name.as_str() == "_row_id",
-            is_offset: c.name.as_str() == OFFSET_COLUMN_NAME,
             is_meta,
             is_pk: false,
         }

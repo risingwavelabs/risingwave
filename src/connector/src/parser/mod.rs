@@ -239,7 +239,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_meta || desc.is_offset {
+                if desc.is_meta || desc.name.eq(OFFSET_COLUMN_NAME) {
                     return Ok(());
                 }
                 let output = if desc.is_row_id {
@@ -474,8 +474,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                             )
                                         }
                                     }
-                                } else if desc.is_offset {
-                                    assert_eq!(desc.name.as_str(), OFFSET_COLUMN_NAME);
+                                } else if desc.name.eq(OFFSET_COLUMN_NAME) {
                                     Some(Some(msg_offset.as_str().into()))
                                 } else {
                                     // None will be ignored by `fulfill_meta_column`

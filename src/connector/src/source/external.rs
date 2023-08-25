@@ -298,7 +298,7 @@ impl MySqlExternalTableReader {
         })?;
 
         let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}?timezone=UTC",
+            "mysql://{}:{}@{}:{}/{}",
             config.username, config.password, config.host, config.port, config.database
         );
         let pool = mysql_async::Pool::from_url(database_url)?;
