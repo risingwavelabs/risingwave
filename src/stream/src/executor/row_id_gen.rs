@@ -120,8 +120,10 @@ impl RowIdGenExecutor {
                     }
                     if let Some(Mutation::Update {
                         source: Some(source),
+                        added_dispatchers,
                         ..
-                    }) = barrier.mutation.as_deref()
+                    }) = barrier.mutation.as_deref() &&
+                        added_dispatchers.contains_key(&self.ctx.id)
                     {
                         self.schema = Schema {
                             fields: source
