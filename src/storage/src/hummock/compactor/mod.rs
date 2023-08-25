@@ -70,7 +70,10 @@ use super::{
     SharedComapctorObjectIdManager, SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
     Xor16FilterBuilder,
 };
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
+use crate::filter_key_extractor::{
+    self, FilterKeyExtractorBuilder, FilterKeyExtractorImpl, FilterKeyExtractorManager,
+    FilterKeyExtractorManagerFactory,
+};
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, shared_compact};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
@@ -666,16 +669,20 @@ pub fn start_shared_compactor(
         let mut output_object_ids: VecDeque<_> = VecDeque::new();
         output_object_ids.extend(output_ids);
         let sstable_object_id_manager = SharedComapctorObjectIdManager::new(output_object_ids);
+        let filter_key_extractor_manager =
+            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
+                FilterKeyExtractorBuilder::new(id_to_table),
+            );
         let (compact_task, table_stats) = shared_compact(
             compactor_metrics,
             compact_task,
             rx,
             sstable_store,
             parallel_compact_size_mb,
+            filter_key_extractor_manager,
             worker_num,
             max_sub_compaction,
             memory_limiter,
-            id_to_table,
             sstable_object_id_manager,
             block_size_kb,
             compact_iter_recreate_timeout_ms,

@@ -39,7 +39,8 @@ use tokio::sync::oneshot::Receiver;
 use super::task_progress::{TaskProgress, TaskProgressManagerRef};
 use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{
-    self, FilterKeyExtractorImpl, FilterKeyExtractorManager, MultiFilterKeyExtractor,
+    self, FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerFactory,
+    MultiFilterKeyExtractor,
 };
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, estimate_task_output_capacity_v2,
@@ -1059,11 +1060,11 @@ pub async fn shared_compact(
     shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
     parallel_compact_size_mb: u32,
+    filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
 
     worker_num: u64,
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
-    id_to_table: HashMap<u32, Table>,
     sstable_object_id_manager: SharedComapctorObjectIdManager,
     block_size_kb: u32,
     compact_iter_recreate_timeout_ms: u64,
@@ -1075,9 +1076,7 @@ pub async fn shared_compact(
     storage_opts: Arc<StorageOpts>,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
-    // let context = compactor_context.clone();
-    // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
-    // write op. The watermark is invalidated when this method exits.
+
 
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -1143,14 +1142,17 @@ pub async fn shared_compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-    for table_id in compact_table_ids.clone() {
-        if let Some(table) = id_to_table.get(&table_id) {
-            let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
-            multi_filter_key_extractor.register(table_id, key_extractor);
+    let multi_filter_key_extractor = match filter_key_extractor_manager
+        .acquire(compact_table_ids.clone())
+        .await
+    {
+        Err(e) => {
+            tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
+            let task_status = TaskStatus::ExecuteFailed;
+            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
         }
-    }
-    let multi_filter_key_extractor = FilterKeyExtractorImpl::Multi(multi_filter_key_extractor);
+        Ok(extractor) => extractor,
+    };
 
     if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
         let found_tables = multi.get_existing_table_ids();

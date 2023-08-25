@@ -426,7 +426,7 @@ pub async fn shared_compactor_serve(
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
         )),
-        filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+        filter_key_extractor_manager: FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(filter_key_extractor_manager.clone()),
         memory_limiter,
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
