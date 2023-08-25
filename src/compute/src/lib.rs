@@ -236,11 +236,8 @@ pub fn start(
 
 fn run_jvm() {
     let mut env = JVM.attach_current_thread_as_daemon().unwrap();
-    let string_class = env.find_class("java/lang/String").unwrap();
-    let jarray = env
-        .new_object_array(0, string_class, JObject::null())
-        .unwrap();
 
+    // FIXME: remove this function would cause segment fault.
     run_this_func_to_get_valid_ptr_from_java_binding();
 
     let binding_class = env
@@ -443,6 +440,11 @@ fn run_jvm() {
         },
 
     ]).unwrap();
+
+    let string_class = env.find_class("java/lang/String").unwrap();
+    let jarray = env
+        .new_object_array(0, string_class, JObject::null())
+        .unwrap();
 
     let _ = env
         .call_static_method(

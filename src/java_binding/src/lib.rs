@@ -819,9 +819,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     pointer.drop()
 }
 
-pub fn run_this_func_to_get_valid_ptr_from_java_binding() {
-    println!("run_this_func_to_get_valid_ptr_from_java_binding")
-}
+#[inline(never)]
+pub fn run_this_func_to_get_valid_ptr_from_java_binding() {}
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel<'a>(
