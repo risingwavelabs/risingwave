@@ -49,7 +49,7 @@ public class CassandraSink extends SinkWriterBase {
             throw new IllegalArgumentException(
                     "Invalid cassandraURL: expected `host:port`, got " + url);
         }
-        // 2. check connection
+        // check connection
         CqlSessionBuilder sessionBuilder =
                 CqlSession.builder()
                         .addContactPoint(
@@ -97,7 +97,6 @@ public class CassandraSink extends SinkWriterBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
-        System.out.println(this.config.getType());
         if (this.config.getType().equals("append-only")) {
             write_append_only(rows);
         } else {

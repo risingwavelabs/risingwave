@@ -31,5 +31,5 @@ docker compose exec cassandra bash /opt/cassandra/cassandra-sql/run-sql-file.sh 
 ```
 
 ```sql
-select user_id, count(*) from default.demo_test group by user_id
+select user_id, count(*) from my_keyspace.demo_test group by user_id
 ```

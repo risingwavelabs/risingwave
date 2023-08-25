@@ -124,6 +124,7 @@ public class CassandraUtil {
                 return CqlDuration.from((String) value);
             case BYTEA:
                 return ByteBuffer.wrap((byte[]) value);
+            case LIST:
             case STRUCT:
                 throw Status.UNIMPLEMENTED
                         .withDescription(String.format("not support %s now", typeName))
