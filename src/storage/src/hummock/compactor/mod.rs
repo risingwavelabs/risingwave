@@ -15,16 +15,21 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use parking_lot::RwLock;
+use risingwave_pb::catalog::Table;
+use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
+use risingwave_pb::hummock::CompactTask;
 pub mod compactor_runner;
 mod context;
 mod iterator;
+use std::collections::VecDeque;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Div;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -35,6 +40,7 @@ pub use compaction_filter::{
     TtlCompactionFilter,
 };
 pub use context::CompactorContext;
+use futures::channel::oneshot::Receiver;
 use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -46,8 +52,8 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, CompactorWorkload, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse,
+    CompactTaskProgress, CompactorWorkload, ReportCompactionTaskRequest,
+    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
@@ -57,14 +63,15 @@ use tokio::time::Instant;
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 pub use self::task_progress::TaskProgress;
+use self::task_progress::TaskProgressManagerRef;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompactionDeleteRanges, GetObjectId, HummockResult, MemoryLimiter,
     SharedComapctorObjectIdManager, SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
     Xor16FilterBuilder,
 };
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
-use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
+use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, shared_compact};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
@@ -73,6 +80,7 @@ use crate::hummock::{
     HummockError, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
+use crate::opts::StorageOpts;
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
@@ -141,66 +149,62 @@ impl Compactor {
             self.compactor_metrics.compact_sst_duration.start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = if self
-            
-            .sstable_store
-            .store()
-            .support_streaming_upload()
-        {
-            let factory = StreamingSstableWriterFactory::new(self.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
+        let (split_table_outputs, table_stats_map) =
+            if self.sstable_store.store().support_streaming_upload() {
+                let factory = StreamingSstableWriterFactory::new(self.sstable_store.clone());
+                if self.task_config.use_block_based_filter {
+                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                        self.sstable_object_id_manager.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                } else {
+                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                        self.sstable_object_id_manager.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                }
             } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
-        } else {
-            let factory = BatchSstableWriterFactory::new(self.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
-        };
+                let factory = BatchSstableWriterFactory::new(self.sstable_store.clone());
+                if self.task_config.use_block_based_filter {
+                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                        self.sstable_object_id_manager.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                } else {
+                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        del_agg,
+                        filter_key_extractor,
+                        task_progress.clone(),
+                        self.sstable_object_id_manager.clone(),
+                    )
+                    .verbose_instrument_await("compact")
+                    .await?
+                }
+            };
 
         compact_timer.observe_duration();
 
@@ -611,5 +615,87 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
         }
     });
 
+    (join_handle, shutdown_tx)
+}
+
+/// The background compaction thread that receives compaction tasks from hummock compaction
+/// manager and runs compaction tasks.
+#[cfg_attr(coverage, no_coverage)]
+pub fn start_shared_compactor(
+    compact_task: CompactTask,
+    id_to_table: HashMap<u32, Table>,
+    output_ids: Vec<u64>,
+    cpu_core_num: u32,
+    running_task_count: Arc<AtomicU32>,
+    compactor_metrics: Arc<CompactorMetrics>,
+
+    sstable_store: SstableStoreRef,
+    parallel_compact_size_mb: u32,
+
+    worker_num: u64,
+    max_sub_compaction: u32,
+    memory_limiter: Arc<MemoryLimiter>,
+    block_size_kb: u32,
+    object_store_recv_buffer_size: usize,
+    sstable_size_mb: u32,
+    task_progress_manager: TaskProgressManagerRef,
+    compact_iter_recreate_timeout_ms: u64,
+    is_share_buffer_compact: bool,
+    storage_opts: Arc<StorageOpts>,
+    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+) -> (JoinHandle<()>, Sender<()>) {
+    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let stream_retry_interval = Duration::from_secs(30);
+    let periodic_event_update_interval = Duration::from_millis(1000);
+    let mut system =
+        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
+    let pid = sysinfo::get_current_pid().unwrap();
+    let pull_task_ack = Arc::new(AtomicBool::new(true));
+
+    let join_handle = tokio::spawn(async move {
+        let shutdown_map = CompactionShutdownMap::default();
+        let shutdown = shutdown_map.clone();
+        let mut min_interval = tokio::time::interval(stream_retry_interval);
+        let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
+        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
+        running_task_count.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task_id = compact_task.task_id;
+        shutdown.lock().unwrap().insert(task_id, tx);
+        let mut output_object_ids: VecDeque<_> = VecDeque::new();
+        output_object_ids.extend(output_ids);
+        let sstable_object_id_manager = SharedComapctorObjectIdManager::new(output_object_ids);
+        let (compact_task, table_stats) = shared_compact(
+            compactor_metrics,
+            compact_task,
+            rx,
+            sstable_store,
+            parallel_compact_size_mb,
+            worker_num,
+            max_sub_compaction,
+            memory_limiter,
+            id_to_table,
+            sstable_object_id_manager,
+            block_size_kb,
+            compact_iter_recreate_timeout_ms,
+            is_share_buffer_compact,
+            object_store_recv_buffer_size,
+            sstable_size_mb,
+            task_progress_manager,
+            storage_opts,
+            await_tree_reg,
+        )
+        .await;
+        shutdown.lock().unwrap().remove(&task_id);
+        running_task_count.fetch_sub(1, Ordering::SeqCst);
+        // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
+        let report_compaction_task_request = ReportCompactionTaskRequest {
+            report_task: Some(ReportSharedTask {
+                compact_task: Some(compact_task),
+                table_stats_change: to_prost_table_stats_map(table_stats),
+            }),
+        };
+    });
     (join_handle, shutdown_tx)
 }

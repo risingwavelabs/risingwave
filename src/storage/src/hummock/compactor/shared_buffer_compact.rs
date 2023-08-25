@@ -473,7 +473,6 @@ impl SharedBufferCompactRunner {
             context.memory_limiter.clone(),
             sstable_object_id_manager,
             context.storage_opts.compact_iter_recreate_timeout_ms,
-            
         );
         Self {
             compactor,

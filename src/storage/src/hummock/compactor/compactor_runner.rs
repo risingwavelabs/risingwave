@@ -29,29 +29,18 @@ use risingwave_hummock_sdk::compact::{
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
-use risingwave_hummock_sdk::table_stats::{
-    add_table_stats_map, to_prost_table_stats_map, TableStats, TableStatsMap,
-};
+use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
-use risingwave_pb::hummock::subscribe_compaction_event_request::{
-    Event as RequestEvent, HeartBeat, PullTask, ReportTask,
-};
-use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
-use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactorWorkload, LevelType, ReportCompactionTaskRequest,
-    SstableInfo, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
-};
-use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
-use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::task::JoinHandle;
-use tokio::time::Instant;
+use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::{TaskProgress, TaskProgressManagerRef};
 use super::{CompactionStatistics, TaskConfig};
-use crate::{filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager}, hummock::SharedComapctorObjectIdManager};
+use crate::filter_key_extractor::{
+    self, FilterKeyExtractorImpl, FilterKeyExtractorManager, MultiFilterKeyExtractor,
+};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, estimate_task_output_capacity_v2,
     generate_splits, generate_splits_v2,
@@ -67,7 +56,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     validate_ssts, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges,
     CompressionAlgorithm, GetObjectId, HummockResult, MemoryLimiter, MonotonicDeleteEvent,
-    SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
+    SharedComapctorObjectIdManager, SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 use crate::opts::StorageOpts;
@@ -1062,89 +1051,6 @@ mod tests {
     }
 }
 
-/// The background compaction thread that receives compaction tasks from hummock compaction
-/// manager and runs compaction tasks.
-#[cfg_attr(coverage, no_coverage)]
-pub fn start_shared_compactor(
-    compact_task: CompactTask,
-    table_catalogs: Table,
-    output_ids: Vec<u64>,
-    cpu_core_num: u32,
-    running_task_count: Arc<AtomicU32>,
-    compactor_metrics: Arc<CompactorMetrics>,
-    mut shutdown_rx: Receiver<()>,
-    sstable_store: SstableStoreRef,
-    parallel_compact_size_mb: u32,
-
-    worker_num: u64,
-    max_sub_compaction: u32,
-    memory_limiter: Arc<MemoryLimiter>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    block_size_kb: u32,
-    object_store_recv_buffer_size: usize,
-    sstable_size_mb: u32,
-    task_progress_manager: TaskProgressManagerRef,
-    compact_iter_recreate_timeout_ms: u64,
-    is_share_buffer_compact: bool,
-    storage_opts: Arc<StorageOpts>,
-    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
-) -> (JoinHandle<()>, Sender<()>) {
-    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let stream_retry_interval = Duration::from_secs(30);
-    let periodic_event_update_interval = Duration::from_millis(1000);
-    let mut system =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
-    let pid = sysinfo::get_current_pid().unwrap();
-    let pull_task_ack = Arc::new(AtomicBool::new(true));
-
-    let join_handle = tokio::spawn(async move {
-        let shutdown_map = CompactionShutdownMap::default();
-        let shutdown = shutdown_map.clone();
-        let mut min_interval = tokio::time::interval(stream_retry_interval);
-        let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
-        running_task_count.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let task_id = compact_task.task_id;
-        shutdown.lock().unwrap().insert(task_id, tx);
-        let mut output_object_ids: VecDeque<_> = VecDeque::new();
-        output_object_ids.extend(output_ids);
-        let sstable_object_id_manager =  SharedComapctorObjectIdManager::new(output_object_ids);
-        let (compact_task, table_stats) = shared_compact(
-            compactor_metrics,
-            compact_task,
-            rx,
-            sstable_store,
-            parallel_compact_size_mb,
-            worker_num,
-            max_sub_compaction,
-            memory_limiter,
-            filter_key_extractor_manager,
-            sstable_object_id_manager,
-            block_size_kb,
-            compact_iter_recreate_timeout_ms,
-            is_share_buffer_compact,
-            object_store_recv_buffer_size,
-            sstable_size_mb,
-            task_progress_manager,
-            storage_opts,
-            await_tree_reg,
-        )
-        .await;
-        shutdown.lock().unwrap().remove(&task_id);
-        running_task_count.fetch_sub(1, Ordering::SeqCst);
-        // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
-        let report_compaction_task_request = ReportCompactionTaskRequest {
-            report_task: Some(ReportSharedTask {
-                compact_task: Some(compact_task),
-                table_stats_change: to_prost_table_stats_map(table_stats),
-            }),
-        };
-    });
-    (join_handle, shutdown_tx)
-}
-
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn shared_compact(
@@ -1157,7 +1063,7 @@ pub async fn shared_compact(
     worker_num: u64,
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    id_to_table: HashMap<u32, Table>,
     sstable_object_id_manager: SharedComapctorObjectIdManager,
     block_size_kb: u32,
     compact_iter_recreate_timeout_ms: u64,
@@ -1232,22 +1138,19 @@ pub async fn shared_compact(
 
     let existing_table_ids: HashSet<u32> =
         HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let compact_table_ids = HashSet::from_iter(
+    let compact_table_ids: HashSet<u32> = HashSet::from_iter(
         compact_table_ids
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match filter_key_extractor_manager
-        .acquire(compact_table_ids.clone())
-        .await
-    {
-        Err(e) => {
-            tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
-            let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+    let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+    for table_id in compact_table_ids.clone() {
+        if let Some(table) = id_to_table.get(&table_id) {
+            let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
+            multi_filter_key_extractor.register(table_id, key_extractor);
         }
-        Ok(extractor) => extractor,
-    };
+    }
+    let multi_filter_key_extractor = FilterKeyExtractorImpl::Multi(multi_filter_key_extractor);
 
     if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
         let found_tables = multi.get_existing_table_ids();
