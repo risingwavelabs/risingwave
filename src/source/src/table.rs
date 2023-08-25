@@ -115,7 +115,7 @@ impl TableDmlHandle {
     }
 
     /// Get the reference of all columns in this table.
-    pub(super) fn column_descs(&self) -> &[ColumnDesc] {
+    pub fn column_descs(&self) -> &[ColumnDesc] {
         self.column_descs.as_ref()
     }
 
