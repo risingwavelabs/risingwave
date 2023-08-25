@@ -29,6 +29,7 @@ use super::create_table::{
 };
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableType;
 use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
