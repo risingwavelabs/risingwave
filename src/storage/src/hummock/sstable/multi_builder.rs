@@ -750,7 +750,7 @@ mod tests {
             .add_monotonic_delete(MonotonicDeleteEvent {
                 event_key: PointRange::from_user_key(
                     UserKey::for_test(table_id, b"eeee".to_vec()),
-                    false,
+                    true,
                 ),
                 new_epoch: 11,
             })
