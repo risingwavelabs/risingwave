@@ -188,8 +188,11 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 
 use std::future::Future;
 use std::marker::PhantomData;
+use std::mem::transmute;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::ptr;
+use std::ptr::null;
 use jni::{JNIEnv, NativeMethod};
 use jni::objects::{JClass, JObject, JString, JValue, JValueGen};
 use jni::strings::JNIString;
@@ -382,17 +385,13 @@ fn run_jvm() {
     let string_class = env.find_class("java/lang/String").unwrap();
     let jarray = env.new_object_array(0, string_class, JObject::null()).unwrap();
 
-    let fn_ptr = Java_com_risingwave_java_binding_Binding_sendMsgToChannel as *const fn (
-        EnvParam<'static>,
-        Pointer<'static, MyJniSender>,
-        JObject<'static>
-    );
+    let fn_ptr = Java_com_risingwave_java_binding_Binding_sendMsgToChannel as *mut c_void;
 
     let binding_class = env.find_class("com/risingwave/java/binding/Binding").unwrap();
     env.register_native_methods(binding_class, &[NativeMethod {
         name: JNIString::from("sendMsgToChannel"),
         sig: JNIString::from("(JLjava/lang/Object;)V"),
-        fn_ptr: fn_ptr as *mut c_void,
+        fn_ptr,
     }]).unwrap();
 
     let _ = env.call_static_method("com/risingwave/connector/ConnectorService", "main", "([Ljava/lang/String;)V", &[JValue::Object(&jarray)]).inspect_err(|e| eprintln!("{:?}", e));
