@@ -176,21 +176,21 @@ mod tests {
     }
 
     fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
-        let mut agg = Registers::<UpdatableBucket<DENSE_BITS>>::new();
+        let mut agg = Registers::<UpdatableBucket<DENSE_BITS>>::default();
         assert_eq!(agg.calculate_result(), 0);
 
-        agg.update(1, false).unwrap();
-        agg.update(2, false).unwrap();
-        agg.update(3, false).unwrap();
+        agg.update(1.into(), false).unwrap();
+        agg.update(2.into(), false).unwrap();
+        agg.update(3.into(), false).unwrap();
         assert_eq!(agg.calculate_result(), 4);
 
-        agg.update(3, false).unwrap();
+        agg.update(3.into(), false).unwrap();
         assert_eq!(agg.calculate_result(), 4);
 
-        agg.update(3, true).unwrap();
-        agg.update(3, true).unwrap();
-        agg.update(1, true).unwrap();
-        agg.update(2, true).unwrap();
+        agg.update(3.into(), true).unwrap();
+        agg.update(3.into(), true).unwrap();
+        agg.update(1.into(), true).unwrap();
+        agg.update(2.into(), true).unwrap();
         assert_eq!(agg.calculate_result(), 0);
     }
 
@@ -209,12 +209,12 @@ mod tests {
     /// error.
     #[test]
     fn test_error_ratio() {
-        let mut agg = Registers::<UpdatableBucket<16>>::new();
+        let mut agg = Registers::<UpdatableBucket<16>>::default();
         assert_eq!(agg.calculate_result(), 0);
         let actual_ndv = 1000000;
         for i in 0..1000000 {
             for _ in 0..3 {
-                agg.update(i, false).unwrap();
+                agg.update(i.into(), false).unwrap();
             }
         }
 
