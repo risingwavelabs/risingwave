@@ -22,7 +22,7 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, Ove
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::create_overlap_strategy;
-use crate::hummock::compaction::picker::MinOverlappingPicker;
+use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct LevelCompactionPicker {
@@ -56,38 +56,13 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        let target_level = levels.get_level(self.target_level);
-        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let min_overlap_picker = MinOverlappingPicker::new(
-            0,
-            self.target_level,
-            self.config.sub_level_max_compaction_bytes,
-            false,
-            overlap_strategy.clone(),
-        );
-        let (select_tables, target_tables) = min_overlap_picker.pick_tables(
-            &l0.sub_levels[0].table_infos,
-            &target_level.table_infos,
+        if let Some(ret) = self.pick_base_trivial_move(
+            l0,
+            levels.get_level(self.target_level),
             level_handlers,
-        );
-        // only pick tables for trivial move
-        if !select_tables.is_empty() && target_tables.is_empty() {
-            return Some(CompactionInput {
-                input_levels: vec![
-                    InputLevel {
-                        level_idx: 0,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: select_tables,
-                    },
-                    InputLevel {
-                        level_idx: self.target_level as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: vec![],
-                    },
-                ],
-                target_level: self.target_level,
-                target_sub_level_id: 0,
-            });
+            stats,
+        ) {
+            return Some(ret);
         }
 
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
@@ -104,7 +79,7 @@ impl CompactionPicker for LevelCompactionPicker {
             return Some(ret);
         }
 
-        self.pick_l0_trivial_move_file(l0, level_handlers)
+        self.pick_l0_trivial_move_file(l0, level_handlers, stats)
     }
 }
 
@@ -114,6 +89,25 @@ impl LevelCompactionPicker {
             target_level,
             config,
         }
+    }
+
+    fn pick_base_trivial_move(
+        &self,
+        l0: &OverlappingLevel,
+        target_level: &Level,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let trivial_move_picker =
+            TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());
+
+        trivial_move_picker.pick_trivial_move_task(
+            &l0.sub_levels[0].table_infos,
+            &target_level.table_infos,
+            level_handlers,
+            stats,
+        )
     }
 
     fn pick_multi_level_to_base(
@@ -359,6 +353,7 @@ impl LevelCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
@@ -371,30 +366,25 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            let min_overlap_picker = MinOverlappingPicker::new(
-                0,
-                0,
-                self.config.sub_level_max_compaction_bytes,
-                false,
-                overlap_strategy.clone(),
-            );
+            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
 
-            let (select_tables, target_tables) = min_overlap_picker.pick_tables(
+            let select_sst = trivial_move_picker.pick_trivial_move_sst(
                 &l0.sub_levels[idx + 1].table_infos,
                 &level.table_infos,
                 level_handlers,
+                stats,
             );
 
             // only pick tables for trivial move
-            if select_tables.is_empty() || !target_tables.is_empty() {
+            if select_sst.is_none() {
                 continue;
             }
 
+            let select_sst = select_sst.unwrap();
+
             // support trivial move cross multi sub_levels
             let mut overlap = overlap_strategy.create_overlap_info();
-            for sst in &select_tables {
-                overlap.update(sst);
-            }
+            overlap.update(&select_sst);
 
             assert!(overlap
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
@@ -416,7 +406,7 @@ impl LevelCompactionPicker {
                 InputLevel {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: select_tables,
+                    table_infos: vec![select_sst],
                 },
                 InputLevel {
                     level_idx: 0,

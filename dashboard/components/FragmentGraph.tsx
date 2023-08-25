@@ -21,6 +21,7 @@ import {
   layout,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/streaming_plan"
+import BackPressureTable from "./BackPressureTable"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -116,6 +117,7 @@ export default function FragmentGraph({
         extraInfo: string
       }
     >()
+    const includedActorIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
         dx: nodeMarginX,
@@ -133,8 +135,9 @@ export default function FragmentGraph({
         layoutRoot,
         width,
         height,
-        extraInfo: fragmentRoot.data.extraInfo ?? "",
+        extraInfo: `Actor ${fragmentRoot.data.actor_ids?.join(", ")}` || "",
       })
+      fragmentRoot.data.actor_ids?.forEach((id) => includedActorIds.add(id))
     }
     const fragmentLayout = layout(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
@@ -160,7 +163,14 @@ export default function FragmentGraph({
       svgWidth = Math.max(svgWidth, x + width)
     })
     const links = generateBoxLinks(fragmentLayout)
-    return { layoutResult, fragmentLayout, svgWidth, svgHeight, links }
+    return {
+      layoutResult,
+      fragmentLayout,
+      svgWidth,
+      svgHeight,
+      links,
+      includedActorIds,
+    }
   }, [planNodeDependencies, fragmentDependency])
 
   type PlanNodeDesc = {
@@ -179,6 +189,7 @@ export default function FragmentGraph({
     links,
     fragmentLayout: fragmentDependencyDag,
     layoutResult: planNodeDependencyDag,
+    includedActorIds,
   } = planNodeDependencyDagCallback()
 
   useEffect(() => {
@@ -423,6 +434,7 @@ export default function FragmentGraph({
         <g className="actor-links" />
         <g className="actors" />
       </svg>
+      <BackPressureTable selectedActorIds={includedActorIds} />
     </Fragment>
   )
 }

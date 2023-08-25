@@ -55,7 +55,7 @@ opentelemetry = { version = "0.20", default-features = false }
 parking_lot = "0.12"
 parse-display = "0.8"
 paste = "1"
-postgres-types = { version = "0.2.5", features = [
+postgres-types = { version = "0.2.6", features = [
     "derive",
     "with-chrono-0_4",
     "with-serde_json-1",
@@ -76,10 +76,10 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-speedate = "0.11.0"
+speedate = "0.12.0"
 static_assertions = "1"
 strum = "0.25"
-strum_macros = "0.24"
+strum_macros = "0.25"
 sysinfo = { version = "0.29", default-features = false }
 thiserror = "1"
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }

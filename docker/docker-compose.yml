@@ -23,7 +23,7 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
+      # - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
@@ -62,7 +62,7 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
+      # - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:

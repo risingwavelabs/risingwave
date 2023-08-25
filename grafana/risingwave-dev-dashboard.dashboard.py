@@ -613,6 +613,7 @@ def section_streaming(panels):
     mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
     table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
     mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
+    sink_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=sink_filter)}[$__rate_interval]) * on(actor_id) group_left(sink_name) (group({metric("sink_info")}) by (actor_id, sink_name))) by (sink_name)'
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
@@ -705,26 +706,22 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
-            "The figure shows the number of rows output by each sink executor actor per second.",
+            "The figure shows the number of rows output by each sink per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])",
-                    "sink={{executor_identity}} {{actor_id}} @ {{instance}}",
+                    sink_throughput_query,
+                   "sink {{sink_name}}",
                 ),
             ],
         ),
 
         panels.timeseries_rowsps(
             "Materialized View Throughput(rows/s)",
-            "The figure shows the number of rows written into each materialized executor actor per second.",
+            "The figure shows the number of rows written into each materialized view per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])",
-                    "{{executor_identity}} {{actor_id}} @ {{instance}}",
-                ),
-                panels.target(
                    mv_throughput_query,
-                    "materialized view {{table_name}} table_id {{materialized_view_id}}",
+                   "materialized view {{table_name}} table_id {{materialized_view_id}}",
                 ),
             ],
         ),

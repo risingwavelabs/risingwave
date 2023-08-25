@@ -84,25 +84,6 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
 echo "--- Kill cluster"
 cargo make ci-kill
 
-if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
-    echo "--- e2e, ci-meta-backup-test"
-    download-and-decompress-artifact backup-restore-"$profile" target/debug/
-    mv target/debug/backup-restore-"$profile" target/debug/backup-restore
-    chmod +x ./target/debug/backup-restore
-
-    test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
-    BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
-    BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
-    BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
-    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
-    RW_META_ADDR="http://127.0.0.1:5690" \
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    bash "${test_root}/run_all.sh"
-    echo "--- Kill cluster"
-    cargo make kill
-fi
-
 if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     echo "--- e2e, ci-delete-range-test"
     cargo make clean-data
@@ -156,4 +137,23 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     echo "--- Kill cluster"
     cargo make ci-kill
+fi
+
+if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
+    echo "--- e2e, ci-meta-backup-test"
+    download-and-decompress-artifact backup-restore-"$profile" target/debug/
+    mv target/debug/backup-restore-"$profile" target/debug/backup-restore
+    chmod +x ./target/debug/backup-restore
+
+    test_root="src/storage/backup/integration_tests"
+    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
+    BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
+    BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
+    BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
+    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
+    RW_META_ADDR="http://127.0.0.1:5690" \
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+    bash "${test_root}/run_all.sh"
+    echo "--- Kill cluster"
+    cargo make kill
 fi

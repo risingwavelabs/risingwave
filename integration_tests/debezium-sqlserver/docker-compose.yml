@@ -104,3 +104,15 @@ services:
 volumes:
   message_queue:
     external: false
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+
+name: risingwave-compose

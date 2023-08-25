@@ -48,7 +48,8 @@ pub(crate) mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
         FullKeyFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::compactor_runner::compact;
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
@@ -277,7 +278,7 @@ pub(crate) mod tests {
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
             let (mut result_task, task_stats) =
-                Compactor::compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
+                compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
 
             hummock_manager_ref
                 .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -332,14 +333,8 @@ pub(crate) mod tests {
                 key.clone(),
                 read_epoch,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await;
@@ -351,13 +346,9 @@ pub(crate) mod tests {
                 key.clone(),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     prefix_hint: Some(key.clone()),
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await;
@@ -431,7 +422,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -469,13 +460,8 @@ pub(crate) mod tests {
                 key.clone(),
                 SST_COUNT + 1,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -746,7 +732,7 @@ pub(crate) mod tests {
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -795,14 +781,10 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -919,7 +901,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -969,14 +951,10 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1092,7 +1070,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -1153,13 +1131,11 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1242,7 +1218,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))

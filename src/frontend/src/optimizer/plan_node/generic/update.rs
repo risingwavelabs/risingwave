@@ -37,6 +37,7 @@ pub struct Update<PlanRef: Eq + Hash> {
     pub input: PlanRef,
     pub exprs: Vec<ExprImpl>,
     pub returning: bool,
+    pub update_column_indices: Vec<usize>,
 }
 
 impl<PlanRef: GenericPlanRef> Update<PlanRef> {
@@ -82,6 +83,7 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
         table_version_id: TableVersionId,
         exprs: Vec<ExprImpl>,
         returning: bool,
+        update_column_indices: Vec<usize>,
     ) -> Self {
         Self {
             table_name,
@@ -90,6 +92,7 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
             input,
             exprs,
             returning,
+            update_column_indices,
         }
     }
 
