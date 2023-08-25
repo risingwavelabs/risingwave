@@ -124,3 +124,44 @@ pub async fn list_prometheus_cluster<S: MetaStore>(
         Err(err(anyhow!("Prometheus endpoint is not set")))
     }
 }
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ActorBackPressure {
+    output_buffer_blocking_duration: Vec<PrometheusVector>,
+}
+pub async fn list_prometheus_actor_back_pressure<S: MetaStore>(
+    Extension(srv): Extension<Service<S>>,
+) -> Result<Json<ActorBackPressure>> {
+    if let Some(ref client) = srv.prometheus_client {
+        let now = SystemTime::now();
+        let back_pressure_query = "rate(stream_actor_output_buffer_blocking_duration_ns{job=~\"compute\"}[60s]) / 1000000000";
+        let result = client
+            .query_range(
+                back_pressure_query,
+                now.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64
+                    - 1800,
+                now.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64,
+                15.0,
+            )
+            .get()
+            .await
+            .map_err(err)?;
+        let back_pressure_data = result
+            .data()
+            .as_matrix()
+            .unwrap()
+            .iter()
+            .map(PrometheusVector::from)
+            .collect();
+        Ok(Json(ActorBackPressure {
+            output_buffer_blocking_duration: back_pressure_data,
+        }))
+    } else {
+        Err(err(anyhow!("Prometheus endpoint is not set")))
+    }
+}

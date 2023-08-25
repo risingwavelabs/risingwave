@@ -30,6 +30,7 @@ pub static PG_CONSTRAINT_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> =
             (DataType::Boolean, "convalidated"),
             (DataType::Int32, "conrelid"),
             (DataType::Int32, "contypid"),
+            (DataType::Int32, "conindid"),
             (DataType::Int32, "conparentid"),
             (DataType::Int32, "confrelid"),
             (DataType::Varchar, "confupdtype"),

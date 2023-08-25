@@ -36,6 +36,7 @@ const LOG_COUNT_BITS: u8 = 6;
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
+/// Count the approximate number of unique non-null values.
 #[aggregate(
     "approx_count_distinct(*) -> int64",
     state = "UpdatableRegisters",

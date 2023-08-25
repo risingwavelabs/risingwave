@@ -1,0 +1,40 @@
+- name: Common sub expression extract1
+  sql: |
+    create table t (v1 jsonb);
+    select v1->'a'->'c' x, v1->'a'->'b' y from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: Common sub expression extract2
+  sql: |
+    create table t (v1 jsonb);
+    select v1->'a'->'c' x, v1->'a'->'c' y from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name:  Common sub expression shouldn't extract impure function
+  sql: |
+    create table t(v1 varchar, v2 int, v3 int);
+    select rw_vnode(v2) + 1 as vnode,  rw_vnode(v2) + 1 as vnode2, v2 + 1 x, v2 + 1 y from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name:  Common sub expression shouldn't extract const
+  sql: |
+    SELECT x,
+       tand(x),
+       tand(x) IN ('-Infinity'::float8,-1,0,1,'Infinity'::float8) AS tand_exact,
+       cotd(x),
+       cotd(x) IN ('-Infinity'::float8,-1,0,1,'Infinity'::float8) AS cotd_exact
+    FROM (VALUES (0), (45), (90), (135), (180),
+    (225), (270), (315), (360)) AS t(x)
+  expected_outputs:
+    - batch_plan
+- name:  Common sub expression shouldn't extract expression having short cut evaluation semantics and we use stddev_samp and var_samp here because they can rewrite into a case then and have some common sub expressions.
+  sql: |
+    create table t(v int);
+    select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+

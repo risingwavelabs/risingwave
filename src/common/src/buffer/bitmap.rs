@@ -52,6 +52,23 @@ pub struct BitmapBuilder {
 
 const BITS: usize = usize::BITS as usize;
 
+impl From<Bitmap> for BitmapBuilder {
+    fn from(bitmap: Bitmap) -> Self {
+        let len = bitmap.len();
+        if let Some(bits) = bitmap.bits {
+            BitmapBuilder {
+                len,
+                data: bits.into_vec(),
+            }
+        } else if bitmap.count_ones == 0 {
+            Self::zeroed(bitmap.len())
+        } else {
+            debug_assert!(bitmap.len() == bitmap.count_ones());
+            Self::filled(bitmap.len())
+        }
+    }
+}
+
 impl BitmapBuilder {
     /// Creates a new empty bitmap with at least the specified capacity.
     pub fn with_capacity(capacity: usize) -> BitmapBuilder {
@@ -67,6 +84,16 @@ impl BitmapBuilder {
             len,
             data: vec![0; Bitmap::vec_len(len)],
         }
+    }
+
+    /// Creates a new bitmap with all bits set to 1.
+    pub fn filled(len: usize) -> BitmapBuilder {
+        let vec_len = Bitmap::vec_len(len);
+        let mut data = vec![usize::MAX; vec_len];
+        if vec_len >= 1 && len % BITS != 0 {
+            data[vec_len - 1] = (1 << (len % BITS)) - 1;
+        }
+        BitmapBuilder { len, data }
     }
 
     /// Writes a new value into a single bit.

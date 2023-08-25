@@ -23,7 +23,8 @@ use risingwave_sqlparser::ast::{Action, GrantObjects, Privileges};
 // impl for privilege check.
 static AVAILABLE_ACTION_ON_DATABASE: &[Action] = &[Action::Connect, Action::Create];
 static AVAILABLE_ACTION_ON_SCHEMA: &[Action] = &[Action::Create];
-static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
+
+static AVAILABLE_ACTION_ON_TABLE: &[Action] = &[
     Action::Select { columns: None },
     Action::Update { columns: None },
     Action::Insert { columns: None },
@@ -31,6 +32,7 @@ static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
 ];
 static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
 static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
+static AVAILABLE_ACTION_ON_SOURCE: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
 static AVAILABLE_ACTION_ON_SINK: &[Action] = &[];
 static AVAILABLE_ACTION_ON_FUNCTION: &[Action] = &[];
 
@@ -51,13 +53,13 @@ pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> R
                 GrantObjects::Mviews(_) | GrantObjects::AllMviewsInSchema { .. } => actions
                     .iter()
                     .all(|action| AVAILABLE_ACTION_ON_MVIEW.contains(action)),
+                GrantObjects::Tables(_) | GrantObjects::AllTablesInSchema { .. } => actions
+                    .iter()
+                    .all(|action| AVAILABLE_ACTION_ON_TABLE.contains(action)),
                 GrantObjects::Sinks(_) => actions
                     .iter()
                     .all(|action| AVAILABLE_ACTION_ON_SINK.contains(action)),
-                GrantObjects::Sequences(_)
-                | GrantObjects::AllSequencesInSchema { .. }
-                | GrantObjects::Tables(_)
-                | GrantObjects::AllTablesInSchema { .. } => true,
+                GrantObjects::Sequences(_) | GrantObjects::AllSequencesInSchema { .. } => true,
             };
             if !valid {
                 return Err(ErrorCode::BindError(
@@ -81,6 +83,9 @@ pub fn available_privilege_actions(objects: &GrantObjects) -> Result<Vec<Action>
         GrantObjects::Mviews(_) | GrantObjects::AllMviewsInSchema { .. } => {
             Ok(AVAILABLE_ACTION_ON_MVIEW.to_vec())
         }
+        GrantObjects::Tables(_) | GrantObjects::AllTablesInSchema { .. } => {
+            Ok(AVAILABLE_ACTION_ON_TABLE.to_vec())
+        }
         _ => Err(
             ErrorCode::BindError("Invalid privilege type for the given object.".to_string()).into(),
         ),
@@ -100,19 +105,22 @@ pub fn get_prost_action(action: &Action) -> PbAction {
     }
 }
 
-pub fn available_prost_privilege(object: PbObject) -> PbGrantPrivilege {
+pub fn available_prost_privilege(object: PbObject, for_dml_table: bool) -> PbGrantPrivilege {
     let actions = match object {
         PbObject::DatabaseId(_) => AVAILABLE_ACTION_ON_DATABASE.to_vec(),
         PbObject::SchemaId(_) => AVAILABLE_ACTION_ON_SCHEMA.to_vec(),
-        PbObject::SourceId(_) | PbObject::AllSourcesSchemaId { .. } => {
-            AVAILABLE_ACTION_ON_SOURCE.to_vec()
-        }
-        PbObject::TableId(_) | PbObject::AllTablesSchemaId { .. } => {
-            AVAILABLE_ACTION_ON_MVIEW.to_vec()
+        PbObject::SourceId(_) => AVAILABLE_ACTION_ON_SOURCE.to_vec(),
+        PbObject::TableId(_) => {
+            if for_dml_table {
+                AVAILABLE_ACTION_ON_TABLE.to_vec()
+            } else {
+                AVAILABLE_ACTION_ON_MVIEW.to_vec()
+            }
         }
         PbObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
         PbObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
         PbObject::FunctionId(_) => AVAILABLE_ACTION_ON_FUNCTION.to_vec(),
+        _ => unreachable!("Invalid object type"),
     };
     let actions = actions
         .iter()

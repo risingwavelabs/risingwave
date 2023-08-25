@@ -347,7 +347,7 @@ pub mod agg_executor {
             | AggKind::Count
             | AggKind::Avg
             | AggKind::ApproxCountDistinct => {
-                AggStateStorage::ResultValue
+                AggStateStorage::Value
             }
             _ => {
                 panic!("no need to mock other agg kinds here");

@@ -19,7 +19,7 @@ use risingwave_expr_macro::function;
 use crate::Result;
 
 /// If the case is `array[1,2,3][:2]`, then start will be 0 set by the frontend
-/// If the case is `array[1,2,3][1:]`, then end will be i32::MAX set by the frontend
+/// If the case is `array[1,2,3][1:]`, then end will be `i32::MAX` set by the frontend
 #[function("array_range_access(list, int32, int32) -> list")]
 pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Result<Option<ListValue>> {
     let mut data = vec![];

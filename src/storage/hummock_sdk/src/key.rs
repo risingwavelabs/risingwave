@@ -38,6 +38,7 @@ pub type UserKeyRange = (
     Bound<UserKey<KeyPayloadType>>,
     Bound<UserKey<KeyPayloadType>>,
 );
+pub type UserKeyRangeRef<'a> = (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>);
 pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
     Bound<FullKey<KeyPayloadType>>,

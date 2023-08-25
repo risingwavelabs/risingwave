@@ -613,6 +613,7 @@ def section_streaming(panels):
     mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
     table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
     mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
+    sink_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=sink_filter)}[$__rate_interval]) * on(actor_id) group_left(sink_name) (group({metric("sink_info")}) by (actor_id, sink_name))) by (sink_name)'
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
@@ -705,26 +706,22 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
-            "The figure shows the number of rows output by each sink executor actor per second.",
+            "The figure shows the number of rows output by each sink per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])",
-                    "sink={{executor_identity}} {{actor_id}} @ {{instance}}",
+                    sink_throughput_query,
+                   "sink {{sink_name}}",
                 ),
             ],
         ),
 
         panels.timeseries_rowsps(
             "Materialized View Throughput(rows/s)",
-            "The figure shows the number of rows written into each materialized executor actor per second.",
+            "The figure shows the number of rows written into each materialized view per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])",
-                    "{{executor_identity}} {{actor_id}} @ {{instance}}",
-                ),
-                panels.target(
                    mv_throughput_query,
-                    "materialized view {{table_name}} table_id {{materialized_view_id}}",
+                   "materialized view {{table_name}} table_id {{materialized_view_id}}",
                 ),
             ],
         ),
@@ -1508,8 +1505,18 @@ def section_frontend(outer_panels):
         outer_panels.row_collapsed(
             "Frontend",
             [
+                panels.timeseries_count(
+                    "Active Sessions",
+                    "Number of active sessions",
+                    [
+                        panels.target(
+                            f"{metric('frontend_active_sessions')}",
+                            "",
+                        ),
+                    ]
+                ),
                 panels.timeseries_query_per_sec(
-                    "Query Per Second(Local Query Mode)",
+                    "Query Per Second (Local Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1519,7 +1526,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_query_per_sec(
-                    "Query Per Second(Distributed Query Mode)",
+                    "Query Per Second (Distributed Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1529,7 +1536,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "The Number of Running Queries(Distributed Query Mode)",
+                    "The Number of Running Queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_running_query_num')}",
@@ -1538,7 +1545,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "The Number of Rejected queries(Distributed Query Mode)",
+                    "The Number of Rejected queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_rejected_query_counter')}",
@@ -1547,7 +1554,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "The Number of Completed Queries(Distributed Query Mode)",
+                    "The Number of Completed Queries (Distributed Query Mode)",
                     "",
                     [
                         panels.target(f"{metric('distributed_completed_query_counter')}",
@@ -1556,7 +1563,7 @@ def section_frontend(outer_panels):
                     ["last"],
                 ),
                 panels.timeseries_latency(
-                    "Query Latency(Distributed Query Mode)",
+                    "Query Latency (Distributed Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1574,7 +1581,7 @@ def section_frontend(outer_panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Query Latency(Local Query Mode)",
+                    "Query Latency (Local Query Mode)",
                     "",
                     [
                         panels.target(
@@ -1602,6 +1609,7 @@ def section_hummock(panels):
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
     file_cache_get_filter = "op='get'"
+
     return [
         panels.row("Hummock"),
         panels.timeseries_latency(
@@ -1743,6 +1751,36 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_bytes(
+            "Materialized View Read Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_iter_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id) + sum((histogram_quantile({quantile}, sum(rate({metric("state_store_get_key_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({metric("state_store_get_value_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id)',
+                        f"read p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+        panels.timeseries_bytes(
+            "Materialized View Write Size",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_write_batch_size_bucket")}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id, table_name)',
+                        f"write p{legend} - materialized view {{{{materialized_view_id}}}}"
+                    ),
+                    [90, 99, "max"],
+                ),
+            ],
+        ),
+
+
         panels.timeseries_count(
             "Read Item Count - Iter",
             "",

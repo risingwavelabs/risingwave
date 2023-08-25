@@ -428,15 +428,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_watermark = vars.window_watermark.take();
         let n_dirty_group = vars.group_change_set.len();
 
-        // Flush agg states if needed.
-        for key in &vars.group_change_set {
-            let agg_group = vars
-                .agg_group_cache
-                .get_mut(key)
-                .expect("changed group must have corresponding AggGroup");
-            agg_group.flush_state_if_needed(&mut this.storages).await?;
-        }
-
         let futs_of_all_groups = vars
             .group_change_set
             .drain()

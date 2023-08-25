@@ -130,18 +130,30 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
-message CreatingJobInfo {
-  uint32 database_id = 1;
-  uint32 schema_id = 2;
-  string name = 3;
-}
-
 message CancelCreatingJobsRequest {
-  repeated CreatingJobInfo infos = 1;
+  message CreatingJobInfo {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+    string name = 3;
+  }
+
+  message CreatingJobInfos {
+    repeated CreatingJobInfo infos = 1;
+  }
+
+  message CreatingJobIds {
+    repeated uint32 job_ids = 1;
+  }
+
+  oneof jobs {
+    CreatingJobInfos infos = 1;
+    CreatingJobIds ids = 2;
+  }
 }
 
 message CancelCreatingJobsResponse {
   common.Status status = 1;
+  repeated uint32 canceled_jobs = 2;
 }
 
 message ListTableFragmentsRequest {
@@ -482,6 +494,7 @@ message SystemParams {
   optional string backup_storage_directory = 9;
   optional bool telemetry_enabled = 10;
   optional uint32 parallel_compact_size_mb = 11;
+  optional uint32 max_concurrent_creating_streaming_jobs = 12;
 }
 
 message GetSystemParamsRequest {}

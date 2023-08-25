@@ -25,7 +25,7 @@ bk-tree = "0.5.0"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 downcast-rs = "1.2"
-dyn-clone = "1.0.12"
+dyn-clone = "1.0.13"
 easy-ext = "1"
 educe = "0.4"
 enum-as-inner = "0.6"
@@ -39,12 +39,12 @@ md5 = "0.7.0"
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = "0.12"
-parse-display = "0.6"
+parse-display = "0.8"
 paste = "1"
 petgraph = "0.6"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = "0.2"
-postgres-types = { version = "0.2.5" }
+postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }

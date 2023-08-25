@@ -149,7 +149,10 @@ pub struct MetaOpts {
     pub do_not_config_object_storage_lifecycle: bool,
 
     pub partition_vnode_count: u32,
+
+    /// threshold of high write throughput of state-table, unit: B/sec
     pub table_write_throughput_threshold: u64,
+    /// threshold of low write throughput of state-table, unit: B/sec
     pub min_table_split_write_throughput: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,

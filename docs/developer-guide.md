@@ -448,6 +448,24 @@ To run these tests:
 ./risedev sit-test
 ```
 
+Sometimes in CI you may see a backtrace, followed by an error message with a `MADSIM_TEST_SEED`:
+```shell
+ 161: madsim::sim::task::Executor::block_on
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/task/mod.rs:238:13
+ 162: madsim::sim::runtime::Runtime::block_on
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/runtime/mod.rs:126:9
+ 163: madsim::sim::runtime::builder::Builder::run::{{closure}}::{{closure}}::{{closure}}
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/runtime/builder.rs:128:35
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+context: node=6 "compute-1", task=2237 (spawned at /risingwave/src/stream/src/task/stream_manager.rs:689:34)
+note: run with `MADSIM_TEST_SEED=2` environment variable to reproduce this error
+```
+
+You may use that to reproduce it in your local environment. For example:
+```shell
+MADSIM_TEST_SEED=4 ./risedev sit-test test_backfill_with_upstream_and_snapshot_read
+```
+
 ## Miscellaneous checks
 
 For shell code, please run:

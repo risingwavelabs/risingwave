@@ -21,6 +21,7 @@ use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 use crate::user::user_privilege::{
@@ -67,6 +68,38 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
+                match table.table_type() {
+                    TableType::MaterializedView => {}
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "{table_name} is not a materialized view",
+                        ))
+                        .into());
+                    }
+                }
+                grant_objs.push(PbObject::TableId(table.id().table_id));
+            }
+        }
+        GrantObjects::Tables(tables) => {
+            let db_name = session.database();
+            let search_path = session.config().get_search_path();
+            let user_name = &session.auth_context().user_name;
+
+            for name in tables {
+                let (schema_name, table_name) =
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
+                match table.table_type() {
+                    TableType::Table => {}
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "{table_name} is not a table",
+                        ))
+                        .into());
+                    }
+                }
                 grant_objs.push(PbObject::TableId(table.id().table_id));
             }
         }
@@ -96,6 +129,13 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
                 grant_objs.push(PbObject::AllTablesSchemaId(schema.id()));
+            }
+        }
+        GrantObjects::AllTablesInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
+                grant_objs.push(PbObject::AllDmlTablesSchemaId(schema.id()));
             }
         }
         o => {

@@ -521,7 +521,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         fragment_manager.clone(),
         barrier_manager.clone(),
         sink_manager.clone(),
-    );
+    )
+    .await;
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
 
@@ -593,6 +594,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             catalog_manager,
             fragment_manager.clone(),
+            hummock_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -701,7 +703,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
-        .add_service(HummockManagerServiceServer::new(hummock_srv))
+        .add_service(
+            HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(NotificationServiceServer::new(notification_srv))
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
@@ -733,7 +737,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        dashboard_task.await.unwrap().unwrap();
+        // Join the task while ignoring the cancellation error.
+        let _ = dashboard_task.await;
     }
     Ok(())
 }

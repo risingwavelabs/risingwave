@@ -40,14 +40,15 @@ pub(crate) mod tests {
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::MetaStore;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::{HummockVersion, InputLevel, TableOption};
+    use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
         FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
         FullKeyFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::compactor_runner::compact;
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
@@ -256,33 +257,24 @@ pub(crate) mod tests {
         )
         .await;
         // 2. get compact task
-        let mut compact_task = hummock_manager_ref
+        while let Some(mut compact_task) = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_level_selector(),
             )
             .await
             .unwrap()
-            .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::TTL;
-        compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.table_options = HashMap::from([(
-            0,
-            TableOption {
-                retention_seconds: 64,
-            },
-        )]);
-        compact_task.current_epoch_time = 0;
-        let mut val = b"0"[..].repeat(1 << 10);
-        val.extend_from_slice(&compact_task.watermark.to_be_bytes());
-
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        let _recv = compactor_manager.add_compactor(worker_node.id);
-        let version = hummock_manager_ref.get_current_version().await;
-        let group =
-            version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
-
+        {
+            let compaction_filter_flag = CompactionFilterFlag::TTL;
+            compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
+            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+            compact_task.table_options = HashMap::from([(
+                0,
+                TableOption {
+                    retention_seconds: 64,
+                },
+            )]);
+            compact_task.current_epoch_time = 0;
         compact_task.input_ssts = group
             .l0
             .as_ref()
@@ -300,45 +292,56 @@ pub(crate) mod tests {
             table_infos: group.levels.last().unwrap().table_infos.clone(),
             level_type: group.levels.last().unwrap().level_type,
         });
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            let (mut result_task, task_stats) =
+                compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
 
-        // assert compact_task
-        assert_eq!(compact_task.input_ssts.len(), SST_COUNT as usize);
+            hummock_manager_ref
+                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .await
+                .unwrap();
+        }
 
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let mut val = b"0"[..].repeat(1 << 10);
+        val.extend_from_slice(&((TEST_WATERMARK * 1000) << 16).to_be_bytes());
 
-        hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
-            .await
-            .unwrap();
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        let _recv = compactor_manager.add_compactor(worker_node.id);
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let group =
             version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
 
-        let output_table = group
+        // base level
+        let output_tables = group
             .levels
-            .last()
-            .unwrap()
-            .table_infos
-            .first()
-            .unwrap()
-            .clone();
+            .iter()
+            .flat_map(|level| level.table_infos.clone())
+            .chain(
+                group
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .flat_map(|level| level.table_infos.clone()),
+            )
+            .collect_vec();
+
         storage.wait_version(version).await;
-        let table = storage
-            .sstable_store()
-            .sstable(&output_table, &mut StoreLocalStatistic::default())
-            .await
-            .unwrap();
+        let mut table_key_count = 0;
+        for output_sst in output_tables {
+            let table = storage
+                .sstable_store()
+                .sstable(&output_sst, &mut StoreLocalStatistic::default())
+                .await
+                .unwrap();
+            table_key_count += table.value().meta.key_count;
+        }
 
         // we have removed these 31 keys before watermark 32.
-        assert_eq!(
-            table.value().meta.key_count,
-            (SST_COUNT - TEST_WATERMARK + 1) as u32
-        );
+        assert_eq!(table_key_count, (SST_COUNT - TEST_WATERMARK + 1) as u32);
         let read_epoch = (TEST_WATERMARK * 1000) << 16;
 
         let get_ret = storage
@@ -346,14 +349,8 @@ pub(crate) mod tests {
                 key.clone(),
                 read_epoch,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await;
@@ -365,13 +362,9 @@ pub(crate) mod tests {
                 key.clone(),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     prefix_hint: Some(key.clone()),
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await;
@@ -445,7 +438,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -483,13 +476,8 @@ pub(crate) mod tests {
                 key.clone(),
                 SST_COUNT + 1,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -760,7 +748,7 @@ pub(crate) mod tests {
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -809,14 +797,10 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -933,7 +917,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -983,14 +967,10 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-
-                    prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1106,7 +1086,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -1167,13 +1147,11 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    ignore_range_tombstone: false,
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -1256,7 +1234,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (mut result_task, task_stats) =
-            Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))

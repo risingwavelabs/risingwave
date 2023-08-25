@@ -217,7 +217,6 @@ impl<S: StateStore> SortBuffer<S> {
 
         #[for_await]
         for kv in merge_sort(streams).take(filler.capacity().unwrap_or(usize::MAX)) {
-            // NOTE: The rows may not appear in order.
             let row = key_value_to_full_row(kv?, buffer_table)?;
             let key = row_to_cache_key(self.sort_column_index, &row, buffer_table);
             filler.insert_unchecked(key, row);

@@ -27,24 +27,26 @@ pin-project = "1.1"
 pretty_assertions = "1"
 prometheus = { version = "0.13" }
 rand = "0.8"
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
+rdkafka = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
+risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_frontend = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
-serde = "1.0.183"
+serde = "1.0.185"
 serde_derive = "1.0.183"
-serde_json = "1.0.104"
+serde_json = "1.0.105"
 sqllogictest = "0.15.2"
 tempfile = "3"
 tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", features = ["profiling"], rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
 tokio = { version = "0.2.23", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

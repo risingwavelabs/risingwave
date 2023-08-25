@@ -57,6 +57,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::TableId(table.id.table_id),
+                                false,
                                 &users,
                                 username_map,
                             )

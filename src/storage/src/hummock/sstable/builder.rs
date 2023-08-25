@@ -30,8 +30,12 @@ use super::{
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::sstable::FilterBuilder;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder};
+use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder, DEFAULT_BLOCK_SIZE};
 use crate::opts::StorageOpts;
+
+pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
+pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
+pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
@@ -45,8 +49,6 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
-    /// Limit the number of keys inside a single sst to avoid excessive memory usage.
-    pub max_key_count: u64,
     pub max_sst_size: u64,
 }
 
@@ -59,8 +61,20 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: options.compactor_max_sst_key_count,
             max_sst_size: options.compactor_max_sst_size,
+        }
+    }
+}
+
+impl Default for SstableBuilderOptions {
+    fn default() -> Self {
+        Self {
+            capacity: DEFAULT_SSTABLE_SIZE,
+            block_capacity: DEFAULT_BLOCK_SIZE,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
+            compression_algorithm: CompressionAlgorithm::None,
+            max_sst_size: DEFAULT_MAX_SST_SIZE,
         }
     }
 }
@@ -101,7 +115,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     last_full_key: Vec<u8>,
-    last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
@@ -163,7 +176,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
-            last_extract_key: vec![],
             monotonic_deletes: vec![],
             sstable_id,
             filter_key_extractor,
@@ -260,19 +272,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
-                self.last_extract_key.clear();
-            }
-            let mut extract_key = user_key(&self.raw_key);
-            extract_key = self.filter_key_extractor.extract(extract_key);
-
-            // add bloom_filter check
-            // 1. not empty_key
-            // 2. extract_key key is not duplicate
-            if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
-                // avoid duplicate add to bloom filter
-                self.filter_builder.add_key(extract_key, table_id);
-                self.last_extract_key.clear();
-                self.last_extract_key.extend_from_slice(extract_key);
+                if !self.block_builder.is_empty() {
+                    self.build_block().await?;
+                }
+            } else if self.block_builder.approximate_len() >= self.options.block_capacity {
+                self.build_block().await?;
             }
         } else {
             self.stale_key_count += 1;
@@ -296,6 +300,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             })
         }
 
+        let table_id = full_key.user_key.table_id.table_id();
+        let mut extract_key = user_key(&self.raw_key);
+        extract_key = self.filter_key_extractor.extract(extract_key);
+        // add bloom_filter check
+        if !extract_key.is_empty() {
+            self.filter_builder.add_key(extract_key, table_id);
+        }
         self.block_builder.add(full_key, self.raw_value.as_ref());
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
@@ -305,11 +316,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.raw_key.clear();
         self.raw_value.clear();
-
-        if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block().await?;
-        }
-
         Ok(())
     }
 
@@ -524,6 +530,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
+            self.block_metas.pop();
             return Ok(());
         }
 
@@ -531,6 +538,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
+        self.filter_builder
+            .switch_block(self.memory_limiter.clone());
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())
@@ -547,10 +556,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
-    }
-
-    pub fn reach_max_key_count(&self) -> bool {
-        self.total_key_count >= self.options.max_key_count
     }
 
     pub fn reach_max_sst_size(&self) -> bool {
@@ -570,15 +575,18 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use std::collections::Bound;
+
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::UserKey;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
-        test_value_of, DEFAULT_MAX_KEY_COUNT, DEFAULT_MAX_SST_SIZE, TEST_KEYS_COUNT,
+        test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::{CachePolicy, Sstable, Xor16FilterBuilder, Xor8FilterBuilder};
 
@@ -589,9 +597,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: 0.001,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
-            max_sst_size: DEFAULT_MAX_SST_SIZE,
+            ..Default::default()
         };
 
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -606,9 +612,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
-            max_sst_size: DEFAULT_MAX_SST_SIZE,
+            ..Default::default()
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
@@ -669,9 +673,7 @@ pub(super) mod tests {
             block_capacity: 4096,
             restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
-            compression_algorithm: CompressionAlgorithm::None,
-            max_key_count: DEFAULT_MAX_KEY_COUNT,
-            max_sst_size: DEFAULT_MAX_SST_SIZE,
+            ..Default::default()
         };
 
         // build remote table
@@ -691,7 +693,15 @@ pub(super) mod tests {
             let full_key = test_key_of(i);
             if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
-                assert!(table.may_match_hash(hash));
+                let key_ref = full_key.user_key.as_ref();
+                assert!(
+                    table.may_match_hash(
+                        &(Bound::Included(key_ref), Bound::Included(key_ref)),
+                        hash
+                    ),
+                    "failed at {}",
+                    i
+                );
             }
         }
     }
@@ -701,5 +711,6 @@ pub(super) mod tests {
         test_with_bloom_filter::<Xor16FilterBuilder>(false).await;
         test_with_bloom_filter::<Xor16FilterBuilder>(true).await;
         test_with_bloom_filter::<Xor8FilterBuilder>(true).await;
+        test_with_bloom_filter::<BlockedXor16FilterBuilder>(true).await;
     }
 }

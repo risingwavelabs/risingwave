@@ -13,12 +13,12 @@
 // limitations under the License.
 
 #![cfg_attr(coverage, feature(no_coverage))]
+#![feature(iterator_try_collect)]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use proc_macro_error::{proc_macro_error, ResultExt};
 use quote::{format_ident, quote};
-use syn::{DataStruct, DeriveInput};
+use syn::{parse_macro_input, DataStruct, DeriveInput, Result};
 
 mod generate;
 
@@ -26,26 +26,24 @@ mod generate;
 /// See `prost/helpers/README.md` for more details.
 #[cfg_attr(coverage, no_coverage)]
 #[proc_macro_derive(AnyPB)]
-#[proc_macro_error]
 pub fn any_pb(input: TokenStream) -> TokenStream {
     // Parse the string representation
-    let ast: DeriveInput = syn::parse(input).expect_or_abort("Couldn't parse for getters");
+    let ast = parse_macro_input!(input as DeriveInput);
 
-    // Build the impl
-    let gen = produce(&ast);
-
-    // Return the generated impl
-    gen.into()
+    match produce(&ast) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
 }
 
 // Procedure macros can not be tested from the same crate.
 #[cfg_attr(coverage, no_coverage)]
-fn produce(ast: &DeriveInput) -> TokenStream2 {
+fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
     let name = &ast.ident;
 
     // Is it a struct?
     let struct_get = if let syn::Data::Struct(DataStruct { ref fields, .. }) = ast.data {
-        let generated = fields.iter().map(generate::implement);
+        let generated: Vec<_> = fields.iter().map(generate::implement).try_collect()?;
         quote! {
             impl #name {
                 #(#generated)*
@@ -66,8 +64,8 @@ fn produce(ast: &DeriveInput) -> TokenStream2 {
         }
     };
 
-    quote! {
+    Ok(quote! {
         #pb_alias
         #struct_get
-    }
+    })
 }

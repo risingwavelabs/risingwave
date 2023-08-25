@@ -28,7 +28,7 @@ mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
 use xor_filter::XorFilterReader;
-pub use xor_filter::{Xor16FilterBuilder, Xor8FilterBuilder};
+pub use xor_filter::{BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder};
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -41,7 +41,9 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{
+    FullKey, KeyPayloadType, PointRange, TableKey, UserKey, UserKeyRangeRef,
+};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -244,7 +246,7 @@ impl Debug for Sstable {
 impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
-        let filter_reader = XorFilterReader::new(filter_data);
+        let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
 
         Self {
             id,
@@ -283,8 +285,8 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn may_match_hash(&self, hash: u64) -> bool {
-        self.filter_reader.may_match(hash)
+    pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
+        self.filter_reader.may_match(user_key_range, hash)
     }
 
     pub fn block_count(&self) -> usize {

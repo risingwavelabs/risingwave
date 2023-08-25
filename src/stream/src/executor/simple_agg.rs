@@ -212,11 +212,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
-            // Flush agg states.
-            vars.agg_group
-                .flush_state_if_needed(&mut this.storages)
-                .await?;
-
             // Flush distinct dedup state.
             vars.distinct_dedup
                 .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;

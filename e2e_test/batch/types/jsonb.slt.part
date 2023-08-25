@@ -266,3 +266,18 @@ select * from jsonb_each_text('"string"'::jsonb)
 
 statement error cannot deconstruct
 select * from jsonb_each_text('[]'::jsonb)
+
+query TTTTT
+SELECT js,
+  js IS JSON "json?",
+  js IS JSON SCALAR "scalar?",
+  js IS JSON OBJECT "object?",
+  js IS JSON ARRAY "array?"
+FROM (VALUES
+      ('123'), ('"abc"'), ('{"a": "b"}'), ('[1,2]'),('abc')) foo(js);
+----
+123        t t f f
+"abc"      t t f f
+{"a": "b"} t f t f
+[1,2]      t f f t
+abc        f f f f

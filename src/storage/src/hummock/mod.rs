@@ -14,13 +14,13 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -368,7 +368,7 @@ pub async fn get_from_sstable_info(
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash
-        && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), &(Bound::Included(full_key.user_key), Bound::Included(full_key.user_key)), hash, local_stats)
     {
         if !read_options.ignore_range_tombstone {
             let delete_epoch = get_min_delete_range_epoch_from_sstable(
@@ -429,11 +429,12 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
+    user_key_range: &UserKeyRangeRef<'_>,
     prefix_hash: u64,
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let may_exist = sstable_info_ref.may_match_hash(prefix_hash);
+    let may_exist = sstable_info_ref.may_match_hash(user_key_range, prefix_hash);
     if !may_exist {
         local_stats.bloom_filter_true_negative_counts += 1;
     }

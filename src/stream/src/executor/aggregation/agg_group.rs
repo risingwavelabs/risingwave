@@ -209,7 +209,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
-        // XXX(wrj): don't use try_join_all here to avoid weird memmove overhead
         let mut states = Vec::with_capacity(agg_calls.len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
             let state = AggState::create(
@@ -217,11 +216,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 &storages[idx],
                 prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                 pk_indices,
-                group_key.as_ref(),
                 extreme_cache_size,
                 input_schema,
-            )
-            .await?;
+            )?;
             states.push(state);
         }
 
@@ -304,26 +301,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             tracing::trace!(group = ?self.group_key_row(), "last time see this group");
         }
 
-        Ok(())
-    }
-
-    /// Flush in-memory state into state table if needed.
-    /// The calling order of this method and `get_outputs` doesn't matter, but this method
-    /// must be called before committing state tables.
-    pub async fn flush_state_if_needed(
-        &self,
-        storages: &mut [AggStateStorage<S>],
-    ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
-            |(state, storage)| match state {
-                AggState::Table(state) => Some(state.flush_state_if_needed(
-                    must_match!(storage, AggStateStorage::Table { table } => table),
-                    self.group_key(),
-                )),
-                _ => None,
-            },
-        ))
-        .await?;
         Ok(())
     }
 

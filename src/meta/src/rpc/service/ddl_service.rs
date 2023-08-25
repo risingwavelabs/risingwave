@@ -59,7 +59,7 @@ where
     S: MetaStore,
 {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv<S>,
         aws_client: Option<AwsEc2Client>,
         catalog_manager: CatalogManagerRef<S>,
@@ -80,7 +80,8 @@ where
             fragment_manager,
             barrier_manager,
             aws_cli_ref.clone(),
-        );
+        )
+        .await;
         Self {
             env,
             catalog_manager,
@@ -590,6 +591,21 @@ where
             .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
             .await?;
         Ok(Response::new(AlterRelationNameResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_source(
+        &self,
+        request: Request<AlterSourceRequest>,
+    ) -> Result<Response<AlterSourceResponse>, Status> {
+        let AlterSourceRequest { source } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
+            .await?;
+        Ok(Response::new(AlterSourceResponse {
             status: None,
             version,
         }))
