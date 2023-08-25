@@ -52,8 +52,6 @@ level0_sub_level_compact_level_count = 3
 level0_overlapping_sub_level_compact_level_count = 6
 max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 96
-large_group_max_bytes_for_level_base = 2147483648
-large_group_sub_level_max_compaction_bytes = 402653184
 
 [batch]
 enable_barrier_read = true
