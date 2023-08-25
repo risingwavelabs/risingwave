@@ -35,7 +35,7 @@ pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, SourceWatermark, TableConstraint,
 };
-pub use self::operator::{BinaryOperator, UnaryOperator};
+pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
     Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
@@ -43,7 +43,8 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{
-    CstyleEscapedString, DateTimeField, DollarQuotedString, TrimWhereField, Value,
+    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, TrimWhereField,
+    Value,
 };
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
@@ -292,6 +293,16 @@ pub enum Expr {
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
     IsNotDistinctFrom(Box<Expr>, Box<Expr>),
+    /// ```text
+    /// IS [ NOT ] JSON [ VALUE | ARRAY | OBJECT | SCALAR ]
+    /// [ { WITH | WITHOUT } UNIQUE [ KEYS ] ]
+    /// ```
+    IsJson {
+        expr: Box<Expr>,
+        negated: bool,
+        item_type: JsonPredicateType,
+        unique_keys: bool,
+    },
     /// `[ NOT ] IN (val1, val2, ...)`
     InList {
         expr: Box<Expr>,
@@ -440,6 +451,23 @@ impl fmt::Display for Expr {
             Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
             Expr::IsUnknown(ast) => write!(f, "{} IS UNKNOWN", ast),
             Expr::IsNotUnknown(ast) => write!(f, "{} IS NOT UNKNOWN", ast),
+            Expr::IsJson {
+                expr,
+                negated,
+                item_type,
+                unique_keys,
+            } => write!(
+                f,
+                "{} IS {}JSON{}{}",
+                expr,
+                if *negated { "NOT " } else { "" },
+                item_type,
+                if *unique_keys {
+                    " WITH UNIQUE KEYS"
+                } else {
+                    ""
+                },
+            ),
             Expr::InList {
                 expr,
                 list,
@@ -803,7 +831,12 @@ pub enum ShowObject {
     Function { schema: Option<Ident> },
     Indexes { table: ObjectName },
     Cluster,
+    Jobs,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct JobIdents(pub Vec<u32>);
 
 impl fmt::Display for ShowObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -839,6 +872,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Cluster => {
                 write!(f, "CLUSTER")
             }
+            ShowObject::Jobs => write!(f, "JOBS"),
         }
     }
 }
@@ -1114,6 +1148,8 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    /// CANCEL JOBS COMMAND
+    CancelJobs(JobIdents),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
@@ -1730,6 +1766,10 @@ impl fmt::Display for Statement {
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::CancelJobs(jobs) => {
+                write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
                 Ok(())
             }
         }

@@ -206,6 +206,7 @@ message ExprNode {
     JSONB_ACCESS_STR = 601;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
+    IS_JSON = 604;
 
     // Non-pure functions below (> 1000)
     // ------------------------
