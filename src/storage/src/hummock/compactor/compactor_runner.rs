@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -51,7 +51,7 @@ use tokio::time::Instant;
 
 use super::task_progress::{TaskProgress, TaskProgressManagerRef};
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
+use crate::{filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager}, hummock::SharedComapctorObjectIdManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, estimate_task_output_capacity_v2,
     generate_splits, generate_splits_v2,
@@ -66,7 +66,7 @@ use crate::hummock::vacuum::Vacuum;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     validate_ssts, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges,
-    CompressionAlgorithm, HummockResult, MemoryLimiter, MonotonicDeleteEvent,
+    CompressionAlgorithm, GetObjectId, HummockResult, MemoryLimiter, MonotonicDeleteEvent,
     SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -81,7 +81,12 @@ pub struct CompactorRunner {
 }
 
 impl CompactorRunner {
-    pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
+    pub fn new(
+        split_index: usize,
+        context: Arc<CompactorContext>,
+        task: CompactTask,
+        sstable_object_id_manager: Box<dyn GetObjectId>,
+    ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -124,9 +129,8 @@ impl CompactorRunner {
             context.is_share_buffer_compact,
             context.sstable_store.clone(),
             context.memory_limiter.clone(),
-            context.sstable_object_id_manager.clone(),
+            sstable_object_id_manager,
             context.storage_opts.compact_iter_recreate_timeout_ms,
-            false,
         );
 
         Self {
@@ -145,7 +149,7 @@ impl CompactorRunner {
         sstable_store: SstableStoreRef,
         memory_limiter: Arc<MemoryLimiter>,
         storage_opts: Arc<StorageOpts>,
-        sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        sstable_object_id_manager: Box<dyn GetObjectId>,
         compact_iter_recreate_timeout_ms: u64,
         task: CompactTask,
     ) -> Self {
@@ -191,9 +195,8 @@ impl CompactorRunner {
             is_share_buffer_compact,
             sstable_store.clone(),
             memory_limiter.clone(),
-            sstable_object_id_manager.clone(),
+            sstable_object_id_manager,
             storage_opts.compact_iter_recreate_timeout_ms,
-            false,
         );
 
         Self {
@@ -583,8 +586,12 @@ pub async fn compact(
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let compactor_runner =
-            CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
+        let compactor_runner = CompactorRunner::new(
+            split_index,
+            compactor_context.clone(),
+            compact_task.clone(),
+            Box::new(context.sstable_object_id_manager.clone()),
+        );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
         let runner = async move {
@@ -1073,7 +1080,6 @@ pub fn start_shared_compactor(
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
     block_size_kb: u32,
     object_store_recv_buffer_size: usize,
     sstable_size_mb: u32,
@@ -1102,8 +1108,10 @@ pub fn start_shared_compactor(
         let (tx, rx) = tokio::sync::oneshot::channel();
         let task_id = compact_task.task_id;
         shutdown.lock().unwrap().insert(task_id, tx);
+        let mut output_object_ids: VecDeque<_> = VecDeque::new();
+        output_object_ids.extend(output_ids);
+        let sstable_object_id_manager =  SharedComapctorObjectIdManager::new(output_object_ids);
         let (compact_task, table_stats) = shared_compact(
-            output_ids,
             compactor_metrics,
             compact_task,
             rx,
@@ -1140,7 +1148,6 @@ pub fn start_shared_compactor(
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn shared_compact(
-    output_object_id: Vec<u64>,
     compactor_metrics: Arc<CompactorMetrics>,
     mut compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
@@ -1151,7 +1158,7 @@ pub async fn shared_compact(
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    sstable_object_id_manager: SharedComapctorObjectIdManager,
     block_size_kb: u32,
     compact_iter_recreate_timeout_ms: u64,
     is_share_buffer_compact: bool,
@@ -1369,7 +1376,7 @@ pub async fn shared_compact(
             sstable_store.clone(),
             memory_limiter.clone(),
             storage_opts.clone(),
-            sstable_object_id_manager.clone(),
+            Box::new(sstable_object_id_manager.clone()),
             compact_iter_recreate_timeout_ms,
             compact_task.clone(),
         );

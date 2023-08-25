@@ -21,7 +21,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -81,12 +81,11 @@ pub struct Compactor {
     sstable_store: SstableStoreRef,
     memory_limiter: Arc<MemoryLimiter>,
 
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    sstable_object_id_manager: Box<dyn GetObjectId>,
     compact_iter_recreate_timeout_ms: u64,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
-    is_shared_compactor: bool,
 }
 
 pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
@@ -101,9 +100,8 @@ impl Compactor {
         sstable_store: SstableStoreRef,
         memory_limiter: Arc<MemoryLimiter>,
 
-        sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        sstable_object_id_manager: Box<dyn GetObjectId>,
         compact_iter_recreate_timeout_ms: u64,
-        is_shared_compactor: bool,
     ) -> Self {
         Self {
             compactor_metrics,
@@ -115,8 +113,8 @@ impl Compactor {
             options,
             task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
+
             compact_iter_recreate_timeout_ms,
-            is_shared_compactor,
         }
     }
 
@@ -142,63 +140,67 @@ impl Compactor {
         } else {
             self.compactor_metrics.compact_sst_duration.start_timer()
         };
-        let sstable_object_id_manager = self.get_object_id_manager();
-        let (split_table_outputs, table_stats_map) =
-            if self.sstable_store.store().support_streaming_upload() {
-                let factory = StreamingSstableWriterFactory::new(self.sstable_store.clone());
-                if self.task_config.use_block_based_filter {
-                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        del_agg,
-                        filter_key_extractor,
-                        task_progress.clone(),
-                        sstable_object_id_manager,
-                    )
-                    .verbose_instrument_await("compact")
-                    .await?
-                } else {
-                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        del_agg,
-                        filter_key_extractor,
-                        task_progress.clone(),
-                        sstable_object_id_manager,
-                    )
-                    .verbose_instrument_await("compact")
-                    .await?
-                }
+
+        let (split_table_outputs, table_stats_map) = if self
+            
+            .sstable_store
+            .store()
+            .support_streaming_upload()
+        {
+            let factory = StreamingSstableWriterFactory::new(self.sstable_store.clone());
+            if self.task_config.use_block_based_filter {
+                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                    self.sstable_object_id_manager.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
             } else {
-                let factory = BatchSstableWriterFactory::new(self.sstable_store.clone());
-                if self.task_config.use_block_based_filter {
-                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        del_agg,
-                        filter_key_extractor,
-                        task_progress.clone(),
-                        sstable_object_id_manager,
-                    )
-                    .verbose_instrument_await("compact")
-                    .await?
-                } else {
-                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        del_agg,
-                        filter_key_extractor,
-                        task_progress.clone(),
-                        sstable_object_id_manager,
-                    )
-                    .verbose_instrument_await("compact")
-                    .await?
-                }
-            };
+                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                    self.sstable_object_id_manager.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            }
+        } else {
+            let factory = BatchSstableWriterFactory::new(self.sstable_store.clone());
+            if self.task_config.use_block_based_filter {
+                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                    self.sstable_object_id_manager.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            } else {
+                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                    self.sstable_object_id_manager.clone(),
+                )
+                .verbose_instrument_await("compact")
+                .await?
+            }
+        };
 
         compact_timer.observe_duration();
 
@@ -260,14 +262,6 @@ impl Compactor {
             );
         }
         Ok((ssts, table_stats_map))
-    }
-
-    fn get_object_id_manager(&self) -> Box<dyn GetObjectId> {
-        // todo(wcy-fdu): handle shared case
-        match self.is_shared_compactor {
-            true => Box::new(SharedComapctorObjectIdManager::new(VecDeque::new())),
-            false => Box::new(self.sstable_object_id_manager.clone()),
-        }
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(
