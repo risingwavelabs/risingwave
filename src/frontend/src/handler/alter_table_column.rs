@@ -52,6 +52,14 @@ pub async fn handle_alter_table_column(
         let (table, schema_name) =
             reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
 
+        match table.table_type() {
+            TableType::Table => {}
+
+            _ => Err(ErrorCode::InvalidInputSyntax(format!(
+                "\"{table_name}\" is not a table or cannot be altered"
+            )))?,
+        }
+
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
         table.clone()
