@@ -18,11 +18,11 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::CreatingJobInfo;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -39,7 +39,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
-    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()>;
+    async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
     async fn list_table_fragments(
         &self,
@@ -85,7 +85,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.flush(checkpoint).await
     }
 
-    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+    async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {
         self.0.cancel_creating_jobs(infos).await
     }
 
