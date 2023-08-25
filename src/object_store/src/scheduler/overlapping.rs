@@ -455,7 +455,7 @@ where
                 None => self.notify.notified().await,
                 Some(enqueue) => {
                     let elapsed = enqueue.elapsed();
-                    if elapsed < Duration::from_millis(5) {
+                    if elapsed < self.plugging {
                         tokio::time::sleep(self.plugging - elapsed).await;
                     }
                     let launch = self.task_manager.lock().launch().unwrap();
