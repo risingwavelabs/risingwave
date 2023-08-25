@@ -23,8 +23,11 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_expr::vector_op::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
-use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
+use risingwave_sqlparser::ast::{
+    Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
+};
 use serde_json;
 
 use super::RwPgResponse;
@@ -78,9 +81,21 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Result<RwPgResponse> {
+pub fn handle_show_object(
+    handler_args: HandlerArgs,
+    command: ShowObject,
+    filter: Option<ShowStatementFilter>,
+) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader().read_guard();
+
+    if let Some(ShowStatementFilter::Where(..)) = filter {
+        return Err(ErrorCode::NotImplemented(
+            "WHERE clause in SHOW statement".to_string(),
+            None.into(),
+        )
+        .into());
+    }
 
     let names = match command {
         // If not include schema name, use default schema name
@@ -356,6 +371,12 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
     let rows = names
         .into_iter()
+        .filter(|arg| match &filter {
+            Some(ShowStatementFilter::Like(pattern)) => like_default(arg, pattern),
+            Some(ShowStatementFilter::ILike(pattern)) => i_like_default(arg, pattern),
+            Some(ShowStatementFilter::Where(..)) => unreachable!(),
+            None => true,
+        })
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 

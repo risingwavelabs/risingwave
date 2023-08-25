@@ -39,7 +39,9 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
 use risingwave_storage::hummock::compactor::CompactorContext;
-use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
+use risingwave_storage::hummock::{
+    CachePolicy, GetObjectId, SstableObjectIdManager, SstableObjectIdManager,
+};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use serial_test::serial;
@@ -73,7 +75,7 @@ async fn test_syncpoints_sstable_object_id_manager() {
     });
 
     // Start the task that fetches new ids.
-    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         sstable_object_id_manager_clone
             .get_new_sst_object_id()
@@ -90,7 +92,7 @@ async fn test_syncpoints_sstable_object_id_manager() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             sstable_object_id_manager_clone
                 .get_new_sst_object_id()
@@ -137,7 +139,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     });
 
     // Start the task that fetches new ids.
-    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
         sstable_object_id_manager_clone
@@ -153,7 +155,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             sstable_object_id_manager_clone
                 .get_new_sst_object_id()
@@ -388,14 +390,9 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
-        ignore_range_tombstone: false,
-
-        prefix_hint: None,
         table_id: TableId::from(existing_table_id),
-        retention_seconds: None,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     let get_result = storage
         .get(Bytes::from("\0\0hhh"), 120, read_options.clone())

@@ -126,6 +126,7 @@ impl CompactorRunner {
             context.memory_limiter.clone(),
             context.sstable_object_id_manager.clone(),
             context.storage_opts.compact_iter_recreate_timeout_ms,
+            false,
         );
 
         Self {
@@ -192,6 +193,7 @@ impl CompactorRunner {
             memory_limiter.clone(),
             sstable_object_id_manager.clone(),
             storage_opts.compact_iter_recreate_timeout_ms,
+            false,
         );
 
         Self {
@@ -666,6 +668,7 @@ pub async fn compact(
         output_ssts,
         task_status,
     );
+
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
@@ -716,305 +719,15 @@ fn compact_done(
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compaction_write_bytes);
     compactor_metrics
+        .compact_write_bytes
+        .with_label_values(&[&group_label, level_label.as_str()])
+        .inc_by(compaction_write_bytes);
+    compactor_metrics
         .compact_write_sstn
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
     (compact_task, table_stats_map)
-}
-
-/// The background compaction thread that receives compaction tasks from hummock compaction
-/// manager and runs compaction tasks.
-#[cfg_attr(coverage, no_coverage)]
-pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<()>, Sender<()>) {
-    let hummock_meta_client = compactor_context.hummock_meta_client.clone();
-    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let stream_retry_interval = Duration::from_secs(30);
-    let task_progress = compactor_context.task_progress_manager.clone();
-    let periodic_event_update_interval = Duration::from_millis(1000);
-    let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
-    let mut system =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
-    let pid = sysinfo::get_current_pid().unwrap();
-    let running_task_count = compactor_context.running_task_count.clone();
-    let pull_task_ack = Arc::new(AtomicBool::new(true));
-
-    assert_ge!(
-        compactor_context.storage_opts.compactor_max_task_multiplier,
-        0.0
-    );
-    let max_pull_task_count = (cpu_core_num as f32
-        * compactor_context.storage_opts.compactor_max_task_multiplier)
-        .ceil() as u32;
-
-    let join_handle = tokio::spawn(async move {
-        let shutdown_map = CompactionShutdownMap::default();
-        let mut min_interval = tokio::time::interval(stream_retry_interval);
-        let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
-
-        // This outer loop is to recreate stream.
-        'start_stream: loop {
-            // reset state
-            pull_task_ack.store(true, Ordering::SeqCst);
-            tokio::select! {
-                // Wait for interval.
-                _ = min_interval.tick() => {},
-                // Shutdown compactor.
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Compactor is shutting down");
-                    return;
-                }
-            }
-
-            let (request_sender, response_event_stream) =
-                match hummock_meta_client.subscribe_compaction_event().await {
-                    Ok((request_sender, response_event_stream)) => {
-                        tracing::debug!("Succeeded subscribe_compaction_event.");
-                        (request_sender, response_event_stream)
-                    }
-
-                    Err(e) => {
-                        tracing::warn!(
-                            "Subscribing to compaction tasks failed with error: {}. Will retry.",
-                            e
-                        );
-                        continue 'start_stream;
-                    }
-                };
-
-            pin_mut!(response_event_stream);
-
-            let executor = compactor_context.compaction_executor.clone();
-            let mut last_workload = CompactorWorkload::default();
-
-            // This inner loop is to consume stream or report task progress.
-            let mut event_loop_iteration_now = Instant::now();
-            'consume_stream: loop {
-                {
-                    // report
-                    compactor_context
-                        .compactor_metrics
-                        .compaction_event_loop_iteration_latency
-                        .observe(event_loop_iteration_now.elapsed().as_millis() as _);
-                    event_loop_iteration_now = Instant::now();
-                }
-
-                let running_task_count = running_task_count.clone();
-                let pull_task_ack = pull_task_ack.clone();
-                let request_sender = request_sender.clone();
-                let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
-                    _ = periodic_event_interval.tick() => {
-                        let mut progress_list = Vec::new();
-                        for (&task_id, progress) in task_progress.lock().iter() {
-                            progress_list.push(CompactTaskProgress {
-                                task_id,
-                                num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
-                                num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
-                                num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
-                                num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
-                                num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
-                            });
-                        }
-
-                        if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
-                            event: Some(RequestEvent::HeartBeat(
-                                HeartBeat {
-                                    progress: progress_list
-                                }
-                            )),
-                            create_at: SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .expect("Clock may have gone backwards")
-                                .as_millis() as u64,
-                        }) {
-                            tracing::warn!("Failed to report task progress. {e:?}");
-                            // re subscribe stream
-                            continue 'start_stream;
-                        }
-
-
-                        let mut pending_pull_task_count = 0;
-                        if pull_task_ack.load(Ordering::SeqCst) {
-                            // reset pending_pull_task_count when all pending task had been refill
-                            pending_pull_task_count = {
-                                assert_ge!(max_pull_task_count, running_task_count.load(Ordering::SeqCst));
-                                max_pull_task_count - running_task_count.load(Ordering::SeqCst)
-                            };
-
-                            if pending_pull_task_count > 0 {
-                                if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
-                                    event: Some(RequestEvent::PullTask(
-                                        PullTask {
-                                            pull_task_count: pending_pull_task_count,
-                                        }
-                                    )),
-                                    create_at: SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .expect("Clock may have gone backwards")
-                                        .as_millis() as u64,
-                                }) {
-                                    tracing::warn!("Failed to pull task {e:?}");
-
-                                    // re subscribe stream
-                                    continue 'start_stream;
-                                } else {
-                                    pull_task_ack.store(false, Ordering::SeqCst);
-                                }
-                            }
-                        }
-
-                        tracing::info!(
-                            cpu = %last_workload.cpu,
-                            running_task_count = %running_task_count.load(Ordering::Relaxed),
-                            pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
-                            pending_pull_task_count = %pending_pull_task_count
-                        );
-
-                        continue;
-                    }
-
-                    _ = workload_collect_interval.tick() => {
-                        let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
-                        debug_assert!(refresh_result);
-                        let cpu = if let Some(process) = system.process(pid) {
-                            process.cpu_usage().div(cpu_core_num as f32) as u32
-                        } else {
-                            tracing::warn!("fail to get process pid {:?}", pid);
-                            0
-                        };
-
-                        tracing::debug!("compactor cpu usage {cpu}");
-                        let workload = CompactorWorkload {
-                            cpu,
-                        };
-
-                        last_workload = workload.clone();
-
-                        continue;
-                    }
-
-                    event = response_event_stream.next() => {
-                        event
-                    }
-
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Compactor is shutting down");
-                        return
-                    }
-                };
-
-                match event {
-                    Some(Ok(SubscribeCompactionEventResponse { event, create_at })) => {
-                        let event = match event {
-                            Some(event) => event,
-                            None => continue 'consume_stream,
-                        };
-                        let shutdown = shutdown_map.clone();
-                        let context = compactor_context.clone();
-                        let consumed_latency_ms = SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .expect("Clock may have gone backwards")
-                            .as_millis() as u64
-                            - create_at;
-                        context
-                            .compactor_metrics
-                            .compaction_event_consumed_latency
-                            .observe(consumed_latency_ms as _);
-
-                        let meta_client = hummock_meta_client.clone();
-                        executor.spawn(async move {
-                                let running_task_count = running_task_count.clone();
-                                match event {
-                                    ResponseEvent::CompactTask(compact_task)  => {
-                                        running_task_count.fetch_add(1, Ordering::SeqCst);
-                                        let (tx, rx) = tokio::sync::oneshot::channel();
-                                        let task_id = compact_task.task_id;
-                                        shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats) = compact(context, compact_task, rx).await;
-                                        shutdown.lock().unwrap().remove(&task_id);
-                                        running_task_count.fetch_sub(1, Ordering::SeqCst);
-
-                                        if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
-                                            event: Some(RequestEvent::ReportTask(
-                                                ReportTask {
-                                                    compact_task: Some(compact_task),
-                                                    table_stats_change:to_prost_table_stats_map(table_stats),
-                                                }
-                                            )),
-                                            create_at: SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .expect("Clock may have gone backwards")
-                                                .as_millis() as u64,
-                                        }) {
-                                            tracing::warn!("Failed to report task {task_id:?} . {e:?}");
-                                        }
-                                    }
-                                    ResponseEvent::VacuumTask(vacuum_task) => {
-                                        Vacuum::vacuum(
-                                            vacuum_task,
-                                            context.sstable_store.clone(),
-                                            meta_client,
-                                        )
-                                        .await;
-                                    }
-                                    ResponseEvent::FullScanTask(full_scan_task) => {
-                                        Vacuum::full_scan(
-                                            full_scan_task,
-                                            context.sstable_store.clone(),
-                                            meta_client,
-                                        )
-                                        .await;
-                                    }
-                                    ResponseEvent::ValidationTask(validation_task) => {
-                                        validate_ssts(
-                                            validation_task,
-                                            context.sstable_store.clone(),
-                                        )
-                                        .await;
-                                    }
-                                    ResponseEvent::CancelCompactTask(cancel_compact_task) => {
-                                        if let Some(tx) = shutdown
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&cancel_compact_task.task_id)
-                                        {
-                                            if tx.send(()).is_err() {
-                                                tracing::warn!(
-                                                    "Cancellation of compaction task failed. task_id: {}",
-                                                    cancel_compact_task.task_id
-                                                );
-                                            }
-                                        } else {
-                                            tracing::warn!(
-                                                    "Attempting to cancel non-existent compaction task. task_id: {}",
-                                                    cancel_compact_task.task_id
-                                                );
-                                        }
-                                    }
-
-                                    ResponseEvent::PullTaskAck(_pull_task_ack) => {
-                                        // set flag
-                                        pull_task_ack.store(true, Ordering::SeqCst);
-                                    }
-                                }
-                            });
-                    }
-                    Some(Err(e)) => {
-                        tracing::warn!("Failed to consume stream. {}", e.message());
-                        continue 'start_stream;
-                    }
-                    _ => {
-                        // The stream is exhausted
-                        continue 'start_stream;
-                    }
-                }
-            }
-        }
-    });
-
-    (join_handle, shutdown_tx)
 }
 
 pub async fn compact_and_build_sst<F>(
@@ -1524,12 +1237,7 @@ pub async fn shared_compact(
         Err(e) => {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
             let task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(
-                compact_task,
-                compactor_metrics.clone(),
-                vec![],
-                task_status,
-            );
+            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
         }
         Ok(extractor) => extractor,
     };
@@ -1543,12 +1251,7 @@ pub async fn shared_compact(
         if !removed_tables.is_empty() {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
             let task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(
-                compact_task,
-                compactor_metrics.clone(),
-                vec![],
-                task_status,
-            );
+            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
         }
     }
 
@@ -1591,12 +1294,7 @@ pub async fn shared_compact(
         Err(e) => {
             tracing::warn!("Failed to generate_splits {:#?}", e);
             task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(
-                compact_task,
-                compactor_metrics.clone(),
-                vec![],
-                task_status,
-            );
+            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
         }
     }
 
@@ -1619,12 +1317,7 @@ pub async fn shared_compact(
         Err(err) => {
             tracing::warn!("Failed to build delete range aggregator {:#?}", err);
             task_status = TaskStatus::ExecuteFailed;
-            return shared_compact_done(
-                compact_task,
-                compactor_metrics.clone(),
-                vec![],
-                task_status,
-            );
+            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
         }
     };
 
@@ -1662,7 +1355,7 @@ pub async fn shared_compact(
                 memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailResourceCanceled;
-        return shared_compact_done(compact_task, compactor_metrics, output_ssts, task_status);
+        return compact_done(compact_task, compactor_metrics, output_ssts, task_status);
     }
 
     compactor_metrics.compact_task_pending_num.inc();
@@ -1758,7 +1451,7 @@ pub async fn shared_compact(
     }
 
     // After a compaction is done, mutate the compaction task.
-    let (compact_task, table_stats) = shared_compact_done(
+    let (compact_task, table_stats) = compact_done(
         compact_task,
         compactor_metrics.clone(),
         output_ssts,
@@ -1777,45 +1470,4 @@ pub async fn shared_compact(
         }
     }
     (compact_task, table_stats)
-}
-
-fn shared_compact_done(
-    mut compact_task: CompactTask,
-    compactor_metrics: Arc<CompactorMetrics>,
-    output_ssts: Vec<CompactOutput>,
-    task_status: TaskStatus,
-) -> (CompactTask, HashMap<u32, TableStats>) {
-    let mut table_stats_map = TableStatsMap::default();
-    compact_task.set_task_status(task_status);
-    compact_task
-        .sorted_output_ssts
-        .reserve(compact_task.splits.len());
-    let mut compaction_write_bytes = 0;
-    for (
-        _,
-        ssts,
-        CompactionStatistics {
-            delta_drop_stat, ..
-        },
-    ) in output_ssts
-    {
-        add_table_stats_map(&mut table_stats_map, &delta_drop_stat);
-        for sst_info in ssts {
-            compaction_write_bytes += sst_info.file_size();
-            compact_task.sorted_output_ssts.push(sst_info.sst_info);
-        }
-    }
-
-    let group_label = compact_task.compaction_group_id.to_string();
-    let level_label = compact_task.target_level.to_string();
-    compactor_metrics
-        .compact_write_bytes
-        .with_label_values(&[&group_label, level_label.as_str()])
-        .inc_by(compaction_write_bytes);
-    compactor_metrics
-        .compact_write_sstn
-        .with_label_values(&[&group_label, level_label.as_str()])
-        .inc_by(compact_task.sorted_output_ssts.len() as u64);
-
-    (compact_task, table_stats_map)
 }

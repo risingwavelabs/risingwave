@@ -106,8 +106,23 @@ impl SinkCoordinatorStreamHandle {
         .await?;
         match self.next_response().await? {
             SinkCoordinatorStreamResponse {
-                response: Some(sink_coordinator_stream_response::Response::Commit(_)),
-            } => Ok(()),
+                response:
+                    Some(sink_coordinator_stream_response::Response::Commit(
+                        sink_coordinator_stream_response::CommitResponse {
+                            epoch: response_epoch,
+                        },
+                    )),
+            } => {
+                if epoch == response_epoch {
+                    Ok(())
+                } else {
+                    Err(RpcError::Internal(anyhow!(
+                        "get different response epoch to commit epoch: {} {}",
+                        epoch,
+                        response_epoch
+                    )))
+                }
+            }
             msg => Err(RpcError::Internal(anyhow!(
                 "should get Commit response but get {:?}",
                 msg

@@ -1546,6 +1546,28 @@ where
         .await
     }
 
+    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        let source_id = source.get_id();
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        let original_source = database_core.sources.get(&source_id).unwrap().clone();
+        if original_source.get_version() + 1 != source.get_version() {
+            bail!("source version is stale");
+        }
+
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        sources.insert(source_id, source.clone());
+        commit_meta!(self, sources)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Source(source))
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_index_name(
         &self,
         index_id: IndexId,
@@ -2220,6 +2242,16 @@ where
             }
         }
         tables
+    }
+
+    pub async fn get_created_table_ids(&self) -> Vec<u32> {
+        let guard = self.core.lock().await;
+        guard
+            .database
+            .tables
+            .values()
+            .map(|table| table.id)
+            .collect()
     }
 }
 

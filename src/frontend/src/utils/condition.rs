@@ -403,9 +403,13 @@ impl Condition {
                 ));
             }
 
-            let Some((lower_bound_conjunctions,upper_bound_conjunctions,eq_conds,part_of_other_conds)) = Self::analyze_group(
-                group,
-            )? else {
+            let Some((
+                lower_bound_conjunctions,
+                upper_bound_conjunctions,
+                eq_conds,
+                part_of_other_conds,
+            )) = Self::analyze_group(group)?
+            else {
                 return Ok(false_cond());
             };
             other_conds.extend(part_of_other_conds.into_iter());
@@ -561,9 +565,9 @@ impl Condition {
                 };
 
                 let Some(new_cond) = new_expr.fold_const()? else {
-                        // column = NULL, the result is always NULL.
-                        return Ok(None);
-                    };
+                    // column = NULL, the result is always NULL.
+                    return Ok(None);
+                };
                 if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
                     return Ok(None);
                 }
@@ -583,8 +587,8 @@ impl Condition {
                         .unwrap();
                     let value = const_expr.fold_const()?;
                     let Some(value) = value else {
-                            continue;
-                        };
+                        continue;
+                    };
                     scalars.insert(Some(value));
                 }
                 if scalars.is_empty() {
@@ -641,9 +645,9 @@ impl Condition {
                     }
                 };
                 let Some(value) = new_expr.fold_const()? else {
-                        // column compare with NULL, the result is always  NULL.
-                        return Ok(None);
-                    };
+                    // column compare with NULL, the result is always  NULL.
+                    return Ok(None);
+                };
                 match op {
                     ExprType::LessThan => {
                         upper_bound_conjunctions.push(Bound::Excluded(value));

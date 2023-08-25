@@ -37,7 +37,7 @@ public class SinkUtils {
                 return new FileSinkFactory();
             case "jdbc":
                 return new JDBCSinkFactory();
-            case "iceberg":
+            case "iceberg_java":
                 return new IcebergSinkFactory();
             case "deltalake":
                 return new DeltaLakeSinkFactory();

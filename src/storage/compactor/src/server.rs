@@ -216,9 +216,7 @@ pub async fn compactor_serve(
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
             vec![sstable_object_id_manager],
         ),
-        risingwave_storage::hummock::compactor::compactor_runner::start_compactor(
-            compactor_context.clone(),
-        ),
+        risingwave_storage::hummock::compactor::start_compactor(compactor_context.clone()),
     ];
 
     let telemetry_manager = TelemetryManager::new(
@@ -436,9 +434,7 @@ pub async fn shared_compactor_serve(
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
             vec![sstable_object_id_manager],
         ),
-        risingwave_storage::hummock::compactor::compactor_runner::start_compactor(
-            compactor_context.clone(),
-        ),
+        risingwave_storage::hummock::compactor::start_compactor(compactor_context.clone()),
     ];
 
     let telemetry_manager = TelemetryManager::new(

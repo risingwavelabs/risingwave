@@ -35,14 +35,14 @@ use crate::hummock::compactor::{
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
-    CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
+    CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableObjectIdManagerRef, SstableStore, SstableWriterFactory,
     SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
 pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
-    pub sstable_object_id_manager: SstableObjectIdManagerRef,
+    pub sstable_object_id_manager: Box<dyn GetObjectId>,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,

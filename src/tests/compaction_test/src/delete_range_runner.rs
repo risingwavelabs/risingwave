@@ -42,8 +42,9 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
 };
-use risingwave_storage::hummock::compactor::compactor_runner::start_compactor;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    start_compactor, CompactionExecutor, CompactorContext,
+};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
