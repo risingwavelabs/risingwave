@@ -8,7 +8,7 @@ use serde_derive::{Deserialize, Serialize};
 use tonic::transport::Channel;
 
 use crate::server_pb::server_client::ServerClient;
-use crate::server_pb::{ActionType, GetFeatureRequest, ReportActionRequest};
+use crate::server_pb::{GetFeatureRequest, ReportActionRequest};
 
 #[derive(Serialize, Deserialize)]
 pub struct User {
@@ -24,7 +24,7 @@ pub struct User {
 #[derive(Serialize, Deserialize)]
 pub struct ActionHistory {
     userid: String,
-    event_type: i32,
+    event_type: String,
     changenum: i64,
     timestamp: u64,
 }
@@ -41,17 +41,17 @@ impl User {
         let changenum: i64 = rand::thread_rng().gen_range(0, 90);
         let (changenum, event_type) = {
             if changenum > 0 && changenum < 30 {
-                (changenum, ActionType::Mfachangeadd)
+                (changenum, "mfa+")
             } else if changenum < 60 {
-                (changenum - 30, ActionType::Mfachangereduce)
+                (changenum - 30, "mfa-")
             } else {
-                (0, ActionType::Other)
+                (0, "other")
             }
         };
         let response = client
             .report_action(tonic::Request::new(ReportActionRequest {
                 userid: self.userid.clone(),
-                eventtype: event_type as i32,
+                eventtype: event_type.to_string(),
                 changenum,
             }))
             .await
@@ -61,7 +61,7 @@ impl User {
         Ok(ActionHistory {
             userid: self.userid.clone(),
             changenum: changenum,
-            event_type: event_type as i32,
+            event_type: event_type.to_string(),
             timestamp,
         })
     }

@@ -18,6 +18,7 @@ serde_json = "1.0"
 prost = "0.10"
 clap = "2.26.0"
 tokio-postgres = "0.7.8"
+tonic-build = "0.7.1"
 
 [build-dependencies]
 tonic-build = "0.7.1"

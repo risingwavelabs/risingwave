@@ -10,7 +10,7 @@ sleep 2
 python3 generator
 sleep 2
 
-python3 server/model &
+python3 server/model  > /opt/feature-store/.log/model_log &
 MODEL_PID=$!
 ./feature-store-server > /opt/feature-store/.log/server_log &
 RECOMMENDER_PID=$!

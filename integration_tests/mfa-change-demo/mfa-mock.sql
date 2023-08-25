@@ -27,7 +27,7 @@ create materialized view user_mfa_change_count as
         select * from tumble(user_action_mfa , timestamp , INTERVAL '30 minutes')
       ) group by userid,window_start;
 
-create function udf_sum(int,int) returns int as udf_sum using link 'http://localhost:8815';
+create function udf_sum(int,varchar) returns int as udf_sum using link 'http://localhost:8815';
 
 create materialized view user_mfa_change_num as
       select userid , sum(udf_sum(changenum,eventype)) as sum, window_start

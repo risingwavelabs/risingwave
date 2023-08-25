@@ -85,16 +85,9 @@ impl FeatureStoreServer {
     }
 
     pub(crate) fn create_sink_mfa_json(message: &ReportActionRequest, timestamp: u64) -> String {
-        let eventtype = if message.eventtype == 1{
-            "mfa+"
-        }else if message.eventtype == 2{
-            "mfa-"
-        }else{
-            "other"
-        };
         format!(
             "{{\"userid\": {:?}, \"eventype\": {:?}, \"changenum\": {:?}, \"timestamp\": {:?}}}",
-            message.userid, eventtype, message.changenum, timestamp
+            message.userid, message.eventtype, message.changenum, timestamp
         )
         .to_string()
     }

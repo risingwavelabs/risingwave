@@ -2,8 +2,8 @@
 pub struct ReportActionRequest {
     #[prost(string, tag="1")]
     pub userid: ::prost::alloc::string::String,
-    #[prost(enumeration="ActionType", tag="2")]
-    pub eventtype: i32,
+    #[prost(string, tag="2")]
+    pub eventtype: ::prost::alloc::string::String,
     #[prost(int64, tag="3")]
     pub changenum: i64,
 }
@@ -85,13 +85,6 @@ pub struct StartTrainingRequest {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartTrainingResponse {
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum ActionType {
-    Other = 0,
-    Mfachangeadd = 1,
-    Mfachangereduce = 2,
 }
 /// Generated client implementations.
 pub mod server_client {
