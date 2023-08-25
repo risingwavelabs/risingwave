@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
+use futures::try_join;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -65,6 +66,35 @@ use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
+
+/// Map a JSON schema to a relational schema
+async fn extract_json_table_schema(
+    schema_config: &Option<(AstString, bool)>,
+    with_properties: &HashMap<String, String>,
+) -> Result<Option<Vec<ColumnCatalog>>> {
+    match schema_config {
+        None => Ok(None),
+        Some((schema_location, use_schema_registry)) => Ok(Some(
+            schema_to_columns(&schema_location.0, *use_schema_registry, with_properties)
+                .await?
+                .into_iter()
+                .map(|col| ColumnCatalog {
+                    column_desc: col.into(),
+                    is_hidden: false,
+                })
+                .collect_vec(),
+        )),
+    }
+}
+
+fn json_schema_infer_use_schema_registry(
+    schema_config: &Option<(AstString, bool)>,
+) -> bool {
+    match schema_config {
+        None => false,
+        Some((_, use_registry)) => *use_registry,
+    }
+}
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -358,39 +388,16 @@ pub(crate) async fn try_bind_columns_from_source(
                     "schema definition is required for ENCODE JSON".to_owned(),
                 )));
             }
-            if schema_config.is_none() {
-                (
-                    None,
-                    sql_defined_pk_names,
-                    StreamSourceInfo {
-                        format: FormatType::Plain as i32,
-                        row_encode: EncodeType::Json as i32,
-                        use_schema_registry: false,
-                        ..Default::default()
-                    },
-                )
-            } else {
-                let (schema_location, use_schema_registry) = schema_config.unwrap();
-                (
-                    Some(
-                        schema_to_columns(&schema_location.0, use_schema_registry, with_properties)
-                            .await?
-                            .into_iter()
-                            .map(|col| ColumnCatalog {
-                                column_desc: col.into(),
-                                is_hidden: false,
-                            })
-                            .collect_vec(),
-                    ),
-                    sql_defined_pk_names,
-                    StreamSourceInfo {
-                        format: FormatType::Plain as i32,
-                        row_encode: EncodeType::Json as i32,
-                        use_schema_registry,
-                        ..Default::default()
-                    },
-                )
-            }
+            (
+                extract_json_table_schema(&schema_config, with_properties).await?,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    format: FormatType::Plain as i32,
+                    row_encode: EncodeType::Json as i32,
+                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    ..Default::default()
+                },
+            )
         }
         (Format::Plain, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) = get_schema_location(&mut options)?;
@@ -476,12 +483,17 @@ pub(crate) async fn try_bind_columns_from_source(
             )
         }
         (Format::Upsert, Encode::Json) => {
+            let schema_config = get_json_schema_location(&mut options)?;
+            let columns = extract_json_table_schema(&schema_config, with_properties).await?;
             let (columns, pk_names) = if !sql_defined_pk {
-                let mut columns = bind_sql_columns(sql_defined_columns)?;
+                let mut columns = match columns {
+                    None => bind_sql_columns(sql_defined_columns)?,
+                    Some(columns) => columns,
+                };
                 add_upsert_default_key_column(&mut columns);
                 (Some(columns), vec![DEFAULT_KEY_COLUMN_NAME.into()])
             } else {
-                (None, sql_defined_pk_names)
+                (columns, sql_defined_pk_names)
             };
             (
                 columns,
@@ -489,6 +501,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 StreamSourceInfo {
                     format: FormatType::Upsert as i32,
                     row_encode: EncodeType::Json as i32,
+                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
                     ..Default::default()
                 },
             )
@@ -550,19 +563,21 @@ pub(crate) async fn try_bind_columns_from_source(
             }
         }
 
-        (Format::Debezium, Encode::Json) => {
+        (Format::Debezium, Encode::Json) => {            
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with format debezium."
                         .to_string(),
                 )));
             }
+            let schema_config = get_json_schema_location(&mut options)?;
             (
-                None,
+                extract_json_table_schema(&schema_config, with_properties).await?,
                 sql_defined_pk_names,
                 StreamSourceInfo {
                     format: FormatType::Debezium as i32,
                     row_encode: EncodeType::Json as i32,
+                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
                     ..Default::default()
                 },
             )
@@ -712,12 +727,14 @@ pub(crate) async fn try_bind_columns_from_source(
     .to_string(),
     )));
             }
+            let schema_config = get_json_schema_location(&mut options)?;
             (
-                None,
+                extract_json_table_schema(&schema_config, with_properties).await?,
                 sql_defined_pk_names,
                 StreamSourceInfo {
                     format: FormatType::Maxwell as i32,
                     row_encode: EncodeType::Json as i32,
+                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
                     ..Default::default()
                 },
             )
@@ -730,12 +747,14 @@ pub(crate) async fn try_bind_columns_from_source(
     .to_string(),
     )));
             }
+            let schema_config = get_json_schema_location(&mut options)?;
             (
-                None,
+                extract_json_table_schema(&schema_config, with_properties).await?,
                 sql_defined_pk_names,
                 StreamSourceInfo {
                     format: FormatType::Canal as i32,
                     row_encode: EncodeType::Json as i32,
+                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
                     ..Default::default()
                 },
             )

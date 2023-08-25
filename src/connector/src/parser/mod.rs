@@ -886,19 +886,21 @@ impl SpecificParserConfig {
                     ..Default::default()
                 })
             }
-            (SourceFormat::Plain, SourceEncode::Json) => EncodingProperties::Json(JsonProperties {
-                use_schema_registry: info.use_schema_registry,
-            }),
             (
-                SourceFormat::Debezium
-                | SourceFormat::DebeziumMongo
+                SourceFormat::Plain
+                | SourceFormat::Debezium
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
-                use_schema_registry: false,
+                use_schema_registry: info.use_schema_registry,
             }),
+            (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
+                EncodingProperties::Json(JsonProperties {
+                    use_schema_registry: false,
+                })
+            }
             (SourceFormat::Plain, SourceEncode::Bytes) => {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }
