@@ -744,14 +744,12 @@ pub(crate) async fn try_bind_columns_from_source(
     .to_string(),
     )));
             }
-            let schema_config = get_json_schema_location(&mut options)?;
             (
-                extract_json_table_schema(&schema_config, with_properties).await?,
+                None,
                 sql_defined_pk_names,
                 StreamSourceInfo {
                     format: FormatType::Canal as i32,
                     row_encode: EncodeType::Json as i32,
-                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
                     ..Default::default()
                 },
             )

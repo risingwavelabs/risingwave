@@ -38,14 +38,17 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
+    payload_start_idx: usize,
 }
 
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         self.value = Some(payload);
-        let value = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let value = simd_json::to_borrowed_value(
+            &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
+        )
+        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             value,
             // Debezium and Canal have their special json access builder and will not
@@ -56,8 +59,11 @@ impl AccessBuilder for JsonAccessBuilder {
 }
 
 impl JsonAccessBuilder {
-    pub fn new() -> Result<Self> {
-        Ok(Self { value: None })
+    pub fn new(use_schema_registry: bool) -> Result<Self> {
+        Ok(Self {
+            value: None,
+            payload_start_idx: if use_schema_registry { 5 } else { 0 },
+        })
     }
 }
 

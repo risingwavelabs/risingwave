@@ -69,12 +69,29 @@ CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
 ) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 statement ok
-CREATE TABLE kafka_json_schema with (
+CREATE TABLE kafka_json_schema_plain with (
     connector = 'kafka',
     kafka.topic = 'kafka_json_schema',
     kafka.brokers = 'kafka:9093',
     kafka.scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
+
+statement ok
+CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(id))
+with (
+    connector = 'kafka',
+    kafka.topic = 'kafka_json_schema',
+    kafka.brokers = 'kafka:9093',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT UPSERT ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
+
+statement ok
+CREATE TABLE kafka_json_schema_maxwell with (
+    connector = 'kafka',
+    kafka.topic = 'kafka_json_schema',
+    kafka.brokers = 'kafka:9093',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT MAXWELL ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
 
 statement ok
 flush;
@@ -150,7 +167,23 @@ select count(*) from debezium_compact;
 2
 
 query TFITT
-select * from kafka_json_schema
+select * from kafka_json_schema_plain
+----
+(9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
+
+query TFITT
+select * from kafka_json_schema_upsert order by id
+----
+(9.5,7,12) 23 1 An ice sculpture {cold,ice}
+(9.5,7,12) 12.5 2 An ice sculpture {cold,ice}
+
+query TFITT
+select * from kafka_json_schema_plain
+----
+(9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
+
+query TFITT
+select * from kafka_json_schema_upsert
 ----
 (9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
 

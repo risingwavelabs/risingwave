@@ -557,7 +557,7 @@ impl AccessBuilderImpl {
             EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
             }
-            EncodingProperties::Json(_) => AccessBuilderImpl::Json(JsonAccessBuilder::new()?),
+            EncodingProperties::Json(config) => AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?),
             _ => unreachable!(),
         };
         Ok(accessor)
@@ -890,13 +890,12 @@ impl SpecificParserConfig {
                 SourceFormat::Plain
                 | SourceFormat::Debezium
                 | SourceFormat::Maxwell
-                | SourceFormat::Canal
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
             }),
-            (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
+            (SourceFormat::DebeziumMongo | SourceFormat::Canal, SourceEncode::Json) => {
                 EncodingProperties::Json(JsonProperties {
                     use_schema_registry: false,
                 })
