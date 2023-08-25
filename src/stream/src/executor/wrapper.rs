@@ -95,7 +95,7 @@ impl WrapperExecutor {
             trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Schema check
-        let stream = schema_check::schema_check(info.clone(), stream);
+        let stream = schema_check::schema_check(info.clone(), extra.actor_id, stream);
         // Epoch check
         let stream = epoch_check::epoch_check(info.clone(), stream);
 

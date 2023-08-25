@@ -20,11 +20,16 @@ use risingwave_common::catalog::{Field, Schema};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{ExecutorInfo, Message, MessageStream, Mutation};
+use crate::task::ActorId;
 
 /// Streams wrapped by `schema_check` will check the passing stream chunk against the expected
 /// schema.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn schema_check(mut info: Arc<ExecutorInfo>, input: impl MessageStream) {
+pub async fn schema_check(
+    mut info: Arc<ExecutorInfo>,
+    actor_id: ActorId,
+    input: impl MessageStream,
+) {
     #[for_await]
     for message in input {
         let message = message?;
@@ -48,8 +53,10 @@ pub async fn schema_check(mut info: Arc<ExecutorInfo>, input: impl MessageStream
             Message::Barrier(barrier) => {
                 if let Some(Mutation::Update {
                     source: Some(source),
+                    added_dispatchers,
                     ..
-                }) = barrier.mutation.as_deref()
+                }) = barrier.mutation.as_deref() &&
+                    added_dispatchers.contains_key(&actor_id)
                 {
                     info = Arc::new(ExecutorInfo {
                         schema: Schema {
@@ -103,7 +110,7 @@ mod tests {
         ));
         tx.push_barrier(1, false);
 
-        let checked = schema_check(source.info().into(), source.boxed().execute());
+        let checked = schema_check(source.info().into(), 0, source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
@@ -129,7 +136,7 @@ mod tests {
         ));
         tx.push_barrier(1, false);
 
-        let checked = schema_check(source.info().into(), source.boxed().execute());
+        let checked = schema_check(source.info().into(), 0, source.boxed().execute());
         pin_mut!(checked);
         checked.next().await.unwrap().unwrap();
     }
