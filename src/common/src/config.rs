@@ -245,6 +245,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
+    pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
+
     #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -837,6 +840,10 @@ pub mod default {
             180 // 3mi
         }
 
+        pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
+            600
+        }
+
         pub fn move_table_size_limit() -> u64 {
             10 * 1024 * 1024 * 1024 // 10GB
         }
@@ -1201,6 +1208,7 @@ pub mod default {
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1242,6 +1250,9 @@ pub mod default {
         }
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+        pub fn tombstone_reclaim_ratio() -> u32 {
+            DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
     }
 
@@ -1366,6 +1377,8 @@ pub struct CompactionConfig {
     pub max_space_reclaim_bytes: u64,
     #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
     pub level0_max_compact_file_number: u64,
+    #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
+    pub tombstone_reclaim_ratio: u32,
 }
 
 #[cfg(test)]

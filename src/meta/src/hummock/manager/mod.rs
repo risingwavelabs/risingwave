@@ -65,7 +65,9 @@ use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
+use crate::hummock::compaction::{
+    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, TombstoneCompactionSelector,
+};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
@@ -1959,6 +1961,7 @@ where
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
+                TombstoneCompactionTrigger,
 
                 FullGc,
             }
@@ -2028,6 +2031,19 @@ where
             let full_gc_trigger =
                 IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
 
+            let mut tombstone_reclaim_trigger_interval =
+                tokio::time::interval(Duration::from_secs(
+                    hummock_manager
+                        .env
+                        .opts
+                        .periodic_tombstone_reclaim_compaction_interval_sec,
+                ));
+            tombstone_reclaim_trigger_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tombstone_reclaim_trigger_interval.reset();
+            let tombstone_reclaim_trigger = IntervalStream::new(tombstone_reclaim_trigger_interval)
+                .map(|_| HummockTimerEvent::TombstoneCompactionTrigger);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
@@ -2036,6 +2052,7 @@ where
                 Box::pin(space_reclaim_trigger),
                 Box::pin(ttl_reclaim_trigger),
                 Box::pin(full_gc_trigger),
+                Box::pin(tombstone_reclaim_trigger),
             ];
 
             let periodic_check_split_group_interval_sec = hummock_manager
@@ -2219,6 +2236,19 @@ where
 
                                     hummock_manager
                                         .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
+                                        .await;
+                                }
+
+                                HummockTimerEvent::TombstoneCompactionTrigger => {
+                                    // Disable periodic trigger for compaction_deterministic_test.
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager
+                                        .on_handle_trigger_multi_group(
+                                            compact_task::TaskType::Tombstone,
+                                        )
                                         .await;
                                 }
 
@@ -2826,6 +2856,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
     compaction_selectors.insert(
         compact_task::TaskType::Ttl,
         Box::<TtlCompactionSelector>::default(),
+    );
+    compaction_selectors.insert(
+        compact_task::TaskType::Tombstone,
+        Box::<TombstoneCompactionSelector>::default(),
     );
     compaction_selectors
 }

@@ -272,7 +272,10 @@ impl Binder {
                 share_id
             }
         };
-        let input = Relation::Subquery(Box::new(BoundSubquery { query }));
+        let input = Relation::Subquery(Box::new(BoundSubquery {
+            query,
+            lateral: false,
+        }));
         Ok((
             Relation::Share(Box::new(BoundShare { share_id, input })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
