@@ -45,8 +45,8 @@ pub(crate) mod tests {
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FixedLengthFilterKeyExtractor,
-        FullKeyFilterKeyExtractor,
+        FilterKeyExtractorImpl, FilterKeyExtractorManagerFactory, FilterKeyExtractorManagerRef,
+        FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
     };
     use risingwave_storage::hummock::compactor::compactor_runner::compact;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
@@ -191,7 +191,10 @@ pub(crate) mod tests {
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             memory_limiter: MemoryLimiter::unlimit(),
-            filter_key_extractor_manager,
+            filter_key_extractor_manager:
+                FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+                    filter_key_extractor_manager,
+                ),
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(
                 hummock_meta_client.clone(),
                 options.sstable_id_remote_fetch_number,

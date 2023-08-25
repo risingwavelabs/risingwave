@@ -32,6 +32,7 @@ use tracing::log::error;
 mod block_cache;
 pub use block_cache::*;
 
+use crate::filter_key_extractor::FilterKeyExtractorManagerFactory;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::opts::StorageOpts;
 
@@ -183,7 +184,9 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
-            filter_key_extractor_manager.clone(),
+            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+                filter_key_extractor_manager.clone(),
+            ),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -257,7 +260,12 @@ impl HummockStorage {
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
-        &self.context.filter_key_extractor_manager
+        match &self.context.filter_key_extractor_manager {
+            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+                filter_key_extractor_manager,
+            ) => filter_key_extractor_manager,
+            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(_) => todo!(),
+        }
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {

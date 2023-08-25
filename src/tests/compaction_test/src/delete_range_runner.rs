@@ -40,7 +40,8 @@ use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerFactory,
+    FullKeyFilterKeyExtractor,
 };
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
@@ -574,7 +575,10 @@ fn run_compactor_thread(
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager,
+        filter_key_extractor_manager:
+            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+                filter_key_extractor_manager,
+            ),
         memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),

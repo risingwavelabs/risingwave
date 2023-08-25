@@ -238,6 +238,7 @@ impl Parser {
                         Ok(self.parse_show()?)
                     }
                 }
+                Keyword::CANCEL => Ok(self.parse_cancel_job()?),
                 Keyword::DESCRIBE => Ok(Statement::Describe {
                     name: self.parse_object_name()?,
                 }),
@@ -673,6 +674,15 @@ impl Parser {
                 Ok(Expr::Value(self.parse_value()?))
             }
             Token::Parameter(number) => self.parse_param(number),
+            Token::Pipe => {
+                let args = self.parse_comma_separated(Parser::parse_identifier)?;
+                self.expect_token(&Token::Pipe)?;
+                let body = self.parse_expr()?;
+                Ok(Expr::LambdaFunction {
+                    args,
+                    body: Box::new(body),
+                })
+            }
             Token::LParen => {
                 let expr =
                     if self.parse_keyword(Keyword::SELECT) || self.parse_keyword(Keyword::WITH) {
@@ -4020,6 +4030,12 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::JOBS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Jobs,
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 _ => {}
             }
         }
@@ -4027,6 +4043,18 @@ impl Parser {
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })
+    }
+
+    pub fn parse_cancel_job(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::JOBS)?;
+        let mut job_ids = vec![];
+        loop {
+            job_ids.push(self.parse_literal_uint()? as u32);
+            if !self.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(Statement::CancelJobs(JobIdents(job_ids)))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude
