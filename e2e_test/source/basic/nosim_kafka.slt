@@ -166,8 +166,8 @@ select * from kafka_json_schema_plain
 query TFITT
 select * from kafka_json_schema_upsert order by id
 ----
-(9.5,7,12) 23 1 An ice sculpture {cold,ice}
-(9.5,7,12) 12.5 2 An ice sculpture {cold,ice}
+(9.5,7,12) 1 23 An ice sculpture {cold,ice}
+(9.5,7,12) 2 12.5 An ice sculpture {cold,ice}
 
 statement ok
 DROP TABLE upsert_avro_json_default_key;
