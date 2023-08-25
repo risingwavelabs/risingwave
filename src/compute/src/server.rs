@@ -177,9 +177,15 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
+    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(
+        registry.clone(),
+        config.storage.storage_metric_level,
+    ));
     let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
+    let storage_metrics = Arc::new(MonitoredStorageMetrics::new(
+        registry.clone(),
+        config.storage.storage_metric_level,
+    ));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
