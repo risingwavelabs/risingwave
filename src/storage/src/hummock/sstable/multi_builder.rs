@@ -270,17 +270,19 @@ where
 
     /// Add kv pair to sstable.
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
+        let mut add_point_delete_epoch = HummockEpoch::MAX;
         if let Some(builder) = self.current_builder.as_mut() && builder.reach_capacity() &&
-            && event.new_epoch != HummockEpoch::MAX {
-            if builder.last_range_tombstone_epoch() == HummockEpoch::MAX {
-                self.seal_current().await?;
-            } else if !event.event_key.is_exclude_left_key {
+            event.new_epoch != HummockEpoch::MAX {
+            if builder.last_range_tombstone_epoch() != HummockEpoch::MAX {
+                if event.event_key.is_exclude_left_key {
+                    add_point_delete_epoch = builder.last_range_tombstone_epoch();
+                }
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: event.event_key.clone(),
+                    event_key: PointRange::from_user_key(event.event_key.left_user_key.clone(), false),
                     new_epoch: HummockEpoch::MAX,
                 });
-                self.seal_current().await?;
             }
+            self.seal_current().await?;
         }
 
         if self.current_builder.is_none() {
@@ -293,7 +295,25 @@ where
                     .num_pending_write_io
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
-            let builder = self.builder_factory.open_builder().await?;
+            let mut builder = self.builder_factory.open_builder().await?;
+            if add_point_delete_epoch != HummockEpoch::MAX {
+                // We do not hope the left-bound of key-range of a sstable be `Excluded`, so we
+                // split the last range to be be too part. For example, [a, +∞) and
+                // (b, f) will be cut into [a, b), b, (b,f) three range, and [a,b) belongs to the
+                // last file. we must add b to the next file. Since all point key
+                // less than `event` have been add to builder before, there will be no point-key
+                // larger than `event-key`.
+                builder
+                    .add(
+                        FullKey::from_user_key(
+                            event.event_key.left_user_key.as_ref(),
+                            add_point_delete_epoch,
+                        ),
+                        HummockValue::Delete,
+                        true,
+                    )
+                    .await?;
+            }
             self.current_builder = Some(builder);
         }
         let builder = self.current_builder.as_mut().unwrap();
