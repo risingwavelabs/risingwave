@@ -37,8 +37,6 @@ tracing = "0.1"
 [dev-dependencies]
 risingwave_expr = { workspace = true }
 
-[lib]
-crate-type = ["cdylib"]
 
 [[bin]]
 name = "data-chunk-payload-generator"
