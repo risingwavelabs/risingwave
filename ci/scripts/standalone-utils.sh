@@ -48,4 +48,5 @@ restart_standalone() {
   stop_standalone
   sleep 5
   start_standalone >"$PREFIX_LOG"/standalone-restarted.log 2>&1 &
+  sleep 5
 }
