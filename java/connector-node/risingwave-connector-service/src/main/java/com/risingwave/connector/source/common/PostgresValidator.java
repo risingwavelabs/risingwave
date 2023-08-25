@@ -267,7 +267,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTablePrivileges() throws SQLException {
-        // check whether user has select privilege on table for initial snapshot
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
