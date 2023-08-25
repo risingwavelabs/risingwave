@@ -23,8 +23,7 @@ done
 shift $((OPTIND -1))
 
 if [[ $mode == "standalone" ]]; then
-  source ci/scripts/start-standalone.sh
-  source ci/scripts/stop-standalone.sh
+  source ci/scripts/standalone-utils.sh
 fi
 
 cluster_start() {
@@ -39,10 +38,8 @@ cluster_start() {
 cluster_stop() {
   if [[ $mode == "standalone" ]]; then
     stop_standalone
-  else
-    cargo make ci-kill
-    pkill "standalone"
   fi
+  cargo make ci-kill
 }
 
 download_and_prepare_rw "$profile" common
@@ -182,4 +179,37 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     bash "${test_root}/run_all.sh"
     echo "--- Kill cluster"
     cargo make kill
+fi
+
+if [[ "$mode" == "standalone" ]]; then
+  run_sql() {
+    psql -h localhost -p 4566 -d dev -U root -f "$@"
+  }
+
+  echo "--- e2e, standalone, cluster-persistence-test"
+  cluster_start
+  run_sql "CREATE TABLE t (v1 int);
+  INSERT INTO t VALUES (1);
+  INSERT INTO t VALUES (2);
+  INSERT INTO t VALUES (3);
+  INSERT INTO t VALUES (4);
+  INSERT INTO t VALUES (5);
+  flush;"
+
+  EXPECTED=$(run_sql "SELECT * FROM t;")
+  echo -e "Expected:\n$EXPECTED"
+
+  restart_standalone
+
+  ACTUAL=$(run_sql "SELECT * FROM t;")
+  echo -e "Expected:\n$ACTUAL"
+
+  if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+    echo "Expected: $EXPECTED"
+    echo "Actual: $ACTUAL"
+    exit 1
+  fi
+
+  echo "--- Kill cluster"
+  cluster_stop
 fi
