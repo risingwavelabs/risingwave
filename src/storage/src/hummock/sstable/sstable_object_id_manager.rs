@@ -29,11 +29,12 @@ use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
-
+use dyn_clone::DynClone;
 #[async_trait::async_trait]
-pub trait GetObjectId: Send + Sync {
+pub trait GetObjectId: DynClone + Send + Sync {
     async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId>;
 }
+dyn_clone::clone_trait_object!(GetObjectId);
 /// 1. Caches SST object ids fetched from meta.
 /// 2. Maintains GC watermark SST object id.
 ///
@@ -198,6 +199,7 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 }
 
 /// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
+#[derive(Clone)]
 pub struct SharedComapctorObjectIdManager {
     output_object_ids: VecDeque<u64>,
 }

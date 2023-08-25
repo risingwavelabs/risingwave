@@ -46,7 +46,7 @@ use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     create_monotonic_events_from_compaction_delete_events, BlockedXor16FilterBuilder, CachePolicy,
-    CompactionDeleteRanges, HummockError, HummockResult, SstableBuilderOptions,
+    CompactionDeleteRanges, GetObjectId, HummockError, HummockResult, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -230,6 +230,7 @@ async fn compact_shared_buffer(
             sub_compaction_sstable_size as usize,
             split_weight_by_vnode as u32,
             use_block_based_filter,
+            Box::new(context.sstable_object_id_manager.clone()),
         );
         let iter = OrderedMergeIteratorInner::new(
             payload.iter().map(|imm| imm.clone().into_forward_iter()),
@@ -448,6 +449,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         split_weight_by_vnode: u32,
         use_block_based_filter: bool,
+        sstable_object_id_manager: Box<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -466,7 +468,7 @@ impl SharedBufferCompactRunner {
                 split_weight_by_vnode,
                 use_block_based_filter,
             },
-            false,
+            sstable_object_id_manager,
         );
         Self {
             compactor,

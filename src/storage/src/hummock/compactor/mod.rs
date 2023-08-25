@@ -21,7 +21,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -59,8 +59,7 @@ pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, Tas
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    CompactionDeleteRanges, GetObjectId, HummockResult, SharedComapctorObjectIdManager,
-    SstableBuilderOptions, Xor16FilterBuilder,
+    CompactionDeleteRanges, GetObjectId, HummockResult, SstableBuilderOptions, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
@@ -76,10 +75,10 @@ use crate::hummock::{
 pub struct Compactor {
     /// The context of the compactor.
     context: Arc<CompactorContext>,
+    sstable_object_id_manager: Box<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
-    is_shared_compactor: bool,
 }
 
 pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
@@ -90,14 +89,14 @@ impl Compactor {
         context: Arc<CompactorContext>,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
-        is_shared_compactor: bool,
+        sstable_object_id_manager: Box<dyn GetObjectId>,
     ) -> Self {
         Self {
             context,
             options,
             task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
-            is_shared_compactor,
+            sstable_object_id_manager,
         }
     }
 
@@ -128,8 +127,6 @@ impl Compactor {
                 .start_timer()
         };
 
-        let sstable_object_id_manager = self.get_object_id_manager();
-
         let (split_table_outputs, table_stats_map) = if self
             .context
             .sstable_store
@@ -145,7 +142,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    sstable_object_id_manager,
+                    self.sstable_object_id_manager.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -157,7 +154,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    sstable_object_id_manager,
+                    self.sstable_object_id_manager.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -172,7 +169,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    sstable_object_id_manager,
+                    self.sstable_object_id_manager.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -184,7 +181,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    sstable_object_id_manager,
+                    self.sstable_object_id_manager.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -255,14 +252,6 @@ impl Compactor {
             );
         }
         Ok((ssts, table_stats_map))
-    }
-
-    fn get_object_id_manager(&self) -> Box<dyn GetObjectId> {
-        // todo(wcy-fdu): handle shared case
-        match self.is_shared_compactor {
-            true => Box::new(SharedComapctorObjectIdManager::new(VecDeque::new())),
-            false => Box::new(self.context.sstable_object_id_manager.clone()),
-        }
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(

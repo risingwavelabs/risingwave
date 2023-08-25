@@ -45,7 +45,7 @@ use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-    HummockResult, MonotonicDeleteEvent, SstableBuilderOptions, SstableStoreRef,
+    GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -58,7 +58,12 @@ pub struct CompactorRunner {
 }
 
 impl CompactorRunner {
-    pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
+    pub fn new(
+        split_index: usize,
+        context: Arc<CompactorContext>,
+        task: CompactTask,
+        sstable_object_id_manager: Box<dyn GetObjectId>,
+    ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -98,7 +103,7 @@ impl CompactorRunner {
                 split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
             },
-            false,
+            sstable_object_id_manager,
         );
 
         Self {
@@ -458,8 +463,12 @@ pub async fn compact(
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let compactor_runner =
-            CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
+        let compactor_runner = CompactorRunner::new(
+            split_index,
+            compactor_context.clone(),
+            compact_task.clone(),
+            Box::new(context.sstable_object_id_manager.clone()),
+        );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
         let runner = async move {
