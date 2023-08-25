@@ -186,10 +186,10 @@ pub(crate) fn gen_create_index_plan(
         index_table_name.clone(),
         &index_columns_ordered_expr,
         &include_columns_expr,
-        // We use the whole index columns as distributed key by default if users
+        // We use the first index column as distributed key by default if users
         // haven't specify the distributed by columns.
         if distributed_columns_expr.is_empty() {
-            index_columns_ordered_expr.len()
+            1
         } else {
             distributed_columns_expr.len()
         },

@@ -112,8 +112,9 @@ macro_rules! commit_meta {
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
+use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use crate::manager::catalog::utils::{
@@ -1544,6 +1545,28 @@ where
             Some(source),
         )
         .await
+    }
+
+    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        let source_id = source.get_id();
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        let original_source = database_core.sources.get(&source_id).unwrap().clone();
+        if original_source.get_version() + 1 != source.get_version() {
+            bail!("source version is stale");
+        }
+
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        sources.insert(source_id, source.clone());
+        commit_meta!(self, sources)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Source(source))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn alter_index_name(
