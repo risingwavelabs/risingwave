@@ -628,13 +628,10 @@ pub fn start_shared_compactor(
     compact_task: CompactTask,
     id_to_table: HashMap<u32, Table>,
     output_ids: Vec<u64>,
-    cpu_core_num: u32,
     running_task_count: Arc<AtomicU32>,
     compactor_metrics: Arc<CompactorMetrics>,
-
     sstable_store: SstableStoreRef,
     parallel_compact_size_mb: u32,
-
     worker_num: u64,
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
@@ -642,8 +639,6 @@ pub fn start_shared_compactor(
     object_store_recv_buffer_size: usize,
     sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
-    compact_iter_recreate_timeout_ms: u64,
-    is_share_buffer_compact: bool,
     storage_opts: Arc<StorageOpts>,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -685,8 +680,6 @@ pub fn start_shared_compactor(
             memory_limiter,
             sstable_object_id_manager,
             block_size_kb,
-            compact_iter_recreate_timeout_ms,
-            is_share_buffer_compact,
             object_store_recv_buffer_size,
             sstable_size_mb,
             task_progress_manager,

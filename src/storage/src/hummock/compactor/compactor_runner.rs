@@ -140,7 +140,6 @@ impl CompactorRunner {
         memory_limiter: Arc<MemoryLimiter>,
         storage_opts: Arc<StorageOpts>,
         sstable_object_id_manager: Box<dyn GetObjectId>,
-        compact_iter_recreate_timeout_ms: u64,
         task: CompactTask,
     ) -> Self {
         let mut options: SstableBuilderOptions = storage_opts.as_ref().into();
@@ -1061,23 +1060,17 @@ pub async fn shared_compact(
     sstable_store: SstableStoreRef,
     parallel_compact_size_mb: u32,
     filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
-
     worker_num: u64,
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     sstable_object_id_manager: SharedComapctorObjectIdManager,
     block_size_kb: u32,
-    compact_iter_recreate_timeout_ms: u64,
-    is_share_buffer_compact: bool,
-
     object_store_recv_buffer_size: usize,
     sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
     storage_opts: Arc<StorageOpts>,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
-
-
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
     let select_table_infos = compact_task
@@ -1277,39 +1270,41 @@ pub async fn shared_compact(
         let compactor_runner = CompactorRunner::new_with_parametric(
             split_index,
             compactor_metrics.clone(),
-            is_share_buffer_compact,
+            false,
             sstable_store.clone(),
             memory_limiter.clone(),
             storage_opts.clone(),
             Box::new(sstable_object_id_manager.clone()),
-            compact_iter_recreate_timeout_ms,
             compact_task.clone(),
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
+        let mut abort_handles = vec![];
+        let mut compaction_futures = vec![];
         let runner = async move {
             compactor_runner
                 .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                 .await
         };
 
-        // let traced = match await_tree_reg.as_ref() {
-        //     None => runner.right_future(),
-        //     Some(await_tree_reg) => await_tree_reg
-        //         .write()
-        //         .register(
-        //             format!("{}-{}", compact_task.task_id, split_index),
-        //             format!(
-        //                 "Compaction Task {} Split {} ",
-        //                 compact_task.task_id, split_index
-        //             ),
-        //         )
-        //         .instrument(runner)
-        //         .left_future(),
-        // };
-        // let handle = tokio::spawn(runner.right_future());
-        // abort_handles.push(handle.abort_handle());
-        // compaction_futures.push(handle);
+        let traced = match await_tree_reg.as_ref() {
+            None => runner.right_future(),
+            Some(await_tree_reg) => await_tree_reg
+                .write()
+                .register(
+                    format!("{}-{}", compact_task.task_id, split_index),
+                    format!(
+                        "Compaction Task {} Split {} ",
+                        compact_task.task_id, split_index
+                    ),
+                )
+                .instrument(runner)
+                .left_future(),
+        };
+        let handle = tokio::spawn(traced);
+
+        abort_handles.push(handle.abort_handle());
+        compaction_futures.push(handle);
     }
 
     // let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);

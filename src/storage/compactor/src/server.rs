@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -33,6 +34,7 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::parse_remote_object_store_with_config;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
+use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{
@@ -315,11 +317,6 @@ pub async fn shared_compactor_serve(
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
-    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
-        meta_client.clone(),
-        hummock_metrics.clone(),
-    ));
-
     let state_store_url = system_params_reader.state_store();
 
     let storage_memory_config = extract_storage_memory_config(&config);
@@ -404,10 +401,7 @@ pub async fn shared_compactor_serve(
     ));
 
     monitor_cache(memory_collector, &registry).unwrap();
-    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
-        hummock_meta_client.clone(),
-        storage_opts.sstable_id_remote_fetch_number,
-    ));
+
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => await_tree::ConfigBuilder::default()
@@ -417,29 +411,50 @@ pub async fn shared_compactor_serve(
     };
     let await_tree_reg =
         await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
-    let compactor_context = Arc::new(CompactorContext {
-        storage_opts,
-        hummock_meta_client: hummock_meta_client.clone(),
-        sstable_store: sstable_store.clone(),
-        compactor_metrics,
-        is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
-        )),
-        filter_key_extractor_manager: FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(filter_key_extractor_manager.clone()),
-        memory_limiter,
-        sstable_object_id_manager: sstable_object_id_manager.clone(),
-        task_progress_manager: Default::default(),
-        await_tree_reg: await_tree_reg.clone(),
-        running_task_count: Arc::new(AtomicU32::new(0)),
-    });
+
+    let output_ids = vec![];
+    let id_to_table = HashMap::new();
+    let compact_task = CompactTask {
+        input_ssts: todo!(),
+        splits: todo!(),
+        watermark: todo!(),
+        sorted_output_ssts: todo!(),
+        task_id: todo!(),
+        target_level: todo!(),
+        gc_delete_keys: todo!(),
+        base_level: todo!(),
+        task_status: todo!(),
+        compaction_group_id: todo!(),
+        existing_table_ids: todo!(),
+        compression_algorithm: todo!(),
+        target_file_size: todo!(),
+        compaction_filter_mask: todo!(),
+        table_options: todo!(),
+        current_epoch_time: todo!(),
+        target_sub_level_id: todo!(),
+        task_type: todo!(),
+        split_by_state_table: todo!(),
+        split_weight_by_vnode: todo!(),
+    };
     let mut sub_tasks = vec![
-        MetaClient::start_heartbeat_loop(
-            meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            vec![sstable_object_id_manager],
+        risingwave_storage::hummock::compactor::start_shared_compactor(
+            compact_task,
+            id_to_table,
+            output_ids,
+            Arc::new(AtomicU32::new(0)),
+            compactor_metrics.clone(),
+            sstable_store.clone(),
+            0,
+            0,
+            0,
+            memory_limiter,
+            0,
+            0,
+            0,
+            Default::default(),
+            storage_opts,
+            await_tree_reg.clone(),
         ),
-        risingwave_storage::hummock::compactor::start_compactor(compactor_context.clone()),
     ];
 
     let telemetry_manager = TelemetryManager::new(
