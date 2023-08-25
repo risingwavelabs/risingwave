@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -85,16 +86,26 @@ where
         request: Request<CancelCreatingJobsRequest>,
     ) -> TonicResponse<CancelCreatingJobsResponse> {
         let req = request.into_inner();
-        let table_ids = self
-            .catalog_manager
-            .find_creating_streaming_job_ids(req.infos)
-            .await;
-        if !table_ids.is_empty() {
-            self.stream_manager
-                .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
-                .await;
-        }
-        Ok(Response::new(CancelCreatingJobsResponse { status: None }))
+        let table_ids = match req.jobs.unwrap() {
+            Jobs::Infos(infos) => {
+                self.catalog_manager
+                    .find_creating_streaming_job_ids(infos.infos)
+                    .await
+            }
+            Jobs::Ids(jobs) => jobs.job_ids,
+        };
+
+        let canceled_jobs = self
+            .stream_manager
+            .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+            .await
+            .into_iter()
+            .map(|id| id.table_id)
+            .collect_vec();
+        Ok(Response::new(CancelCreatingJobsResponse {
+            status: None,
+            canceled_jobs,
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

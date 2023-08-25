@@ -112,8 +112,9 @@ macro_rules! commit_meta {
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
+use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use crate::manager::catalog::utils::{

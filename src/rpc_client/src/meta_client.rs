@@ -55,6 +55,7 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
+use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
@@ -695,10 +696,10 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    pub async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
-        let request = CancelCreatingJobsRequest { infos };
-        let _ = self.inner.cancel_creating_jobs(request).await?;
-        Ok(())
+    pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
+        let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
+        let resp = self.inner.cancel_creating_jobs(request).await?;
+        Ok(resp.canceled_jobs)
     }
 
     pub async fn list_table_fragments(
