@@ -448,7 +448,8 @@ pub async fn compact(
     }
 
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
+    let mut compaction_futures = vec![];
+    let mut abort_handles = vec![];
     let mut task_status = TaskStatus::Success;
     // skip sst related to non-existent able_id to reduce io
     let sstable_infos = compact_task
@@ -500,8 +501,7 @@ pub async fn compact(
     let parallelism = compact_task.splits.len();
     assert_ne!(parallelism, 0, "splits cannot be empty");
     let mut output_ssts = Vec::with_capacity(parallelism);
-    let mut compaction_futures = vec![];
-    let mut abort_handles = vec![];
+
     let task_progress_guard =
         TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
     let delete_range_agg = match CompactorRunner::build_delete_range_iter(
@@ -1056,7 +1056,7 @@ mod tests {
 pub async fn shared_compact(
     compactor_metrics: Arc<CompactorMetrics>,
     mut compact_task: CompactTask,
-    shutdown_rx: Receiver<()>,
+    mut shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
     parallel_compact_size_mb: u32,
     filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
@@ -1208,8 +1208,8 @@ pub async fn shared_compact(
     let parallelism = compact_task.splits.len();
     assert_ne!(parallelism, 0, "splits cannot be empty");
     let mut output_ssts = Vec::with_capacity(parallelism);
-    // let mut compaction_futures = vec![];
-    // let mut abort_handles = vec![];
+    let mut compaction_futures = vec![];
+    let mut abort_handles = vec![];
     let task_progress_guard = TaskProgressGuard::new(compact_task.task_id, task_progress_manager);
     let delete_range_agg = match CompactorRunner::build_delete_range_iter(
         &sstable_infos,
@@ -1279,8 +1279,6 @@ pub async fn shared_compact(
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
-        let mut abort_handles = vec![];
-        let mut compaction_futures = vec![];
         let runner = async move {
             compactor_runner
                 .run(filter, multi_filter_key_extractor, del_agg, task_progress)
@@ -1307,49 +1305,49 @@ pub async fn shared_compact(
         compaction_futures.push(handle);
     }
 
-    // let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
-    // loop {
-    //     tokio::select! {
-    //         _ = &mut shutdown_rx => {
-    //             tracing::warn!("Compaction task cancelled externally:\n{}",
-    // compact_task_to_string(&compact_task));             task_status =
-    // TaskStatus::ManualCanceled;             break;
-    //         }
-    //         future_result = buffered.next() => {
-    //             match future_result {
-    //                 Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
-    //                     output_ssts.push((split_index, ssts, compact_stat));
-    //                 }
-    //                 Some(Ok(Err(e))) => {
-    //                     task_status = TaskStatus::ExecuteFailed;
-    //                     tracing::warn!(
-    //                         "Compaction task {} failed with error: {:#?}",
-    //                         compact_task.task_id,
-    //                         e
-    //                     );
-    //                     break;
-    //                 }
-    //                 Some(Err(e)) => {
-    //                     task_status = TaskStatus::JoinHandleFailed;
-    //                     tracing::warn!(
-    //                         "Compaction task {} failed with join handle error: {:#?}",
-    //                         compact_task.task_id,
-    //                         e
-    //                     );
-    //                     break;
-    //                 }
-    //                 None => break,
-    //             }
-    //         }
-    //     }
-    // }
+    let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
+    loop {
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::warn!("Compaction task cancelled externally:\n{}",
+    compact_task_to_string(&compact_task));             task_status =
+    TaskStatus::ManualCanceled;             break;
+            }
+            future_result = buffered.next() => {
+                match future_result {
+                    Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
+                        output_ssts.push((split_index, ssts, compact_stat));
+                    }
+                    Some(Ok(Err(e))) => {
+                        task_status = TaskStatus::ExecuteFailed;
+                        tracing::warn!(
+                            "Compaction task {} failed with error: {:#?}",
+                            compact_task.task_id,
+                            e
+                        );
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        task_status = TaskStatus::JoinHandleFailed;
+                        tracing::warn!(
+                            "Compaction task {} failed with join handle error: {:#?}",
+                            compact_task.task_id,
+                            e
+                        );
+                        break;
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
 
-    // drop(memory_detector);
+    drop(memory_detector);
 
     if task_status != TaskStatus::Success {
-        // for abort_handle in abort_handles {
-        //     abort_handle.abort();
-        // }
+        for abort_handle in abort_handles {
+            abort_handle.abort();
+        }
         output_ssts.clear();
     }
     // Sort by split/key range index.
