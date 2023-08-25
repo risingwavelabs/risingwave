@@ -67,12 +67,12 @@ if [[ "$mode" == "standalone" ]]; then
   INSERT INTO t VALUES (5);
   flush;"
 
-  EXPECTED=$(run_sql "SELECT * FROM t;")
+  EXPECTED=$(run_sql "SELECT * FROM t ORDER BY v1;")
   echo -e "Expected:\n$EXPECTED"
 
   restart_standalone
 
-  ACTUAL=$(run_sql "SELECT * FROM t;")
+  ACTUAL=$(run_sql "SELECT * FROM t ORDER BY v1;")
   echo -e "Expected:\n$ACTUAL"
 
   if [[ "$EXPECTED" != "$ACTUAL" ]]; then
