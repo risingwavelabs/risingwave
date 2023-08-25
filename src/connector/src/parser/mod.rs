@@ -557,7 +557,9 @@ impl AccessBuilderImpl {
             EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
             }
-            EncodingProperties::Json(config) => AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?),
+            EncodingProperties::Json(config) => {
+                AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?)
+            }
             _ => unreachable!(),
         };
         Ok(accessor)
@@ -623,8 +625,8 @@ impl ByteStreamSourceParserImpl {
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
             }
-            (ProtocolProperties::Canal, EncodingProperties::Json(_)) => {
-                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
+            (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
+                CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)
             }
             (ProtocolProperties::Native, _) => unreachable!("Native parser should not be created"),
             (ProtocolProperties::Upsert, _) => {
@@ -890,12 +892,13 @@ impl SpecificParserConfig {
                 SourceFormat::Plain
                 | SourceFormat::Debezium
                 | SourceFormat::Maxwell
+                | SourceFormat::Canal
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
             }),
-            (SourceFormat::DebeziumMongo | SourceFormat::Canal, SourceEncode::Json) => {
+            (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 EncodingProperties::Json(JsonProperties {
                     use_schema_registry: false,
                 })
