@@ -266,6 +266,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
+            if value.is_delete() {
+                self.stale_key_count += 1;
+            }
             let table_id = full_key.user_key.table_id.table_id();
             is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
             if is_new_table {
