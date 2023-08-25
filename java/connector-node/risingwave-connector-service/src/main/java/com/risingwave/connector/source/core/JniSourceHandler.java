@@ -45,23 +45,10 @@ public class JniSourceHandler {
         public void run() {
             while (runner.isRunning()) {
                 try {
-                    LOG.info("Engine#{}: loop step 1 ", config.getSourceId());
-                    //                    if (Context.current().isCancelled()) {
-                    //                        LOG.info(
-                    //                                "Engine#{}: Connection broken detected, stop
-                    // the engine",
-                    //                                config.getSourceId());
-                    //                        runner.stop();
-                    //                        return;
-                    //                    }
-
-                    LOG.info("Engine#{}: loop step 2 ", config.getSourceId());
-
                     // check whether the send queue has room for new messages
                     // Thread will block on the channel to get output from engine
                     var resp =
                             runner.getEngine().getOutputChannel().poll(500, TimeUnit.MILLISECONDS);
-                    LOG.info("Engine#{}: loop step 3 ", config.getSourceId());
                     if (resp != null) {
                         ConnectorNodeMetrics.incSourceRowsReceived(
                                 config.getSourceType().toString(),
@@ -75,8 +62,6 @@ public class JniSourceHandler {
                         Binding.sendMsgToChannel(channelPtr, resp);
                         Thread.sleep(10000);
                     }
-
-                    LOG.info("Engine#{}: loop step 4 ", config.getSourceId());
                 } catch (Throwable e) {
                     LOG.error("Poll engine output channel fail. ", e);
                 }

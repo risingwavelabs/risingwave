@@ -1,16 +1,14 @@
 use core::option::Option::Some;
 use core::result::Result::{Err, Ok};
-use std::collections::HashMap;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, LazyLock, RwLock};
-use std::sync::atomic::AtomicI32;
+use std::sync::{Arc, LazyLock};
 use jni::{InitArgsBuilder, JavaVM, JNIVersion};
-use tokio::sync::mpsc::{Sender, UnboundedSender};
+use tokio::sync::mpsc::Sender;
 
 pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
-    let dir_path = "/Users/dylan/Desktop/workspace/risingwave/.risingwave/bin/connector-node/libs/";
+    let dir_path = ".risingwave/bin/connector-node/libs/";
 
     let dir = Path::new(dir_path);
 

@@ -12,24 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::fs;
-use std::mem::forget;
-use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock, RwLock};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use jni::{InitArgsBuilder, JavaVM, JNIVersion};
 use jni::objects::{JObject, JValue};
-use jni::sys::jint;
 use tokio::sync::mpsc;
-use tokio::time::sleep;
 use risingwave_common::jvm_runtime::{JVM, MyPtr};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
@@ -208,9 +198,6 @@ impl CdcSplitReader {
 
             let source_id_arg = JValue::from(self.source_id as i64);
 
-
-            let source_type = env.find_class("com/risingwave/connector/api/source/SourceTypeE").unwrap();
-            let string_class = env.find_class("java/lang/String").unwrap();
             let start_offset = match self.start_offset {
                 Some(start_offset) => {
                     let start_offset = env.new_string(start_offset).unwrap();
@@ -221,14 +208,12 @@ impl CdcSplitReader {
                 }
             };
 
-            let mut user_prop = properties;
-
             let hashmap_class = "java/util/HashMap";
             let hashmap_constructor_signature = "()V";
             let hashmap_put_signature = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
 
             let java_map = env.new_object(hashmap_class, hashmap_constructor_signature, &[]).unwrap();
-            for (key, value) in user_prop.iter() {
+            for (key, value) in properties.iter() {
                 let key = env.new_string(key.to_string()).unwrap();
                 let value = env.new_string(value.to_string()).unwrap();
                 let args = [
@@ -249,22 +234,7 @@ impl CdcSplitReader {
                 "startJniSourceHandler",
                 "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZJ)V",
                 &[(&st).into(), source_id_arg, (&start_offset).into(), JValue::Object(&java_map), snapshot_done, channel_ptr]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
-
-            println!("call jni cdc start source success");
         });
-
-        // loop {
-        //     let GetEventStreamResponse { events, .. } = rx.recv().unwrap();
-        //     println!("recieve events {:?}", events.len());
-        //     if events.is_empty() {
-        //         continue;
-        //     }
-        //     let mut msgs = Vec::with_capacity(events.len());
-        //     for event in events {
-        //         msgs.push(SourceMessage::from(event));
-        //     }
-        //     yield msgs;
-        // }
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
             println!("recieve events {:?}", events.len());

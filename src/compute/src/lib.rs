@@ -31,9 +31,7 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
-use std::collections::HashMap;
 use std::ffi::c_void;
-use std::fs;
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
@@ -191,12 +189,11 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::path::Path;
 use std::pin::Pin;
-use jni::{InitArgsBuilder, JavaVM, JNIEnv, JNIVersion, NativeMethod};
+use jni::{JNIEnv, NativeMethod};
 use jni::objects::{JClass, JObject, JString, JValue, JValueGen};
 use jni::strings::JNIString;
-use jni::sys::{jint, jlong, jobject};
+use jni::sys::{jint, jlong};
 use risingwave_common::jvm_runtime::{JVM, MyPtr};
 use risingwave_pb::connector_service::{CdcMessage, GetEventStreamResponse};
 
@@ -239,24 +236,6 @@ pub fn start(
             join_handle.await.unwrap();
         }
     })
-}
-
-fn rust_hashmap_to_java_hashmap<'a>(env: &'a mut JNIEnv, hashmap: &HashMap<&str, &str>) -> Result<JObject<'a>, String> {
-    let hashmap_class = "java/util/HashMap";
-    let hashmap_constructor_signature = "()V";
-    let hashmap_put_signature = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
-
-    let map = env.new_object(hashmap_class, hashmap_constructor_signature, &[]).unwrap();
-    for (key, value) in hashmap.iter() {
-        let key = env.new_string(*key).unwrap();
-        let value = env.new_string(*value).unwrap();
-        let args = [
-            JValue::Object(&key),
-            JValue::Object(&value),
-        ];
-        env.call_method(&map, "put", hashmap_put_signature, &args).unwrap();
-    }
-    Ok(map)
 }
 
 #[repr(C)]
@@ -364,21 +343,21 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
             _ => unreachable!()
         };
         let payload = env.call_method(&mut java_element, "getPayload", "()Ljava/lang/String;", &[]).unwrap();
-        let mut payload = match payload {
+        let payload = match payload {
             JValueGen::Object(obj) => obj,
             _ => unreachable!()
         };
         let payload: String = env.get_string(&JString::from(payload)).unwrap().into();
 
         let partition = env.call_method(&mut java_element, "getPartition", "()Ljava/lang/String;", &[]).unwrap();
-        let mut partition = match partition {
+        let partition = match partition {
             JValueGen::Object(obj) => obj,
             _ => unreachable!()
         };
         let partition: String = env.get_string(&JString::from(partition)).unwrap().into();
 
         let offset = env.call_method(&mut java_element, "getOffset", "()Ljava/lang/String;", &[]).unwrap();
-        let mut offset = match offset {
+        let offset = match offset {
             JValueGen::Object(obj) => obj,
             _ => unreachable!()
         };

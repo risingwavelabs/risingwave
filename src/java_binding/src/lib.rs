@@ -34,7 +34,7 @@ use jni::objects::{
     JValue, JValueGen, JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
-use jni::sys::{jboolean, jbyte, jdouble, jfloat, jint, jlong, jobject, jshort, jsize, jvalue};
+use jni::sys::{jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
@@ -46,7 +46,6 @@ use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::UnboundedSender;
 use risingwave_common::jvm_runtime::MyPtr;
 use risingwave_pb::connector_service::{CdcMessage, GetEventStreamResponse};
 
@@ -849,21 +848,21 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
             _ => unreachable!()
         };
         let payload = env.call_method(&mut java_element, "getPayload", "()Ljava/lang/String;", &[]).unwrap();
-        let mut payload = match payload {
+        let payload = match payload {
             JValueGen::Object(obj) => obj,
             _ => unreachable!()
         };
         let payload: String = env.get_string(&JString::from(payload)).unwrap().into();
 
         let partition = env.call_method(&mut java_element, "getPartition", "()Ljava/lang/String;", &[]).unwrap();
-        let mut partition = match partition {
+        let partition = match partition {
             JValueGen::Object(obj) => obj,
             _ => unreachable!()
         };
         let partition: String = env.get_string(&JString::from(partition)).unwrap().into();
 
         let offset = env.call_method(&mut java_element, "getOffset", "()Ljava/lang/String;", &[]).unwrap();
-        let mut offset = match offset {
+        let offset = match offset {
             JValueGen::Object(obj) => obj,
             _ => unreachable!()
         };
