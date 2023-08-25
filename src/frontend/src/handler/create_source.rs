@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-use futures::try_join;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -87,9 +86,7 @@ async fn extract_json_table_schema(
     }
 }
 
-fn json_schema_infer_use_schema_registry(
-    schema_config: &Option<(AstString, bool)>,
-) -> bool {
+fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool)>) -> bool {
     match schema_config {
         None => false,
         Some((_, use_registry)) => *use_registry,
@@ -563,7 +560,7 @@ pub(crate) async fn try_bind_columns_from_source(
             }
         }
 
-        (Format::Debezium, Encode::Json) => {            
+        (Format::Debezium, Encode::Json) => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with format debezium."
