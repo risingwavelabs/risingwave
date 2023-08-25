@@ -12,34 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericCounterVec};
+use prometheus::core::AtomicU64;
 use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram,
-    HistogramVec, Registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
+
+use crate::monitor::relabeled_metric::{RelabeledGenericCounterVec, RelabeledHistogramVec};
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug)]
 pub struct MonitoredStorageMetrics {
-    pub get_duration: HistogramVec,
-    pub get_key_size: HistogramVec,
-    pub get_value_size: HistogramVec,
+    pub get_duration: RelabeledHistogramVec,
+    pub get_key_size: RelabeledHistogramVec,
+    pub get_value_size: RelabeledHistogramVec,
 
-    pub iter_size: HistogramVec,
-    pub iter_item: HistogramVec,
-    pub iter_init_duration: HistogramVec,
-    pub iter_scan_duration: HistogramVec,
-    pub may_exist_duration: HistogramVec,
+    pub iter_size: RelabeledHistogramVec,
+    pub iter_item: RelabeledHistogramVec,
+    pub iter_init_duration: RelabeledHistogramVec,
+    pub iter_scan_duration: RelabeledHistogramVec,
+    pub may_exist_duration: RelabeledHistogramVec,
 
-    pub iter_in_process_counts: GenericCounterVec<AtomicU64>,
+    pub iter_in_process_counts: RelabeledGenericCounterVec<AtomicU64>,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
 }
 
 impl MonitoredStorageMetrics {
-    pub fn new(registry: Registry) -> Self {
+    pub fn new(registry: Registry, storage_metric_level: u8) -> Self {
         // ----- get -----
         let opts = histogram_opts!(
             "state_store_get_key_size",
@@ -48,6 +49,8 @@ impl MonitoredStorageMetrics {
         );
         let get_key_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let get_key_size =
+            RelabeledHistogramVec::with_default_metric_level(get_key_size, storage_metric_level);
 
         let opts = histogram_opts!(
             "state_store_get_value_size",
@@ -56,6 +59,8 @@ impl MonitoredStorageMetrics {
         );
         let get_value_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let get_value_size =
+            RelabeledHistogramVec::with_default_metric_level(get_value_size, storage_metric_level);
 
         let mut buckets = exponential_buckets(0.000004, 2.0, 4).unwrap(); // 4 ~ 32us
         buckets.extend(linear_buckets(0.00006, 0.00004, 5).unwrap()); // 60 ~ 220us.
@@ -71,6 +76,8 @@ impl MonitoredStorageMetrics {
         let get_duration =
             register_histogram_vec_with_registry!(get_duration_opts, &["table_id"], registry)
                 .unwrap();
+        let get_duration =
+            RelabeledHistogramVec::with_metric_level(1, get_duration, storage_metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_size",
@@ -79,6 +86,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_size =
+            RelabeledHistogramVec::with_default_metric_level(iter_size, storage_metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_item",
@@ -87,6 +96,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_item =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_item =
+            RelabeledHistogramVec::with_default_metric_level(iter_item, storage_metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_init_duration",
@@ -95,6 +106,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_init_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_init_duration =
+            RelabeledHistogramVec::with_metric_level(1, iter_init_duration, storage_metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
@@ -103,6 +116,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_scan_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_scan_duration =
+            RelabeledHistogramVec::with_metric_level(1, iter_scan_duration, storage_metric_level);
 
         let iter_in_process_counts = register_int_counter_vec_with_registry!(
             "state_store_iter_in_process_counts",
@@ -111,6 +126,10 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
+        let iter_in_process_counts = RelabeledGenericCounterVec::with_default_metric_level(
+            iter_in_process_counts,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_may_exist_duration",
@@ -119,6 +138,10 @@ impl MonitoredStorageMetrics {
         );
         let may_exist_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let may_exist_duration = RelabeledHistogramVec::with_default_metric_level(
+            may_exist_duration,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_sync_duration",
@@ -151,6 +174,6 @@ impl MonitoredStorageMetrics {
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        Self::new(Registry::new(), 0)
     }
 }

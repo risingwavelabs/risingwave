@@ -525,9 +525,11 @@ pub struct StorageConfig {
     pub compactor_max_sst_key_count: u64,
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
-
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+
+    #[serde(default = "default::storage::storage_metric_level")]
+    pub storage_metric_level: u8,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -949,6 +951,10 @@ pub mod default {
 
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
+        }
+
+        pub fn storage_metric_level() -> u8 {
+            4
         }
     }
 

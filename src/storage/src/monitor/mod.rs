@@ -30,6 +30,8 @@ mod local_metrics;
 pub use local_metrics::*;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
+mod relabeled_metric;
+
 // include only when hummock trace enabled
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 mod traced_store;
