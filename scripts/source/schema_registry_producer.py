@@ -59,11 +59,6 @@ if __name__ == '__main__':
     producer = Producer(kafka_conf)
     key_serializer = None
     value_serializer = None
-    serializer = None
-    if type == 'avro':
-        serializer = AvroSerializer
-    else:
-        serializer = JSONSerializer
     with open(file) as file:
         for (i, line) in enumerate(file):
             if i == 0:
