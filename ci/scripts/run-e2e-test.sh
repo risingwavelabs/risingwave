@@ -206,6 +206,8 @@ if [[ "$mode" == "standalone" ]]; then
   if [[ "$EXPECTED" != "$ACTUAL" ]]; then
     echo "ERROR: Expected did not match Actual."
     exit 1
+  else
+    echo "PASSED"
   fi
 
   echo "--- Kill cluster"
