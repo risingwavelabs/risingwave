@@ -342,6 +342,20 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
+  - label: "end-to-end clickhouse sink test (release mode)"
+    command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
   - label: "e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
     depends_on:
