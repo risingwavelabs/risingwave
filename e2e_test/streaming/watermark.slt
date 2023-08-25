@@ -31,3 +31,10 @@ drop materialized view mv;
 
 statement ok
 drop table t;
+
+# create a watermark with different return type from column
+statement error QueryError: Bind error: The return value type of the watermark expression must be identical to the watermark column data type. Current data type of watermark return value: `timestamp with time zone`, column `integer`
+CREATE TABLE t (
+    v INT,
+    WATERMARK FOR v AS to_timestamp(v) - INTERVAL '5' SECOND
+);
