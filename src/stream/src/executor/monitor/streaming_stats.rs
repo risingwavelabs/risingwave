@@ -49,7 +49,8 @@ pub struct StreamingMetrics {
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
     // Streaming Join
-    pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
+    pub join_lookup_operator_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub join_lookup_memory_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
@@ -304,9 +305,17 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_lookup_miss_count = register_int_counter_vec_with_registry!(
-            "stream_join_lookup_miss_count",
-            "Join executor lookup miss duration",
+        let join_lookup_operator_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_join_lookup_operator_cache_miss_count",
+            "Join executor lookup operator cache miss duration",
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let join_lookup_memory_miss_count = register_int_counter_vec_with_registry!(
+            "stream_join_lookup_memory_miss_count",
+            "Join executor lookup memory miss duration",
             &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
@@ -711,7 +720,8 @@ impl StreamingMetrics {
             source_row_per_barrier,
             source_split_change_count,
             exchange_frag_recv_size,
-            join_lookup_miss_count,
+            join_lookup_operator_cache_miss_count,
+            join_lookup_memory_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,

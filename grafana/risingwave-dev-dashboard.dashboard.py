@@ -963,11 +963,15 @@ def section_streaming_actors(outer_panels):
                 ),
                 panels.timeseries_actor_ops(
                     "Join Executor Cache",
-                    "",
+                    "Operator Cache refers to the cache that belongs to a specific join operator. Memory Cache refers to the sum of operator cache and block cache.",
                     [
                         panels.target(
-                            f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
+                            f"rate({metric('stream_join_lookup_operator_cache_miss_count')}[$__rate_interval])",
+                            "operator cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_lookup_memory_miss_count')}[$__rate_interval])",
+                            "memory cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
@@ -1009,8 +1013,8 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
-                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                            f"(sum(rate({metric('stream_join_lookup_operator_cache_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            "join executor operator cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
 
                         panels.target(

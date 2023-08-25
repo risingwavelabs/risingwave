@@ -164,10 +164,12 @@ pub struct JoinHashMapMetrics {
     join_table_id: String,
     degree_table_id: String,
     side: &'static str,
-    /// How many times have we hit the cache of join executor
-    lookup_miss_count: usize,
+    /// How many times have we missed the cache of join executor
+    lookup_operator_cache_miss_count: usize,
+    /// How many times have we missed the all the caches in memory
+    lookup_memory_miss_count: usize,
     total_lookup_count: usize,
-    /// How many times have we miss the cache when insert row
+    /// How many times have we missed the cache when insert row
     insert_cache_miss_count: usize,
 }
 
@@ -185,7 +187,8 @@ impl JoinHashMapMetrics {
             join_table_id: join_table_id.to_string(),
             degree_table_id: degree_table_id.to_string(),
             side,
-            lookup_miss_count: 0,
+            lookup_operator_cache_miss_count: 0,
+            lookup_memory_miss_count: 0,
             total_lookup_count: 0,
             insert_cache_miss_count: 0,
         }
@@ -193,14 +196,23 @@ impl JoinHashMapMetrics {
 
     pub fn flush(&mut self) {
         self.metrics
-            .join_lookup_miss_count
+            .join_lookup_operator_cache_miss_count
             .with_label_values(&[
                 (self.side),
                 &self.join_table_id,
                 &self.degree_table_id,
                 &self.actor_id,
             ])
-            .inc_by(self.lookup_miss_count as u64);
+            .inc_by(self.lookup_operator_cache_miss_count as u64);
+        self.metrics
+            .join_lookup_memory_miss_count
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
+            .inc_by(self.lookup_memory_miss_count as u64);
         self.metrics
             .join_total_lookup_count
             .with_label_values(&[
@@ -220,7 +232,8 @@ impl JoinHashMapMetrics {
             ])
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
-        self.lookup_miss_count = 0;
+        self.lookup_operator_cache_miss_count = 0;
+        self.lookup_memory_miss_count = 0;
         self.insert_cache_miss_count = 0;
     }
 }
@@ -388,8 +401,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let mut state = self.inner.peek_mut(key).unwrap();
             state.take()
         } else {
-            self.metrics.lookup_miss_count += 1;
-            self.fetch_cached_state(key).await?.into()
+            self.metrics.lookup_operator_cache_miss_count += 1;
+            let join_entry_state = self.fetch_cached_state(key).await?;
+            if !join_entry_state.is_empty() {
+                self.metrics.lookup_memory_miss_count += 1;
+            }
+            join_entry_state.into()
         };
         Ok(state)
     }
