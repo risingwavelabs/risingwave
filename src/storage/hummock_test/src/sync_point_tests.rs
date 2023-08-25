@@ -251,13 +251,8 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (mut result_task, task_stats) = compact(
-        compact_ctx.clone(),
-        compact_task.clone(),
-        rx,
-        Box::new(compact_ctx.filter_key_extractor_manager.clone()),
-    )
-    .await;
+    let (mut result_task, task_stats) =
+        compact(compact_ctx.clone(), compact_task.clone(), rx).await;
 
     hummock_manager_ref
         .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))

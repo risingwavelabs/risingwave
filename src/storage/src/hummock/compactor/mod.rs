@@ -59,9 +59,7 @@ pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, Tas
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
-use crate::filter_key_extractor::{
-    AcquireFilterKeyExtractor, FilterKeyExtractorImpl, SharedFilterKeyExtractor,
-};
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
@@ -299,10 +297,7 @@ impl Compactor {
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
-pub fn start_compactor(
-    compactor_context: Arc<CompactorContext>,
-    is_shared_compact: bool,
-) -> (JoinHandle<()>, Sender<()>) {
+pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<()>, Sender<()>) {
     let hummock_meta_client = compactor_context.hummock_meta_client.clone();
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -508,12 +503,7 @@ pub fn start_compactor(
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats)=  match is_shared_compact{
-                                            true => {
-                                                compactor_runner::compact(context.clone(), compact_task, rx, Box::new(SharedFilterKeyExtractor::new(HashMap::new()))).await
-                                            },
-                                            false =>   compactor_runner::compact(context.clone(), compact_task, rx, Box::new(context.filter_key_extractor_manager.clone())).await,
-                                        };
+                                        let (compact_task, table_stats)=  compactor_runner::compact(context.clone(), compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
                                         running_task_count.fetch_sub(1, Ordering::SeqCst);
 

@@ -32,7 +32,7 @@ use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::{AcquireFilterKeyExtractor, FilterKeyExtractorImpl};
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
@@ -232,7 +232,6 @@ pub async fn compact(
     compactor_context: Arc<CompactorContext>,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    filter_key_extractor_manager: Box<dyn AcquireFilterKeyExtractor>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
     // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
@@ -328,7 +327,8 @@ pub async fn compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match filter_key_extractor_manager
+    let multi_filter_key_extractor = match compactor_context
+        .filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await
     {

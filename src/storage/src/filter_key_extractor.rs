@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use dyn_clone::DynClone;
-use futures::Future;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
@@ -390,24 +389,45 @@ impl AcquireFilterKeyExtractor for FilterKeyExtractorManagerRef {
         self.inner.acquire(table_id_set).await
     }
 }
+#[derive(Clone)]
+pub enum FilterKeyExtractorManagerFactory {
+    FilterKeyExtractorManagerRef(Arc<FilterKeyExtractorManager>),
+    ServerlessFilterKeyExtractorManager(FilterKeyExtractorBuilder),
+}
+
+impl FilterKeyExtractorManagerFactory {
+    pub async fn acquire(
+        &self,
+        table_id_set: HashSet<u32>,
+    ) -> HummockResult<FilterKeyExtractorImpl> {
+        match self {
+            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+                filter_key_exactor_manager,
+            ) => filter_key_exactor_manager.acquire(table_id_set).await,
+            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(shared_key_exactor) => {
+                shared_key_exactor.acquire(table_id_set).await
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
-pub struct SharedFilterKeyExtractor {
+pub struct FilterKeyExtractorBuilder {
     id_to_table: HashMap<u32, Table>,
 }
 
-impl SharedFilterKeyExtractor {
+impl FilterKeyExtractorBuilder {
     pub fn new(id_to_table: HashMap<u32, Table>) -> Self {
         Self { id_to_table }
     }
 }
 #[async_trait::async_trait]
-impl AcquireFilterKeyExtractor for SharedFilterKeyExtractor {
+impl AcquireFilterKeyExtractor for FilterKeyExtractorBuilder {
     async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         for table_id in table_id_set {
             if let Some(table) = self.id_to_table.get(&table_id) {
-                let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
+                let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(table));
                 multi_filter_key_extractor.register(table_id, key_extractor);
             }
         }
