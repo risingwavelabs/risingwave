@@ -404,9 +404,9 @@ impl FilterKeyExtractorManagerFactory {
             FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
                 filter_key_exactor_manager,
             ) => filter_key_exactor_manager.acquire(table_id_set).await,
-            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(shared_key_exactor) => {
-                shared_key_exactor.acquire(table_id_set).await
-            }
+            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
+                shared_key_exactor,
+            ) => shared_key_exactor.acquire(table_id_set).await,
         }
     }
 }
