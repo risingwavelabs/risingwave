@@ -56,12 +56,21 @@ impl Binder {
             self.push_lateral_context();
             let right = self.bind_table_with_joins(t.clone())?;
             self.pop_and_merge_lateral_context()?;
-            root = Relation::Join(Box::new(BoundJoin {
-                join_type: JoinType::Inner,
-                left: root,
-                right,
-                cond: ExprImpl::literal_bool(true),
-            }));
+            root = if let Relation::Subquery(subquery) = &right && subquery.lateral {
+                Relation::Apply(Box::new(BoundJoin {
+                    join_type: JoinType::Inner,
+                    left: root,
+                    right,
+                    cond: ExprImpl::literal_bool(true),
+                }))
+            } else {
+                Relation::Join(Box::new(BoundJoin {
+                    join_type: JoinType::Inner,
+                    left: root,
+                    right,
+                    cond: ExprImpl::literal_bool(true),
+                }))
+            }
         }
         Ok(Some(root))
     }
@@ -91,13 +100,30 @@ impl Binder {
                 right = self.bind_table_factor(join.relation.clone())?;
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
-            let join = BoundJoin {
-                join_type,
-                left: root,
-                right,
-                cond,
-            };
-            root = Relation::Join(Box::new(join));
+            root = if let Relation::Subquery(subquery) = &right && subquery.lateral {
+                match join_type {
+                    JoinType::Inner | JoinType::LeftOuter => {},
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_string())
+                            .into());
+
+                        }
+                }
+
+                Relation::Apply(Box::new(BoundJoin {
+                    join_type,
+                    left: root,
+                    right,
+                    cond,
+                }))
+            } else {
+                Relation::Join(Box::new(BoundJoin {
+                    join_type,
+                    left: root,
+                    right,
+                    cond,
+                }))
+            }
         }
 
         Ok(root)

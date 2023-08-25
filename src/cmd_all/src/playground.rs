@@ -25,28 +25,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::signal;
 
-pub enum RisingWaveService {
-    Compute(Vec<OsString>),
-    Meta(Vec<OsString>),
-    Frontend(Vec<OsString>),
-    Compactor(Vec<OsString>),
-    ConnectorNode(Vec<OsString>),
-}
-
-impl RisingWaveService {
-    /// Extend additional arguments to the service.
-    fn extend_args(&mut self, args: &[&str]) {
-        match self {
-            RisingWaveService::Compute(args0)
-            | RisingWaveService::Meta(args0)
-            | RisingWaveService::Frontend(args0)
-            | RisingWaveService::Compactor(args0)
-            | RisingWaveService::ConnectorNode(args0) => {
-                args0.extend(args.iter().map(|s| s.into()))
-            }
-        }
-    }
-}
+use crate::common::{osstrs as common_osstrs, RisingWaveService};
 
 const IDLE_EXIT_SECONDS: u64 = 1800;
 
@@ -63,6 +42,10 @@ max_heartbeat_interval_secs = 600",
     .expect("failed to write config file");
     file.into_temp_path()
 });
+
+fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
+    common_osstrs(s)
+}
 
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     let mut services = match profile {
@@ -168,10 +151,6 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
         })
     }
     (services, idle_exit)
-}
-
-fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
-    s.iter().map(OsString::from).collect()
 }
 
 #[derive(Debug, Clone, Parser)]

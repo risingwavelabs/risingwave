@@ -262,3 +262,25 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: test cardinality visitor with correlated filter
+  sql: |
+    CREATE TABLE t1(i INT);
+    CREATE TABLE t2(j INT);
+    select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
+  expected_outputs:
+    - optimizer_error
+
+- name: test grouping sets subquery 1
+  sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT i, (SELECT COUNT(*) FROM (SELECT i1.i FROM integers GROUP BY GROUPING SETS(i1.i)) tbl) AS j FROM integers i1 ORDER BY i;
+  expected_outputs:
+    - batch_plan
+- name: test expand operator subquery 1
+  sql: |
+    CREATE TABLE integers(i INTEGER, correlated_col int);
+    CREATE TABLE rows(k int, v int, correlated_col int);
+    select * from integers where 2 in (select count(distinct k) + count(distinct v) from rows where correlated_col = integers.correlated_col);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

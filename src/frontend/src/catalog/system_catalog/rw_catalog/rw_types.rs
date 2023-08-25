@@ -17,33 +17,26 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
+use risingwave_common::for_all_base_types;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-// TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
-pub const RW_TYPE_DATA: &[(i32, &str)] = &[
-    (16, "bool"),
-    (17, "bytea"),
-    (20, "int8"),
-    (21, "int2"),
-    (23, "int4"),
-    // Note: rw doesn't support `text` type, returning it is just a workaround to be compatible
-    // with PostgreSQL.
-    (25, "text"),
-    (700, "float4"),
-    (701, "float8"),
-    (1043, "varchar"),
-    (1082, "date"),
-    (1083, "time"),
-    (1114, "timestamp"),
-    (1184, "timestamptz"),
-    (1186, "interval"),
-    (1301, "rw_int256"),
-    (1700, "numeric"),
-    (3802, "jsonb"),
-];
+macro_rules! impl_pg_type_data {
+    ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $len:literal } )*) => {
+        &[
+            $(
+            ($oid, stringify!($name)),
+            )*
+            // Note: rw doesn't support `text` type, returning it is just a workaround to be compatible
+            // with PostgreSQL.
+            (25, "text"),
+            (1301, "rw_int256"),
+        ]
+    }
+}
+pub const RW_TYPE_DATA: &[(i32, &str)] = for_all_base_types! { impl_pg_type_data };
 
 /// `rw_types` stores all supported types in the database.
 pub static RW_TYPES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {

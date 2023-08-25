@@ -229,6 +229,19 @@ impl SessionTimezone {
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
+            // `to_char(input_timestamptz, format_string)`
+            // => `to_char(input_timestamptz, format_string, zone_string)`
+            ExprType::ToChar => {
+                if !(inputs.len() == 2
+                    && inputs[0].return_type() == DataType::Timestamptz
+                    && inputs[1].return_type() == DataType::Varchar)
+                {
+                    return None;
+                }
+                let mut new_inputs = inputs.clone();
+                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
+                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+            }
             _ => None,
         }
     }

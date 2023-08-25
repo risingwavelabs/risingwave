@@ -4,6 +4,22 @@ import subprocess
 import csv
 import unittest
 import time
+from datetime import date
+from datetime import datetime
+from datetime import timezone
+
+
+def strtobool(v):
+    return v.lower() == 'true'
+
+
+def strtodate(v):
+    return date.fromisoformat(v)
+
+
+def strtots(v):
+    return datetime.fromisoformat(v).astimezone(timezone.utc).replace(tzinfo=None)
+
 
 g_spark = None
 
@@ -17,7 +33,11 @@ init_table_sqls = [
     v_long long,
     v_float float,
     v_double double,
-    v_varchar string
+    v_varchar string,
+    v_bool boolean,
+    v_date date,
+    v_timestamp timestamp,
+    v_ts_ntz timestamp_ntz
     ) TBLPROPERTIES ('format-version'='2');
     """,
 ]
@@ -68,6 +88,10 @@ def verify_result(args):
             tc.assertEqual(round(row1[3], 5), round(float(row2[3]), 5))
             tc.assertEqual(round(row1[4], 5), round(float(row2[4]), 5))
             tc.assertEqual(row1[5], row2[5])
+            tc.assertEqual(row1[6], strtobool(row2[6]))
+            tc.assertEqual(row1[7], strtodate(row2[7]))
+            tc.assertEqual(row1[8].astimezone(timezone.utc).replace(tzinfo=None), strtots(row2[8]))
+            tc.assertEqual(row1[9], datetime.fromisoformat(row2[9]))
 
         tc.assertEqual(len(df), len(csv_result))
 

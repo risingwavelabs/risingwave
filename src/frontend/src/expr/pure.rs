@@ -73,6 +73,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Substr
             | expr_node::Type::Length
             | expr_node::Type::Like
+            | expr_node::Type::ILike
             | expr_node::Type::Upper
             | expr_node::Type::Lower
             | expr_node::Type::Trim
@@ -166,6 +167,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::IsJson
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd

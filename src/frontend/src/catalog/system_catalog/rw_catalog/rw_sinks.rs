@@ -72,8 +72,13 @@ impl SysCatalogReaderImpl {
                             .map(|id| ScalarImpl::Int32(id.connection_id() as i32)),
                         Some(ScalarImpl::Utf8(sink.create_sql().into())),
                         Some(
-                            get_acl_items(&Object::SinkId(sink.id.sink_id), &users, username_map)
-                                .into(),
+                            get_acl_items(
+                                &Object::SinkId(sink.id.sink_id),
+                                false,
+                                &users,
+                                username_map,
+                            )
+                            .into(),
                         ),
                         sink.initialized_at_epoch.map(|e| e.as_scalar()),
                         sink.created_at_epoch.map(|e| e.as_scalar()),
