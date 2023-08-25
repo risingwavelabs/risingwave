@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::types::Datum;
 
 use super::{Access, AccessError, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
@@ -86,16 +87,27 @@ pub fn apply_row_operation_on_stream_chunk_writer(
 pub fn apply_row_accessor_on_stream_chunk_writer(
     accessor: impl Access,
     writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> std::result::Result<WriteGuard, RwError> {
+) -> Result<WriteGuard, RwError> {
     writer.insert(|column| {
-        let res = match accessor.access(&[&column.name], Some(&column.data_type)) {
+        let res: Result<Datum, RwError> = match accessor
+            .access(&[&column.name], Some(&column.data_type))
+        {
             Ok(o) => Ok(o),
             Err(AccessError::Undefined { name, .. }) if !column.is_pk && name == column.name => {
                 // Fill in null value for non-pk column
                 // TODO: figure out a way to fill in not-null default value if user specifies one
                 Ok(None)
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                // if want to discard the row, return Err(e) here
+                tracing::warn!(
+                    "access error when fetch {} with type {}, err {:?}. Fill None instead.",
+                    &column.name,
+                    &column.data_type,
+                    e
+                );
+                Ok(None)
+            }
         };
         tracing::trace!(
             "inserted {:?} {:?} is_pk:{:?} {:?} ",
@@ -104,7 +116,7 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
             &column.is_pk,
             res
         );
-        Ok(res?)
+        res
     })
 }
 
