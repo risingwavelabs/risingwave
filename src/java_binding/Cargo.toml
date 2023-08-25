@@ -37,7 +37,6 @@ tracing = "0.1"
 [dev-dependencies]
 risingwave_expr = { workspace = true }
 
-
 [[bin]]
 name = "data-chunk-payload-generator"
 test = false

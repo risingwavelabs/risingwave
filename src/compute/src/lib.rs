@@ -34,16 +34,17 @@ pub mod telemetry;
 use std::ffi::c_void;
 use std::future::Future;
 use std::pin::Pin;
+
 use clap::{Parser, ValueEnum};
-use jni::NativeMethod;
 use jni::objects::{JObject, JValue};
 use jni::strings::JNIString;
+use jni::NativeMethod;
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
+use risingwave_common::jvm_runtime::JVM;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use serde::{Deserialize, Serialize};
-use risingwave_common::jvm_runtime::JVM;
 use risingwave_java_binding::run_this_func_to_get_valid_ptr_from_java_binding;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
@@ -227,7 +228,6 @@ pub fn start(
             run_jvm();
         });
 
-
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
         }
@@ -237,11 +237,15 @@ pub fn start(
 fn run_jvm() {
     let mut env = JVM.attach_current_thread_as_daemon().unwrap();
     let string_class = env.find_class("java/lang/String").unwrap();
-    let jarray = env.new_object_array(0, string_class, JObject::null()).unwrap();
+    let jarray = env
+        .new_object_array(0, string_class, JObject::null())
+        .unwrap();
 
     run_this_func_to_get_valid_ptr_from_java_binding();
 
-    let binding_class = env.find_class("com/risingwave/java/binding/Binding").unwrap();
+    let binding_class = env
+        .find_class("com/risingwave/java/binding/Binding")
+        .unwrap();
     env.register_native_methods(binding_class, &[
         NativeMethod {
             name: JNIString::from("vnodeCount"),
@@ -440,7 +444,14 @@ fn run_jvm() {
 
     ]).unwrap();
 
-    let _ = env.call_static_method("com/risingwave/connector/ConnectorService", "main", "([Ljava/lang/String;)V", &[JValue::Object(&jarray)]).inspect_err(|e| eprintln!("{:?}", e));
+    let _ = env
+        .call_static_method(
+            "com/risingwave/connector/ConnectorService",
+            "main",
+            "([Ljava/lang/String;)V",
+            &[JValue::Object(&jarray)],
+        )
+        .inspect_err(|e| eprintln!("{:?}", e));
 }
 
 fn default_total_memory_bytes() -> usize {

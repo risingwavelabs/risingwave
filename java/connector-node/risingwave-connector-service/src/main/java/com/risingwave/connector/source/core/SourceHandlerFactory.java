@@ -56,7 +56,7 @@ public abstract class SourceHandlerFactory {
         var config =
                 new DbzConnectorConfig(
                         source, sourceId, startOffset, mutableUserProps, snapshotDone);
-        JniSourceHandler hanlder = new JniSourceHandler(config);
-        hanlder.start(channelPtr);
+        JniSourceHandler handler = new JniSourceHandler(config);
+        handler.start(channelPtr);
     }
 }

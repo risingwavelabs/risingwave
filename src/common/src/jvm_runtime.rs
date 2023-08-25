@@ -1,10 +1,11 @@
 use core::option::Option::Some;
 use core::result::Result::{Err, Ok};
-use risingwave_pb::connector_service::GetEventStreamResponse;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
-use jni::{InitArgsBuilder, JavaVM, JNIVersion};
+
+use jni::{InitArgsBuilder, JNIVersion, JavaVM};
+use risingwave_pb::connector_service::GetEventStreamResponse;
 use tokio::sync::mpsc::Sender;
 
 pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
@@ -19,12 +20,10 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
     let mut class_vec = vec![];
 
     if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                if let Some(name) = entry.path().file_name() {
-                    println!("{:?}", name);
-                    class_vec.push(String::from( dir_path.to_owned() + name.to_str().to_owned().unwrap()));
-                }
+        for entry in entries.flatten() {
+            if let Some(name) = entry.path().file_name() {
+                println!("{:?}", name);
+                class_vec.push(dir_path.to_owned() + name.to_str().to_owned().unwrap());
             }
         }
     } else {
@@ -40,7 +39,7 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
         // Here we enable some extra JNI checks useful during development
         // .option("-Xcheck:jni")
         .option("-ea")
-        .option(format!("-Djava.class.path={}", class_vec.join(":")) )
+        .option(format!("-Djava.class.path={}", class_vec.join(":")))
         .option("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=9111")
         .build()
         .unwrap();
@@ -49,7 +48,7 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
     let jvm = match JavaVM::new(jvm_args) {
         Err(err) => {
             panic!("{:?}", err)
-        },
+        }
         Ok(jvm) => jvm,
     };
 

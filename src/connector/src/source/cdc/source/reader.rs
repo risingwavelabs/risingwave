@@ -19,10 +19,10 @@ use async_trait::async_trait;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use jni::objects::{JObject, JValue};
-use tokio::sync::mpsc;
-use risingwave_common::jvm_runtime::{JVM, MyJniSender};
+use risingwave_common::jvm_runtime::{MyJniSender, JVM};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
+use tokio::sync::mpsc;
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
@@ -34,7 +34,6 @@ use crate::source::{
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
-
 
 pub struct CdcSplitReader {
     source_id: u64,
@@ -184,13 +183,22 @@ impl CdcSplitReader {
 
         let source_type = self.conn_props.get_source_type_pb()?;
 
-
         tokio::task::spawn_blocking(move || {
             let mut env = JVM.attach_current_thread_as_daemon().unwrap();
 
-            env.find_class("com/risingwave/proto/ConnectorServiceProto$SourceType").inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+            env.find_class("com/risingwave/proto/ConnectorServiceProto$SourceType")
+                .inspect_err(|e| eprintln!("{:?}", e))
+                .unwrap();
             let source_type_arg = JValue::from(source_type as i32);
-            let st = env.call_static_method("com/risingwave/proto/ConnectorServiceProto$SourceType", "forNumber", "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;", &[source_type_arg]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+            let st = env
+                .call_static_method(
+                    "com/risingwave/proto/ConnectorServiceProto$SourceType",
+                    "forNumber",
+                    "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;",
+                    &[source_type_arg],
+                )
+                .inspect_err(|e| eprintln!("{:?}", e))
+                .unwrap();
             let st = env.call_static_method("com/risingwave/connector/api/source/SourceTypeE", "valueOf", "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;", &[(&st).into()]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
 
             let source_id_arg = JValue::from(self.source_id as i64);
@@ -198,26 +206,25 @@ impl CdcSplitReader {
             let start_offset = match self.start_offset {
                 Some(start_offset) => {
                     let start_offset = env.new_string(start_offset).unwrap();
-                    env.call_method(start_offset, "toString", "()Ljava/lang/String;", &[]).unwrap()
-                },
-                None => {
-                    jni::objects::JValueGen::Object(JObject::null())
+                    env.call_method(start_offset, "toString", "()Ljava/lang/String;", &[])
+                        .unwrap()
                 }
+                None => jni::objects::JValueGen::Object(JObject::null()),
             };
 
             let hashmap_class = "java/util/HashMap";
             let hashmap_constructor_signature = "()V";
             let hashmap_put_signature = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
 
-            let java_map = env.new_object(hashmap_class, hashmap_constructor_signature, &[]).unwrap();
-            for (key, value) in properties.iter() {
+            let java_map = env
+                .new_object(hashmap_class, hashmap_constructor_signature, &[])
+                .unwrap();
+            for (key, value) in &properties {
                 let key = env.new_string(key.to_string()).unwrap();
                 let value = env.new_string(value.to_string()).unwrap();
-                let args = [
-                    JValue::Object(&key),
-                    JValue::Object(&value),
-                ];
-                env.call_method(&java_map, "put", hashmap_put_signature, &args).unwrap();
+                let args = [JValue::Object(&key), JValue::Object(&value)];
+                env.call_method(&java_map, "put", hashmap_put_signature, &args)
+                    .unwrap();
             }
 
             let snapshot_done = JValue::from(self.snapshot_done);
@@ -234,7 +241,7 @@ impl CdcSplitReader {
         });
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
-            println!("recieve events {:?}", events.len());
+            println!("receive events {:?}", events.len());
             if events.is_empty() {
                 continue;
             }
@@ -246,5 +253,3 @@ impl CdcSplitReader {
         }
     }
 }
-
-
