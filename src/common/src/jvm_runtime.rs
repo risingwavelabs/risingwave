@@ -56,14 +56,4 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
     Arc::new(jvm)
 });
 
-
-pub struct MyPtr {
-    pub ptr: Sender<GetEventStreamResponse>,
-    pub num: u64,
-}
-
-impl Drop for MyPtr {
-    fn drop(&mut self) {
-        println!("drop MyPtr, num = {}", self.num);
-    }
-}
+pub type MyJniSender = Sender<GetEventStreamResponse>;

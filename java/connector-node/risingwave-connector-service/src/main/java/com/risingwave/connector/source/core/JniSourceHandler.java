@@ -60,7 +60,6 @@ public class JniSourceHandler {
                                 resp.getEventsCount());
 
                         Binding.sendMsgToChannel(channelPtr, resp);
-                        Thread.sleep(10000);
                     }
                 } catch (Throwable e) {
                     LOG.error("Poll engine output channel fail. ", e);

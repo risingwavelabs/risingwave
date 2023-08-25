@@ -20,7 +20,7 @@ use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use jni::objects::{JObject, JValue};
 use tokio::sync::mpsc;
-use risingwave_common::jvm_runtime::{JVM, MyPtr};
+use risingwave_common::jvm_runtime::{JVM, MyJniSender};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 
@@ -180,10 +180,7 @@ impl CdcSplitReader {
 
         let (tx, mut rx) = mpsc::channel(1024);
 
-        let tx: Box<MyPtr> = Box::new(MyPtr {
-            ptr: tx,
-            num: 123456,
-        });
+        let tx: Box<MyJniSender> = Box::new(tx);
 
         let source_type = self.conn_props.get_source_type_pb()?;
 

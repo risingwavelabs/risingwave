@@ -194,7 +194,7 @@ use jni::{JNIEnv, NativeMethod};
 use jni::objects::{JClass, JObject, JString, JValue, JValueGen};
 use jni::strings::JNIString;
 use jni::sys::{jint, jlong};
-use risingwave_common::jvm_runtime::{JVM, MyPtr};
+use risingwave_common::jvm_runtime::{JVM, MyJniSender};
 use risingwave_pb::connector_service::{CdcMessage, GetEventStreamResponse};
 
 use crate::server::compute_node_serve;
@@ -317,13 +317,9 @@ impl<'a, T> Pointer<'a, T> {
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel<'a>(
     mut env: EnvParam<'a>,
-    channel: Pointer<'a, MyPtr>,
+    channel: Pointer<'a, MyJniSender>,
     mut msg: JObject<'a>,
 ) {
-
-    println!("channel_ptr = {}, num = {}", channel.pointer, channel.as_ref().num);
-    // let channel: &mut UnboundedSender<GetEventStreamResponse> = unsafe { &mut *(channel_ptr.pointer as *mut UnboundedSender<GetEventStreamResponse>) };
-
     let source_id = env.env.call_method(&mut msg, "getSourceId", "()J", &[]).unwrap();
     let source_id = source_id.j().unwrap();
 
@@ -375,7 +371,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
         events,
     };
     println!("before send");
-    let _ = channel.as_ref().ptr.blocking_send(get_event_stream_response).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+    let _ = channel.as_ref().blocking_send(get_event_stream_response).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
     println!("send successfully");
 }
 
@@ -383,19 +379,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
 
 fn run_jvm() {
     let mut env = JVM.attach_current_thread_as_daemon().unwrap();
-    // Call Java Math#abs(-10)
-    let x = JValue::from(-10);
-    let val: jint = env.call_static_method("java/lang/Math", "abs", "(I)I", &[x]).unwrap()
-        .i().unwrap();
-
-    assert_eq!(val, 10);
-
     let string_class = env.find_class("java/lang/String").unwrap();
     let jarray = env.new_object_array(0, string_class, JObject::null()).unwrap();
 
     let fn_ptr = Java_com_risingwave_java_binding_Binding_sendMsgToChannel as *const fn (
         EnvParam<'static>,
-        Pointer<'static, MyPtr>,
+        Pointer<'static, MyJniSender>,
         JObject<'static>
     );
 
