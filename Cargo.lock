@@ -657,7 +657,7 @@ dependencies = [
  "fastrand 1.9.0",
  "http",
  "hyper",
- "time 0.3.25",
+ "time 0.3.27",
  "tokio",
  "tower",
  "tracing",
@@ -854,7 +854,7 @@ dependencies = [
  "percent-encoding",
  "regex",
  "sha2",
- "time 0.3.25",
+ "time 0.3.27",
  "tracing",
 ]
 
@@ -995,7 +995,7 @@ dependencies = [
  "itoa",
  "num-integer",
  "ryu",
- "time 0.3.25",
+ "time 0.3.27",
 ]
 
 [[package]]
@@ -1598,7 +1598,7 @@ dependencies = [
  "serde",
  "static_assertions",
  "thiserror",
- "time 0.3.25",
+ "time 0.3.27",
  "tokio",
  "url",
 ]
@@ -2396,7 +2396,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "thiserror",
- "time 0.3.25",
+ "time 0.3.27",
 ]
 
 [[package]]
@@ -3070,7 +3070,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "time 0.3.25",
+ "time 0.3.27",
  "tokio",
  "tracing",
  "urlencoding",
@@ -5531,7 +5531,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "time 0.3.25",
+ "time 0.3.27",
  "url",
 ]
 
@@ -6971,7 +6971,7 @@ dependencies = [
  "prometheus",
  "risingwave_common",
  "risingwave_variables",
- "time 0.3.25",
+ "time 0.3.27",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -7771,7 +7771,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with_macros 2.3.3",
- "time 0.3.25",
+ "time 0.3.27",
 ]
 
 [[package]]
@@ -7788,7 +7788,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with_macros 3.3.0",
- "time 0.3.25",
+ "time 0.3.27",
 ]
 
 [[package]]
@@ -7993,7 +7993,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "thiserror",
- "time 0.3.25",
+ "time 0.3.27",
 ]
 
 [[package]]
@@ -8479,9 +8479,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.25"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0fdd63d58b18d663fbdf70e049f00a22c8e42be082203be7f26589213cd75ea"
+checksum = "0bb39ee79a6d8de55f48f2293a830e040392f1c5f16e336bdd1788cd0aadce07"
 dependencies = [
  "deranged",
  "itoa",
@@ -8500,9 +8500,9 @@ checksum = "7300fbefb4dadc1af235a9cef3737cea692a9d97e1b9cbcd4ebdae6f8868e6fb"
 
 [[package]]
 name = "time-macros"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb71511c991639bb078fd5bf97757e03914361c48100d52878b8e52b46fb92cd"
+checksum = "733d258752e9303d392b94b75230d07b0b9c489350c69b851fc6c065fde3e8f9"
 dependencies = [
  "time-core",
 ]
@@ -8937,7 +8937,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "time 0.3.25",
+ "time 0.3.27",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -9143,7 +9143,7 @@ checksum = "bbc5ad0d9d26b2c49a5ab7da76c3e79d3ee37e7821799f8223fcb8f2f391a2e7"
 dependencies = [
  "anyhow",
  "rustversion",
- "time 0.3.25",
+ "time 0.3.27",
 ]
 
 [[package]]
@@ -9618,7 +9618,7 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.29",
- "time 0.3.25",
+ "time 0.3.27",
  "tinyvec",
  "tokio",
  "tokio-postgres",
