@@ -696,8 +696,12 @@ impl HummockLevelsExt for Levels {
                     "should find the level to insert into when applying compaction generated delta. sub level idx: {},  removed sst ids: {:?}, sub levels: {:?},",
                     insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
                 );
-                if l0.sub_levels[index].table_infos.is_empty() && insert_table_infos.iter().all(|sst|sst.table_ids.len() == 1) {
-                    l0.sub_levels[index].partition_vnode_count = new_partition_vnode_count;
+                if l0.sub_levels[index].table_infos.is_empty()
+                    && insert_table_infos
+                        .iter()
+                        .all(|sst| sst.table_ids.len() == 1)
+                {
+                    l0.sub_levels[index].vnode_partition_count = new_partition_vnode_count;
                 }
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
@@ -766,7 +770,7 @@ pub fn build_initial_compaction_group_levels(
             total_file_size: 0,
             sub_level_id: 0,
             uncompressed_file_size: 0,
-            partition_vnode_count: 0,
+            vnode_partition_count: 0,
         });
     }
     Levels {
@@ -779,6 +783,7 @@ pub fn build_initial_compaction_group_levels(
         group_id,
         parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
         member_table_ids: vec![],
+        vnode_partition_count: compaction_config.split_weight_by_vnode,
     }
 }
 
@@ -917,7 +922,7 @@ pub fn new_sub_level(
         total_file_size,
         sub_level_id,
         uncompressed_file_size,
-        partition_vnode_count,
+        vnode_partition_count: 0,
     }
 }
 

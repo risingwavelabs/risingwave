@@ -21,6 +21,7 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, Overlappin
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::picker::min_overlap_compaction_picker::MAX_LEVEL_COUNT;
+use crate::hummock::compaction::picker::partition_level;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -36,6 +37,8 @@ impl TierCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
+        mut vnode_partition_count: u32,
+        table_id: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -65,10 +68,21 @@ impl TierCompactionPicker {
             });
 
             if can_concat(&input_level.table_infos) {
+                if vnode_partition_count > 0
+                    && !partition_level(
+                        table_id,
+                        vnode_partition_count as usize,
+                        level,
+                        &mut Vec::default(),
+                    )
+                {
+                    vnode_partition_count = 0;
+                }
                 return Some(CompactionInput {
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    vnode_partition_count,
                 });
             }
 
@@ -138,11 +152,15 @@ impl TierCompactionPicker {
             }
 
             select_level_inputs.reverse();
+            if compaction_bytes < self.config.sub_level_max_compaction_bytes {
+                vnode_partition_count = 0;
+            }
 
             return Some(CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
+                vnode_partition_count,
             });
         }
         None
@@ -161,7 +179,13 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        self.pick_overlapping_level(l0, &level_handlers[0], stats)
+        self.pick_overlapping_level(
+            l0,
+            &level_handlers[0],
+            levels.vnode_partition_count,
+            levels.member_table_ids.first().cloned().unwrap_or(0),
+            stats,
+        )
     }
 }
 

@@ -101,6 +101,7 @@ impl ManualCompactionPicker {
             input_levels,
             target_level: 0,
             target_sub_level_id: sub_level_id,
+            vnode_partition_count: 0,
         })
     }
 
@@ -170,6 +171,7 @@ impl ManualCompactionPicker {
             input_levels,
             target_level: self.target_level,
             target_sub_level_id: 0,
+            vnode_partition_count: levels.levels[self.target_level - 1].vnode_partition_count,
         })
     }
 
@@ -315,6 +317,7 @@ impl CompactionPicker for ManualCompactionPicker {
             ],
             target_level,
             target_sub_level_id: 0,
+            vnode_partition_count: levels.vnode_partition_count,
         })
     }
 }

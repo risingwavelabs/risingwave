@@ -22,6 +22,7 @@ mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
+pub use intral_sub_level_picker::*;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -44,6 +45,7 @@ pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,
     pub target_sub_level_id: u64,
+    pub vnode_partition_count: u32,
 }
 
 impl CompactionInput {

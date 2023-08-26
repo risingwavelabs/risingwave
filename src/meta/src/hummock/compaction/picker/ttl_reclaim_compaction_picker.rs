@@ -213,6 +213,7 @@ impl TtlReclaimCompactionPicker {
             ],
             target_level: reclaimed_level.level_idx as usize,
             target_sub_level_id: 0,
+            vnode_partition_count: reclaimed_level.vnode_partition_count,
         })
     }
 }

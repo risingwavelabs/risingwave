@@ -19,10 +19,12 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
 
-use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::create_overlap_strategy;
-use crate::hummock::compaction::picker::TrivialMovePicker;
+use crate::hummock::compaction::picker::{
+    partition_level, partition_sub_levels, IntraSubLevelPicker, SubLevelPartition,
+    TrivialMovePicker,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct LevelCompactionPicker {
@@ -66,16 +68,18 @@ impl CompactionPicker for LevelCompactionPicker {
         }
 
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
-        if let Some(ret) = self.pick_multi_level_to_base(
-            l0,
-            levels.get_level(self.target_level),
-            level_handlers,
-            stats,
-        ) {
+        let partitions = if levels.vnode_partition_count != 0 {
+            partition_sub_levels(levels)
+        } else {
+            vec![]
+        };
+        if let Some(ret) =
+            self.pick_multi_level_to_base(levels, level_handlers, partitions.clone(), stats)
+        {
             return Some(ret);
         }
 
-        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], stats) {
+        if let Some(ret) = self.pick_l0_intra(levels, level_handlers, partitions, stats) {
             return Some(ret);
         }
 
@@ -112,241 +116,198 @@ impl LevelCompactionPicker {
 
     fn pick_multi_level_to_base(
         &self,
-        l0: &OverlappingLevel,
-        target_level: &Level,
+        levels: &Levels,
         level_handlers: &[LevelHandler],
+        l0_partitions: Vec<SubLevelPartition>,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let l0_size = l0.total_file_size - level_handlers[0].get_pending_file_size();
-        let base_level_size = target_level.total_file_size
-            - level_handlers[target_level.level_idx as usize].get_pending_file_size();
+        let l0 = levels.l0.as_ref().unwrap();
+        let target_level = levels.get_level(self.target_level);
+        let min_sub_level_id = l0_partitions
+            .iter()
+            .map(|part| {
+                part.sub_levels
+                    .last()
+                    .map(|info| info.sub_level_id)
+                    .unwrap_or(0)
+            })
+            .min()
+            .unwrap_or(0);
+        let vnode_partition_count = levels.vnode_partition_count;
+        let mut partitions =
+            vec![SubLevelPartition::default(); levels.vnode_partition_count as usize];
+        if target_level.vnode_partition_count != 0
+            && levels.vnode_partition_count != 0
+            && min_sub_level_id > 0
+            && levels.member_table_ids.len() == 1
+            && partition_level(
+                levels.member_table_ids[0],
+                levels.vnode_partition_count as usize,
+                target_level,
+                &mut partitions,
+            )
+        {
+            let mut partitions_score = partitions
+                .iter()
+                .enumerate()
+                .map(|(idx, part)| {
+                    (
+                        idx,
+                        part.sub_levels
+                            .iter()
+                            .map(|info| info.total_file_size)
+                            .sum::<u64>(),
+                    )
+                })
+                .collect_vec();
+            partitions_score.sort_by_key(|(_, file_size)| *file_size);
 
-        if l0_size < base_level_size {
-            stats.skip_by_write_amp_limit += 1;
+            for (idx, target_level_size) in partitions_score {
+                let mut input_levels = vec![];
+                let target_part = &partitions[idx].sub_levels[0];
+                let mut pending_compact = false;
+                if target_part.right_idx > target_part.left_idx {
+                    for i in target_part.left_idx..target_part.right_idx {
+                        if level_handlers[self.target_level]
+                            .is_pending_compact(&target_level.table_infos[i].sst_id)
+                        {
+                            pending_compact = true;
+                            break;
+                        }
+                    }
+                    if pending_compact {
+                        continue;
+                    }
+                }
+
+                let max_compaction_size = std::cmp::max(
+                    std::cmp::min(
+                        self.config.max_compaction_bytes,
+                        self.config.max_bytes_for_level_base,
+                    ),
+                    target_level_size,
+                );
+
+                let mut total_file_size = 0;
+                let mut total_file_count = 0;
+                let mut wait_enough = false;
+                let l0_part = &l0_partitions[idx];
+                for (sub_level_idx, level_part) in l0_part.sub_levels.iter().enumerate() {
+                    if total_file_size > max_compaction_size
+                        || total_file_count > self.config.level0_max_compact_file_number
+                    {
+                        wait_enough = true;
+                        break;
+                    }
+                    assert_eq!(
+                        level_part.sub_level_id,
+                        l0.sub_levels[sub_level_idx].sub_level_id
+                    );
+                    let mut level_file_size = 0;
+                    if level_part.right_idx > level_part.left_idx {
+                        for sst in &l0.sub_levels[sub_level_idx].table_infos
+                            [level_part.left_idx..level_part.right_idx]
+                        {
+                            if level_handlers[0].is_pending_compact(&sst.sst_id) {
+                                pending_compact = true;
+                            }
+                            level_file_size += sst.file_size;
+                        }
+
+                        if pending_compact {
+                            break;
+                        }
+                        input_levels.push(InputLevel {
+                            level_idx: 0,
+                            level_type: l0.sub_levels[sub_level_idx].level_type,
+                            table_infos: l0.sub_levels[sub_level_idx].table_infos
+                                [level_part.left_idx..level_part.right_idx]
+                                .to_vec(),
+                        });
+                        total_file_size += level_file_size;
+                        total_file_count += (level_part.right_idx - level_part.left_idx) as u64;
+                    }
+                }
+                if wait_enough {
+                    input_levels.reverse();
+                    input_levels.push(InputLevel {
+                        level_idx: target_level.level_idx,
+                        level_type: target_level.level_type,
+                        table_infos: target_level.table_infos
+                            [target_part.left_idx..target_part.right_idx]
+                            .to_vec(),
+                    });
+                    return Some(CompactionInput {
+                        input_levels,
+                        target_level: self.target_level,
+                        target_sub_level_id: 0,
+                        vnode_partition_count,
+                    });
+                }
+            }
             return None;
         }
-
-        // no running base_compaction
-        let strict_check = level_handlers[0]
-            .get_pending_tasks()
-            .iter()
-            .any(|task| task.target_level != 0);
-
-        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
-        let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-            min_compaction_bytes,
-            // divide by 2 because we need to select files of base level and it need use the other
-            // half quota.
-            std::cmp::min(
-                self.config.max_bytes_for_level_base,
-                self.config.max_compaction_bytes / 2,
-            ),
-            1,
-            // The maximum number of sub_level compact level per task
-            self.config.level0_max_compact_file_number,
-            overlap_strategy.clone(),
-        );
-
-        let l0_select_tables_vec = non_overlap_sub_level_picker
-            .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
-        if l0_select_tables_vec.is_empty() {
+        if level_handlers[self.target_level].is_level_pending_compact(target_level) {
             stats.skip_by_pending_files += 1;
             return None;
         }
-
-        let mut skip_by_pending = false;
         let mut input_levels = vec![];
-        let mut min_write_amp_meet = false;
-        for input in l0_select_tables_vec {
-            let l0_select_tables = input
-                .sstable_infos
-                .iter()
-                .flat_map(|select_tables| select_tables.clone())
-                .collect_vec();
-
-            let target_level_ssts = overlap_strategy
-                .check_base_level_overlap(&l0_select_tables, &target_level.table_infos);
-
-            let mut target_level_size = 0;
-            let mut pending_compact = false;
-            for sst in &target_level_ssts {
-                if level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id) {
-                    pending_compact = true;
-                    break;
-                }
-
-                target_level_size += sst.file_size;
-            }
-
-            if pending_compact {
-                skip_by_pending = true;
-                continue;
-            }
-
-            // The size of target level may be too large, we shall skip this compact task and wait
-            //  the data in base level compact to lower level.
-            if target_level_size > self.config.max_compaction_bytes && strict_check {
-                continue;
-            }
-
-            if input.total_file_size >= target_level_size {
-                min_write_amp_meet = true;
-            }
-
-            input_levels.push((input, target_level_size, target_level_ssts));
-        }
-
-        if input_levels.is_empty() {
-            if skip_by_pending {
+        let mut total_file_size = 0;
+        let mut total_file_count = 0;
+        let max_compaction_size = std::cmp::min(
+            self.config.max_compaction_bytes,
+            target_level.total_file_size,
+        );
+        let mut wait_enough = false;
+        for level in &l0.sub_levels {
+            if level.level_type() != LevelType::Nonoverlapping
+                || level_handlers[0].is_level_pending_compact(level)
+            {
                 stats.skip_by_pending_files += 1;
-            }
-            return None;
-        }
-
-        if !min_write_amp_meet && strict_check {
-            // If the write-amplification of all candidate task are large, we may hope to wait base
-            // level compact more data to lower level.  But if we skip all task, I'm
-            // afraid the data will be blocked in level0 and will be never compacted to base level.
-            // So we only allow one task exceed write-amplification-limit running in
-            // level0 to base-level.
-            return None;
-        }
-
-        for (input, target_file_size, target_level_files) in input_levels {
-            if min_write_amp_meet && input.total_file_size < target_file_size {
-                continue;
+                break;
             }
 
-            let mut select_level_inputs = input
-                .sstable_infos
-                .into_iter()
-                .map(|table_infos| InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos,
-                })
-                .collect_vec();
-            select_level_inputs.reverse();
-            select_level_inputs.push(InputLevel {
+            if total_file_size > max_compaction_size
+                || total_file_count > self.config.level0_max_compact_file_number
+            {
+                wait_enough = true;
+                break;
+            }
+            input_levels.push(InputLevel {
+                level_idx: 0,
+                level_type: level.level_type,
+                table_infos: level.table_infos.clone(),
+            });
+            total_file_size += level.total_file_size;
+            total_file_count += level.table_infos.len() as u64;
+        }
+        if wait_enough {
+            input_levels.reverse();
+            input_levels.push(InputLevel {
                 level_idx: target_level.level_idx,
                 level_type: target_level.level_type,
-                table_infos: target_level_files,
+                table_infos: target_level.table_infos.clone(),
             });
             return Some(CompactionInput {
-                input_levels: select_level_inputs,
+                input_levels,
                 target_level: self.target_level,
                 target_sub_level_id: 0,
+                vnode_partition_count,
             });
         }
-        stats.skip_by_write_amp_limit += 1;
+
         None
     }
 
     fn pick_l0_intra(
         &self,
-        l0: &OverlappingLevel,
-        level_handler: &LevelHandler,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+        partitions: Vec<SubLevelPartition>,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-
-        for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
-            {
-                continue;
-            }
-
-            if level_handler.is_level_all_pending_compact(level) {
-                continue;
-            }
-
-            let max_compaction_bytes = std::cmp::min(
-                self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes,
-            );
-
-            let tier_sub_level_compact_level_count =
-                self.config.level0_sub_level_compact_level_count as usize;
-            let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-                self.config.sub_level_max_compaction_bytes / 2,
-                max_compaction_bytes,
-                self.config.level0_sub_level_compact_level_count as usize,
-                self.config.level0_max_compact_file_number,
-                overlap_strategy.clone(),
-            );
-
-            let l0_select_tables_vec = non_overlap_sub_level_picker
-                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler);
-
-            if l0_select_tables_vec.is_empty() {
-                continue;
-            }
-
-            let mut skip_by_write_amp = false;
-            // Limit the number of selection levels for the non-overlapping
-            // sub_level at least level0_sub_level_compact_level_count
-            for (plan_index, input) in l0_select_tables_vec.into_iter().enumerate() {
-                if plan_index == 0
-                    && input.sstable_infos.len()
-                        < self.config.level0_sub_level_compact_level_count as usize
-                {
-                    // first plan level count smaller than limit
-                    break;
-                }
-
-                let mut max_level_size = 0;
-                for level_select_table in &input.sstable_infos {
-                    let level_select_size = level_select_table
-                        .iter()
-                        .map(|sst| sst.file_size)
-                        .sum::<u64>();
-
-                    max_level_size = std::cmp::max(max_level_size, level_select_size);
-                }
-
-                // This limitation would keep our write-amplification no more than
-                // ln(max_compaction_bytes/flush_level_bytes) /
-                // ln(self.config.level0_sub_level_compact_level_count/2) Here we only use half
-                // of level0_sub_level_compact_level_count just for convenient.
-                let is_write_amp_large =
-                    max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
-                        >= input.total_file_size;
-
-                if (is_write_amp_large
-                    || input.sstable_infos.len() < tier_sub_level_compact_level_count)
-                    && input.total_file_count < self.config.level0_max_compact_file_number as usize
-                {
-                    skip_by_write_amp = true;
-                    continue;
-                }
-
-                let mut select_level_inputs = Vec::with_capacity(input.sstable_infos.len());
-                for level_select_sst in input.sstable_infos {
-                    if level_select_sst.is_empty() {
-                        continue;
-                    }
-                    select_level_inputs.push(InputLevel {
-                        level_idx: 0,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: level_select_sst,
-                    });
-                }
-                select_level_inputs.reverse();
-                return Some(CompactionInput {
-                    input_levels: select_level_inputs,
-                    target_level: 0,
-                    target_sub_level_id: level.sub_level_id,
-                });
-            }
-
-            if skip_by_write_amp {
-                stats.skip_by_write_amp_limit += 1;
-            }
-        }
-
-        None
+        let mut picker = IntraSubLevelPicker::new(self.config.clone(), partitions);
+        picker.pick_compaction(levels, level_handlers, stats)
     }
 
     fn pick_l0_trivial_move_file(
@@ -418,6 +379,7 @@ impl LevelCompactionPicker {
                 input_levels,
                 target_level: 0,
                 target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                vnode_partition_count: 0,
             });
         }
         None
@@ -614,10 +576,7 @@ pub mod tests {
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
-            table_infos: vec![],
-            total_file_size: 0,
-            sub_level_id: 0,
-            uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,
@@ -670,9 +629,7 @@ pub mod tests {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
@@ -716,8 +673,8 @@ pub mod tests {
                     generate_table(3, 1, 700, 999, 2),
                 ],
                 total_file_size: 900,
-                sub_level_id: 0,
                 uncompressed_file_size: 900,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
             ..Default::default()
@@ -901,6 +858,7 @@ pub mod tests {
             }],
             target_level: 1,
             target_sub_level_id: pending_level.sub_level_id,
+            vnode_partition_count: 0,
         };
         assert!(!levels_handler[0].is_level_pending_compact(&pending_level));
         tier_task_input.add_pending_task(1, &mut levels_handler);

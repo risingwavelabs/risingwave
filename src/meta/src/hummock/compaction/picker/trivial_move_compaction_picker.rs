@@ -93,6 +93,7 @@ impl TrivialMovePicker {
                 ],
                 target_level: self.target_level,
                 target_sub_level_id: 0,
+                vnode_partition_count: 0,
             });
         }
 

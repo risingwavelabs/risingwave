@@ -70,7 +70,7 @@ where
 
     last_table_id: u32,
     split_by_table: bool,
-    split_weight_by_vnode: u32,
+    partition_count_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
     largest_vnode_in_current_partition: usize,
@@ -88,9 +88,9 @@ where
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         mut split_by_table: bool,
-        mut split_weight_by_vnode: u32,
+        partition_count_by_vnode: u32,
     ) -> Self {
-        if split_weight_by_vnode > 0 {
+        if partition_count_by_vnode > 0 {
             split_by_table = true;
         }
 
@@ -102,7 +102,7 @@ where
             task_progress,
             last_table_id: 0,
             split_by_table,
-            split_weight_by_vnode,
+            partition_count_by_vnode,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
             last_vnode: 0,
         }
@@ -117,7 +117,7 @@ where
             task_progress: None,
             last_table_id: 0,
             split_by_table: false,
-            split_weight_by_vnode: 0,
+            partition_count_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
             last_vnode: 0,
         }
@@ -172,7 +172,7 @@ where
                 if switch_builder {
                     need_seal_current = true;
                 } else if builder.reach_capacity() {
-                    if self.split_weight_by_vnode == 0 || builder.reach_max_sst_size() {
+                    if self.partition_count_by_vnode == 0 || builder.reach_max_sst_size() {
                         need_seal_current = true;
                     } else {
                         need_seal_current = vnode_changed;
@@ -228,9 +228,9 @@ where
             switch_builder = true;
             self.last_vnode = 0;
             vnode_changed = true;
-            if self.split_weight_by_vnode > 1 {
+            if self.partition_count_by_vnode > 1 {
                 self.largest_vnode_in_current_partition =
-                    VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
+                    VirtualNode::COUNT / (self.partition_count_by_vnode as usize) - 1;
             }
         }
         if self.largest_vnode_in_current_partition != VirtualNode::MAX.to_index() {
@@ -245,8 +245,9 @@ where
 
                 // SAFETY: `self.split_weight_by_vnode > 1` here.
                 let (basic, remainder) =
-                    VirtualNode::COUNT.div_rem(&(self.split_weight_by_vnode as usize));
-                let small_segments_area = basic * (self.split_weight_by_vnode as usize - remainder);
+                    VirtualNode::COUNT.div_rem(&(self.partition_count_by_vnode as usize));
+                let small_segments_area =
+                    basic * (self.partition_count_by_vnode as usize - remainder);
                 self.largest_vnode_in_current_partition = (if key_vnode < small_segments_area {
                     (key_vnode / basic + 1) * basic
                 } else {

@@ -35,7 +35,8 @@ use super::{
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
-    CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+    partition_level, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+    SubLevelPartition,
 };
 use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
@@ -125,10 +126,12 @@ impl DynamicLevelSelectorCore {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
         let mut ctx = SelectContext::default();
+        let mut first_level_partition_count = 0;
 
         for level in &levels.levels {
             if level.total_file_size > 0 && first_non_empty_level == 0 {
                 first_non_empty_level = level.level_idx as usize;
+                first_level_partition_count = level.vnode_partition_count;
             }
             max_level_size = std::cmp::max(max_level_size, level.total_file_size);
         }
@@ -142,7 +145,12 @@ impl DynamicLevelSelectorCore {
             return ctx;
         }
 
-        let base_bytes_max = self.config.max_bytes_for_level_base;
+        let mut max_bytes_for_level_base = self.config.max_bytes_for_level_base;
+        if first_level_partition_count != 0 {
+            max_bytes_for_level_base *= first_level_partition_count as u64;
+        }
+
+        let base_bytes_max = max_bytes_for_level_base;
         let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
@@ -158,7 +166,7 @@ impl DynamicLevelSelectorCore {
             base_bytes_min + 1
         } else {
             ctx.base_level = first_non_empty_level;
-            while ctx.base_level > 1 && cur_level_size > base_bytes_max {
+            while ctx.base_level > 1 && cur_level_size > base_bytes_max * 2 {
                 ctx.base_level -= 1;
                 cur_level_size /= self.config.max_bytes_for_level_multiplier;
             }
@@ -224,8 +232,6 @@ impl DynamicLevelSelectorCore {
                 let total_size = levels.l0.as_ref().unwrap().total_file_size
                     - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
                 let base_level_size = levels.get_level(ctx.base_level).total_file_size;
-                let base_level_sst_count =
-                    levels.get_level(ctx.base_level).table_infos.len() as u64;
 
                 // size limit
                 let non_overlapping_size_score = total_size * SCORE_BASE
@@ -240,10 +246,7 @@ impl DynamicLevelSelectorCore {
                     .filter(|level| level.level_type() == LevelType::Nonoverlapping)
                     .count() as u64;
                 let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
-                    / std::cmp::max(
-                        base_level_sst_count / 16,
-                        self.config.level0_sub_level_compact_level_count as u64,
-                    );
+                    / self.config.level0_sub_level_compact_level_count as u64;
 
                 std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
             };
@@ -270,11 +273,31 @@ impl DynamicLevelSelectorCore {
             if total_size == 0 {
                 continue;
             }
-            ctx.score_levels.push((
-                total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
-                level_idx,
-                level_idx + 1,
-            ));
+            let mut score = total_size * SCORE_BASE / ctx.level_max_bytes[level_idx];
+            let vnode_partition_count = level.vnode_partition_count as usize;
+            if level.level_idx as usize == ctx.base_level
+                && level.vnode_partition_count != 0
+                && levels.member_table_ids.len() == 1
+            {
+                let mut partitions = vec![SubLevelPartition::default(); vnode_partition_count];
+                assert!(partition_level(
+                    levels.member_table_ids[0],
+                    vnode_partition_count,
+                    level,
+                    &mut partitions
+                ));
+                let max_size = partitions
+                    .iter()
+                    .map(|part| part.sub_levels[0].total_file_size)
+                    .max()
+                    .unwrap();
+                score = std::cmp::max(
+                    score,
+                    max_size * SCORE_BASE * (level.vnode_partition_count as u64)
+                        / ctx.level_max_bytes[level_idx],
+                )
+            }
+            ctx.score_levels.push((score, level_idx, level_idx + 1));
         }
 
         // sort reverse to pick the largest one.
@@ -429,26 +452,22 @@ impl LevelSelector for ManualCompactionSelector {
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let (mut picker, base_level) = {
-            let target_level = if self.option.level == 0 {
-                ctx.base_level
-            } else if self.option.level == group.compaction_config.max_level as usize {
-                self.option.level
-            } else {
-                self.option.level + 1
-            };
-            if self.option.level > 0 && self.option.level < ctx.base_level {
-                return None;
-            }
-            (
-                ManualCompactionPicker::new(overlap_strategy, self.option.clone(), target_level),
-                ctx.base_level,
-            )
+        let mut base_level = 1;
+        while base_level < levels.levels.len()
+            && levels.get_level(base_level).table_infos.is_empty()
+        {
+            base_level += 1;
+        }
+        let target_level = if self.option.level == 0 {
+            base_level
+        } else if self.option.level == group.compaction_config.max_level as usize {
+            self.option.level
+        } else {
+            self.option.level + 1
         };
-
+        let mut picker =
+            ManualCompactionPicker::new(overlap_strategy, self.option.clone(), target_level);
         let compaction_input =
             picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
         compaction_input.add_pending_task(task_id, level_handlers);
@@ -490,7 +509,12 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             levels.member_table_ids.iter().cloned().collect(),
         );
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let mut base_level = 1;
+        while base_level < levels.levels.len()
+            && levels.get_level(base_level).table_infos.is_empty()
+        {
+            base_level += 1;
+        }
         let state = self
             .state
             .entry(group.group_id)
@@ -502,7 +526,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
         Some(create_compaction_task(
             dynamic_level_core.get_config(),
             compaction_input,
-            ctx.base_level,
+            base_level,
             self.task_type(),
         ))
     }
@@ -531,8 +555,12 @@ impl LevelSelector for TtlCompactionSelector {
         _selector_stats: &mut LocalSelectorStatistic,
         table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let mut base_level = 1;
+        while base_level < levels.levels.len()
+            && levels.get_level(base_level).table_infos.is_empty()
+        {
+            base_level += 1;
+        }
         let picker = TtlReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
             table_id_to_options,
@@ -547,7 +575,7 @@ impl LevelSelector for TtlCompactionSelector {
         Some(create_compaction_task(
             group.compaction_config.as_ref(),
             compaction_input,
-            ctx.base_level,
+            base_level,
             self.task_type(),
         ))
     }

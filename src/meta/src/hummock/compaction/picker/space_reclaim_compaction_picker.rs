@@ -94,6 +94,7 @@ impl SpaceReclaimCompactionPicker {
                         ],
                         target_level: level.level_idx as usize,
                         target_sub_level_id: level.sub_level_id,
+                        vnode_partition_count: levels.levels[state.last_level - 1].vnode_partition_count,
                     });
                 }
             }
@@ -149,6 +150,8 @@ impl SpaceReclaimCompactionPicker {
                     ],
                     target_level: state.last_level,
                     target_sub_level_id: 0,
+                    vnode_partition_count: levels.levels[state.last_level - 1]
+                        .vnode_partition_count,
                 });
             }
             state.last_level += 1;
