@@ -310,7 +310,7 @@ pub async fn shared_compactor_serve(
 
     let meta_cache_capacity_mb: usize = 0;
 
-    // in shared compaction mode, these object stoage related parameters should be defined via cloud
+    // in shared compaction mode, these object storage related parameters should be defined via cloud
     // infra. object storage
     let state_store_url: String = "".to_string();
     let data_directory: String = "".to_string();
