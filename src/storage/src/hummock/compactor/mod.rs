@@ -530,7 +530,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats)=  compactor_runner::compact(context.clone(), compact_task, rx).await;
+                                        let (compact_task, table_stats)=  compactor_runner::compact(context.clone(), Box::new(context.sstable_object_id_manager.clone()),compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
                                         running_task_count.fetch_sub(1, Ordering::SeqCst);
 
@@ -681,7 +681,7 @@ pub fn start_shared_compactor(
                     worker_num,
                     max_sub_compaction,
                     memory_limiter,
-                    sstable_object_id_manager,
+                    Box::new(sstable_object_id_manager.clone()),
                     block_size_kb,
                     object_store_recv_buffer_size,
                     sstable_size_mb,
