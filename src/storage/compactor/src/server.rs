@@ -284,7 +284,6 @@ pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: CompactorOpts,
-    state_store_url: String,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactorMemoryCollector = HummockMemoryCollector;
 
@@ -297,16 +296,42 @@ pub async fn shared_compactor_serve(
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
+    // In dedicated compaction mode, these parameters are load from storage opt,
+    // and in shared compaction mode, these parameters should be defined via cloud infra.
+    let parallel_compact_size_mb: u32 = 0;
+    let worker_num: u32 = 0;
+    let max_sub_compaction: u32 = 0;
+    let block_size_kb: u32 = 0;
+    let object_store_recv_buffer_size: usize = 0;
+    let sstable_size_mb: u32 = 0;
+    let bloom_false_positive: f64 = 0.0;
+    let compactor_max_sst_size: u64 = 0;
+    let compact_iter_recreate_timeout_ms: u64 = 0;
+
+    let meta_cache_capacity_mb: usize = 0;
+
+    // in shared compaction mode, these object stoage related parameters should be defined via cloud
+    // infra. object storage
+    let state_store_url: String = "".to_string();
+    let data_directory: String = "".to_string();
+    let object_store_streaming_read_timeout_ms: u64 = 0;
+    // object store streaming upload timeout.
+    let object_store_streaming_upload_timeout_ms: u64 = 0;
+    // object store upload timeout.
+    let object_store_upload_timeout_ms: u64 = 0;
+    // object store read timeout.
+    let object_store_read_timeout_ms: u64 = 0;
+
     // Register to the cluster.
-    let (_, system_params_reader) = MetaClient::register_new(
-        &opts.meta_address,
-        WorkerType::Compactor,
-        &advertise_addr,
-        Default::default(),
-        &config.meta,
-    )
-    .await
-    .unwrap();
+    // let (_, system_params_reader) = MetaClient::register_new(
+    //     &opts.meta_address,
+    //     WorkerType::Compactor,
+    //     &advertise_addr,
+    //     Default::default(),
+    //     &config.meta,
+    // )
+    // .await
+    // .unwrap();
 
     // info!("Assigned compactor id {}", meta_client.worker_id());
     // meta_client.activate(&advertise_addr).await.unwrap();
@@ -320,16 +345,11 @@ pub async fn shared_compactor_serve(
     // let state_store_url = system_params_reader.state_store();
 
     let storage_memory_config = extract_storage_memory_config(&config);
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
-        &config,
-        &system_params_reader,
-        &storage_memory_config,
-    )));
 
     let total_memory_available_bytes =
         (resource_util::memory::total_memory_available_bytes() as f64
             * config.storage.compactor_memory_available_proportion) as usize;
-    let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
+    let meta_cache_capacity_bytes = meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
         None => (total_memory_available_bytes - meta_cache_capacity_bytes) as u64,
@@ -338,17 +358,16 @@ pub async fn shared_compactor_serve(
     tracing::info!(
         "Compactor total_memory_available_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
         total_memory_available_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
-        storage_opts.sstable_size_mb * (1 << 20),
-        storage_opts.block_size_kb * (1 << 10),
+        sstable_size_mb * (1 << 20),
+        block_size_kb * (1 << 10),
     );
 
     // check memory config
     {
         // This is a similar logic to SstableBuilder memory detection, to ensure that we can find
         // configuration problems as quickly as possible
-        let min_compactor_memory_limit_bytes = (storage_opts.sstable_size_mb * (1 << 20)
-            + storage_opts.block_size_kb * (1 << 10))
-            as u64;
+        let min_compactor_memory_limit_bytes =
+            (sstable_size_mb * (1 << 20) + block_size_kb * (1 << 10)) as u64;
 
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
@@ -359,19 +378,19 @@ pub async fn shared_compactor_serve(
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        Some(Arc::new(config.storage.clone())),
+        None,
     )
     .await;
     object_store.set_opts(
-        storage_opts.object_store_streaming_read_timeout_ms,
-        storage_opts.object_store_streaming_upload_timeout_ms,
-        storage_opts.object_store_read_timeout_ms,
-        storage_opts.object_store_upload_timeout_ms,
+        object_store_streaming_read_timeout_ms,
+        object_store_streaming_upload_timeout_ms,
+        object_store_read_timeout_ms,
+        object_store_upload_timeout_ms,
     );
     let object_store = Arc::new(object_store);
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
-        storage_opts.data_directory.to_string(),
+        data_directory,
         1 << 20, // set 1MB memory to avoid panic.
         meta_cache_capacity_bytes,
     ));
@@ -450,17 +469,17 @@ pub async fn shared_compactor_serve(
             Arc::new(AtomicU32::new(0)),
             compactor_metrics.clone(),
             sstable_store.clone(),
-            0,
-            0,
-            0,
+            parallel_compact_size_mb,
+            worker_num,
+            max_sub_compaction,
             memory_limiter,
-            0,
-            0,
-            0,
+            block_size_kb,
+            object_store_recv_buffer_size,
+            sstable_size_mb,
             Default::default(),
-            0.0,
-            0,
-            0,
+            bloom_false_positive,
+            compactor_max_sst_size,
+            compact_iter_recreate_timeout_ms,
             await_tree_reg.clone(),
         ),
     ];
