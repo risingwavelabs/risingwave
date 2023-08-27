@@ -74,6 +74,6 @@ Run `./risedev configure`, and enable `[Component] Hummock: Hdfs Backend`.
 
 After that, you need to [enable OpenDAL](https://github.com/risingwavelabs/risingwave/blob/1fd0394980fd713459df8076283bb1a1f46fef9a/risedev.yml#L123-L126) in `risedev.yml`, set `engine = hdfs`,  `namenode` and `root` as well.
 
-You can also use WebHDFS as a lightweight alternative to HDFS. Hdfs is powered by HDFS’s native java client. Users need to setup the hdfs services correctly. But webhdfs can access from HTTP API and no extra setup needed. The way to start WebHDFS is basically the same as hdfs, but its default name_node is `127.0.0.1:9870`.
+You can also use WebHDFS as a lightweight alternative to HDFS. Hdfs is powered by HDFS's native java client. Users need to setup the hdfs services correctly. But webhdfs can access from HTTP API and no extra setup needed. The way to start WebHDFS is basically the same as hdfs, but its default name_node is `127.0.0.1:9870`.
 
 Once these configurations are set, run `./risedev d hdfs` or `./risedev d webhdfs`, then you can run RisingWave on HDFS(WebHDFS).
