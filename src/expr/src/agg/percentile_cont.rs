@@ -15,12 +15,11 @@
 use std::ops::Range;
 
 use risingwave_common::array::*;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::Aggregator;
+use super::{AggStateDyn, AggregateFunction, AggregateState};
 use crate::agg::AggCall;
 use crate::Result;
 
@@ -64,90 +63,75 @@ use crate::Result;
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_cont(float64) -> float64")]
-fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
-    let fraction: Option<f64> = agg.direct_args[0]
+fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
+    let fraction = agg.direct_args[0]
         .literal()
         .map(|x| (*x.as_float64()).into());
-    Ok(Box::new(PercentileCont::new(fraction)))
+    Ok(Box::new(PercentileCont { fraction }))
 }
 
-#[derive(Clone, EstimateSize)]
 pub struct PercentileCont {
-    fractions: Option<f64>,
-    data: Vec<f64>,
+    fraction: Option<f64>,
 }
+
+type State = Vec<f64>;
+
+impl AggStateDyn for State {}
 
 impl PercentileCont {
-    pub fn new(fractions: Option<f64>) -> Self {
-        Self {
-            fractions,
-            data: vec![],
-        }
-    }
-
-    fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
+    fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {
         if let Some(datum) = datum_ref.to_owned_datum() {
-            self.data.push((*datum.as_float64()).into());
+            state.push((*datum.as_float64()).into());
         }
     }
 }
 
 #[async_trait::async_trait]
-impl Aggregator for PercentileCont {
+impl AggregateFunction for PercentileCont {
     fn return_type(&self) -> DataType {
         DataType::Float64
     }
 
-    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Any(Box::<State>::default())
+    }
+
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        let state = state.downcast_mut();
         for (_, row) in input.rows() {
-            self.add_datum(row.datum_at(0));
+            self.add_datum(state, row.datum_at(0));
         }
         Ok(())
     }
 
-    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        let state = state.downcast_mut();
         for (_, row) in input.rows_in(range) {
-            self.add_datum(row.datum_at(0));
+            self.add_datum(state, row.datum_at(0));
         }
         Ok(())
     }
 
-    fn get_output(&self) -> Result<Datum> {
-        Ok(if let Some(fractions) = self.fractions && !self.data.is_empty() {
-            let rn = fractions * (self.data.len() - 1) as f64;
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<State>();
+        Ok(if let Some(fraction) = self.fraction && !state.is_empty() {
+            let rn = fraction * (state.len() - 1) as f64;
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
             let result = if crn == frn {
-                self.data[crn as usize]
+                state[crn as usize]
             } else {
-                (crn - rn) * self.data[frn as usize]
-                    + (rn - frn) * self.data[crn as usize]
+                (crn - rn) * state[frn as usize]
+                    + (rn - frn) * state[crn as usize]
             };
             Some(result.into())
         } else {
             None
         })
-    }
-
-    fn output(&mut self) -> Result<Datum> {
-        let result = self.get_output()?;
-        self.reset();
-        Ok(result)
-    }
-
-    fn reset(&mut self) {
-        self.data.clear();
-    }
-
-    fn get_state(&self) -> Datum {
-        unimplemented!()
-    }
-
-    fn set_state(&mut self, _: Datum) {
-        unimplemented!()
-    }
-
-    fn estimated_size(&self) -> usize {
-        EstimateSize::estimated_size(self)
     }
 }

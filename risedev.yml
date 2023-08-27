@@ -145,6 +145,18 @@ profile:
         persist-data: true
       - use: connector-node
 
+  standalone-minio-etcd-compactor:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+
   standalone-full-peripherals-without-kafka:
     steps:
       - use: minio

@@ -126,6 +126,14 @@ impl DataChunk {
         (self.columns.to_vec(), self.vis2)
     }
 
+    pub fn into_parts_v2(self) -> (Arc<[ArrayRef]>, Vis) {
+        (self.columns, self.vis2)
+    }
+
+    pub fn from_parts(columns: Arc<[ArrayRef]>, vis2: Vis) -> Self {
+        Self { columns, vis2 }
+    }
+
     pub fn dimension(&self) -> usize {
         self.columns.len()
     }
