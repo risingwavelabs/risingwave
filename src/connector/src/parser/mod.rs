@@ -26,7 +26,7 @@ use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
@@ -239,10 +239,10 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_meta || desc.name.eq(OFFSET_COLUMN_NAME) {
+                if desc.is_meta() || desc.is_offset() {
                     return Ok(());
                 }
-                let output = if desc.is_row_id {
+                let output = if desc.is_row_id() {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
@@ -458,7 +458,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     for _ in old_op_num..new_op_num {
                         let f =
                             |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                                if desc.is_meta && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                                if desc.is_meta() && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
                                     match desc.name.as_str() {
                                         KAFKA_TIMESTAMP_COLUMN_NAME => {
                                             Some(kafka_meta.timestamp.map(|ts| {
@@ -474,7 +474,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                             )
                                         }
                                     }
-                                } else if desc.name.eq(OFFSET_COLUMN_NAME) {
+                                } else if desc.is_offset() {
                                     Some(Some(msg_offset.as_str().into()))
                                 } else {
                                     // None will be ignored by `fulfill_meta_column`
@@ -482,15 +482,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                 }
                             };
 
-                        // TODO: support more kinds of SourceMeta
-                        if let SourceMeta::Kafka(_) = &msg.meta {
-                            builder.row_writer().fulfill_meta_column(f)?;
-                        }
-
-                        // fill the offset column
-                        if parser.source_ctx().cdc_backfill_enabled() {
-                            builder.row_writer().fulfill_meta_column(f)?;
-                        }
+                        // fill in meta or offset column if any
+                        builder.row_writer().fulfill_meta_column(f)?;
                     }
                 }
 
