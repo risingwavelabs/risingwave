@@ -52,6 +52,26 @@ pub struct SstableBuilderOptions {
     pub max_sst_size: u64,
 }
 
+impl SstableBuilderOptions {
+    pub fn new(
+        capacity: usize,
+        block_capacity: usize,
+        restart_interval: usize,
+        bloom_false_positive: f64,
+        compression_algorithm: CompressionAlgorithm,
+        max_sst_size: u64,
+    ) -> Self {
+        Self {
+            capacity,
+            block_capacity,
+            restart_interval,
+            bloom_false_positive,
+            compression_algorithm,
+            max_sst_size,
+        }
+    }
+}
+
 impl From<&StorageOpts> for SstableBuilderOptions {
     fn from(options: &StorageOpts) -> SstableBuilderOptions {
         let capacity: usize = (options.sstable_size_mb as usize) * (1 << 20);

@@ -284,7 +284,8 @@ pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: CompactorOpts,
-) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
+    state_store_url: String,
+) -> (JoinHandle<()>, Sender<()>) {
     type CompactorMemoryCollector = HummockMemoryCollector;
 
     let config = load_config(&opts.config_path, &opts);
@@ -297,7 +298,7 @@ pub async fn shared_compactor_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Register to the cluster.
-    let (meta_client, system_params_reader) = MetaClient::register_new(
+    let (_, system_params_reader) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
@@ -307,17 +308,16 @@ pub async fn shared_compactor_serve(
     .await
     .unwrap();
 
-    info!("Assigned compactor id {}", meta_client.worker_id());
-    meta_client.activate(&advertise_addr).await.unwrap();
+    // info!("Assigned compactor id {}", meta_client.worker_id());
+    // meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
-    let state_store_url = system_params_reader.state_store();
+    // let state_store_url = system_params_reader.state_store();
 
     let storage_memory_config = extract_storage_memory_config(&config);
     let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
@@ -376,22 +376,23 @@ pub async fn shared_compactor_serve(
         meta_cache_capacity_bytes,
     ));
 
-    let telemetry_enabled = system_params_reader.telemetry_enabled();
+    // let telemetry_enabled = system_params_reader.telemetry_enabled();
 
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
-        RemoteTableAccessor::new(meta_client.clone()),
-    )));
-    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
-    let compactor_observer_node = CompactorObserverNode::new(
-        filter_key_extractor_manager.clone(),
-        system_params_manager.clone(),
-    );
-    let observer_manager =
-        ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
+    // let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+    //     RemoteTableAccessor::new(meta_client.clone()),
+    // )));
+    // let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
+    // let compactor_observer_node = CompactorObserverNode::new(
+    //     filter_key_extractor_manager.clone(),
+    //     system_params_manager.clone(),
+    // );
+    // let observer_manager =
+    //     ObserverManager::new_with_meta_client(meta_client.clone(),
+    // compactor_observer_node).await;
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
-    let observer_join_handle = observer_manager.start().await;
+    // let observer_join_handle = observer_manager.start().await;
 
     let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
@@ -457,26 +458,28 @@ pub async fn shared_compactor_serve(
             0,
             0,
             Default::default(),
-            storage_opts,
+            0.0,
+            0,
+            0,
             await_tree_reg.clone(),
         ),
     ];
 
-    let telemetry_manager = TelemetryManager::new(
-        system_params_manager.watch_params(),
-        Arc::new(meta_client.clone()),
-        Arc::new(CompactorTelemetryCreator::new()),
-    );
-    // if the toml config file or env variable disables telemetry, do not watch system params change
-    // because if any of configs disable telemetry, we should never start it
-    if config.server.telemetry_enabled && telemetry_env_enabled() {
-        if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting().await;
-        }
-        sub_tasks.push(telemetry_manager.watch_params_change());
-    } else {
-        tracing::info!("Telemetry didn't start due to config");
-    }
+    // let telemetry_manager = TelemetryManager::new(
+    //     system_params_manager.watch_params(),
+    //     Arc::new(meta_client.clone()),
+    //     Arc::new(CompactorTelemetryCreator::new()),
+    // );
+    // // if the toml config file or env variable disables telemetry, do not watch system params
+    // change // because if any of configs disable telemetry, we should never start it
+    // if config.server.telemetry_enabled && telemetry_env_enabled() {
+    //     if telemetry_enabled {
+    //         telemetry_manager.start_telemetry_reporting().await;
+    //     }
+    //     sub_tasks.push(telemetry_manager.watch_params_change());
+    // } else {
+    //     tracing::info!("Telemetry didn't start due to config");
+    // }
 
     let compactor_srv = CompactorServiceImpl::default();
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
@@ -513,5 +516,5 @@ pub async fn shared_compactor_serve(
         );
     }
 
-    (join_handle, observer_join_handle, shutdown_send)
+    (join_handle, shutdown_send)
 }

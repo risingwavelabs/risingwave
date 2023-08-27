@@ -47,7 +47,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
     GetObjectId, HummockResult, MemoryLimiter, MonotonicDeleteEvent, SstableBuilderOptions,
-    SstableStoreRef,
+    SstableStoreRef, DEFAULT_RESTART_INTERVAL,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 use crate::opts::StorageOpts;
@@ -67,18 +67,30 @@ impl CompactorRunner {
         is_share_buffer_compact: bool,
         sstable_store: SstableStoreRef,
         memory_limiter: Arc<MemoryLimiter>,
-        storage_opts: Arc<StorageOpts>,
         sstable_object_id_manager: Box<dyn GetObjectId>,
         task: CompactTask,
+        sstable_size_mb: u32,
+        block_size_kb: u32,
+        bloom_false_positive: f64,
+        compactor_max_sst_size: u64,
+        compact_iter_recreate_timeout_ms: u64,
     ) -> Self {
-        let mut options: SstableBuilderOptions = storage_opts.as_ref().into();
+        let mut options = SstableBuilderOptions::new(
+            (sstable_size_mb as usize) * (1 << 20),
+            (block_size_kb as usize) * (1 << 10),
+            DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive,
+            CompressionAlgorithm::None,
+            compactor_max_sst_size,
+        );
+
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
 
-        options.capacity = estimate_task_output_capacity(storage_opts.sstable_size_mb, &task);
+        options.capacity = estimate_task_output_capacity(sstable_size_mb, &task);
         let kv_count = task
             .input_ssts
             .iter()
@@ -114,7 +126,7 @@ impl CompactorRunner {
             sstable_store.clone(),
             memory_limiter.clone(),
             sstable_object_id_manager,
-            storage_opts.compact_iter_recreate_timeout_ms,
+            compact_iter_recreate_timeout_ms,
         );
 
         Self {
@@ -289,7 +301,11 @@ pub async fn compact(
             .unwrap_or(6 * 1024 * 1024) as u64,
         compactor_context.storage_opts.sstable_size_mb,
         compactor_context.task_progress_manager.clone(),
-        compactor_context.storage_opts.clone(),
+        compactor_context.storage_opts.bloom_false_positive,
+        compactor_context.storage_opts.compactor_max_sst_size,
+        compactor_context
+            .storage_opts
+            .compact_iter_recreate_timeout_ms,
         compactor_context.await_tree_reg.clone(),
     )
     .await
@@ -583,7 +599,9 @@ pub async fn shared_compact(
     object_store_recv_buffer_size: usize,
     sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
-    storage_opts: Arc<StorageOpts>,
+    bloom_false_positive: f64,
+    compactor_max_sst_size: u64,
+    compact_iter_recreate_timeout_ms: u64,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     compact_inner(
@@ -601,7 +619,9 @@ pub async fn shared_compact(
         object_store_recv_buffer_size as u64,
         sstable_size_mb,
         task_progress_manager,
-        storage_opts,
+        bloom_false_positive,
+        compactor_max_sst_size,
+        compact_iter_recreate_timeout_ms,
         await_tree_reg,
     )
     .await
@@ -622,7 +642,9 @@ async fn compact_inner(
     object_store_recv_buffer_size: u64,
     sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
-    storage_opts: Arc<StorageOpts>,
+    bloom_false_positive: f64,
+    compactor_max_sst_size: u64,
+    compact_iter_recreate_timeout_ms: u64,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let group_label = compact_task.compaction_group_id.to_string();
@@ -833,9 +855,13 @@ async fn compact_inner(
             false,
             sstable_store.clone(),
             memory_limiter.clone(),
-            storage_opts.clone(),
             sstable_object_id_manager.clone(),
             compact_task.clone(),
+            sstable_size_mb,
+            block_size_kb,
+            bloom_false_positive,
+            compactor_max_sst_size,
+            compact_iter_recreate_timeout_ms,
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();

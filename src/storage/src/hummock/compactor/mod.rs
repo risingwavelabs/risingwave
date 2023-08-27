@@ -18,7 +18,7 @@ pub mod compaction_utils;
 use parking_lot::RwLock;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
-use risingwave_pb::hummock::{dispatch_compaction_task_request, CompactTask};
+use risingwave_pb::hummock::{dispatch_compaction_task_request, CompactTask, VacuumTask};
 pub mod compactor_runner;
 mod context;
 mod iterator;
@@ -47,6 +47,9 @@ pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, LocalSstableInfo};
+use risingwave_pb::hummock::report_compaction_task_request::{
+    Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
+};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
 };
@@ -639,24 +642,72 @@ pub fn start_shared_compactor(
     object_store_recv_buffer_size: usize,
     sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
-    storage_opts: Arc<StorageOpts>,
+    bloom_false_positive: f64,
+    compactor_max_sst_size: u64,
+    compact_iter_recreate_timeout_ms: u64,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
+    let task_progress = task_progress_manager.clone();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let stream_retry_interval = Duration::from_secs(30);
     let periodic_event_update_interval = Duration::from_millis(1000);
     let mut system =
         System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
     let pid = sysinfo::get_current_pid().unwrap();
-    let pull_task_ack = Arc::new(AtomicBool::new(true));
 
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
         let shutdown = shutdown_map.clone();
-        let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
         let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
+        let mut last_workload = CompactorWorkload::default();
+        tokio::select! {
+            _ = periodic_event_interval.tick() => {
+                let mut progress_list = Vec::new();
+                for (&task_id, progress) in task_progress.lock().iter() {
+                    progress_list.push(CompactTaskProgress {
+                        task_id,
+                        num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
+                        num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
+                        num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
+                        num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
+                        num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
+                    });
+                }
+
+                let report_compaction_task_request = ReportCompactionTaskRequest{
+                    event: Some(ReportCompactionTaskEvent::HeartBeat(
+                        SharedHeartBeat {
+                            progress: progress_list
+                        }
+                    )),
+                 };
+            }
+
+            _ = workload_collect_interval.tick() => {
+                let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
+                debug_assert!(refresh_result);
+                let cpu = if let Some(process) = system.process(pid) {
+                    process.cpu_usage().div(worker_num as f32) as u32
+                } else {
+                    tracing::warn!("fail to get process pid {:?}", pid);
+                    0
+                };
+
+                tracing::debug!("compactor cpu usage {cpu}");
+                let workload = CompactorWorkload {
+                    cpu,
+                };
+
+                last_workload = workload.clone();
+
+            }
+            _ = &mut shutdown_rx => {
+                tracing::info!("Compactor is shutting down");
+                return
+            }
+        };
+
         match dispatch_task {
             dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
                 running_task_count.fetch_add(1, Ordering::SeqCst);
@@ -686,7 +737,9 @@ pub fn start_shared_compactor(
                     object_store_recv_buffer_size,
                     sstable_size_mb,
                     task_progress_manager,
-                    storage_opts,
+                    bloom_false_positive,
+                    compactor_max_sst_size,
+                    compact_iter_recreate_timeout_ms,
                     await_tree_reg,
                 )
                 .await;
@@ -694,10 +747,10 @@ pub fn start_shared_compactor(
                 running_task_count.fetch_sub(1, Ordering::SeqCst);
                 // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
                 let report_compaction_task_request = ReportCompactionTaskRequest {
-                    report_task: Some(ReportSharedTask {
+                    event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                         compact_task: Some(compact_task),
                         table_stats_change: to_prost_table_stats_map(table_stats),
-                    }),
+                    })),
                 };
             }
             dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
@@ -709,6 +762,9 @@ pub fn start_shared_compactor(
                 {
                     Ok(_) => {
                         // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
+                        let report_compaction_task_request = ReportCompactionTaskRequest {
+                            event: Some(ReportCompactionTaskEvent::VacuumTask(vacuum_task)),
+                        };
                     }
                     Err(e) => {
                         tracing::warn!("Failed to vacuum task: {:#?}", e)
