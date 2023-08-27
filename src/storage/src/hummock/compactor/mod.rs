@@ -18,7 +18,7 @@ pub mod compaction_utils;
 use parking_lot::RwLock;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
-use risingwave_pb::hummock::CompactTask;
+use risingwave_pb::hummock::{dispatch_compaction_task_request, CompactTask};
 pub mod compactor_runner;
 mod context;
 mod iterator;
@@ -625,14 +625,14 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
 pub fn start_shared_compactor(
-    compact_task: CompactTask,
+    dispatch_task: dispatch_compaction_task_request::Task,
     id_to_table: HashMap<u32, Table>,
     output_ids: Vec<u64>,
     running_task_count: Arc<AtomicU32>,
     compactor_metrics: Arc<CompactorMetrics>,
     sstable_store: SstableStoreRef,
     parallel_compact_size_mb: u32,
-    worker_num: u64,
+    worker_num: u32,
     max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     block_size_kb: u32,
@@ -657,45 +657,70 @@ pub fn start_shared_compactor(
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
         let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
-        running_task_count.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let task_id = compact_task.task_id;
-        shutdown.lock().unwrap().insert(task_id, tx);
-        let mut output_object_ids: VecDeque<_> = VecDeque::new();
-        output_object_ids.extend(output_ids);
-        let sstable_object_id_manager = SharedComapctorObjectIdManager::new(output_object_ids);
-        let filter_key_extractor_manager =
-            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
-                FilterKeyExtractorBuilder::new(id_to_table),
-            );
-        let (compact_task, table_stats) = shared_compact(
-            compactor_metrics,
-            compact_task,
-            rx,
-            sstable_store,
-            parallel_compact_size_mb,
-            filter_key_extractor_manager,
-            worker_num,
-            max_sub_compaction,
-            memory_limiter,
-            sstable_object_id_manager,
-            block_size_kb,
-            object_store_recv_buffer_size,
-            sstable_size_mb,
-            task_progress_manager,
-            storage_opts,
-            await_tree_reg,
-        )
-        .await;
-        shutdown.lock().unwrap().remove(&task_id);
-        running_task_count.fetch_sub(1, Ordering::SeqCst);
-        // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
-        let report_compaction_task_request = ReportCompactionTaskRequest {
-            report_task: Some(ReportSharedTask {
-                compact_task: Some(compact_task),
-                table_stats_change: to_prost_table_stats_map(table_stats),
-            }),
-        };
+        match dispatch_task {
+            dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
+                running_task_count.fetch_add(1, Ordering::SeqCst);
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let task_id = compact_task.task_id;
+                shutdown.lock().unwrap().insert(task_id, tx);
+                let mut output_object_ids: VecDeque<_> = VecDeque::new();
+                output_object_ids.extend(output_ids);
+                let sstable_object_id_manager =
+                    SharedComapctorObjectIdManager::new(output_object_ids);
+                let filter_key_extractor_manager =
+                    FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
+                        FilterKeyExtractorBuilder::new(id_to_table),
+                    );
+                let (compact_task, table_stats) = shared_compact(
+                    compactor_metrics,
+                    compact_task,
+                    rx,
+                    sstable_store,
+                    parallel_compact_size_mb,
+                    filter_key_extractor_manager,
+                    worker_num,
+                    max_sub_compaction,
+                    memory_limiter,
+                    sstable_object_id_manager,
+                    block_size_kb,
+                    object_store_recv_buffer_size,
+                    sstable_size_mb,
+                    task_progress_manager,
+                    storage_opts,
+                    await_tree_reg,
+                )
+                .await;
+                shutdown.lock().unwrap().remove(&task_id);
+                running_task_count.fetch_sub(1, Ordering::SeqCst);
+                // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
+                let report_compaction_task_request = ReportCompactionTaskRequest {
+                    report_task: Some(ReportSharedTask {
+                        compact_task: Some(compact_task),
+                        table_stats_change: to_prost_table_stats_map(table_stats),
+                    }),
+                };
+            }
+            dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
+                match Vacuum::handle_vacuum_task(
+                    sstable_store.clone(),
+                    &vacuum_task.sstable_object_ids,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to vacuum task: {:#?}", e)
+                    }
+                }
+            }
+            dispatch_compaction_task_request::Task::FullScanTask(_) => todo!(),
+            dispatch_compaction_task_request::Task::ValidationTask(_) => todo!(),
+            dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
+                // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
+            }
+        }
     });
     (join_handle, shutdown_tx)
 }
