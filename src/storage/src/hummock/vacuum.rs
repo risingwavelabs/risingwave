@@ -97,6 +97,41 @@ impl Vacuum {
         true
     }
 
+    pub async fn handle_full_scan_task(
+        full_scan_task: FullScanTask,
+        sstable_store: SstableStoreRef,
+    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64)> {
+        tracing::info!(
+            "Try to full scan SSTs with timestamp {}",
+            full_scan_task.sst_retention_time_sec
+        );
+        let metadata_iter = sstable_store
+            .list_object_metadata_from_object_store()
+            .await?;
+        Vacuum::full_scan_inner(full_scan_task, metadata_iter).await
+    }
+
+    pub async fn report_full_scan_task(
+        filtered_object_ids: Vec<u64>,
+        unfiltered_count: u64,
+        unfiltered_size: u64,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) -> bool {
+        match hummock_meta_client
+            .report_full_scan_task(filtered_object_ids, unfiltered_count, unfiltered_size)
+            .await
+        {
+            Ok(_) => {
+                tracing::info!("Finished full scan SSTs");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to report full scan task: {:#?}", e);
+                return false;
+            }
+        }
+        true
+    }
+
     /// Returns **filtered** object ids, and **unfiltered** total object count and size.
     pub async fn full_scan_inner(
         full_scan_task: FullScanTask,

@@ -18,7 +18,9 @@ pub mod compaction_utils;
 use parking_lot::RwLock;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
-use risingwave_pb::hummock::{dispatch_compaction_task_request, CompactTask, VacuumTask};
+use risingwave_pb::hummock::{
+    dispatch_compaction_task_request, CompactTask, ReportFullScanTaskRequest, VacuumTask,
+};
 pub mod compactor_runner;
 mod context;
 mod iterator;
@@ -771,10 +773,42 @@ pub fn start_shared_compactor(
                     }
                 }
             }
-            dispatch_compaction_task_request::Task::FullScanTask(_) => todo!(),
-            dispatch_compaction_task_request::Task::ValidationTask(_) => todo!(),
+            dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
+                match Vacuum::handle_full_scan_task(full_scan_task, sstable_store.clone()).await {
+                    Ok((object_ids, total_object_count, total_object_size)) => {
+                        let report_full_scan_task_request = ReportFullScanTaskRequest {
+                            object_ids,
+                            total_object_count,
+                            total_object_size,
+                        };
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to iter object: {:#?}", e);
+                    }
+                }
+            }
+            dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
+                validate_ssts(validation_task, sstable_store.clone()).await;
+            }
             dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
                 // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
+                if let Some(tx) = shutdown
+                    .lock()
+                    .unwrap()
+                    .remove(&cancel_compact_task.task_id)
+                {
+                    if tx.send(()).is_err() {
+                        tracing::warn!(
+                            "Cancellation of compaction task failed. task_id: {}",
+                            cancel_compact_task.task_id
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        "Attempting to cancel non-existent compaction task. task_id: {}",
+                        cancel_compact_task.task_id
+                    );
+                }
             }
         }
     });
