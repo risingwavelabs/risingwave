@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroU32;
 
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use risingwave_common::catalog::Schema;
 
 use super::*;
@@ -23,22 +26,35 @@ use super::*;
 /// or update element into next operator according to the result of the expression.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
-    rate_limit: usize,
+    rate_limit: u32,
 }
 
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(input: Box<dyn Executor>, rate_limit: usize) -> Self {
+    pub fn new(input: Box<dyn Executor>, rate_limit: u32) -> Self {
         Self { input, rate_limit }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
+        let quota = Quota::per_second(NonZeroU32::new(self.rate_limit).unwrap());
+        let clock = MonotonicClock;
+        let rate_limiter = RateLimiter::direct_with_clock(quota, &clock);
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
-            {
-                yield msg;
+            match msg {
+                Message::Chunk(chunk) => {
+                    let result = rate_limiter
+                        .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
+                        .await;
+                    assert!(
+                        result.is_ok(),
+                        "the capacity of rate_limiter must be larger than the cardinality of chunk"
+                    );
+                    yield Message::Chunk(chunk);
+                }
+                _ => yield msg,
             }
         }
     }

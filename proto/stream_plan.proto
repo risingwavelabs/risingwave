@@ -451,7 +451,7 @@ message ChainNode {
   plan_common.StorageTableDesc table_desc = 7;
 
   // The rate limit for the chain node.
-  optional uint64 rate_limit = 8;
+  optional uint32 rate_limit = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
