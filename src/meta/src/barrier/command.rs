@@ -324,7 +324,7 @@ where
             } => {
                 let dropped_actors = old_table_fragments.actor_ids();
 
-                let actor_dispatchers = dispatchers
+                let actor_new_dispatchers = dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
                         (
@@ -337,7 +337,7 @@ where
                     .collect();
 
                 Some(Mutation::Update(UpdateMutation {
-                    actor_dispatchers,
+                    actor_new_dispatchers,
                     merge_update: merge_updates.clone(),
                     dropped_actors,
                     ..Default::default()
@@ -460,7 +460,7 @@ where
                 }
 
                 // we don't create dispatchers in reschedule scenario
-                let actor_dispatchers = HashMap::new();
+                let actor_new_dispatchers = HashMap::new();
 
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
@@ -468,7 +468,7 @@ where
                     actor_vnode_bitmap_update,
                     dropped_actors,
                     actor_splits,
-                    actor_dispatchers,
+                    actor_new_dispatchers,
                 });
                 tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)

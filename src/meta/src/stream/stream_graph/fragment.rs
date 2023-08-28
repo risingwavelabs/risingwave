@@ -51,9 +51,6 @@ pub(super) struct BuildingFragment {
     /// The fragment structure from the frontend, with the global fragment ID.
     inner: StreamFragment,
 
-    /// A clone of the internal tables in this fragment.
-    internal_tables: Vec<Table>,
-
     /// The ID of the job if it's materialized in this fragment.
     table_id: Option<u32>,
 
@@ -74,16 +71,28 @@ impl BuildingFragment {
             fragment_id: id.as_global_id(),
             ..fragment
         };
-        let internal_tables = Self::fill_internal_tables(&mut fragment, job, table_id_gen);
+
+        // Fill the information of the internal tables in the fragment.
+        Self::fill_internal_tables(&mut fragment, job, table_id_gen);
+
         let table_id = Self::fill_job(&mut fragment, job).then(|| job.id());
         let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
 
         Self {
             inner: fragment,
-            internal_tables,
             table_id,
             upstream_table_columns,
         }
+    }
+
+    /// Extract the internal tables from the fragment.
+    fn extract_internal_tables(&self) -> Vec<Table> {
+        let mut fragment = self.inner.to_owned();
+        let mut tables = Vec::new();
+        stream_graph_visitor::visit_internal_tables(&mut fragment, |table, _| {
+            tables.push(table.clone());
+        });
+        tables
     }
 
     /// Fill the information of the internal tables in the fragment.
@@ -91,10 +100,8 @@ impl BuildingFragment {
         fragment: &mut StreamFragment,
         job: &StreamingJob,
         table_id_gen: GlobalTableIdGen,
-    ) -> Vec<Table> {
+    ) {
         let fragment_id = fragment.fragment_id;
-        let mut internal_tables = Vec::new();
-
         stream_graph_visitor::visit_internal_tables(fragment, |table, table_type_name| {
             table.id = table_id_gen.to_global_id(table.id).as_global_id();
             table.schema_id = job.schema_id();
@@ -107,12 +114,7 @@ impl BuildingFragment {
             );
             table.fragment_id = fragment_id;
             table.owner = job.owner();
-
-            // Record the internal table.
-            internal_tables.push(table.clone());
         });
-
-        internal_tables
     }
 
     /// Fill the information of the job in the fragment.
@@ -287,7 +289,7 @@ impl StreamFragmentGraph {
         assert_eq!(
             fragments
                 .values()
-                .map(|f| f.internal_tables.len() as u32)
+                .map(|f| f.extract_internal_tables().len() as u32)
                 .sum::<u32>(),
             proto.table_ids_cnt
         );
@@ -340,10 +342,11 @@ impl StreamFragmentGraph {
     pub fn internal_tables(&self) -> HashMap<u32, Table> {
         let mut tables = HashMap::new();
         for fragment in self.fragments.values() {
-            for table in &fragment.internal_tables {
+            for table in fragment.extract_internal_tables() {
+                let table_id = table.id;
                 tables
-                    .try_insert(table.id, table.clone())
-                    .unwrap_or_else(|_| panic!("duplicated table id `{}`", table.id));
+                    .try_insert(table_id, table)
+                    .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
             }
         }
         tables
@@ -356,10 +359,11 @@ impl StreamFragmentGraph {
     ) -> MetaResult<()> {
         let mut new_internal_table_ids = Vec::new();
         for fragment in self.fragments.values() {
-            for table in &fragment.internal_tables {
+            for table in &fragment.extract_internal_tables() {
                 new_internal_table_ids.push(table.id);
             }
         }
+
         if new_internal_table_ids.len() != old_internal_tables.len() {
             bail!(
                 "Different number of internal tables. New: {}, Old: {}",
@@ -374,20 +378,6 @@ impl StreamFragmentGraph {
             .into_iter()
             .zip_eq_fast(old_internal_tables.into_iter())
             .collect::<HashMap<_, _>>();
-
-        for fragment in self.fragments.values_mut() {
-            for table in &mut fragment.internal_tables {
-                let old_table = internal_table_id_map.get(&table.id).unwrap();
-                if old_table.get_columns() != table.get_columns() {
-                    bail!(
-                        "Mismatch of internal tables.\nOld table: {:?}\nNew table: {:?}\n",
-                        old_table,
-                        table
-                    );
-                }
-                table.id = old_table.get_id();
-            }
-        }
 
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
@@ -750,12 +740,13 @@ impl CompleteStreamFragmentGraph {
         actors: Vec<StreamActor>,
         distribution: Distribution,
     ) -> Fragment {
+        let building_fragment = self.get_fragment(id).into_building().unwrap();
+        let internal_tables = building_fragment.extract_internal_tables();
         let BuildingFragment {
             inner,
-            internal_tables,
             table_id,
             upstream_table_columns: _,
-        } = self.get_fragment(id).into_building().unwrap();
+        } = building_fragment;
 
         let distribution_type = distribution.to_distribution_type() as i32;
 

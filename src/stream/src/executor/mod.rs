@@ -224,7 +224,7 @@ pub enum Mutation {
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-        actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+        actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
@@ -412,7 +412,7 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
-                actor_dispatchers,
+                actor_new_dispatchers,
             } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -422,7 +422,7 @@ impl Mutation {
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
-                actor_dispatchers: actor_dispatchers
+                actor_new_dispatchers: actor_new_dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
                         (
@@ -506,8 +506,8 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                actor_dispatchers: update
-                    .actor_dispatchers
+                actor_new_dispatchers: update
+                    .actor_new_dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),

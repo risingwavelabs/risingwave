@@ -185,7 +185,7 @@ impl DispatchExecutorInner {
             }
             Mutation::Update {
                 dispatchers,
-                actor_dispatchers,
+                actor_new_dispatchers: actor_dispatchers,
                 ..
             } => {
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
@@ -1101,7 +1101,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
-            actor_dispatchers: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1153,7 +1153,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
-            actor_dispatchers: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
