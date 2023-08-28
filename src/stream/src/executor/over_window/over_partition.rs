@@ -50,9 +50,9 @@ pub enum CachePolicy {
     /// Cache only recently accessed range of entries.
     Recent,
     /// Cache only the first N entries in recently accessed range.
-    RecentStart,
+    RecentFirstN,
     /// Cache only the last N entries in recently accessed range.
-    RecentEnd,
+    RecentLastN,
 }
 
 pub(super) type CacheKey = KeyWithSentinel<StateKey>;

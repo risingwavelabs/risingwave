@@ -473,7 +473,7 @@ pub struct ConfigMap {
     standard_conforming_strings: StandardConformingStrings,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "recent-start" or "recent-end".
+    /// Can be "full", "recent", "recent-first-n" or "recent-last-n".
     streaming_over_window_cache_policy: StreamingOverWindowCachePolicy,
 }
 
@@ -851,7 +851,7 @@ impl ConfigMap {
             VariableInfo{
                 name: StreamingOverWindowCachePolicy::entry_name().to_lowercase(),
                 setting: self.streaming_over_window_cache_policy.to_string(),
-                description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent-start" or "recent-end"."#),
+                description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent-first-n" or "recent-last-n"."#),
             },
         ]
     }
