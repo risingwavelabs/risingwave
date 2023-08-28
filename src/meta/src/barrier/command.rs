@@ -130,6 +130,7 @@ pub enum Command {
         old_table_fragments: TableFragments,
         new_table_fragments: TableFragments,
         merge_updates: Vec<MergeUpdate>,
+        dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     },
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
@@ -319,11 +320,25 @@ where
             Command::ReplaceTable {
                 old_table_fragments,
                 merge_updates,
+                dispatchers,
                 ..
             } => {
                 let dropped_actors = old_table_fragments.actor_ids();
 
+                let actor_dispatchers = dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+
                 Some(Mutation::Update(UpdateMutation {
+                    actor_dispatchers,
                     merge_update: merge_updates.clone(),
                     dropped_actors,
                     ..Default::default()
@@ -445,12 +460,16 @@ where
                     }
                 }
 
+                // we don't create dispatchers in reschedule scenario
+                let actor_dispatchers = HashMap::new();
+
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
                     actor_splits,
+                    actor_dispatchers,
                 });
                 tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
@@ -474,7 +493,6 @@ where
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
                 .chain(table_fragments.values_actor_ids().into_iter())
                 .collect(),
-
             _ => Default::default(),
         }
     }
@@ -685,6 +703,7 @@ where
                 old_table_fragments,
                 new_table_fragments,
                 merge_updates,
+                dispatchers,
             } => {
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
@@ -695,9 +714,10 @@ where
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .post_replace_table(
-                        old_table_fragments.table_id(),
-                        new_table_fragments.table_id(),
+                        old_table_fragments,
+                        new_table_fragments,
                         merge_updates,
+                        dispatchers,
                     )
                     .await?;
             }

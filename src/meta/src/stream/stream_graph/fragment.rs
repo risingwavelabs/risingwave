@@ -21,7 +21,9 @@ use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::catalog::{
+    generate_internal_table_name_with_type, TableId, INITIAL_TABLE_VERSION_ID,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
@@ -143,7 +145,8 @@ impl BuildingFragment {
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
-                dml_node.table_version_id = job.table_version_id().unwrap();
+                dml_node.table_version_id =
+                    job.table_version_id().unwrap_or(INITIAL_TABLE_VERSION_ID);
             }
             _ => {}
         });
@@ -347,29 +350,34 @@ impl StreamFragmentGraph {
     }
 
     /// Set internal tables' `table_id`s according to a list of internal tables
-    pub fn fit_internal_table_ids(&mut self, mut old_tables: Vec<Table>) -> MetaResult<()> {
-        let mut new_ids = Vec::new();
+    pub fn fit_internal_table_ids(
+        &mut self,
+        mut old_internal_tables: Vec<Table>,
+    ) -> MetaResult<()> {
+        let mut new_internal_table_ids = Vec::new();
         for fragment in self.fragments.values() {
             for table in &fragment.internal_tables {
-                new_ids.push(table.id);
+                new_internal_table_ids.push(table.id);
             }
         }
-        if new_ids.len() != old_tables.len() {
+        if new_internal_table_ids.len() != old_internal_tables.len() {
             bail!(
                 "Different number of internal tables. New: {}, Old: {}",
-                new_ids.len(),
-                old_tables.len()
+                new_internal_table_ids.len(),
+                old_internal_tables.len()
             );
         }
-        old_tables.sort_by(|a, b| a.id.cmp(&b.id));
-        new_ids.sort();
-        let id_map = new_ids
+        old_internal_tables.sort_by(|a, b| a.id.cmp(&b.id));
+        new_internal_table_ids.sort();
+
+        let internal_table_id_map = new_internal_table_ids
             .into_iter()
-            .zip_eq_fast(old_tables.into_iter())
+            .zip_eq_fast(old_internal_tables.into_iter())
             .collect::<HashMap<_, _>>();
+
         for fragment in self.fragments.values_mut() {
             for table in &mut fragment.internal_tables {
-                let old_table = id_map.get(&table.id).unwrap();
+                let old_table = internal_table_id_map.get(&table.id).unwrap();
                 if old_table.get_columns() != table.get_columns() {
                     bail!(
                         "Mismatch of internal tables.\nOld table: {:?}\nNew table: {:?}\n",
@@ -380,6 +388,17 @@ impl StreamFragmentGraph {
                 table.id = old_table.get_id();
             }
         }
+
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner,
+                |table, _table_type_name| {
+                    let target = internal_table_id_map.get(&table.id).cloned().unwrap();
+                    *table = target;
+                },
+            );
+        }
+
         Ok(())
     }
 
@@ -466,6 +485,15 @@ pub struct CompleteStreamFragmentGraph {
     extra_upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 }
 
+pub struct FragmentGraphUpstreamContext {
+    upstream_mview_fragments: HashMap<TableId, Fragment>,
+}
+
+pub struct FragmentGraphDownstreamContext {
+    original_table_fragment_id: FragmentId,
+    downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+}
+
 impl CompleteStreamFragmentGraph {
     /// Create a new [`CompleteStreamFragmentGraph`] with empty existing fragments, i.e., there's no
     /// upstream mviews.
@@ -485,80 +513,13 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
     ) -> MetaResult<Self> {
-        let mut extra_downstreams = HashMap::new();
-        let mut extra_upstreams = HashMap::new();
-
-        // Build the extra edges between the upstream `Materialize` and the downstream `Chain` of
-        // the new materialized view.
-        for (&id, fragment) in &graph.fragments {
-            for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                let mview_fragment = upstream_mview_fragments
-                    .get(&upstream_table_id)
-                    .context("upstream materialized view fragment not found")?;
-                let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
-
-                // Resolve the required output columns from the upstream materialized view.
-                let output_indices = {
-                    let nodes = mview_fragment.actors[0].get_nodes().unwrap();
-                    let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
-                    let all_column_ids = mview_node
-                        .get_table()
-                        .unwrap()
-                        .columns
-                        .iter()
-                        .map(|c| c.column_desc.as_ref().unwrap().column_id)
-                        .collect_vec();
-
-                    output_columns
-                        .iter()
-                        .map(|c| {
-                            all_column_ids
-                                .iter()
-                                .position(|&id| id == *c)
-                                .map(|i| i as u32)
-                        })
-                        .collect::<Option<Vec<_>>>()
-                        .context("column not found in the upstream materialized view")?
-                };
-
-                let edge = StreamFragmentEdge {
-                    id: EdgeId::UpstreamExternal {
-                        upstream_table_id,
-                        downstream_fragment_id: id,
-                    },
-                    // We always use `NoShuffle` for the exchange between the upstream `Materialize`
-                    // and the downstream `Chain` of the new materialized view.
-                    dispatch_strategy: DispatchStrategy {
-                        r#type: DispatcherType::NoShuffle as _,
-                        dist_key_indices: vec![], // not used for `NoShuffle`
-                        output_indices,
-                    },
-                };
-
-                extra_downstreams
-                    .entry(mview_id)
-                    .or_insert_with(HashMap::new)
-                    .try_insert(id, edge.clone())
-                    .unwrap();
-                extra_upstreams
-                    .entry(id)
-                    .or_insert_with(HashMap::new)
-                    .try_insert(mview_id, edge)
-                    .unwrap();
-            }
-        }
-
-        let existing_fragments = upstream_mview_fragments
-            .into_values()
-            .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
-            .collect();
-
-        Ok(Self {
-            building_graph: graph,
-            existing_fragments,
-            extra_downstreams,
-            extra_upstreams,
-        })
+        Self::build_helper(
+            graph,
+            Some(FragmentGraphUpstreamContext {
+                upstream_mview_fragments,
+            }),
+            None,
+        )
     }
 
     /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
@@ -568,41 +529,136 @@ impl CompleteStreamFragmentGraph {
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
     ) -> MetaResult<Self> {
+        Self::build_helper(
+            graph,
+            None,
+            Some(FragmentGraphDownstreamContext {
+                original_table_fragment_id,
+                downstream_fragments,
+            }),
+        )
+    }
+
+    fn build_helper(
+        graph: StreamFragmentGraph,
+        upstream_ctx: Option<FragmentGraphUpstreamContext>,
+        downstream_ctx: Option<FragmentGraphDownstreamContext>,
+    ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
+        let mut existing_fragments = HashMap::new();
 
-        let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
-        let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+        if let Some(FragmentGraphUpstreamContext {
+            upstream_mview_fragments,
+        }) = upstream_ctx
+        {
+            // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
+            // of the new materialized view.
+            for (&id, fragment) in &graph.fragments {
+                for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
+                    let mview_fragment = upstream_mview_fragments
+                        .get(&upstream_table_id)
+                        .context("upstream materialized view fragment not found")?;
+                    let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
-        // Build the extra edges between the `Materialize` and the downstream `Chain` of the
-        // existing materialized views.
-        for (dispatch_strategy, fragment) in &downstream_fragments {
-            let id = GlobalFragmentId::new(fragment.fragment_id);
+                    // Resolve the required output columns from the upstream materialized view.
+                    let output_indices = {
+                        let nodes = mview_fragment.actors[0].get_nodes().unwrap();
+                        let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
+                        let all_column_ids = mview_node
+                            .get_table()
+                            .unwrap()
+                            .columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec();
 
-            let edge = StreamFragmentEdge {
-                id: EdgeId::DownstreamExternal {
-                    original_upstream_fragment_id: original_table_fragment_id,
-                    downstream_fragment_id: id,
-                },
-                dispatch_strategy: dispatch_strategy.clone(),
-            };
+                        output_columns
+                            .iter()
+                            .map(|c| {
+                                all_column_ids
+                                    .iter()
+                                    .position(|&id| id == *c)
+                                    .map(|i| i as u32)
+                            })
+                            .collect::<Option<Vec<_>>>()
+                            .context("column not found in the upstream materialized view")?
+                    };
 
-            extra_downstreams
-                .entry(table_fragment_id)
-                .or_insert_with(HashMap::new)
-                .try_insert(id, edge.clone())
-                .unwrap();
-            extra_upstreams
-                .entry(id)
-                .or_insert_with(HashMap::new)
-                .try_insert(table_fragment_id, edge)
-                .unwrap();
+                    let edge = StreamFragmentEdge {
+                        id: EdgeId::UpstreamExternal {
+                            upstream_table_id,
+                            downstream_fragment_id: id,
+                        },
+                        // We always use `NoShuffle` for the exchange between the upstream
+                        // `Materialize` and the downstream `Chain` of the
+                        // new materialized view.
+                        dispatch_strategy: DispatchStrategy {
+                            r#type: DispatcherType::NoShuffle as _,
+                            dist_key_indices: vec![], // not used for `NoShuffle`
+                            output_indices,
+                        },
+                    };
+
+                    extra_downstreams
+                        .entry(mview_id)
+                        .or_insert_with(HashMap::new)
+                        .try_insert(id, edge.clone())
+                        .unwrap();
+                    extra_upstreams
+                        .entry(id)
+                        .or_insert_with(HashMap::new)
+                        .try_insert(mview_id, edge)
+                        .unwrap();
+                }
+            }
+
+            existing_fragments.extend(
+                upstream_mview_fragments
+                    .into_values()
+                    .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
+            );
         }
 
-        let existing_fragments = downstream_fragments
-            .into_iter()
-            .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f))
-            .collect();
+        if let Some(FragmentGraphDownstreamContext {
+            original_table_fragment_id,
+            downstream_fragments,
+        }) = downstream_ctx
+        {
+            let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
+            let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+
+            // Build the extra edges between the `Materialize` and the downstream `Chain` of the
+            // existing materialized views.
+            for (dispatch_strategy, fragment) in &downstream_fragments {
+                let id = GlobalFragmentId::new(fragment.fragment_id);
+
+                let edge = StreamFragmentEdge {
+                    id: EdgeId::DownstreamExternal {
+                        original_upstream_fragment_id: original_table_fragment_id,
+                        downstream_fragment_id: id,
+                    },
+                    dispatch_strategy: dispatch_strategy.clone(),
+                };
+
+                extra_downstreams
+                    .entry(table_fragment_id)
+                    .or_insert_with(HashMap::new)
+                    .try_insert(id, edge.clone())
+                    .unwrap();
+                extra_upstreams
+                    .entry(id)
+                    .or_insert_with(HashMap::new)
+                    .try_insert(table_fragment_id, edge)
+                    .unwrap();
+            }
+
+            existing_fragments.extend(
+                downstream_fragments
+                    .into_iter()
+                    .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
+            );
+        }
 
         Ok(Self {
             building_graph: graph,
