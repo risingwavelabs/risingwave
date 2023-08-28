@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_counter_vec_with_registry,
@@ -19,8 +21,9 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompactorMetrics {
     pub compaction_upload_sst_counts: GenericCounter<AtomicU64>,
     pub compact_write_bytes: GenericCounterVec<AtomicU64>,
@@ -50,8 +53,11 @@ pub struct CompactorMetrics {
     pub compaction_event_loop_iteration_latency: Histogram,
 }
 
+pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
+    LazyLock::new(|| CompactorMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl CompactorMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         // 256B - 4GB
         let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
         // 10ms - 2.7h
@@ -284,6 +290,6 @@ impl CompactorMetrics {
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        GLOBAL_COMPACTOR_METRICS.clone()
     }
 }

@@ -742,7 +742,7 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
             let system_params = env.system_params_manager().get_params().await;
-            let meta_metrics = Arc::new(MetaMetrics::new());
+            let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
