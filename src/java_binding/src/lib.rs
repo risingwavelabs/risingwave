@@ -830,6 +830,15 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
     channel: Pointer<'a, MyJniSender>,
     mut msg: JObject<'a>,
 ) -> jboolean {
+    // If msg is null means just check whether channel is closed.
+    if msg.is_null() {
+        if channel.as_ref().is_closed() {
+            return JNI_FALSE;
+        } else {
+            return JNI_TRUE;
+        }
+    }
+
     let source_id = env
         .env
         .call_method(&mut msg, "getSourceId", "()J", &[])

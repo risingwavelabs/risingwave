@@ -58,15 +58,15 @@ public class JniSourceHandler {
                                 "Engine#{}: emit one chunk {} events to network ",
                                 config.getSourceId(),
                                 resp.getEventsCount());
-
-                        boolean success = Binding.sendMsgToChannel(channelPtr, resp);
-                        if (!success) {
-                            LOG.info(
-                                    "Engine#{}: JNI sender broken detected, stop the engine",
-                                    config.getSourceId());
-                            runner.stop();
-                            return;
-                        }
+                    }
+                    // If resp is null means just check whether channel is closed.
+                    boolean success = Binding.sendMsgToChannel(channelPtr, resp);
+                    if (!success) {
+                        LOG.info(
+                                "Engine#{}: JNI sender broken detected, stop the engine",
+                                config.getSourceId());
+                        runner.stop();
+                        return;
                     }
                 } catch (Throwable e) {
                     LOG.error("Poll engine output channel fail. ", e);
