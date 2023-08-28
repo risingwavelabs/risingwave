@@ -17,7 +17,6 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,10 +26,7 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{
-    Array, ArrayBuilder, DataChunk, F64Array, SerialArray, StreamChunk, StreamChunkTestExt,
-    Utf8ArrayBuilder,
-};
+use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
@@ -60,9 +56,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, Barrier, BoxedExecutor as StreamBoxedExecutor,
-    BoxedMessageStream, CdcBackfillExecutor, Executor, MaterializeExecutor, Message, Mutation,
-    PkIndices, PkIndicesRef, StreamExecutorError,
+    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
