@@ -48,11 +48,10 @@ wait_standalone() {
   set +e
   echo "Waiting 5s for recovery to progress"
   sleep 5
-  psql -h localhost -p 4566 -d dev -U root -c "SELECT 1;"
   timeout 20s bash -c '
     while true; do
       echo "Polling every 1s for standalone to be ready for 20s"
-      if psql -h localhost -p 4566 -d dev -U root -c "SELECT 1;"
+      if psql -h localhost -p 4566 -d dev -U root -c "SELECT 1;" </dev/null
       then exit 0;
       else sleep 1;
       fi
