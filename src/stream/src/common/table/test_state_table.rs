@@ -287,7 +287,7 @@ async fn test_state_table_iter_with_prefix() {
     pin_mut!(iter);
 
     // this row exists in both mem_table and shared_storage
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(1_i32.into()),
@@ -298,7 +298,7 @@ async fn test_state_table_iter_with_prefix() {
     );
 
     // this row exists in mem_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(1_i32.into()),
@@ -309,7 +309,7 @@ async fn test_state_table_iter_with_prefix() {
     );
 
     // this row exists in shared_storage
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(1_i32.into()),
@@ -319,7 +319,7 @@ async fn test_state_table_iter_with_prefix() {
         res.as_ref()
     );
     // this row exists in shared_storage
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(1_i32.into()),
@@ -418,7 +418,7 @@ async fn test_state_table_iter_with_pk_range() {
     pin_mut!(iter);
 
     // this row exists in both mem_table and cell_based_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(4_i32.into()),
@@ -443,7 +443,7 @@ async fn test_state_table_iter_with_pk_range() {
     pin_mut!(iter);
 
     // this row exists in both mem_table and cell_based_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(4_i32.into()),
@@ -454,7 +454,7 @@ async fn test_state_table_iter_with_pk_range() {
     );
 
     // this row exists in mem_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(6_i32.into()),
@@ -579,14 +579,14 @@ async fn test_state_table_iter_with_value_indices() {
         let iter = state_table.iter_row(Default::default()).await.unwrap();
         pin_mut!(iter);
 
-        let res = iter.next().await.unwrap().unwrap();
+        let res = iter.next().await.unwrap().unwrap().into_row();
         assert_eq!(&OwnedRow::new(vec![Some(111_i32.into())]), res.as_ref());
 
         // will not get [2, 22, 222]
-        let res = iter.next().await.unwrap().unwrap();
+        let res = iter.next().await.unwrap().unwrap().into_row();
         assert_eq!(&OwnedRow::new(vec![Some(3333_i32.into())]), res.as_ref());
 
-        let res = iter.next().await.unwrap().unwrap();
+        let res = iter.next().await.unwrap().unwrap().into_row();
         assert_eq!(&OwnedRow::new(vec![Some(666_i32.into())]), res.as_ref());
     }
 
@@ -634,34 +634,34 @@ async fn test_state_table_iter_with_value_indices() {
     let iter = state_table.iter_row(Default::default()).await.unwrap();
     pin_mut!(iter);
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this pk exist in both shared_storage and mem_table
     assert_eq!(&OwnedRow::new(vec![Some(333_i32.into())]), res.as_ref());
 
     // this row exists in mem_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(&OwnedRow::new(vec![Some(444_i32.into())]), res.as_ref());
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in mem_table
     assert_eq!(&OwnedRow::new(vec![Some(555_i32.into())]), res.as_ref());
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in shared_storage
     assert_eq!(&OwnedRow::new(vec![Some(666_i32.into())]), res.as_ref());
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     // this row exists in mem_table
     assert_eq!(&OwnedRow::new(vec![Some(777.into())]), res.as_ref());
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in mem_table
     assert_eq!(&OwnedRow::new(vec![Some(888_i32.into())]), res.as_ref());
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in shared_storage
     assert_eq!(&OwnedRow::new(vec![Some(999_i32.into())]), res.as_ref());
@@ -740,7 +740,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         let iter = state_table.iter_row(Default::default()).await.unwrap();
         pin_mut!(iter);
 
-        let res = iter.next().await.unwrap().unwrap();
+        let res = iter.next().await.unwrap().unwrap().into_row();
         assert_eq!(
             &OwnedRow::new(vec![
                 Some(111_i32.into()),
@@ -751,7 +751,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         );
 
         // will not get [2, 22, 222]
-        let res = iter.next().await.unwrap().unwrap();
+        let res = iter.next().await.unwrap().unwrap().into_row();
         assert_eq!(
             &OwnedRow::new(vec![
                 Some(3333_i32.into()),
@@ -761,7 +761,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             res.as_ref()
         );
 
-        let res = iter.next().await.unwrap().unwrap();
+        let res = iter.next().await.unwrap().unwrap().into_row();
         assert_eq!(
             &OwnedRow::new(vec![
                 Some(666_i32.into()),
@@ -816,7 +816,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     let iter = state_table.iter_row(Default::default()).await.unwrap();
     pin_mut!(iter);
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     assert_eq!(
         &OwnedRow::new(vec![
@@ -828,7 +828,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     );
 
     // this row exists in mem_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     assert_eq!(
         &OwnedRow::new(vec![
             Some(444_i32.into()),
@@ -838,7 +838,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         res.as_ref()
     );
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in mem_table
     assert_eq!(
@@ -849,7 +849,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         ]),
         res.as_ref()
     );
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in shared_storage
     assert_eq!(
@@ -861,7 +861,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         res.as_ref()
     );
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
     // this row exists in mem_table
     assert_eq!(
         &OwnedRow::new(vec![
@@ -872,7 +872,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         res.as_ref()
     );
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in mem_table
     assert_eq!(
@@ -884,7 +884,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         res.as_ref()
     );
 
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await.unwrap().unwrap().into_row();
 
     // this row exists in shared_storage
     assert_eq!(
@@ -1006,7 +1006,7 @@ async fn test_state_table_write_chunk() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_row())
         .collect();
 
     assert_eq!(rows.len(), 2);
@@ -1123,7 +1123,7 @@ async fn test_state_table_write_chunk_visibility() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_row())
         .collect();
 
     assert_eq!(rows.len(), 3);
@@ -1235,7 +1235,7 @@ async fn test_state_table_write_chunk_value_indices() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_row())
         .collect();
 
     assert_eq!(rows.len(), 3);
@@ -1517,7 +1517,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_row())
         .collect();
 
     assert_eq!(inserted_rows.len(), 4);
@@ -1804,7 +1804,7 @@ async fn test_state_table_watermark_cache_refill() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_row())
         .collect();
 
     assert_eq!(inserted_rows.len(), 4);

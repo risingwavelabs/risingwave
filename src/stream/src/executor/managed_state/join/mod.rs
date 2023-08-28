@@ -405,29 +405,33 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter_fut = self
                 .state
                 .table
-                .iter_row_and_key_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
+                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
             let degree_table_iter_fut = self
                 .degree_state
                 .table
-                .iter_row_and_key_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
+                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
             #[for_await]
             for (row, degree) in table_iter.zip(degree_table_iter) {
-                let (pk1, row) = row?;
-                let (pk2, degree) = degree?;
+                let keyed_row = row?;
+                let degree_keyed_row = degree?;
+                let pk1 = keyed_row.key();
+                let pk2 = degree_keyed_row.key();
                 debug_assert_eq!(
                     pk1, pk2,
                     "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
                 );
+                let row = keyed_row.into_row();
+                let degree_row = degree_keyed_row.into_row();
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                let degree_i64 = degree
-                    .datum_at(degree.len() - 1)
+                let degree_i64 = degree_row
+                    .datum_at(degree_row.len() - 1)
                     .expect("degree should not be NULL");
                 entry_state.insert(
                     pk,
@@ -438,12 +442,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter = self
                 .state
                 .table
-                .iter_row_and_key_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
                 .await?;
 
             #[for_await]
             for entry in table_iter {
-                let row = entry?.1;
+                let row = entry?.into_row();
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)

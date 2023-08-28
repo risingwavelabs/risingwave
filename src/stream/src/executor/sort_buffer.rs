@@ -22,7 +22,7 @@ use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
@@ -30,6 +30,7 @@ use risingwave_common::types::{
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::merge_sort::merge_sort;
+use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
 
 use super::{StreamExecutorError, StreamExecutorResult};
@@ -201,7 +202,7 @@ impl<S: StateStore> SortBuffer<S> {
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_row_and_key_with_pk_range(
+                buffer_table.iter_row_with_pk_range(
                     &pk_range,
                     vnode,
                     PrefetchOptions {
@@ -229,11 +230,11 @@ impl<S: StateStore> SortBuffer<S> {
 /// Merge the key part and value part of a row into a full row. This is needed for state table with
 /// non-None value indices.
 fn key_value_to_full_row<S: StateStore>(
-    ((_vnode, key), value): ((VirtualNode, Bytes), OwnedRow),
+    keyed_row: KeyedRow<Bytes>,
     table: &StateTable<S>,
 ) -> StreamExecutorResult<OwnedRow> {
     let Some(val_indices) = table.value_indices() else {
-        return Ok(value);
+        return Ok(keyed_row.into_row());
     };
     let pk_indices = table.pk_indices();
     let indices: BTreeSet<_> = val_indices
@@ -247,12 +248,12 @@ fn key_value_to_full_row<S: StateStore>(
     let mut row = vec![None; len];
     let key = table
         .pk_serde()
-        .deserialize(key.as_ref())
+        .deserialize(keyed_row.key())
         .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?;
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }
-    for (i, v) in value.into_iter().enumerate() {
+    for (i, v) in keyed_row.into_row().into_iter().enumerate() {
         row[val_indices[i]] = v;
     }
     Ok(OwnedRow::new(row))

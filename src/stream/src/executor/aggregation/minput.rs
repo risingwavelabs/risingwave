@@ -196,8 +196,8 @@ impl MaterializedInputState {
             pin_mut!(all_data_iter);
 
             #[for_await]
-            for state_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
-                let state_row: OwnedRow = state_row?;
+            for keyed_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
+                let state_row: OwnedRow = keyed_row?.into_row();
                 let cache_key = {
                     let mut cache_key = Vec::new();
                     self.cache_key_serializer.serialize(

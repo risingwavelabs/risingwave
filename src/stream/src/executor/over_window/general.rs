@@ -248,8 +248,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
             .await?;
 
         #[for_await]
-        for row in table_iter {
-            let row: OwnedRow = row?;
+        for keyed_row in table_iter {
+            let row: OwnedRow = keyed_row?.into_row();
             cache_for_partition.insert(this.row_to_state_key(&row)?, row);
         }
 

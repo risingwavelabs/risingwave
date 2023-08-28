@@ -41,15 +41,14 @@ use risingwave_storage::error::StorageError;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
-    deserialize_pk_with_vnode, parse_raw_key_to_vnode_and_key, serialize_pk,
-    serialize_pk_with_vnode,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 
@@ -884,7 +883,7 @@ where
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
                         let stream = self
-                            .iter_kv_with_pk_range(&range, vnode, PrefetchOptions::default())
+                            .iter_row_with_pk_range(&range, vnode, PrefetchOptions::default())
                             .await?;
                         streams.push(Box::pin(stream));
                     }
@@ -893,9 +892,8 @@ where
 
                     #[for_await]
                     for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                        let (key, _row) = entry?;
-                        let (_, pk) =
-                            deserialize_pk_with_vnode(&key.user_key.table_key.0, &self.pk_serde)?;
+                        let keyed_row = entry?;
+                        let (_, pk) = deserialize_pk_with_vnode(keyed_row.key(), &self.pk_serde)?;
                         if !pk.is_null_at(0) {
                             pks.push(pk);
                         }
@@ -1047,7 +1045,7 @@ where
     pub async fn iter_row(
         &self,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         self.iter_row_with_pk_prefix(row::empty(), prefetch_options)
             .await
     }
@@ -1058,23 +1056,8 @@ where
         &self,
         pk_prefix: impl Row,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        Ok(deserialize_row_stream(
-            self.iter_kv_with_pk_prefix(pk_prefix, prefetch_options)
-                .await?,
-            &self.row_serde,
-        ))
-    }
-
-    /// This function scans rows from the relational table with specific `pk_prefix`.
-    /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-    /// It returns both the key with vnode and the row.
-    pub async fn iter_row_and_key_with_pk_prefix(
-        &self,
-        pk_prefix: impl Row,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStreamWithKey<'_, S, SD>> {
-        Ok(deserialize_row_stream_with_key(
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_prefix(pk_prefix, prefetch_options)
                 .await?,
             &self.row_serde,
@@ -1091,26 +1074,8 @@ where
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        Ok(deserialize_row_stream(
-            self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
-                .await?,
-            &self.row_serde,
-        ))
-    }
-
-    /// This function scans rows from the relational table with specific `pk_range` under the same
-    /// `vnode`. It returns both the key with vnode and the row.
-    pub async fn iter_row_and_key_with_pk_range(
-        &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        // Optional vnode that returns an iterator only over the given range under that vnode.
-        // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTableInner` owns.
-        vnode: VirtualNode,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStreamWithKey<'_, S, SD>> {
-        Ok(deserialize_row_stream_with_key(
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
             &self.row_serde,
@@ -1259,32 +1224,19 @@ where
     }
 }
 
-pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
-    impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub type RowStreamWithKey<'a, S: StateStore, SD: ValueRowSerde + 'a> =
-    impl Stream<Item = StreamExecutorResult<((VirtualNode, Bytes), OwnedRow)>> + 'a;
+pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
+    impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
-fn deserialize_row_stream<'a>(
+fn deserialize_keyed_row_stream<'a>(
     stream: impl StateStoreIterItemStream + 'a,
     deserializer: &'a impl ValueRowSerde,
-) -> impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a {
-    stream.map(move |result| {
-        result
-            .map_err(StreamExecutorError::from)
-            .and_then(|(_, value)| Ok(deserializer.deserialize(&value).map(OwnedRow::new)?))
-    })
-}
-
-fn deserialize_row_stream_with_key<'a>(
-    stream: impl StateStoreIterItemStream + 'a,
-    deserializer: &'a impl ValueRowSerde,
-) -> impl Stream<Item = StreamExecutorResult<((VirtualNode, Bytes), OwnedRow)>> + 'a {
+) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
     stream.map(move |result| {
         result
             .map_err(StreamExecutorError::from)
             .and_then(|(key, value)| {
-                Ok((
-                    parse_raw_key_to_vnode_and_key(key.user_key.table_key.0),
+                Ok(KeyedRow::new(
+                    key.user_key.table_key,
                     deserializer.deserialize(&value).map(OwnedRow::new)?,
                 ))
             })

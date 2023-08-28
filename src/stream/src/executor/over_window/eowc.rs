@@ -202,8 +202,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             .await?;
 
         #[for_await]
-        for row in table_iter {
-            let row: OwnedRow = row?;
+        for keyed_row in table_iter {
+            let row: OwnedRow = keyed_row?.into_row();
             let order_key_enc = memcmp_encoding::encode_row(
                 row::once(Some(
                     row.datum_at(this.order_key_index)
