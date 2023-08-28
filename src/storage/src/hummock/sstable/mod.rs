@@ -411,7 +411,7 @@ impl SstableMeta {
 
     pub fn encode_to(&self, buf: &mut Vec<u8>) {
         let start_offset = buf.len();
-        buf.put_u32_le(self.block_metas.len() as u32);
+        buf.put_u32_le(utils::checked_into_u32(self.block_metas.len()));
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
         }
@@ -420,7 +420,9 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(self.monotonic_tombstone_events.len() as u32);
+        buf.put_u32_le(utils::checked_into_u32(
+            self.monotonic_tombstone_events.len(),
+        ));
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
             monotonic_tombstone_event.encode(buf);
         }

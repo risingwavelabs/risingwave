@@ -19,6 +19,7 @@ pub mod enumerator;
 pub mod private_link;
 pub mod source;
 pub mod split;
+pub mod stats;
 
 pub use enumerator::*;
 pub use private_link::*;
