@@ -53,22 +53,34 @@ impl ExprVisitor<()> for CseExprCounter {
     }
 
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
-        // Short cut semantic func type cannot be extracted into common sub-expression.
-        // E.g. select true or (1 / a)::bool or (1 / a)::bool from x
-        // If a is zero, common sub-expression (1 / a) would lead to division by zero error.
-        match func_call.func_type() {
-            ExprType::Case | ExprType::And | ExprType::Or => {
-                return;
-            }
-            _ => {}
-        };
-
         if func_call.is_pure() {
             self.counter
                 .entry(func_call.clone())
                 .and_modify(|counter| *counter += 1)
                 .or_insert(1);
         }
+
+        match func_call.func_type() {
+            // Short cut semantic func type cannot be extracted into common sub-expression.
+            // E.g. select case when a = 0 then 0 when a < 10 then 1 + 1 / a else 1 / a end from x
+            // If a is zero, common sub-expression (1 / a) would lead to division by zero error.
+            //
+            // Also note `AND`/`OR` is not guaranteed this semantic.
+            // E.g. select * from a, b where a1 > b1*b1 and 3 / a1 < 5;
+            // Optimizer is allowed to filter with `3 / a1 < 5` before join on `a1 > b1*b1`.
+            // This can lead to division by zero error not observed without optimization.
+            ExprType::Case | ExprType::Coalesce => {
+                return;
+            }
+            // `some` and `all` cannot be separated from their inner binary boolean operator #11766
+            // We could still visit the lhs scalar and rhs array, but keeping it simple here.
+            // E.g. `v not like some(arr)` is bound as `Some(Not(Like(v, arr)))`
+            // It is invalid to extract `Like(v, arr)` or `Not(Like(v, arr))`. `v` and `arr` are ok.
+            ExprType::Some | ExprType::All => {
+                return;
+            }
+            _ => {}
+        };
 
         func_call
             .inputs()
