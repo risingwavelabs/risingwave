@@ -69,19 +69,15 @@ impl CompactorRunner {
         memory_limiter: Arc<MemoryLimiter>,
         sstable_object_id_manager: Box<dyn GetObjectId>,
         task: CompactTask,
-        sstable_size_mb: u32,
-        block_size_kb: u32,
-        bloom_false_positive: f64,
-        compactor_max_sst_size: u64,
-        compact_iter_recreate_timeout_ms: u64,
+        storage_opts: Arc<StorageOpts>,
     ) -> Self {
         let mut options = SstableBuilderOptions::new(
-            (sstable_size_mb as usize) * (1 << 20),
-            (block_size_kb as usize) * (1 << 10),
+            (storage_opts.sstable_size_mb as usize) * (1 << 20),
+            (storage_opts.block_size_kb as usize) * (1 << 10),
             DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive,
+            storage_opts.bloom_false_positive,
             CompressionAlgorithm::None,
-            compactor_max_sst_size,
+            storage_opts.compactor_max_sst_size,
         );
 
         options.compression_algorithm = match task.compression_algorithm {
@@ -90,7 +86,7 @@ impl CompactorRunner {
             _ => CompressionAlgorithm::Zstd,
         };
 
-        options.capacity = estimate_task_output_capacity(sstable_size_mb, &task);
+        options.capacity = estimate_task_output_capacity(storage_opts.sstable_size_mb, &task);
         let kv_count = task
             .input_ssts
             .iter()
@@ -126,7 +122,7 @@ impl CompactorRunner {
             sstable_store.clone(),
             memory_limiter.clone(),
             sstable_object_id_manager,
-            compact_iter_recreate_timeout_ms,
+            storage_opts.compact_iter_recreate_timeout_ms,
         );
 
         Self {
@@ -288,24 +284,12 @@ pub async fn compact(
         compact_task,
         shutdown_rx,
         compactor_context.sstable_store.clone(),
-        compactor_context.storage_opts.parallel_compact_size_mb,
+        compactor_context.storage_opts.clone(),
         compactor_context.filter_key_extractor_manager.clone(),
         compactor_context.compaction_executor.worker_num() as u32,
-        compactor_context.storage_opts.max_sub_compaction,
         compactor_context.memory_limiter.clone(),
         sstable_object_id_manager_dyn,
-        compactor_context.storage_opts.block_size_kb,
-        compactor_context
-            .storage_opts
-            .object_store_recv_buffer_size
-            .unwrap_or(6 * 1024 * 1024) as u64,
-        compactor_context.storage_opts.sstable_size_mb,
         compactor_context.task_progress_manager.clone(),
-        compactor_context.storage_opts.bloom_false_positive,
-        compactor_context.storage_opts.compactor_max_sst_size,
-        compactor_context
-            .storage_opts
-            .compact_iter_recreate_timeout_ms,
         compactor_context.await_tree_reg.clone(),
     )
     .await
@@ -590,19 +574,11 @@ pub async fn shared_compact(
     shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
     storage_opts: Arc<StorageOpts>,
-    parallel_compact_size_mb: u32,
     filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
     worker_num: u32,
-    max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     sstable_object_id_manager: Box<dyn GetObjectId>,
-    block_size_kb: u32,
-    object_store_recv_buffer_size: usize,
-    sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
-    bloom_false_positive: f64,
-    compactor_max_sst_size: u64,
-    compact_iter_recreate_timeout_ms: u64,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     compact_inner(
@@ -610,19 +586,12 @@ pub async fn shared_compact(
         compact_task,
         shutdown_rx,
         sstable_store,
-        parallel_compact_size_mb,
+        storage_opts,
         filter_key_extractor_manager,
         worker_num,
-        max_sub_compaction,
         memory_limiter,
         sstable_object_id_manager,
-        block_size_kb,
-        object_store_recv_buffer_size as u64,
-        sstable_size_mb,
         task_progress_manager,
-        bloom_false_positive,
-        compactor_max_sst_size,
-        compact_iter_recreate_timeout_ms,
         await_tree_reg,
     )
     .await
@@ -633,19 +602,12 @@ async fn compact_inner(
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
-    parallel_compact_size_mb: u32,
+    storage_opts: Arc<StorageOpts>,
     filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
     worker_num: u32,
-    max_sub_compaction: u32,
     memory_limiter: Arc<MemoryLimiter>,
     sstable_object_id_manager: Box<dyn GetObjectId>,
-    block_size_kb: u32,
-    object_store_recv_buffer_size: u64,
-    sstable_size_mb: u32,
     task_progress_manager: TaskProgressManagerRef,
-    bloom_false_positive: f64,
-    compactor_max_sst_size: u64,
-    compact_iter_recreate_timeout_ms: u64,
     await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let group_label = compact_task.compaction_group_id.to_string();
@@ -761,9 +723,9 @@ async fn compact_inner(
     match generate_splits(
         &sstable_infos,
         compaction_size,
-        parallel_compact_size_mb,
+        storage_opts.parallel_compact_size_mb,
         worker_num,
-        max_sub_compaction,
+        storage_opts.max_sub_compaction,
         sstable_store.clone(),
     )
     .await
@@ -804,12 +766,14 @@ async fn compact_inner(
         }
     };
 
-    let capacity = estimate_task_output_capacity(sstable_size_mb, &compact_task);
+    let capacity = estimate_task_output_capacity(storage_opts.sstable_size_mb, &compact_task);
 
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
-        (block_size_kb as u64) * (1 << 10),
-        object_store_recv_buffer_size,
+        (storage_opts.block_size_kb as u64) * (1 << 10),
+        storage_opts
+            .object_store_recv_buffer_size
+            .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
         sstable_store.store().support_streaming_upload(),
     ) * compact_task.splits.len() as u64;
@@ -858,11 +822,7 @@ async fn compact_inner(
             memory_limiter.clone(),
             sstable_object_id_manager.clone(),
             compact_task.clone(),
-            sstable_size_mb,
-            block_size_kb,
-            bloom_false_positive,
-            compactor_max_sst_size,
-            compact_iter_recreate_timeout_ms,
+            storage_opts.clone(),
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();

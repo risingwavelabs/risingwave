@@ -288,11 +288,17 @@ pub async fn shared_compactor_serve(
     advertise_addr: HostAddr,
     opts: CompactorOpts,
     request: Request<DispatchCompactionTaskRequest>,
+    parallel_compact_size_mb: u32,
+    sstable_size_mb: u32,
+    block_size_kb: u32,
+    bloom_false_positive: f64,
+    state_store_url: &str,
+    data_directory: &str,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactorMemoryCollector = HummockMemoryCollector;
 
     let config = load_config(&opts.config_path, &opts);
-    info!("Starting compactor node",);
+    info!("Starting Serverless compactor node",);
     info!("> config: {:?}", config);
     info!(
         "> debug assertions: {}",
@@ -308,55 +314,9 @@ pub async fn shared_compactor_serve(
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
-    // Register to the cluster.
-    let (meta_client, system_params_reader) = MetaClient::register_new(
-        &opts.meta_address,
-        WorkerType::Compactor,
-        &advertise_addr,
-        Default::default(),
-        &config.meta,
-    )
-    .await
-    .unwrap();
-    // In dedicated compaction mode, these parameters are load from storage opt,
-    // and in shared compaction mode, these parameters should be defined via cloud infra.
-    let parallel_compact_size_mb: u32 = 0;
     let worker_num: u32 = 0;
-    let max_sub_compaction: u32 = 0;
-    let block_size_kb: u32 = 0;
-    let object_store_recv_buffer_size: usize = 0;
-    let sstable_size_mb: u32 = 0;
-    let bloom_false_positive: f64 = 0.0;
-    let compactor_max_sst_size: u64 = 0;
-    let compact_iter_recreate_timeout_ms: u64 = 0;
-
-    let meta_cache_capacity_mb: usize = 0;
-
-    // in shared compaction mode, these object storage related parameters should be defined via
-    // cloud infra. object storage
-    let state_store_url: String = "".to_string();
-    let data_directory: String = "".to_string();
-    let object_store_streaming_read_timeout_ms: u64 = 0;
-    // object store streaming upload timeout.
-    let object_store_streaming_upload_timeout_ms: u64 = 0;
-    // object store upload timeout.
-    let object_store_upload_timeout_ms: u64 = 0;
-    // object store read timeout.
-    let object_store_read_timeout_ms: u64 = 0;
 
     // Register to the cluster.
-    // let (_, system_params_reader) = MetaClient::register_new(
-    //     &opts.meta_address,
-    //     WorkerType::Compactor,
-    //     &advertise_addr,
-    //     Default::default(),
-    //     &config.meta,
-    // )
-    // .await
-    // .unwrap();
-
-    // info!("Assigned compactor id {}", meta_client.worker_id());
-    // meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
     let registry = prometheus::Registry::new();
@@ -364,20 +324,23 @@ pub async fn shared_compactor_serve(
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
-    let state_store_url = system_params_reader.state_store();
-
     let storage_memory_config = extract_storage_memory_config(&config);
 
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
+    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::new(
         &config,
-        &system_params_reader,
         &storage_memory_config,
-    )));
+        parallel_compact_size_mb,
+        sstable_size_mb,
+        block_size_kb,
+        bloom_false_positive,
+        data_directory,
+        state_store_url,
+    ));
 
     let total_memory_available_bytes =
         (resource_util::memory::total_memory_available_bytes() as f64
             * config.storage.compactor_memory_available_proportion) as usize;
-    let meta_cache_capacity_bytes = meta_cache_capacity_mb * (1 << 20);
+    let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
         None => (total_memory_available_bytes - meta_cache_capacity_bytes) as u64,
@@ -386,16 +349,17 @@ pub async fn shared_compactor_serve(
     tracing::info!(
         "Compactor total_memory_available_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
         total_memory_available_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
-        sstable_size_mb * (1 << 20),
-        block_size_kb * (1 << 10),
+        storage_opts.sstable_size_mb * (1 << 20),
+        storage_opts.block_size_kb * (1 << 10),
     );
 
     // check memory config
     {
         // This is a similar logic to SstableBuilder memory detection, to ensure that we can find
         // configuration problems as quickly as possible
-        let min_compactor_memory_limit_bytes =
-            (sstable_size_mb * (1 << 20) + block_size_kb * (1 << 10)) as u64;
+        let min_compactor_memory_limit_bytes = (storage_opts.sstable_size_mb * (1 << 20)
+            + storage_opts.block_size_kb * (1 << 10))
+            as u64;
 
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
@@ -410,32 +374,18 @@ pub async fn shared_compactor_serve(
     )
     .await;
     object_store.set_opts(
-        object_store_streaming_read_timeout_ms,
-        object_store_streaming_upload_timeout_ms,
-        object_store_read_timeout_ms,
-        object_store_upload_timeout_ms,
+        storage_opts.object_store_streaming_read_timeout_ms,
+        storage_opts.object_store_streaming_upload_timeout_ms,
+        storage_opts.object_store_read_timeout_ms,
+        storage_opts.object_store_upload_timeout_ms,
     );
     let object_store = Arc::new(object_store);
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
-        data_directory,
+        data_directory.to_string(),
         1 << 20, // set 1MB memory to avoid panic.
         meta_cache_capacity_bytes,
     ));
-
-    // let telemetry_enabled = system_params_reader.telemetry_enabled();
-
-    // let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
-    //     RemoteTableAccessor::new(meta_client.clone()),
-    // )));
-    // let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
-    // let compactor_observer_node = CompactorObserverNode::new(
-    //     filter_key_extractor_manager.clone(),
-    //     system_params_manager.clone(),
-    // );
-    // let observer_manager =
-    //     ObserverManager::new_with_meta_client(meta_client.clone(),
-    // compactor_observer_node).await;
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
@@ -482,36 +432,12 @@ pub async fn shared_compactor_serve(
             compactor_metrics.clone(),
             sstable_store.clone(),
             storage_opts,
-            parallel_compact_size_mb,
             worker_num,
-            max_sub_compaction,
             memory_limiter,
-            block_size_kb,
-            object_store_recv_buffer_size,
-            sstable_size_mb,
             Default::default(),
-            bloom_false_positive,
-            compactor_max_sst_size,
-            compact_iter_recreate_timeout_ms,
             await_tree_reg.clone(),
         ),
     ];
-
-    // let telemetry_manager = TelemetryManager::new(
-    //     system_params_manager.watch_params(),
-    //     Arc::new(meta_client.clone()),
-    //     Arc::new(CompactorTelemetryCreator::new()),
-    // );
-    // // if the toml config file or env variable disables telemetry, do not watch system params
-    // change // because if any of configs disable telemetry, we should never start it
-    // if config.server.telemetry_enabled && telemetry_env_enabled() {
-    //     if telemetry_enabled {
-    //         telemetry_manager.start_telemetry_reporting().await;
-    //     }
-    //     sub_tasks.push(telemetry_manager.watch_params_change());
-    // } else {
-    //     tracing::info!("Telemetry didn't start due to config");
-    // }
 
     let compactor_srv = CompactorServiceImpl::default();
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
