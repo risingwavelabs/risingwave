@@ -285,7 +285,6 @@ pub async fn compactor_serve(
 
 pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
-    advertise_addr: HostAddr,
     opts: CompactorOpts,
     request: Request<DispatchCompactionTaskRequest>,
     parallel_compact_size_mb: u32,
@@ -387,10 +386,6 @@ pub async fn shared_compactor_serve(
         meta_cache_capacity_bytes,
     ));
 
-    // use half of limit because any memory which would hold in meta-cache will be allocate by
-    // limited at first.
-    // let observer_join_handle = observer_manager.start().await;
-
     let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
@@ -423,7 +418,7 @@ pub async fn shared_compactor_serve(
         acc
     });
 
-    let mut sub_tasks = vec![
+    let (join_handle, shutdown_sender) =
         risingwave_storage::hummock::compactor::start_shared_compactor(
             dispatch_task.unwrap(),
             id_to_tables,
@@ -436,8 +431,7 @@ pub async fn shared_compactor_serve(
             memory_limiter,
             Default::default(),
             await_tree_reg.clone(),
-        ),
-    ];
+        );
 
     let compactor_srv = CompactorServiceImpl::default();
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
@@ -450,15 +444,13 @@ pub async fn shared_compactor_serve(
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
                             if let Err(err) = shutdown_sender.send(()) {
                                 tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
                             }
                             if let Err(err) = join_handle.await {
                                 tracing::warn!("Failed to join shutdown: {:?}", err);
                             }
-                        }
+
                     },
                 }
             })
