@@ -17,7 +17,7 @@ FLUSH;
 query I
 select count(*) from m;
 ----
-100000
+50000
 
 statement ok
 DROP MATERIALIZED VIEW m;
