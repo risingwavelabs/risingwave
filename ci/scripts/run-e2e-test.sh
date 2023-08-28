@@ -28,7 +28,7 @@ fi
 
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
-    start_standalone >"$PREFIX_LOG"/standalone.log 2>&1 &
+    start_standalone &
     cargo make ci-start standalone-minio-etcd-compactor
   else
     cargo make ci-start "$mode"
@@ -198,6 +198,7 @@ if [[ "$mode" == "standalone" ]]; then
   EXPECTED=$(run_sql "SELECT * FROM t ORDER BY v1;")
   echo -e "Expected:\n$EXPECTED"
 
+  echo "--- Restart standalone"
   restart_standalone
 
   ACTUAL=$(run_sql "SELECT * FROM t ORDER BY v1;")
