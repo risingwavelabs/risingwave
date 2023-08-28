@@ -65,6 +65,7 @@ mod dynamic_filter;
 mod error;
 mod expand;
 mod filter;
+mod flow_control;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
