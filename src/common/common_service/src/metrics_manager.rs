@@ -13,32 +13,50 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Deref;
+use std::sync::OnceLock;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct MetricsManager {}
 
 impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String, registry: Registry) {
-        tokio::spawn(async move {
-            info!(
-                "Prometheus listener for Prometheus is set up on http://{}",
-                listen_addr
-            );
-            let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
-            let service = ServiceBuilder::new()
-                .layer(AddExtensionLayer::new(registry))
-                .service_fn(Self::metrics_service);
-            let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
-            if let Err(err) = serve_future.await {
-                eprintln!("server error: {}", err);
-            }
+    pub fn boot_metrics_service(listen_addr: String) {
+        static METRICS_SERVICE_LISTEN_ADDR: OnceLock<String> = OnceLock::new();
+        let new_listen_addr = listen_addr.clone();
+        let current_listen_addr = METRICS_SERVICE_LISTEN_ADDR.get_or_init(|| {
+            let listen_addr_clone = listen_addr.clone();
+            tokio::spawn(async move {
+                info!(
+                    "Prometheus listener for Prometheus is set up on http://{}",
+                    listen_addr
+                );
+                let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
+                let service = ServiceBuilder::new()
+                    .layer(AddExtensionLayer::new(
+                        GLOBAL_METRICS_REGISTRY.deref().clone(),
+                    ))
+                    .service_fn(Self::metrics_service);
+                let serve_future =
+                    hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
+                if let Err(err) = serve_future.await {
+                    eprintln!("server error: {}", err);
+                }
+            });
+            listen_addr_clone
         });
+        if new_listen_addr != *current_listen_addr {
+            warn!(
+                "unable to listen port {} for metrics service. Currently listening on {}",
+                new_listen_addr, current_listen_addr
+            );
+        }
     }
 
     #[expect(clippy::unused_async, reason = "required by service_fn")]

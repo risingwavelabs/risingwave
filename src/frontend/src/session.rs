@@ -34,7 +34,6 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -46,7 +45,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
-use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -74,12 +73,13 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::FrontendMetrics;
+use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
+    GLOBAL_DISTRIBUTED_QUERY_METRICS,
 };
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
@@ -230,9 +230,6 @@ impl FrontendEnv {
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
-        let registry = prometheus::Registry::new();
-        monitor_process(&registry).unwrap();
-
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
@@ -242,7 +239,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
-            Arc::new(DistributedQueryMetrics::new(registry.clone())),
+            Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
         );
 
@@ -277,11 +274,11 @@ impl FrontendEnv {
 
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
-        let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
-        let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
+        let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
+        let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
 
         if config.server.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
         let health_srv = HealthServiceImpl::new();

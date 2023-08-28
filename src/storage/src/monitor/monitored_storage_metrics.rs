@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram,
     HistogramVec, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
     pub get_duration: HistogramVec,
     pub get_key_size: HistogramVec,
@@ -38,8 +41,11 @@ pub struct MonitoredStorageMetrics {
     pub sync_size: Histogram,
 }
 
+pub static GLOBAL_STORAGE_METRICS: LazyLock<MonitoredStorageMetrics> =
+    LazyLock::new(|| MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl MonitoredStorageMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         // 256B ~ max 4GB
         let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
         // 10ms ~ max 2.7h
@@ -153,8 +159,7 @@ impl MonitoredStorageMetrics {
         }
     }
 
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        GLOBAL_STORAGE_METRICS.clone()
     }
 }
