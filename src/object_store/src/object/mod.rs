@@ -914,7 +914,7 @@ pub async fn parse_remote_object_store(
 
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             tracing::error!("The s3 compatible mode has been unified with s3.");
-            tracing::error!("If you want to use s3 compatible storage, please set your access_key, secret_key and region to the environment variable AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, 
+            tracing::error!("If you want to use s3 compatible storage, please set your access_key, secret_key and region to the environment variable AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
             set your endpoint to the environment variable RW_S3_ENDPOINT.");
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
