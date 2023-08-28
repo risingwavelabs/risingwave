@@ -1664,9 +1664,19 @@ where
 
     /// Gets current version without pinning it.
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    ///
+    /// Note: this method can hurt performance because it will clone a large object.
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    #[named]
+    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
+        read_lock!(self, versioning)
+            .await
+            .current_version
+            .max_committed_epoch
     }
 
     /// Gets branched sstable infos
