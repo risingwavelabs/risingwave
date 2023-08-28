@@ -28,7 +28,7 @@ fi
 
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
-    start_standalone &
+    start_standalone "$PREFIX_LOG"/standalone.log &
     cargo make ci-start standalone-minio-etcd-compactor
   else
     cargo make ci-start "$mode"

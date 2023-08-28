@@ -37,7 +37,7 @@ start_standalone() {
        --prometheus-listener-addr 127.0.0.1:2222 \
        --health-check-listener-addr 127.0.0.1:6786 \
        --metrics-level 1 \
-       --meta-addr http://127.0.0.1:5690" >"$PREFIX_LOG"/standalone.log 2>&1
+       --meta-addr http://127.0.0.1:5690" >"$1" 2>&1
 }
 
 stop_standalone() {
@@ -51,8 +51,10 @@ wait_standalone() {
   timeout 20s bash -c '
     while true; do
       echo "Polling every 1s for standalone to be ready for 20s"
-      cargo make psql -c "SELECT 1"
-      sleep 1
+      if cargo make psql -c "SELECT 1"
+      then exit 0;
+      else sleep 1;
+      fi
     done
   '
   STATUS=$?
@@ -68,6 +70,6 @@ wait_standalone() {
 restart_standalone() {
   stop_standalone
   sleep 5
-  start_standalone >"$PREFIX_LOG"/standalone-restarted.log 2>&1 &
+  start_standalone "$PREFIX_LOG"/standalone-restarted.log &
   wait_standalone
 }
