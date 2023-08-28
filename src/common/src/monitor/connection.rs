@@ -42,6 +42,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::server::{Connected, TcpConnectInfo, TcpIncoming};
 use tracing::{info, warn};
 
+use crate::monitor::GLOBAL_METRICS_REGISTRY;
+
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}
     fn on_eof(&mut self) {}
@@ -283,9 +285,8 @@ pub struct ConnectionMetrics {
     io_err_rate: GenericCounterVec<AtomicU64>,
 }
 
-// TODO: use global registry
 pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
-    LazyLock::new(|| ConnectionMetrics::new(&Registry::new()));
+    LazyLock::new(|| ConnectionMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl ConnectionMetrics {
     pub fn new(registry: &Registry) -> Self {
