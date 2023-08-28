@@ -183,7 +183,15 @@ impl DispatchExecutorInner {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
+            Mutation::Update {
+                dispatchers,
+                actor_new_dispatchers: actor_dispatchers,
+                ..
+            } => {
+                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.pre_update_dispatcher(update)?;
@@ -211,10 +219,20 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
+            Mutation::Update {
+                dispatchers,
+                dropped_actors,
+                ..
+            } => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
+                    }
+                }
+
+                if !dropped_actors.contains(&self.actor_id) {
+                    for dispatcher in &mut self.dispatchers {
+                        dispatcher.remove_outputs(dropped_actors);
                     }
                 }
             }
@@ -1083,6 +1101,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1134,6 +1153,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
