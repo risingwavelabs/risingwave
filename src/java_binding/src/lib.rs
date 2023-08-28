@@ -34,7 +34,9 @@ use jni::objects::{
     JValue, JValueGen, JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
-use jni::sys::{jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue};
+use jni::sys::{
+    jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
+};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
@@ -827,7 +829,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
     mut env: EnvParam<'a>,
     channel: Pointer<'a, MyJniSender>,
     mut msg: JObject<'a>,
-) {
+) -> jboolean {
     let source_id = env
         .env
         .call_method(&mut msg, "getSourceId", "()J", &[])
@@ -910,12 +912,16 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
         events,
     };
     println!("before send");
-    channel
-        .as_ref()
-        .blocking_send(get_event_stream_response)
-        .inspect_err(|e| eprintln!("{:?}", e))
-        .unwrap();
-    println!("send successfully");
+    match channel.as_ref().blocking_send(get_event_stream_response) {
+        Ok(_) => {
+            println!("send successfully");
+            JNI_TRUE
+        }
+        Err(e) => {
+            eprintln!("send error.  {:?}", e);
+            JNI_FALSE
+        }
+    }
 }
 
 #[cfg(test)]

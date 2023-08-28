@@ -59,7 +59,14 @@ public class JniSourceHandler {
                                 config.getSourceId(),
                                 resp.getEventsCount());
 
-                        Binding.sendMsgToChannel(channelPtr, resp);
+                        boolean success = Binding.sendMsgToChannel(channelPtr, resp);
+                        if (!success) {
+                            LOG.info(
+                                    "Engine#{}: JNI sender broken detected, stop the engine",
+                                    config.getSourceId());
+                            runner.stop();
+                            return;
+                        }
                     }
                 } catch (Throwable e) {
                     LOG.error("Poll engine output channel fail. ", e);
