@@ -147,7 +147,7 @@ impl LoggerSettings {
 ///
 /// `RW_QUERY_LOG_TRUNCATE_LEN` configures the max length of the SQLs logged in the query log,
 /// to avoid the log file growing too large. The default value is 1024 in production.
-pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
+pub fn init_risingwave_logger(settings: LoggerSettings) {
     let deployment = Deployment::current();
 
     // Default timer for logging with local time offset.
@@ -382,7 +382,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     {
         let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
 
-        layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
+        layers.push(Box::new(MetricsLayer::new().with_filter(filter)));
     }
     tracing_subscriber::registry().with(layers).init();
     // TODO: add file-appender tracing subscriber in the future

@@ -99,7 +99,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 
             let mut cmds = Vec::with_capacity(data_enum.variants.len());
 
-            for variant in data_enum.variants.iter() {
+            for variant in &data_enum.variants {
                 let ident = &variant.ident;
 
                 match &variant.fields {
@@ -142,7 +142,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 
                         let mut field_cmds = Vec::with_capacity(num_fields);
 
-                        for field in named_fields.named.iter() {
+                        for field in &named_fields.named {
                             let field_ident = field.ident.as_ref().unwrap();
 
                             field_idents.push(field_ident);
@@ -211,7 +211,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                     }
                 }
                 syn::Fields::Named(named_fields) => {
-                    for field in named_fields.named.iter() {
+                    for field in &named_fields.named {
                         // Check if the value should be ignored. If so skip it.
                         if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
                             continue;

@@ -19,8 +19,6 @@
 // `zip_eq` is a source of poor performance.
 #![allow(clippy::disallowed_methods)]
 
-use std::cell::RefCell;
-
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
@@ -301,13 +299,10 @@ fn bench_expr(c: &mut Criterion) {
                 continue;
             }
         };
-        // to workaround the lifetime issue
-        let agg = RefCell::new(agg);
         c.bench_function(&format!("{sig:?}"), |bencher| {
-            #[allow(clippy::await_holding_refcell_ref)]
             bencher
                 .to_async(FuturesExecutor)
-                .iter(|| async { agg.borrow_mut().update(&input).await.unwrap() })
+                .iter(|| async { agg.update(&mut agg.create_state(), &input).await.unwrap() })
         });
     }
 }

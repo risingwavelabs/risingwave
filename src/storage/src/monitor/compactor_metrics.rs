@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_counter_vec_with_registry,
@@ -19,8 +21,9 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompactorMetrics {
     pub compaction_upload_sst_counts: GenericCounter<AtomicU64>,
     pub compact_write_bytes: GenericCounterVec<AtomicU64>,
@@ -50,12 +53,19 @@ pub struct CompactorMetrics {
     pub compaction_event_loop_iteration_latency: Histogram,
 }
 
+pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
+    LazyLock::new(|| CompactorMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl CompactorMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
+        // 256B - 4GB
+        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 10ms - 2.7h
+        let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let opts = histogram_opts!(
             "compactor_shared_buffer_to_sstable_size",
             "Histogram of batch size compacted from shared buffer to remote storage",
-            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
+            size_buckets.clone()
         );
         let shared_buffer_to_sstable_size =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -70,13 +80,13 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_compact_sst_duration",
             "Total time of compact_key_range that have been issued to state store",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 320
+            time_buckets.clone()
         );
         let compact_sst_duration = register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
             "compactor_compact_task_duration",
             "Total time of compact that have been issued to state store",
-            exponential_buckets(0.1, 1.6, 28).unwrap() // max 9h
+            time_buckets.clone()
         );
         let compact_task_duration =
             register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
@@ -84,14 +94,14 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_get_table_id_total_time_duration",
             "Total time of compact that have been issued to state store",
-            exponential_buckets(0.1, 1.6, 28).unwrap() // max 9h
+            time_buckets.clone()
         );
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
             "compute_refill_cache_duration",
-            "Total time of compact that have been issued to state store",
-            exponential_buckets(0.001, 1.6, 20).unwrap()
+            "compute_refill_cache_duration",
+            time_buckets.clone()
         );
         let refill_cache_duration = register_histogram_with_registry!(opts, registry).unwrap();
         let refill_data_file_cache_count = register_counter_vec_with_registry!(
@@ -104,7 +114,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 320
+            time_buckets.clone()
         );
         let remote_read_time = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -166,7 +176,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_bloom_filter_size",
             "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            exponential_buckets(16.0, 16.0, 7).unwrap() // max 256MB
         );
 
         let sstable_bloom_filter_size = register_histogram_with_registry!(opts, registry).unwrap();
@@ -174,7 +184,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_file_size",
             "Total bytes gotten from sstable_file_size, for observing sstable_file_size",
-            exponential_buckets(1.0, 2.0, 31).unwrap() // max 1G
+            size_buckets.clone()
         );
 
         let sstable_file_size = register_histogram_with_registry!(opts, registry).unwrap();
@@ -182,7 +192,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_avg_key_size",
             "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            size_buckets.clone()
         );
 
         let sstable_avg_key_size = register_histogram_with_registry!(opts, registry).unwrap();
@@ -190,7 +200,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_avg_value_size",
             "Total bytes gotten from sstable_avg_value_size, for observing sstable_avg_value_size",
-            exponential_buckets(1.0, 2.0, 26).unwrap() // max 32MB
+            size_buckets
         );
 
         let sstable_avg_value_size = register_histogram_with_registry!(opts, registry).unwrap();
@@ -198,7 +208,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "state_store_write_build_l0_sst_duration",
             "Total time of batch_write_build_table that have been issued to state store",
-            exponential_buckets(0.001, 2.0, 16).unwrap() // max 32s
+            time_buckets.clone()
         );
         let write_build_l0_sst_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -220,7 +230,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_distinct_epoch_count",
             "Total number gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
-            exponential_buckets(1.0, 2.0, 17).unwrap()
+            exponential_buckets(1.0, 10.0, 6).unwrap()
         );
 
         let sstable_distinct_epoch_count =
@@ -235,7 +245,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_compaction_event_consumed_latency",
             "The latency of each event being consumed",
-            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
+            time_buckets.clone()
         );
         let compaction_event_consumed_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -243,7 +253,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_compaction_event_loop_iteration_latency",
             "The latency of each iteration of the compaction event loop",
-            exponential_buckets(1.0, 1.5, 30).unwrap() // max 191s
+            time_buckets
         );
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -280,6 +290,6 @@ impl CompactorMetrics {
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        GLOBAL_COMPACTOR_METRICS.clone()
     }
 }
