@@ -62,6 +62,19 @@ pub trait AggregateFunction: Send + Sync + 'static {
 
     /// Get aggregate result from the state.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum>;
+
+    /// Encode the state into a datum that can be stored in state table.
+    fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
+        match state {
+            AggregateState::Datum(d) => Ok(d.clone()),
+            _ => panic!("cannot encode state"),
+        }
+    }
+
+    /// Decode the state from a datum in state table.
+    fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
+        Ok(AggregateState::Datum(datum))
+    }
 }
 
 /// Intermediate state of an aggregate function.

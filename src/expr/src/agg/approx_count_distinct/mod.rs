@@ -28,7 +28,7 @@ use risingwave_expr_macro::build_aggregate;
 use self::append_only::AppendOnlyBucket;
 use self::updatable::UpdatableBucket;
 use super::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
-use crate::Result;
+use crate::{ExprError, Result};
 
 mod append_only;
 mod updatable;
@@ -94,6 +94,23 @@ impl<B: Bucket> AggregateFunction for ApproxCountDistinct<B> {
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = state.downcast_ref::<UpdatableRegisters>();
         Ok(Some(state.calculate_result().into()))
+    }
+
+    fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<UpdatableRegisters>();
+        // FIXME: store state of updatable registers properly
+        Ok(Some(ScalarImpl::Int64(state.calculate_result())))
+    }
+
+    fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
+        // FIXME: restore state of updatable registers properly
+        let Some(ScalarImpl::Int64(initial_count)) = datum else {
+            return Err(ExprError::InvalidState("expect int64".into()));
+        };
+        Ok(AggregateState::Any(Box::new(UpdatableRegisters {
+            initial_count,
+            ..UpdatableRegisters::default()
+        })))
     }
 }
 
@@ -261,25 +278,6 @@ impl From<ScalarImpl> for AppendOnlyRegisters {
         Self {
             registers,
             initial_count: 0,
-        }
-    }
-}
-
-/// Serialize the state into a scalar.
-impl From<UpdatableRegisters> for ScalarImpl {
-    fn from(reg: UpdatableRegisters) -> Self {
-        // FIXME: store state of updatable registers properly
-        ScalarImpl::Int64(reg.calculate_result())
-    }
-}
-
-/// Deserialize the state from a scalar.
-impl From<ScalarImpl> for UpdatableRegisters {
-    fn from(state: ScalarImpl) -> Self {
-        // FIXME: restore state of updatable registers properly
-        Self {
-            initial_count: state.into_int64(),
-            ..Self::default()
         }
     }
 }
