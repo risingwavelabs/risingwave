@@ -42,7 +42,6 @@ pub struct NatsConfig {
 
 #[derive(Clone, Debug)]
 pub struct NatsSink {
-    // TODO(yufan): Fix one for test, will change it in the end
     pub config: NatsConfig,
     schema: Schema,
     is_append_only: bool,
