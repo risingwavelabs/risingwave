@@ -191,7 +191,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
             }
             if (!hashSet.isEmpty()) {
-                throw ValidatorUtils.internalError(
+                throw ValidatorUtils.invalidArgument(
                         "MySQL user doesn't have enough privileges: " + hashSet);
             }
         }
