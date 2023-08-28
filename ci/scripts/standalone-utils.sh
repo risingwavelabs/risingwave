@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-RW_PREFIX=$PWD/.risingwave
-PREFIX_BIN=$RW_PREFIX/bin
-PREFIX_LOG=$RW_PREFIX/log
+export RW_PREFIX=$PWD/.risingwave
+export PREFIX_BIN=$RW_PREFIX/bin
+export PREFIX_LOG=$RW_PREFIX/log
 
 start_standalone() {
   RUST_BACKTRACE=1 \
