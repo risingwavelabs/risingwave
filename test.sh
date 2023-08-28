@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# Lower = less precision, faster
+# Higher = more precision, slower
 PRECISION=2
 
 ./risedev d
