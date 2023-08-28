@@ -25,6 +25,7 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
@@ -541,6 +542,17 @@ where
         *status = new_status;
     }
 
+    async fn take_pause_on_bootstrap(&self) -> MetaResult<bool> {
+        let pm = self.env.system_params_manager();
+        let paused = pm.get_params().await.pause_on_next_bootstrap();
+        if paused {
+            tracing::warn!("The cluster will pause on this bootstrap.");
+            pm.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                .await?;
+        }
+        Ok(paused)
+    }
+
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         // Initialize the barrier manager.
@@ -579,7 +591,8 @@ where
             // inject the first `Initial` barrier.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
-            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
+            let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
+            let new_epoch = self.recovery(prev_epoch, paused).instrument(span).await;
 
             BarrierManagerState::new(new_epoch)
         };
@@ -918,7 +931,7 @@ where
                 %err,
                 prev_epoch = prev_epoch.value().0
             );
-            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
+            let new_epoch = self.recovery(prev_epoch, false).instrument(span).await;
 
             *state = BarrierManagerState::new(new_epoch);
             self.set_status(BarrierManagerStatus::Running).await;

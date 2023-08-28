@@ -751,6 +751,10 @@ pub struct SystemConfig {
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
+
+    /// Whether to pause all data sources on next bootstrap.
+    #[serde(default = "crate::system_param::default::pause_on_next_bootstrap")]
+    pub pause_on_next_bootstrap: Option<bool>,
 }
 
 impl SystemConfig {
@@ -768,6 +772,7 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
+            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
         }
     }
 }

@@ -20,7 +20,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
-use risingwave_pb::stream_plan::AddMutation;
+use risingwave_pb::stream_plan::{AddMutation, PauseMutation};
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
     ForceStopActorsRequest, UpdateActorsRequest,
@@ -106,8 +106,12 @@ where
 
     /// Recovery the whole cluster from the latest epoch.
     ///
+    /// If `paused` is true, all data sources (including connectors and DMLs) will be immediately
+    /// paused after recovery, until the user manually resume them either by SQL interface or
+    /// `risectl` command. Used for debugging purpose.
+    ///
     /// Returns the new epoch after recovery.
-    pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
+    pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch, paused: bool) -> TracedEpoch {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
@@ -151,14 +155,19 @@ where
                         warn!(err = ?err, "build_actors failed");
                     })?;
 
-                    // get split assignments for all actors
-                    let source_split_assignments = self.source_manager.list_assignments().await;
-                    let command = Command::Plain(Some(Mutation::Add(AddMutation {
-                        // Actors built during recovery is not treated as newly added actors.
-                        actor_dispatchers: Default::default(),
-                        added_actors: Default::default(),
-                        actor_splits: build_actor_connector_splits(&source_split_assignments),
-                    })));
+                    let command = Command::Plain(Some(if paused {
+                        Mutation::Pause(PauseMutation {})
+                    } else {
+                        // get split assignments for all actors
+                        let source_split_assignments = self.source_manager.list_assignments().await;
+
+                        Mutation::Add(AddMutation {
+                            // Actors built during recovery is not treated as newly added actors.
+                            actor_dispatchers: Default::default(),
+                            added_actors: Default::default(),
+                            actor_splits: build_actor_connector_splits(&source_split_assignments),
+                        })
+                    }));
 
                     // Use a different `curr_epoch` for each recovery attempt.
                     let new_epoch = prev_epoch.next();
