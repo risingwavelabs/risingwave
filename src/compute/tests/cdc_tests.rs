@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![feature(generators)]
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -20,8 +21,11 @@ use std::time::Duration;
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_batch::executor::{RowSeqScanExecutor, ScanRange};
-use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
+use itertools::Itertools;
+use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
+use risingwave_common::array::{
+    Array, ArrayBuilder, StreamChunk, StreamChunkTestExt, Utf8ArrayBuilder,
+};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::external::{

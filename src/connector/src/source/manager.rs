@@ -33,6 +33,12 @@ pub struct SourceColumnDesc {
     pub is_pk: bool,
 }
 
+/// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
+/// There are 4 types of columns:
+/// - `Normal`: a visible column
+/// - `RowId`: internal column to uniquely identify a row
+/// - `Meta`: internal column to store source related metadata
+/// - `Offset`: internal column to store upstream offset for a row, used in CDC source
 #[derive(Clone, Debug, PartialEq)]
 pub enum SourceColumnType {
     Normal,
