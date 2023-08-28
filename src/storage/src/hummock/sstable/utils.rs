@@ -14,6 +14,7 @@
 
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
+use std::fmt::Display;
 use std::ptr;
 
 use risingwave_hummock_sdk::key::MAX_KEY_LEN;
@@ -71,7 +72,7 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
 use bytes::{Buf, BufMut};
 
 pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
-    let len = slice.len() as u32;
+    let len = checked_into_u32(slice.len());
     buf.put_u32_le(len);
     buf.put_slice(slice);
 }
@@ -144,5 +145,12 @@ impl TryFrom<u8> for CompressionAlgorithm {
                 "not valid compression algorithm",
             )),
         }
+    }
+}
+
+pub fn checked_into_u32<T: TryInto<u32> + Copy + Display>(i: T) -> u32 {
+    match i.try_into() {
+        Ok(v) => v,
+        Err(_) => panic!("cannot convert {i} into u32"),
     }
 }

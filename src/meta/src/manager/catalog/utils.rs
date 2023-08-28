@@ -274,6 +274,7 @@ impl QueryRewriter<'_> {
             | Expr::IsNotFalse(expr)
             | Expr::IsUnknown(expr)
             | Expr::IsNotUnknown(expr)
+            | Expr::IsJson { expr, .. }
             | Expr::InList { expr, .. }
             | Expr::SomeOp(expr)
             | Expr::AllOp(expr)
@@ -319,7 +320,9 @@ impl QueryRewriter<'_> {
                 self.visit_expr(expr2);
             }
             Expr::Function(function) => self.visit_function(function),
-            Expr::Exists(query) | Expr::Subquery(query) => self.visit_query(query),
+            Expr::Exists(query) | Expr::Subquery(query) | Expr::ArraySubquery(query) => {
+                self.visit_query(query)
+            }
 
             Expr::GroupingSets(exprs_vec) | Expr::Cube(exprs_vec) | Expr::Rollup(exprs_vec) => {
                 for exprs in exprs_vec {
@@ -334,6 +337,8 @@ impl QueryRewriter<'_> {
                     self.visit_expr(expr);
                 }
             }
+
+            Expr::LambdaFunction { body, args: _ } => self.visit_expr(body),
 
             // No need to visit.
             Expr::Identifier(_)

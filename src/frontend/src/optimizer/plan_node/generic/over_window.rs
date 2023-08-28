@@ -178,6 +178,10 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
         assert!(self.funcs_have_same_partition_and_order());
         &self.window_functions[0].order_by
     }
+
+    pub fn decompose(self) -> (PlanRef, Vec<PlanWindowFunction>) {
+        (self.input, self.window_functions)
+    }
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for OverWindow<PlanRef> {

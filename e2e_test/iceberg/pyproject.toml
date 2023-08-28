@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "iceberg-e2e-test"
+version = "0.1.0"
+description = "E2e test with iceberg"
+authors = ["risingwavelabs"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pyspark = { version = "3.4.1", extras = ["sql", "connect"] }
+
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

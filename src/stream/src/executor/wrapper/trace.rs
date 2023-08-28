@@ -27,6 +27,7 @@ use crate::task::ActorId;
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn trace(
+    enable_executor_row_count: bool,
     info: Arc<ExecutorInfo>,
     _input_pos: usize,
     actor_id: ActorId,
@@ -38,6 +39,8 @@ pub async fn trace(
 
     let span_name = pretty_identity(&info.identity, actor_id, executor_id);
 
+    let is_sink_or_mv = info.identity.contains("Materialize") || info.identity.contains("Sink");
+
     let new_span = || tracing::info_span!("executor", "otel.name" = span_name, actor_id);
     let mut span = new_span();
 
@@ -45,7 +48,7 @@ pub async fn trace(
 
     while let Some(message) = input.next().instrument(span.clone()).await.transpose()? {
         if let Message::Chunk(chunk) = &message {
-            if chunk.cardinality() > 0 {
+            if chunk.cardinality() > 0 && (enable_executor_row_count || is_sink_or_mv) {
                 metrics
                     .executor_row_count
                     .with_label_values(&[&actor_id_string, &span_name])

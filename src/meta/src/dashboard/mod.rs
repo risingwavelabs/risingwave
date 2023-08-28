@@ -241,6 +241,10 @@ where
                 "/metrics/cluster",
                 get(prometheus::list_prometheus_cluster::<S>),
             )
+            .route(
+                "/metrics/actor/back_pressures",
+                get(prometheus::list_prometheus_actor_back_pressure::<S>),
+            )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
             .layer(
                 ServiceBuilder::new()

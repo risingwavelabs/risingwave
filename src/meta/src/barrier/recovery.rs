@@ -180,11 +180,7 @@ where
                     {
                         use risingwave_common::util::epoch::INVALID_EPOCH;
 
-                        let mce = self
-                            .hummock_manager
-                            .get_current_version()
-                            .await
-                            .max_committed_epoch;
+                        let mce = self.hummock_manager.get_current_max_committed_epoch().await;
 
                         if mce != INVALID_EPOCH {
                             command_ctx.wait_epoch_commit(mce).await?;

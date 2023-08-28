@@ -638,6 +638,7 @@ pub mod tests {
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
             uncompressed_file_size: (right - left + 1) as u64,
+            total_key_count: (right - left + 1) as u64,
             ..Default::default()
         }
     }
@@ -975,9 +976,16 @@ pub mod tests {
                 .iter()
                 .map(|sst| sst.get_sst_id())
                 .collect_vec(),
-            vec![5, 6, 7]
+            vec![5]
         );
-        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 3);
+        assert_eq!(
+            compaction.input.input_levels[1]
+                .table_infos
+                .iter()
+                .map(|sst| sst.get_sst_id())
+                .collect_vec(),
+            vec![10]
+        );
         assert_eq!(
             compaction.target_file_size,
             config.target_file_size_base * 2

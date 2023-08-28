@@ -34,7 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates `TUMBLE`.
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
     fn gen_tumble(&mut self) -> (TableFactor, Table) {
-        let tables = find_tables_with_timestamp_cols(self.tables.clone());
+        let tables: Vec<_> = find_tables_with_timestamp_cols(self.tables.clone());
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
@@ -136,6 +136,9 @@ fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Colum
     tables
         .into_iter()
         .filter_map(|table| {
+            if !table.is_base_table {
+                return None;
+            }
             let name = table.name.clone();
             let columns = table.get_qualified_columns();
             let mut timestamp_cols = vec![];

@@ -29,13 +29,14 @@ node_num_monitor_interval_sec = 10
 backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
+periodic_tombstone_reclaim_compaction_interval_sec = 600
 periodic_split_compact_group_interval_sec = 180
-move_table_size_limit = 4294967296
+move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 64
-table_write_throughput_threshold = 134217728
-min_table_split_write_throughput = 33554432
+table_write_throughput_threshold = 16777216
+min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 60
 
 [meta.compaction_config]
@@ -52,6 +53,7 @@ level0_sub_level_compact_level_count = 3
 level0_overlapping_sub_level_compact_level_count = 6
 max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 96
+tombstone_reclaim_ratio = 40
 
 [batch]
 enable_barrier_read = true
@@ -67,6 +69,7 @@ async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 
 [streaming.developer]
+stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
 stream_chunk_size = 256

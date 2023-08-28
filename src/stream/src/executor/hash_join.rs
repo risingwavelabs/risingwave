@@ -201,7 +201,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
-    // WARNING: Please do not call this until we implement it.、
+    // WARNING: Please do not call this until we implement it.
     #[expect(dead_code)]
     fn is_dirty(&self) -> bool {
         unimplemented!()

@@ -30,6 +30,7 @@ import { clone, reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { Fragment, useCallback, useEffect, useState } from "react"
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { Metrics, MetricsSample } from "../components/metrics"
 import Title from "../components/Title"
 import { WorkerNode } from "../proto/gen/common"
 import {
@@ -132,19 +133,9 @@ function WorkerNodeMetricsComponent({
   )
 }
 
-interface MetricsSample {
-  timestamp: number
-  value: number
-}
-
-interface NodeMetrics {
-  metric: { [key: string]: string }
-  sample: MetricsSample[]
-}
-
 interface ClusterNodeMetrics {
-  cpuData: NodeMetrics[]
-  memoryData: NodeMetrics[]
+  cpuData: Metrics[]
+  memoryData: Metrics[]
 }
 
 export default function Cluster() {

@@ -418,6 +418,14 @@ impl TableCatalog {
             .map(|c| c.name())
     }
 
+    pub fn generated_col_idxes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_generated())
+            .map(|(i, _)| i)
+    }
+
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
         self.columns
             .iter()

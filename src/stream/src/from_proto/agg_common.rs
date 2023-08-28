@@ -34,16 +34,7 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
     let mut result = vec![];
     for agg_call_state in agg_call_states {
         let agg_state_store = match agg_call_state.get_inner().unwrap() {
-            agg_call_state::Inner::ResultValueState(..) => AggStateStorage::ResultValue,
-            agg_call_state::Inner::TableState(state) => {
-                let table = StateTable::from_table_catalog(
-                    state.get_table().unwrap(),
-                    store.clone(),
-                    vnodes.clone(),
-                )
-                .await;
-                AggStateStorage::Table { table }
-            }
+            agg_call_state::Inner::ValueState(..) => AggStateStorage::Value,
             agg_call_state::Inner::MaterializedInputState(state) => {
                 let table = StateTable::from_table_catalog(
                     state.get_table().unwrap(),

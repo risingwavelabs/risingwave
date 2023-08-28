@@ -245,6 +245,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
+    pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
+
     #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -642,6 +645,12 @@ serde_with::with_prefix!(batch_prefix "batch_");
 /// It is put at [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StreamingDeveloperConfig {
+    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
+    /// and might affect the prometheus performance. If you only need actor input and output
+    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+    #[serde(default = "default::developer::stream_enable_executor_row_count")]
+    pub enable_executor_row_count: bool,
+
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::connector_message_buffer_size")]
@@ -831,8 +840,12 @@ pub mod default {
             180 // 3mi
         }
 
+        pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
+            600
+        }
+
         pub fn move_table_size_limit() -> u64 {
-            4 * 1024 * 1024 * 1024 // 4GB
+            10 * 1024 * 1024 * 1024 // 10GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -844,11 +857,11 @@ pub mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            128 * 1024 * 1024 // 128MB
+            16 * 1024 * 1024 // 16MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
-            32 * 1024 * 1024 // 32MB
+            4 * 1024 * 1024 // 4MB
         }
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
@@ -1089,6 +1102,10 @@ pub mod default {
             1024
         }
 
+        pub fn stream_enable_executor_row_count() -> bool {
+            false
+        }
+
         pub fn connector_message_buffer_size() -> usize {
             16
         }
@@ -1191,6 +1208,7 @@ pub mod default {
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1232,6 +1250,9 @@ pub mod default {
         }
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+        pub fn tombstone_reclaim_ratio() -> u32 {
+            DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
     }
 
@@ -1356,6 +1377,8 @@ pub struct CompactionConfig {
     pub max_space_reclaim_bytes: u64,
     #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
     pub level0_max_compact_file_number: u64,
+    #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
+    pub tombstone_reclaim_ratio: u32,
 }
 
 #[cfg(test)]

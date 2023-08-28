@@ -35,6 +35,8 @@ pub static INFORMATION_SCHEMA_COLUMNS: LazyLock<BuiltinView> = LazyLock::new(|| 
         (DataType::Varchar, "column_name"),
         (DataType::Varchar, "column_default"),
         (DataType::Int32, "character_maximum_length"),
+        (DataType::Int32, "numeric_precision"),
+        (DataType::Int32, "numeric_scale"),
         (DataType::Int32, "ordinal_position"),
         (DataType::Varchar, "is_nullable"),
         (DataType::Varchar, "collation_name"),
@@ -48,11 +50,16 @@ pub static INFORMATION_SCHEMA_COLUMNS: LazyLock<BuiltinView> = LazyLock::new(|| 
                 c.name AS column_name, \
                 NULL AS column_default, \
                 NULL::integer AS character_maximum_length, \
+                NULL::integer AS numeric_precision, \
+                NULL::integer AS numeric_scale, \
                 c.position AS ordinal_position, \
                 'YES' AS is_nullable, \
                 NULL AS collation_name, \
                 'pg_catalog' AS udt_schema, \
-                c.data_type AS data_type, \
+                CASE \
+                    WHEN c.data_type = 'varchar' THEN 'character varying' \
+                    ELSE c.data_type \
+                END AS data_type, \
                 c.udt_type AS udt_name \
             FROM rw_catalog.rw_columns c \
             LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id \

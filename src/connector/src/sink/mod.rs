@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
@@ -20,6 +21,8 @@ pub mod kafka;
 pub mod kinesis;
 pub mod redis;
 pub mod remote;
+#[cfg(any(test, madsim))]
+pub mod test_sink;
 pub mod utils;
 pub mod nats;
 
@@ -42,14 +45,17 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
-use self::iceberg::{IcebergSink, ICEBERG_SINK};
+use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
+use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
-use crate::sink::iceberg::IcebergConfig;
+use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
-use crate::sink::remote::{RemoteConfig, RemoteSink};
+use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
+#[cfg(any(test, madsim))]
+use crate::sink::test_sink::{build_test_sink, TEST_SINK_NAME};
 use crate::ConnectorParams;
 use crate::sink::nats::{NatsConfig, NatsSink,NATS_SINK};
 
@@ -263,9 +269,12 @@ pub enum SinkConfig {
     Remote(RemoteConfig),
     Kinesis(Box<KinesisSinkConfig>),
     Iceberg(IcebergConfig),
+    RemoteIceberg(RemoteIcebergConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
     Nats(NatsConfig),
+    #[cfg(any(test, madsim))]
+    Test,
 }
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -334,10 +343,16 @@ impl SinkConfig {
                 ClickHouseConfig::from_hashmap(properties)?,
             ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
+            REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
+                RemoteIcebergConfig::from_hashmap(properties)?,
+            )),
             ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
                 properties,
             )?)),
             NATS_SINK => Ok(SinkConfig::Nats(NatsConfig::from_hashmap(properties)?)),
+            // Only in test or deterministic test, test sink is enabled.
+            #[cfg(any(test, madsim))]
+            TEST_SINK_NAME => Ok(SinkConfig::Test),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
@@ -358,6 +373,8 @@ pub enum SinkImpl {
     ClickHouse(ClickHouseSink),
     Iceberg(IcebergSink),
     Nats(NatsSink),
+    RemoteIceberg(RemoteIcebergSink),
+    TestSink(BoxSink),
 }
 
 impl SinkImpl {
@@ -371,6 +388,8 @@ impl SinkImpl {
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
             SinkImpl::Nats(_) => "ntas",
+            SinkImpl::RemoteIceberg(_) => "iceberg",
+            SinkImpl::TestSink(_) => "test",
         }
     }
 }
@@ -389,6 +408,8 @@ macro_rules! dispatch_sink {
             SinkImpl::ClickHouse($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
             SinkImpl::Nats($sink) => $body,
+            SinkImpl::RemoteIceberg($sink) => $body,
+            SinkImpl::TestSink($sink) => $body,
         }
     }};
 }
@@ -417,8 +438,13 @@ impl SinkImpl {
                 param.pk_indices,
                 param.sink_type.is_append_only(),
             )?),
-            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema())?),
+            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),
             SinkConfig::Nats(cfg) => SinkImpl::Nats(NatsSink::new(cfg, param.schema(), param.sink_type.is_append_only())),
+            SinkConfig::RemoteIceberg(cfg) => {
+                SinkImpl::RemoteIceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
+            }
+            #[cfg(any(test, madsim))]
+            SinkConfig::Test => SinkImpl::TestSink(build_test_sink(param)?),
         })
     }
 }
@@ -436,7 +462,7 @@ pub enum SinkError {
     #[error("Json parse error: {0}")]
     JsonParse(String),
     #[error("Iceberg error: {0}")]
-    Iceberg(String),
+    Iceberg(anyhow::Error),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]

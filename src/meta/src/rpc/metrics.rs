@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
@@ -25,19 +25,23 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::object_metrics::{
+    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
 
+#[derive(Clone)]
 pub struct MetaMetrics {
-    pub registry: Registry,
-
     /// ********************************** Meta ************************************
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
@@ -137,7 +141,7 @@ pub struct MetaMetrics {
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
-    pub time_after_last_observation: AtomicU64,
+    pub time_after_last_observation: Arc<AtomicU64>,
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
@@ -162,14 +166,18 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
+    pub sink_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
 }
 
+pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
+    LazyLock::new(|| MetaMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl MetaMetrics {
-    pub fn new() -> Self {
-        let registry = prometheus::Registry::new();
+    fn new(registry: &Registry) -> Self {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
@@ -479,7 +487,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+        let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
         let recovery_failure_cnt = register_int_counter_with_registry!(
             "recovery_failure_cnt",
@@ -501,7 +509,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::new(registry.clone()));
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -519,8 +527,17 @@ impl MetaMetrics {
                 "table_id",
                 "actor_id",
                 "table_name",
-                "table_type"
+                "table_type",
+                "compaction_group_id"
             ],
+            registry
+        )
+        .unwrap();
+
+        let sink_info = register_int_gauge_vec_with_registry!(
+            "sink_info",
+            "Mapping from actor id to (actor id, sink name)",
+            &["actor_id", "sink_name",],
             registry
         )
         .unwrap();
@@ -598,7 +615,6 @@ impl MetaMetrics {
             register_histogram_with_registry!(opts, registry).unwrap();
 
         Self {
-            registry,
             grpc_latency,
             barrier_latency,
             barrier_wait_commit_latency,
@@ -640,7 +656,7 @@ impl MetaMetrics {
             full_gc_selected_object_count,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
-            time_after_last_observation: AtomicU64::new(0),
+            time_after_last_observation: Arc::new(AtomicU64::new(0)),
             worker_num,
             meta_type,
             compact_pending_bytes,
@@ -651,6 +667,7 @@ impl MetaMetrics {
             source_enumerator_metrics,
             actor_info,
             table_info,
+            sink_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -662,14 +679,10 @@ impl MetaMetrics {
             compaction_event_loop_iteration_latency,
         }
     }
-
-    pub fn registry(&self) -> &Registry {
-        &self.registry
-    }
 }
 impl Default for MetaMetrics {
     fn default() -> Self {
-        Self::new()
+        GLOBAL_META_METRICS.clone()
     }
 }
 
@@ -725,6 +738,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;
@@ -760,6 +774,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 .collect();
             let table_name_and_type_mapping =
                 catalog_manager.get_table_name_and_type_mapping().await;
+            let table_compaction_group_id_mapping = hummock_manager
+                .get_table_compaction_group_id_mapping()
+                .await;
 
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {
@@ -787,6 +804,19 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                             }
                         }
 
+                        if let Some(stream_node) = &actor.nodes {
+                            if let Some(Sink(sink_node)) = &stream_node.node_body {
+                                let sink_name = match &sink_node.sink_desc {
+                                    Some(sink_desc) => &sink_desc.name,
+                                    _ => "unknown",
+                                };
+                                meta_metrics
+                                    .sink_info
+                                    .with_label_values(&[&actor_id_str, sink_name])
+                                    .set(1);
+                            }
+                        }
+
                         // Report a dummy gauge metrics with (table id, actor id, table
                         // name) as its label
 
@@ -796,6 +826,10 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                 .get(table_id)
                                 .cloned()
                                 .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                            let compaction_group_id = table_compaction_group_id_mapping
+                                .get(table_id)
+                                .map(|cg_id| cg_id.to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
 
                             meta_metrics
                                 .table_info
@@ -805,6 +839,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                     &actor_id_str,
                                     &table_name,
                                     &table_type,
+                                    &compaction_group_id,
                                 ])
                                 .set(1);
                         }

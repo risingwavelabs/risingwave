@@ -21,7 +21,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
-    KAFKA_TIMESTAMP_COLUMN_NAME,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -126,18 +126,7 @@ async fn extract_upsert_avro_table_schema(
             .map_ok(|desc| desc.name.clone())
             .collect::<Result<Vec<_>>>()?
     } else {
-        let kafka_key_column = ColumnCatalog {
-            column_desc: ColumnDesc {
-                data_type: DataType::Bytea,
-                column_id: (vec_column_catalog.len() as i32).into(),
-                name: DEFAULT_KEY_COLUMN_NAME.to_string(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-                generated_or_default_column: None,
-            },
-            is_hidden: true,
-        };
-        vec_column_catalog.push(kafka_key_column);
+        add_upsert_default_key_column(&mut vec_column_catalog);
         vec![DEFAULT_KEY_COLUMN_NAME.into()]
     };
     Ok((vec_column_catalog, pks))
@@ -435,15 +424,16 @@ pub(crate) async fn try_bind_columns_from_source(
             )
         }
         (Format::Upsert, Encode::Json) => {
-            if !sql_defined_pk {
-                return Err(RwError::from(ProtocolError(
-    "Primary key must be specified when creating source with FORMAT UPSERT ENCODE JSON."
-    .to_string(),
-    )));
-            }
+            let (columns, pk_names) = if !sql_defined_pk {
+                let mut columns = bind_sql_columns(sql_defined_columns)?;
+                add_upsert_default_key_column(&mut columns);
+                (Some(columns), vec![DEFAULT_KEY_COLUMN_NAME.into()])
+            } else {
+                (None, sql_defined_pk_names)
+            };
             (
-                None,
-                sql_defined_pk_names,
+                columns,
+                pk_names,
                 StreamSourceInfo {
                     format: FormatType::Upsert as i32,
                     row_encode: EncodeType::Json as i32,
@@ -742,6 +732,21 @@ fn check_and_add_timestamp_column(
     }
 }
 
+fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
+    let column = ColumnCatalog {
+        column_desc: ColumnDesc {
+            data_type: DataType::Bytea,
+            column_id: ColumnId::new(columns.len() as i32),
+            name: DEFAULT_KEY_COLUMN_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
+            generated_or_default_column: None,
+        },
+        is_hidden: true,
+    };
+    columns.push(column);
+}
+
 pub(super) fn bind_source_watermark(
     session: &SessionImpl,
     name: String,
@@ -757,12 +762,20 @@ pub(super) fn bind_source_watermark(
             let col_name = source_watermark.column.real_value();
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
-            let expr = binder.bind_expr(source_watermark.expr)?.to_expr_proto();
-
-            Ok::<_, RwError>(WatermarkDesc {
-                watermark_idx: watermark_idx as u32,
-                expr: Some(expr),
-            })
+            let expr = binder.bind_expr(source_watermark.expr)?;
+            let watermark_col_type = column_catalogs[watermark_idx].data_type();
+            let watermark_expr_type = &expr.return_type();
+            if watermark_col_type != watermark_expr_type {
+                Err(RwError::from(ErrorCode::BindError(
+                    format!("The return value type of the watermark expression must be identical to the watermark column data type. Current data type of watermark return value: `{}`, column `{}`",watermark_expr_type, watermark_col_type),
+                )))
+            } else {
+                let expr_proto = expr.to_expr_proto();
+                Ok::<_, RwError>(WatermarkDesc {
+                    watermark_idx: watermark_idx as u32,
+                    expr: Some(expr_proto),
+                })
+            }
         })
         .try_collect()?;
     Ok(watermark_descs)
@@ -1060,6 +1073,7 @@ pub async fn handle_create_source(
         initialized_at_epoch: None,
         created_at_epoch: None,
         optional_associated_table_id: None,
+        version: INITIAL_SOURCE_VERSION_ID,
     };
 
     let catalog_writer = session.catalog_writer()?;

@@ -37,7 +37,8 @@ use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
+use risingwave_storage::hummock::compactor::compactor_runner::compact;
+use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
@@ -250,8 +251,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (mut result_task, task_stats) =
-        Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+    let (mut result_task, task_stats) = compact(compact_ctx, compact_task.clone(), rx).await;
 
     hummock_manager_ref
         .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -388,14 +388,9 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
-        ignore_range_tombstone: false,
-
-        prefix_hint: None,
         table_id: TableId::from(existing_table_id),
-        retention_seconds: None,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     let get_result = storage
         .get(Bytes::from("\0\0hhh"), 120, read_options.clone())

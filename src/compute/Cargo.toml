@@ -25,7 +25,7 @@ futures-async-stream = { workspace = true }
 hyper = "0.14"
 itertools = "0.11"
 maplit = "1.0.2"
-pprof = { version = "0.11", features = ["flamegraph"] }
+pprof = { version = "0.12", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }

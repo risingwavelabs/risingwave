@@ -22,6 +22,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0de
     "xz",
 ] }
 arrow-array = "45"
+arrow-schema = "45"
 async-trait = "0.1"
 async-nats = "0.31.0"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -47,8 +48,8 @@ enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 glob = "0.3"
-google-cloud-pubsub = "0.17"
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "2bbefa7" }
+google-cloud-pubsub = "0.19"
+icelake = { workspace = true }
 itertools = "0.11"
 maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }
@@ -83,7 +84,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.10.5"
+simd-json = "0.10.6"
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
