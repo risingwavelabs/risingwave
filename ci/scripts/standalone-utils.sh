@@ -44,9 +44,28 @@ stop_standalone() {
   pkill standalone
 }
 
+wait_standalone() {
+  set +e
+  timeout 10 bash -c '
+    while true; do
+      echo "Polling for standalone to be ready"
+      ./risedev psql -c "SELECT 1"
+      sleep 1
+    done
+  '
+  STATUS=$?
+  set -e
+  if [[ $STATUS -ne 0 ]]; then
+    echo "Standalone failed to start with status: $STATUS"
+    exit 1
+  else
+    echo "Standalone is ready"
+  fi
+}
+
 restart_standalone() {
   stop_standalone
   sleep 5
   start_standalone >"$PREFIX_LOG"/standalone-restarted.log 2>&1 &
-  sleep 5
+  wait_standalone
 }
