@@ -14,14 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 
-
-
-
-use risingwave_common::catalog::{Schema};
-
-
-
-
+use risingwave_common::catalog::Schema;
 
 use super::*;
 
@@ -30,12 +23,12 @@ use super::*;
 /// or update element into next operator according to the result of the expression.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
-    rate_limit: Option<usize>,
+    rate_limit: usize,
 }
 
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(input: Box<dyn Executor>, rate_limit: Option<usize>) -> Self {
+    pub fn new(input: Box<dyn Executor>, rate_limit: usize) -> Self {
         Self { input, rate_limit }
     }
 
@@ -60,6 +53,10 @@ impl Debug for FlowControlExecutor {
 }
 
 impl Executor for FlowControlExecutor {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+
     fn schema(&self) -> &Schema {
         self.input.schema()
     }
@@ -70,9 +67,5 @@ impl Executor for FlowControlExecutor {
 
     fn identity(&self) -> &str {
         "FlowControlExecutor"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
     }
 }
