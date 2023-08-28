@@ -861,10 +861,7 @@ pub async fn parse_remote_object_store(
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
-            let (namenode, root) = match hdfs.contains('@') {
-                true => hdfs.split_once('@').unwrap(),
-                false => (hdfs, ""),
-            };
+            let (namenode, root) = hdfs.split_once('@').unwrap_or((hdfs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
@@ -873,10 +870,7 @@ pub async fn parse_remote_object_store(
         }
         gcs if gcs.starts_with("gcs://") => {
             let gcs = gcs.strip_prefix("gcs://").unwrap();
-            let (bucket, root) = match gcs.contains('@') {
-                true => gcs.split_once('@').unwrap(),
-                false => (gcs, ""),
-            };
+            let (bucket, root) = gcs.split_once('@').unwrap_or((gcs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
@@ -886,10 +880,7 @@ pub async fn parse_remote_object_store(
 
         oss if oss.starts_with("oss://") => {
             let oss = oss.strip_prefix("oss://").unwrap();
-            let (bucket, root) = match oss.contains('@') {
-                true => oss.split_once('@').unwrap(),
-                false => (oss, ""),
-            };
+            let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
@@ -898,10 +889,7 @@ pub async fn parse_remote_object_store(
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
-            let (namenode, root) = match webhdfs.contains('@') {
-                true => webhdfs.split_once('@').unwrap(),
-                false => (webhdfs, ""),
-            };
+            let (namenode, root) = webhdfs.split_once('@').unwrap_or((webhdfs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_webhdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
@@ -910,10 +898,7 @@ pub async fn parse_remote_object_store(
         }
         azblob if azblob.starts_with("azblob://") => {
             let azblob = azblob.strip_prefix("azblob://").unwrap();
-            let (container_name, root) = match azblob.contains('@') {
-                true => azblob.split_once('@').unwrap(),
-                false => (azblob, ""),
-            };
+            let (container_name, root) = azblob.split_once('@').unwrap_or((azblob, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
                     .unwrap()
@@ -921,11 +906,15 @@ pub async fn parse_remote_object_store(
             )
         }
         fs if fs.starts_with("fs://") => ObjectStoreImpl::Opendal(
-            OpendalObjectStore::new_fs_engine()
+            // Now fs engine is only used in CI, so we can hardcode root.
+            OpendalObjectStore::new_fs_engine("/tmp/rw_ci".to_string())
                 .unwrap()
                 .monitored(metrics),
         ),
-
+ 
+        s3_compatible if s3_compatible.starts_with("s3-compatible://") =>{
+            panic!("");
+        }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await

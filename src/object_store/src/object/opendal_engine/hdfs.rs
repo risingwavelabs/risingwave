@@ -20,11 +20,12 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal hdfs engine.
-    pub fn new_hdfs_engine(namenode: String) -> ObjectResult<Self> {
+    pub fn new_hdfs_engine(namenode: String, root: String) -> ObjectResult<Self> {
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
+        builder.root(&root);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())

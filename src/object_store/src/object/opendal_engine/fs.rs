@@ -20,12 +20,12 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal fs engine.
-    pub fn new_fs_engine() -> ObjectResult<Self> {
+    pub fn new_fs_engine(root: String) -> ObjectResult<Self> {
         // Create fs backend builder.
         let mut builder = Fs::default();
 
         // Now fs engine is only used in CI, so we can hardcode root.
-        builder.root("/tmp/rw_ci");
+        builder.root(&root);
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
