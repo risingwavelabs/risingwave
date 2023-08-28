@@ -88,7 +88,23 @@ INSERT INTO input SELECT n FROM generate_series(11,10001) AS n;
 flush;
 "
 
-echo "--- check approx percentile 0.9"
+echo "--- dynamic filter for approx percentile 0.9"
+./risedev psql -c "
+DROP MATERIALIZED VIEW approx_percentile_90_percent;
+DROP MATERIALIZED VIEW use_dynamic_filter;
+CREATE MATERIALIZED VIEW use_dynamic_filter AS
+SELECT sum_frequency * 0.9 AS scaled_sum_freq FROM hdr_sum;
+
+CREATE MATERIALIZED VIEW approx_percentile_90_percent AS
+SELECT bucket AS approximate_percentile
+FROM hdr_distribution x, use_dynamic_filter y
+WHERE x.cumulative_frequency >= y.scaled_sum_freq
+ORDER BY cumulative_frequency
+LIMIT 1;
+SELECT * FROM approx_percentile_90_percent;
+"
+
+echo "--- batch for approx percentile 0.9"
 ./risedev psql -c "
 SELECT bucket AS approximate_percentile
 FROM hdr_distribution
