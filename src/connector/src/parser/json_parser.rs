@@ -292,7 +292,8 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
-            assert!(parser.parse_inner(Some(payload), writer).await.is_err());
+            // ignored the error, and fill None at v2.
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
         // Parse a correct record.
@@ -304,8 +305,10 @@ mod tests {
 
         let chunk = builder.finish();
         assert!(chunk.valid());
+        assert_eq!(chunk.cardinality(), 3);
 
-        assert_eq!(chunk.cardinality(), 2);
+        let row_vec = chunk.rows().collect_vec();
+        assert_eq!(row_vec[1].1.datum_at(1), None);
     }
 
     #[tokio::test]

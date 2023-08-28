@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::{fmt, mem};
 
 use itertools::Itertools;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
+use super::vis::VisMut;
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
@@ -306,6 +307,109 @@ impl EstimateSize for StreamChunk {
     }
 }
 
+enum OpsMutState {
+    ArcRef(Arc<[Op]>),
+    Mut(Vec<Op>),
+}
+
+impl OpsMutState {
+    const UNDEFINED: Self = Self::Mut(Vec::new());
+}
+
+pub struct OpsMut {
+    state: OpsMutState,
+}
+
+impl OpsMut {
+    pub fn new(ops: Arc<[Op]>) -> Self {
+        Self {
+            state: OpsMutState::ArcRef(ops),
+        }
+    }
+
+    pub fn set(&mut self, n: usize, val: Op) {
+        if let OpsMutState::Mut(v) = &mut self.state {
+            v[n] = val;
+        } else {
+            let state = mem::replace(&mut self.state, OpsMutState::UNDEFINED); // intermediate state
+            let mut v = match state {
+                OpsMutState::ArcRef(v) => v.to_vec(),
+                OpsMutState::Mut(_) => unreachable!(),
+            };
+            v[n] = val;
+            self.state = OpsMutState::Mut(v);
+        }
+    }
+}
+impl From<OpsMut> for Arc<[Op]> {
+    fn from(v: OpsMut) -> Self {
+        match v.state {
+            OpsMutState::ArcRef(a) => a,
+            OpsMutState::Mut(v) => v.into(),
+        }
+    }
+}
+
+/// A mutable wrapper for `StreamChunk`. can only set the visibilities and ops in place, can not
+/// change the length.
+struct StreamChunkMut {
+    columns: Arc<[ArrayRef]>,
+    ops: OpsMut,
+    vis: VisMut,
+}
+
+impl From<StreamChunk> for StreamChunkMut {
+    fn from(c: StreamChunk) -> Self {
+        let (c, ops) = c.into_parts();
+        let (columns, vis) = c.into_parts_v2();
+        Self {
+            columns,
+            ops: OpsMut::new(ops),
+            vis: vis.into(),
+        }
+    }
+}
+
+impl From<StreamChunkMut> for StreamChunk {
+    fn from(c: StreamChunkMut) -> Self {
+        StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.into()))
+    }
+}
+pub struct OpRowMutRef<'a> {
+    c: &'a mut StreamChunkMut,
+    i: usize,
+}
+
+impl OpRowMutRef<'_> {
+    pub fn set_vis(&mut self, val: bool) {
+        self.c.set_vis(self.i, val);
+    }
+
+    pub fn set_op(&mut self, val: Op) {
+        self.c.set_op(self.i, val);
+    }
+}
+
+impl StreamChunkMut {
+    pub fn set_vis(&mut self, n: usize, val: bool) {
+        self.vis.set(n, val);
+    }
+
+    pub fn set_op(&mut self, n: usize, val: Op) {
+        self.ops.set(n, val);
+    }
+
+    /// get the mut reference of the stream chunk.
+    pub fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+        unsafe {
+            (0..self.vis.len()).map(|i| {
+                let p = self as *const StreamChunkMut;
+                let p = p as *mut StreamChunkMut;
+                OpRowMutRef { c: &mut *p, i }
+            })
+        }
+    }
+}
 /// Test utilities for [`StreamChunk`].
 pub trait StreamChunkTestExt: Sized {
     fn from_pretty(s: &str) -> Self;
