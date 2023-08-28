@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+PRECISION=2
+
 ./risedev d
 
 echo "--- running ddl"
@@ -27,7 +29,7 @@ SELECT
   trunc(log10(value))::int AS exponent,
 
   -- Mantissa
-  trunc(pow(10.0, 4) * (value / pow(10.0, trunc(log10(value))::int) - 1.0))::int AS mantissa,
+  trunc(pow(10.0, $PRECISION) * (value / pow(10.0, trunc(log10(value))::int) - 1.0))::int AS mantissa,
 
   --- Frequency of each bucket
   count(*) AS frequency,
@@ -50,7 +52,7 @@ echo "--- create hdr_distribution"
 ./risedev psql -c "
 EXPLAIN CREATE MATERIALIZED VIEW hdr_distribution AS
 SELECT
-  h.sign*(1.0+h.mantissa/pow(10.0, 4))*pow(2.0,h.exponent) AS bucket,
+  h.sign*(1.0+h.mantissa/pow(10.0, $PRECISION))*pow(10.0,h.exponent) AS bucket,
   h.frequency,
   sum(g.frequency) AS cumulative_frequency
   -- Compute this in batch query to avoid nested loop join.
@@ -65,7 +67,7 @@ echo "--- create hdr_distribution"
 ./risedev psql -c "
 CREATE MATERIALIZED VIEW hdr_distribution AS
 SELECT
-  h.sign*(1.0+h.mantissa/pow(10.0, 4))*pow(2.0,h.exponent) AS bucket,
+  h.sign*(1.0+h.mantissa/pow(10.0, $PRECISION))*pow(10.0,h.exponent) AS bucket,
   h.frequency,
   sum(g.frequency) AS cumulative_frequency
   -- Compute this in batch query to avoid nested loop join.
@@ -76,22 +78,8 @@ GROUP BY h.sign, h.exponent, h.mantissa, h.frequency
 ORDER BY cumulative_frequency;
 "
 
-echo "--- check approx percentile 0.9"
-./risedev psql -c "
-SELECT bucket AS approximate_percentile
-FROM hdr_distribution
-WHERE (cumulative_frequency / (SELECT sum(frequency) FROM hdr_sum)) >= 0.9
-ORDER BY cumulative_frequency
-LIMIT 1;
-"
-
 ./risedev psql -c "
 CREATE INDEX hdr_distribution_idx ON hdr_distribution (cumulative_frequency);
-"
-
-echo "--- reading from approx_percentile"
-./risedev psql -c "
-SELECT * FROM hdr_distribution;
 "
 
 echo "--- inserting more values"
@@ -100,8 +88,17 @@ INSERT INTO input SELECT n FROM generate_series(11,10001) AS n;
 flush;
 "
 
+echo "--- check approx percentile 0.9"
+./risedev psql -c "
+SELECT bucket AS approximate_percentile
+FROM hdr_distribution
+WHERE (cumulative_frequency / (SELECT sum_frequency FROM hdr_sum)) >= 0.9
+ORDER BY cumulative_frequency
+LIMIT 1;
+"
+
 echo "--- reading updated approx_percentile"
 ./risedev psql -c "SELECT * FROM hdr_distribution ORDER BY cumulative_frequency;"
 
-./risedev k
+# ./risedev k
 
