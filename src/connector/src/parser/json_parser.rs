@@ -232,16 +232,6 @@ mod tests {
         ]
     }
 
-    fn get_json_config() -> SpecificParserConfig {
-        SpecificParserConfig {
-            key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {
-                use_schema_registry: false,
-            }),
-            protocol_config: ProtocolProperties::Plain,
-        }
-    }
-
     async fn test_json_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
@@ -256,7 +246,12 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
-        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -355,7 +350,12 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
-        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
@@ -421,7 +421,12 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
         let payload = br#"
         {
             "data": {
@@ -488,7 +493,12 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(get_json_config(), descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
         let payload = br#"
         {
             "struct": "{\"varchar\": \"varchar\", \"boolean\": true}"

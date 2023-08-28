@@ -678,6 +678,17 @@ pub struct SpecificParserConfig {
     pub protocol_config: ProtocolProperties,
 }
 
+impl SpecificParserConfig {
+    // for test only
+    pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
+        key_encoding_config: None,
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+        }),
+        protocol_config: ProtocolProperties::Plain,
+    };
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SchemaRegistryAuth {
     username: Option<String>,
