@@ -833,6 +833,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
     // If msg is null means just check whether channel is closed.
     if msg.is_null() {
         if channel.as_ref().is_closed() {
+            // Drop channel as well.
+            channel.drop();
             return JNI_FALSE;
         } else {
             return JNI_TRUE;
@@ -927,6 +929,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
             JNI_TRUE
         }
         Err(e) => {
+            channel.drop();
             eprintln!("send error.  {:?}", e);
             JNI_FALSE
         }
