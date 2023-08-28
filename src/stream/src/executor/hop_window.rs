@@ -196,7 +196,7 @@ impl HopWindowExecutor {
                     let mut chunk_builder = DataChunkBuilder::new(data_types, chunk_size);
                     let mut op_builder = Vec::with_capacity(chunk_size);
 
-                    for &op in ops.iter() {
+                    for &op in &*ops {
                         // Since there could be multiple rows for the same input row, we need to
                         // transform the `U-`/`U+` into `-`/`+` and then duplicate it.
                         let op = match op {

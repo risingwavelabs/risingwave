@@ -308,7 +308,7 @@ mod tests {
             let mut stream = top_n_executor.execute();
             let res = stream.next().await;
 
-            assert!(matches!(res, Some(_)));
+            assert!(res.is_some());
             if let Some(res) = res {
                 let res = res.unwrap();
                 assert!(
@@ -338,7 +338,7 @@ mod tests {
             }
 
             let res = stream.next().await;
-            assert!(matches!(res, None));
+            assert!(res.is_none());
         }
 
         assert_eq!(0, parent_mem.get_bytes_used());

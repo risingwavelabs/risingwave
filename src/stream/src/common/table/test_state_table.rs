@@ -213,7 +213,7 @@ async fn test_state_table_iter_with_prefix() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -341,7 +341,7 @@ async fn test_state_table_iter_with_pk_range() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32), // This is the range prefix key
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -516,7 +516,7 @@ async fn test_state_table_iter_with_value_indices() {
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -677,7 +677,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1278,7 +1278,7 @@ async fn test_state_table_may_exist() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),

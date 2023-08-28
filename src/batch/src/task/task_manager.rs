@@ -289,7 +289,7 @@ impl BatchManager {
         let mut max_mem_task_id = None;
         let mut max_mem = usize::MIN;
         let guard = self.tasks.lock();
-        for (t_id, t) in guard.iter() {
+        for (t_id, t) in &*guard {
             // If the task has been stopped, we should not count this.
             if t.is_end() {
                 continue;

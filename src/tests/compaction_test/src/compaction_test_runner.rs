@@ -625,7 +625,7 @@ async fn open_hummock_iters(
         ))),
     );
 
-    for &epoch in snapshots.iter() {
+    for &epoch in snapshots {
         let iter = hummock
             .iter(
                 range.clone(),

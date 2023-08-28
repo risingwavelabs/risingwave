@@ -180,7 +180,7 @@ impl<S: MetaStore> HummockManager<S> {
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
 
-        for (table_id, _) in pairs.iter() {
+        for (table_id, _) in pairs {
             if let Some(old_group) =
                 try_get_compaction_group_id_by_table_id(current_version, *table_id)
             {
@@ -198,7 +198,7 @@ impl<S: MetaStore> HummockManager<S> {
             build_version_delta_after_version(current_version),
         );
 
-        for (table_id, raw_group_id) in pairs.iter() {
+        for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
             if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
                 let mut is_group_init = false;

@@ -1017,7 +1017,7 @@ where
             .map(|table_fragments| table_fragments.worker_actor_ids())
             .reduce(|mut btree_map, next_map| {
                 next_map.into_iter().for_each(|(k, v)| {
-                    btree_map.entry(k).or_insert_with(Vec::new).extend(v);
+                    btree_map.entry(k).or_default().extend(v);
                 });
                 btree_map
             })

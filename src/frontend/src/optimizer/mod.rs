@@ -438,7 +438,8 @@ impl PlanRoot {
             append_only,
             columns
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .filter(|&c| (!c.is_generated()))
+                .map(|c| c.column_desc.clone())
                 .collect(),
         )
         .into();

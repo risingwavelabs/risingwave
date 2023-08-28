@@ -333,7 +333,7 @@ where
 
                 self.source_fragments
                     .entry(source_id)
-                    .or_insert_with(BTreeSet::default)
+                    .or_default()
                     .append(&mut fragment_ids);
             }
         }

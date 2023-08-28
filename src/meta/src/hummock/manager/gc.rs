@@ -212,7 +212,7 @@ where
     S: MetaStore,
 {
     let mut global_watermark = HummockSstableObjectId::MAX;
-    let workers = vec![
+    let workers = [
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
             .list_worker_node(WorkerType::Compactor, Some(Running))

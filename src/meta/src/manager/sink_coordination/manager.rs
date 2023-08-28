@@ -432,7 +432,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()
@@ -638,7 +638,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()
@@ -718,7 +718,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()

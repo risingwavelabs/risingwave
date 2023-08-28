@@ -388,7 +388,7 @@ where
             })
             .collect();
 
-        for (fragment_id, reschedule) in reschedule.iter() {
+        for (fragment_id, reschedule) in &*reschedule {
             for parallel_unit_id in &reschedule.added_parallel_units {
                 if let Some(worker_id) = unschedulable_parallel_unit_ids.get(parallel_unit_id) {
                     bail!(
@@ -481,7 +481,7 @@ where
                 added_parallel_units,
                 removed_parallel_units,
             },
-        ) in reschedule.iter()
+        ) in &*reschedule
         {
             let fragment = fragment_map
                 .get(fragment_id)
@@ -688,7 +688,7 @@ where
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         fragment_dispatcher_map
                             .entry(actor.fragment_id as FragmentId)
-                            .or_insert(HashMap::new())
+                            .or_default()
                             .insert(
                                 downstream_actor.fragment_id as FragmentId,
                                 dispatcher.r#type(),

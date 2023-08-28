@@ -202,11 +202,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
+                    .chain(get_new_right_fd_set(right_fd_set).into_dependencies())
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
