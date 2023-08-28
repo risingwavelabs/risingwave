@@ -22,6 +22,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
@@ -172,23 +173,26 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             "REPLICATION CLIENT",
             "LOCK TABLES"
         };
+
+        var hashSet = new HashSet<>(List.of(privilegesRequired));
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
             while (res.next()) {
-                String grants = res.getString(1).toUpperCase();
+                String granted = res.getString(1).toUpperCase();
                 // all privileges granted, check passed
-                if (grants.contains("ALL")) {
+                if (granted.contains("ALL")) {
                     break;
                 }
-                // check whether each privilege is granted
-                for (String privilege : privilegesRequired) {
-                    if (!grants.contains(privilege)) {
-                        throw ValidatorUtils.invalidArgument(
-                                String.format(
-                                        "MySQL user does not have privilege %s, which is needed for debezium connector",
-                                        privilege));
-                    }
+
+                // remove granted privilege from the set
+                hashSet.removeIf(granted::contains);
+                if (hashSet.isEmpty()) {
+                    break;
                 }
+            }
+            if (!hashSet.isEmpty()) {
+                throw ValidatorUtils.invalidArgument(
+                        "MySQL user doesn't have enough privileges: " + hashSet);
             }
         }
     }
