@@ -57,7 +57,6 @@ pub struct NatsSinkWriter {
 }
 
 /// Basic data types for use with the nats interface
-// 看remote的write batch 244，streamchunk里面拿到没一个row，然后每一个row根据schema去解析
 impl NatsConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<NatsConfig>(serde_json::to_value(values).unwrap())
