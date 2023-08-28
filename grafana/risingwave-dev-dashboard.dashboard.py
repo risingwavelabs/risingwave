@@ -319,7 +319,7 @@ def section_compaction(outer_panels):
                     "Write amplification is the amount of bytes written to the remote storage by compaction for each "
                     "one byte of flushed SSTable data. Write amplification is by definition higher than 1.0 because "
                     "we write each piece of data to L0, and then write it again to an SSTable, and then compaction "
-                    "may read this piece of data and write it to a new SSTable, that’s another write.",
+                    "may read this piece of data and write it to a new SSTable, that's another write.",
                     [
                         panels.target(
                             f"sum({metric('storage_level_compact_write')}) / sum({metric('compactor_write_build_l0_bytes')})",
@@ -2768,6 +2768,311 @@ def section_grpc_hummock_meta_client(outer_panels):
     ]
 
 
+def section_kafka_native_metrics(outer_panels):
+    panels = outer_panels.sub_panel()
+    cluster_panels = panels.sub_panel()
+    broker_panels = panels.sub_panel()
+    topic_panels = panels.sub_panel()
+    partition_panels = panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Kafka Native Metrics",
+            [
+                panels.row_collapsed(
+                    "Cluster Level Metrics",
+                    [
+                        cluster_panels.timeseries_latency_ms(
+                            "Client Age",
+                            "Time since this client instance was created (milli seconds)",
+                            [
+                                cluster_panels.target(
+                                    f"{metric('rdkafka_top_age')}/1000",
+                                    "id {{ id }}, client_id {{ client_id }}"
+                                ),
+                            ],
+                        ),
+                        cluster_panels.timeseries_count(
+                            "Message Count in Producer Queue",
+                            "Current number of messages in producer queues",
+                            [
+                                cluster_panels.target(
+                                    f"{metric('rdkafka_top_msg_cnt')}",
+                                    "id {{ id }}, client_id {{ client_id }}"
+                                ),
+                            ]
+                        ),
+                        cluster_panels.timeseries_bytes(
+                            "Message Size in Producer Queue",
+                            "Current total size of messages in producer queues",
+                            [
+                                cluster_panels.target(
+                                    f"{metric('rdkafka_top_msg_size')}",
+                                    "id {{ id }}, client_id {{ client_id }}"
+                                ),
+                            ]
+                        ),
+                        cluster_panels.timeseries_count(
+                            "Message Produced Count",
+                            "Total number of messages transmitted (produced) to Kafka brokers",
+                            [
+                                cluster_panels.target(
+                                    f"{metric('rdkafka_top_tx_msgs')}",
+                                    "id {{ id }}, client_id {{ client_id }}"
+                                )
+                            ]
+                        ),
+                        cluster_panels.timeseries_count(
+                            "Message Received Count",
+                            "Total number of messages consumed, not including ignored messages (due to offset, etc), from Kafka brokers.",
+                            [
+                                cluster_panels.target(
+                                    f"{metric('rdkafka_top_rx_msgs')}",
+                                    "id {{ id }}, client_id {{ client_id }}"
+                                )
+                            ]
+                        ),
+                    ]
+                ),
+                panels.row_collapsed(
+                    "Broker Level Metrics",
+                    [
+                        broker_panels.timeseries_count(
+                            "Message Count Pending to Transmit (per broker)",
+                            "Number of messages awaiting transmission to broker",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_outbuf_msg_cnt')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, state {{ state }}"
+                                ),
+                            ]
+                        ),
+                        broker_panels.timeseries_count(
+                            "Inflight Message Count (per broker)",
+                            "Number of messages in-flight to broker awaiting response",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_waitresp_msg_cnt')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, state {{ state }}"
+                                )
+                            ]
+                        ),
+                        broker_panels.timeseries_count(
+                            "Error Count When Transmitting (per broker)",
+                            "Total number of transmission errors",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_tx_errs')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, state {{ state }}"
+                                )
+                            ]
+                        ),
+                        broker_panels.timeseries_count(
+                            "Error Count When Receiving (per broker)",
+                            "Total number of receive errors",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rx_errs')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, state {{ state }}"
+                                )
+                            ]
+                        ),
+                        broker_panels.timeseries_count(
+                            "Timeout Request Count (per broker)",
+                            "Total number of requests timed out",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_req_timeouts')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, state {{ state }}"
+                                )
+                            ]
+                        ),
+                        broker_panels.timeseries_latency_ms(
+                            "RTT (per broker)",
+                            "Broker latency / round-trip time in milli seconds",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rtt_avg')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rtt_p75')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rtt_p90')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rtt_p99')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rtt_p99_99')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_rtt_out_of_range')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                            ]
+                        ),
+                        broker_panels.timeseries_latency_ms(
+                            "Throttle Time (per broker)",
+                            "Broker throttling time in milliseconds",
+                            [
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_throttle_avg')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_throttle_p75')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_throttle_p90')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_throttle_p99')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_throttle_p99_99')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                                broker_panels.target(
+                                    f"{metric('rdkafka_broker_throttle_out_of_range')}/1000",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}",
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+                panels.row_collapsed(
+                    "Topic Level Metrics",
+                    [
+                        topic_panels.timeseries_latency_ms(
+                            "Topic Metadata_age Age",
+                            "Age of metadata from broker for this topic (milliseconds)",
+                            [
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_metadata_age')}",
+                                    "id {{ id }}, client_id {{ client_id}}, topic {{ topic }}"
+                                )
+                            ]
+                        ),
+                        topic_panels.timeseries_bytes(
+                            "Topic Batch Size",
+                            "Batch sizes in bytes",
+                            [
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchsize_avg')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchsize_p75')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchsize_p90')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchsize_p99')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchsize_p99_99')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchsize_out_of_range')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                            ]
+                        ),
+                        topic_panels.timeseries_count(
+                            "Topic Batch Messages",
+                            "Batch message counts",
+                            [
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_avg')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p75')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p90')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p99')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p99_99')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                                topic_panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_out_of_range')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}"
+                                ),
+                            ]
+                        )
+                    ]
+                ),
+                panels.row_collapsed(
+                    "Partition Level Metrics",
+                    [
+                        partition_panels.timeseries_count(
+                            "Message to be Transmitted",
+                            "Number of messages ready to be produced in transmit queue",
+                            [
+                                partition_panels.target(
+                                    f"{metric('rdkafka_topic_partition_xmit_msgq_cnt')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}, partition {{ partition }}"
+                                ),
+                            ]
+                        ),
+                        partition_panels.timeseries_count(
+                            "Message in pre fetch queue",
+                            "Number of pre-fetched messages in fetch queue",
+                            [
+                                partition_panels.target(
+                                    f"{metric('rdkafka_topic_partition_fetchq_cnt')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}, partition {{ partition }}"
+                                ),
+                            ]
+                        ),
+                        partition_panels.timeseries_count(
+                            "Next offset to fetch",
+                            "Next offset to fetch",
+                            [
+                                partition_panels.target(
+                                    f"{metric('rdkafka_topic_partition_next_offset')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}, partition {{ partition }}"
+                                )
+                            ]
+                        ),
+                        partition_panels.timeseries_count(
+                            "Committed Offset",
+                            "Last committed offset",
+                            [
+                                partition_panels.target(
+                                    f"{metric('rdkafka_topic_partition_committed_offset')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}, partition {{ partition }}"
+                                )
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
+    ]
+
+
 def section_memory_manager(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -3059,5 +3364,6 @@ dashboard = Dashboard(
         *section_frontend(panels),
         *section_memory_manager(panels),
         *section_connector_node(panels),
+        *section_kafka_native_metrics(panels),
     ],
 ).auto_panel_ids()
