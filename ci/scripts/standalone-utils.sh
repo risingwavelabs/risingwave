@@ -49,7 +49,7 @@ wait_standalone() {
   timeout 10 bash -c '
     while true; do
       echo "Polling for standalone to be ready"
-      ./risedev psql -c "SELECT 1"
+      cargo make psql -c "SELECT 1"
       sleep 1
     done
   '
