@@ -287,6 +287,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         loop {
+            // Terminateability: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
+            // pushing the cache to the boundary of current partition. In these two methods, when
+            // any side of boundary is reached, the sentinel key will be removed, so finally
+            // `self::find_affected_ranges` will return ranges without any sentinels.
+
             let (left_reached_sentinel, right_reached_sentinel) = {
                 // SAFETY: Here we shortly borrow the range cache and turn the reference into a
                 // `'cache` one to bypass the borrow checker. This is safe because we only return
