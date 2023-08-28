@@ -46,9 +46,11 @@ stop_standalone() {
 
 wait_standalone() {
   set +e
-  timeout 10 bash -c '
+  echo "Waiting 5s for recovery to progress"
+  sleep 5
+  timeout 20 bash -c '
     while true; do
-      echo "Polling for standalone to be ready"
+      echo "Polling every 1s for standalone to be ready for 20s"
       cargo make psql -c "SELECT 1"
       sleep 1
     done
