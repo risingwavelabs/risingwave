@@ -31,7 +31,7 @@ import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
-import { StackTraceResponse } from "../proto/gen/monitor_service"
+import { ListHeapProfilingResponse } from "../proto/gen/monitor_service"
 import api from "./api/api"
 import { getClusterInfoComputeNode } from "./api/cluster"
 import useFetch from "./api/fetch"
@@ -44,40 +44,28 @@ export default function HeapProfiling() {
 
   const [computeNodeId, setComputeNodeId] = useState<number>()
   const [dump, setDump] = useState<string | undefined>("")
-  const [dumpDir, setDumpDir] = useState<string | undefined>("")
+  const [profileCollapsed, setProfileCollapsed] = useState<string | undefined>("")
+  const [profileList, setProfileList] = useState<ListHeapProfilingResponse | undefined>()
 
   useEffect(() => {
     if (computeNodes && !computeNodeId && computeNodes.length > 0) {
       setComputeNodeId(computeNodes[0].id)
+
     }
   }, [computeNodes, computeNodeId])
 
-  const dumpTree = async () => {
-    const title = `Await-Tree Dump of Compute Node ${computeNodeId}:`
-    setDump(undefined)
-
-    let result
-
-    try {
-      const response: StackTraceResponse = StackTraceResponse.fromJSON(
-        await api.get(`/api/monitor/await_tree/${computeNodeId}`)
-      )
-
-      const actorTraces = _(response.actorTraces)
-        .entries()
-        .map(([k, v]) => `[Actor ${k}]\n${v}`)
-        .join("\n")
-      const rpcTraces = _(response.rpcTraces)
-        .entries()
-        .map(([k, v]) => `[RPC ${k}]\n${v}`)
-        .join("\n")
-
-      result = `${title}\n\n${actorTraces}\n${rpcTraces}`
-    } catch (e: any) {
-      result = `${title}\n\nError: ${e.message}`
+  useEffect(() => {
+    if (computeNodes && computeNodeId && computeNodes.length > 0) {
+      let response = useFetch(getProfileList)
+      setProfileList(response.response)
     }
+  }, [computeNodeId])
 
-    setDump(result)
+  async function getProfileList() {
+    const response: ListHeapProfilingResponse = (await api.get(`/api/list_heap_profile/${computeNodeId}`)).map(
+      ListHeapProfilingResponse.fromJSON
+    )
+    return response
   }
 
   const retVal = (
@@ -107,13 +95,7 @@ export default function HeapProfiling() {
                     </option>
                   ))}
               </Select>
-              <FormLabel>Directory</FormLabel>
-              <Input
-                  placeholder="/risingwave/cn/"
-                  value={dumpDir}
-                  onChange={(event) => setDumpDir(event.target.value)}
-              ></Input>
-              <Button onClick={(_) => dumpTree()} width="full">
+              <Button onClick={(_) => dumpProfile()} width="full">
                 Dump
               </Button>
             </VStack>
@@ -121,27 +103,21 @@ export default function HeapProfiling() {
           <FormControl>
             <FormLabel textColor="teal.500">Analyze Heap Profile</FormLabel>
             <VStack>
-              <FormLabel>Directory</FormLabel>
-              <Input
-                  placeholder="/risingwave/cn/"
-                  value={dumpDir}
-                  onChange={(event) => setDumpDir(event.target.value)}
-              ></Input>
               <FormLabel>Dumped Files</FormLabel>
               <Select
                 onChange={(event) =>
-                  setComputeNodeId(parseInt(event.target.value))
+                  setProfileList(parseInt(event.target.value))
                 }
               >
-                {computeNodes &&
-                  computeNodes.map((n) => (
-                    <option value={n.id} key={n.id}>
-                      ({n.id}) {n.host?.host}:{n.host?.port}
+                {profileList &&
+                  profileList.name.map((n) => (
+                    <option value={n} key={n}>
+                      n
                     </option>
                   ))}
               </Select>
               <Button onClick={(_) => dumpTree()} width="full">
-                Dump
+                Analyze
               </Button>
             </VStack>
           </FormControl>
