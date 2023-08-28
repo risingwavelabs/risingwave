@@ -720,8 +720,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            // let (_, key) = parse_raw_key_to_vnode_and_key(raw_key);
-
             let full_row = self.row_deserializer.deserialize(&value)?;
             let result_row_in_value = self
                 .mapping
