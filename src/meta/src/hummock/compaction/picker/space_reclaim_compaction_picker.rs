@@ -216,9 +216,7 @@ mod test {
                     generate_table_with_ids_and_epochs(10, 1, 888, 1600, 1, vec![10], 0, 0),
                     generate_table_with_ids_and_epochs(11, 1, 1600, 1800, 1, vec![10], 0, 0),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 

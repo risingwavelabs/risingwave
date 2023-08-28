@@ -1,3 +1,18 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::ops::Bound;
 use std::sync::Arc;
 
 use risingwave_common::hash::VirtualNode;
@@ -119,7 +134,7 @@ impl CompactionPicker for IntraSubLevelPicker {
                 input_levels,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
-                vnode_partition_count: vnode_partition_count,
+                vnode_partition_count,
             });
         }
 
@@ -224,16 +239,23 @@ pub fn partition_level(
     level: &Level,
     partitions: &mut Vec<SubLevelPartition>,
 ) -> bool {
+    assert_eq!(partition_vnode_count, partitions.len());
     let mut left_idx = 0;
     let mut can_partition = true;
     let partition_size = VirtualNode::COUNT / partition_vnode_count;
-    for partition_id in 0..partition_vnode_count {
+    for (partition_id, partition) in partitions.iter_mut().enumerate() {
         let smallest_vnode = partition_id * partition_size;
         let largest_vnode = (partition_id + 1) * partition_size;
         let smallest_table_key =
             UserKey::prefix_of_vnode(table_id, VirtualNode::from_index(smallest_vnode));
-        let largest_table_key =
-            UserKey::prefix_of_vnode(table_id, VirtualNode::from_index(largest_vnode));
+        let largest_table_key = if largest_vnode >= VirtualNode::COUNT {
+            Bound::Unbounded
+        } else {
+            Bound::Excluded(UserKey::prefix_of_vnode(
+                table_id,
+                VirtualNode::from_index(largest_vnode),
+            ))
+        };
         while left_idx < level.table_infos.len() {
             let key_range = level.table_infos[left_idx].key_range.as_ref().unwrap();
             let ret = key_range.compare_right_with_user_key(smallest_table_key.as_ref());
@@ -243,7 +265,7 @@ pub fn partition_level(
             left_idx += 1;
         }
         if left_idx >= level.table_infos.len() {
-            partitions[partition_id].sub_levels.push(PartitionInfo {
+            partition.sub_levels.push(PartitionInfo {
                 sub_level_id: level.sub_level_id,
                 left_idx: 0,
                 right_idx: 0,
@@ -264,29 +286,45 @@ pub fn partition_level(
         let mut right_idx = left_idx;
         while right_idx < level.table_infos.len() {
             let key_range = level.table_infos[right_idx].key_range.as_ref().unwrap();
-            let ret = key_range.compare_right_with_user_key(largest_table_key.as_ref());
+            let ret = match &largest_table_key {
+                Bound::Excluded(key) => key_range.compare_right_with_user_key(key.as_ref()),
+                Bound::Unbounded => {
+                    let right_key = FullKey::decode(&key_range.right);
+                    assert!(right_key.user_key.table_id.table_id == table_id);
+                    // We would assign partition_vnode_count to a level only when we compact all
+                    // sstable of it, so there will never be another stale table in this sstable
+                    // file.
+                    std::cmp::Ordering::Less
+                }
+                _ => unreachable!(),
+            };
+
             if ret != std::cmp::Ordering::Less {
                 break;
             }
             total_file_size += level.table_infos[right_idx].file_size;
             right_idx += 1;
         }
+
         if right_idx < level.table_infos.len()
-            && FullKey::decode(
-                &level.table_infos[right_idx]
-                    .key_range
-                    .as_ref()
-                    .unwrap()
-                    .left,
-            )
-            .user_key
-            .lt(&largest_table_key.as_ref())
+            && match &largest_table_key {
+                Bound::Excluded(key) => FullKey::decode(
+                    &level.table_infos[right_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .left,
+                )
+                .user_key
+                .lt(&key.as_ref()),
+                _ => unreachable!(),
+            }
         {
             can_partition = false;
             break;
         }
         left_idx = right_idx;
-        partitions[partition_id].sub_levels.push(PartitionInfo {
+        partition.sub_levels.push(PartitionInfo {
             sub_level_id: level.sub_level_id,
             left_idx,
             right_idx,

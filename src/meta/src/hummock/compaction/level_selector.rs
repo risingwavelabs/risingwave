@@ -615,6 +615,7 @@ pub mod tests {
             uncompressed_file_size: sst.uncompressed_file_size,
             sub_level_id: sst.get_sst_id(),
             table_infos: vec![sst],
+            vnode_partition_count: 0,
         });
     }
 
@@ -645,6 +646,7 @@ pub mod tests {
             sub_level_id,
             table_infos,
             uncompressed_file_size,
+            vnode_partition_count: 0,
         });
     }
 
@@ -729,6 +731,7 @@ pub mod tests {
             total_file_size,
             sub_level_id: 0,
             uncompressed_file_size,
+            vnode_partition_count: 0,
         }
     }
 
@@ -751,6 +754,7 @@ pub mod tests {
                     uncompressed_file_size: table.uncompressed_file_size,
                     sub_level_id: idx as u64,
                     table_infos: vec![table],
+                    vnode_partition_count: 0,
                 })
                 .collect_vec(),
             total_file_size,
@@ -775,6 +779,7 @@ pub mod tests {
                         .sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table,
+                    vnode_partition_count: 0,
                 })
                 .collect_vec(),
             total_file_size: 0,
@@ -809,6 +814,7 @@ pub mod tests {
                         .iter()
                         .map(|sst| sst.uncompressed_file_size)
                         .sum::<u64>(),
+                    vnode_partition_count: 0,
                 })
                 .collect_vec(),
             total_file_size: 0,

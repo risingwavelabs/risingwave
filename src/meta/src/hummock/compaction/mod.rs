@@ -38,6 +38,7 @@ pub use crate::hummock::compaction::level_selector::{
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+pub use crate::hummock::compaction::picker::{partition_level, SubLevelPartition};
 use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;

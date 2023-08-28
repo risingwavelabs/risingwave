@@ -382,9 +382,7 @@ pub mod tests {
                     generate_table(1, 1, 101, 200, 1),
                     generate_table(2, 1, 222, 300, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -396,9 +394,7 @@ pub mod tests {
                     generate_table(7, 1, 501, 800, 1),
                     generate_table(8, 2, 301, 400, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         let mut levels = Levels {
@@ -560,9 +556,7 @@ pub mod tests {
                     generate_table(3, 1, 0, 100, 1),
                     generate_table(4, 2, 2000, 3000, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
             Level {
                 level_idx: 2,
@@ -571,9 +565,7 @@ pub mod tests {
                     generate_table(1, 1, 0, 100, 1),
                     generate_table(2, 2, 2000, 3000, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         // Set internal_table_ids.
@@ -615,9 +607,7 @@ pub mod tests {
                 generate_table(3, 2, 200, 300, 1),
                 generate_table(4, 2, 300, 400, 1),
             ],
-            total_file_size: 0,
-            sub_level_id: 0,
-            uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let levels = Levels {
             levels,
@@ -635,10 +625,7 @@ pub mod tests {
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
-            table_infos: vec![],
-            total_file_size: 0,
-            sub_level_id: 0,
-            uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let levels = Levels {
             levels,
@@ -1175,9 +1162,7 @@ pub mod tests {
                     generate_table(3, 1, 101, 200, 1),
                     generate_table(4, 1, 222, 300, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         assert_eq!(levels.len(), 4);
@@ -1285,9 +1270,7 @@ pub mod tests {
                     generate_table(6, 1, 444, 500, 1),
                     generate_table(7, 1, 555, 600, 1),
                 ],
-                total_file_size: 0,
-                sub_level_id: 0,
-                uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
         assert_eq!(levels.len(), 4);

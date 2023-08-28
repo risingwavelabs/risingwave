@@ -26,14 +26,20 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{
+        next_key, FullKey, PointRange, TableKey, UserKey, TABLE_PREFIX_LEN,
+    };
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
+    use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
+    use risingwave_meta::hummock::compaction::{
+        default_level_selector, partition_level, ManualCompactionOption, SubLevelPartition,
+    };
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env, setup_compute_env_with_config,
         unregister_table_ids_from_compaction_group,
@@ -41,7 +47,7 @@ pub(crate) mod tests {
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::MetaStore;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::{HummockVersion, TableOption};
+    use risingwave_pb::hummock::{HummockVersion, Level, LevelType, TableOption};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
@@ -50,10 +56,14 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+    use risingwave_storage::hummock::multi_builder::{
+        CapacitySplitTableBuilder, LocalTableBuilderFactory,
+    };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+    use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SstableObjectIdManager,
+        MonotonicDeleteEvent, SstableBuilderOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -1233,5 +1243,80 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(1, output_level_info.table_infos.len());
         assert_eq!(252, output_level_info.table_infos[0].total_key_count);
+    }
+
+    #[tokio::test]
+    async fn test_compaction_delete_range_vnode_partition() {
+        let sstable_store = mock_sstable_store();
+        let vnode_partition_count = 8;
+        let mut builder = CapacitySplitTableBuilder::new(
+            LocalTableBuilderFactory::new(1, sstable_store, SstableBuilderOptions::default()),
+            Arc::new(CompactorMetrics::unused()),
+            None,
+            true,
+            vnode_partition_count,
+        );
+        let watermark: u64 = 100;
+        let ts: u64 = 99;
+        let watermark_suffix = watermark.to_be_bytes().to_vec();
+        let ts_suffix = ts.to_be_bytes().to_vec();
+        let table_id = TableId::new(1);
+        let v = vec![0u8; 10];
+        for vnode_id in 0..VirtualNode::COUNT {
+            let key = VirtualNode::from_index(vnode_id).to_be_bytes().to_vec();
+            let mut add_key = key.clone();
+            add_key.extend_from_slice(&ts_suffix);
+            builder
+                .add_full_key(
+                    FullKey::new(table_id, TableKey(add_key), 13).to_ref(),
+                    HummockValue::Put(v.as_slice()),
+                    true,
+                )
+                .await
+                .unwrap();
+            let mut end_key = key.clone();
+            end_key.extend_from_slice(&watermark_suffix);
+            builder
+                .add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key: PointRange::from_user_key(
+                        UserKey::new(table_id, TableKey(key)),
+                        false,
+                    ),
+                    new_epoch: 10,
+                })
+                .await
+                .unwrap();
+            builder
+                .add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key: PointRange::from_user_key(
+                        UserKey::new(table_id, TableKey(end_key)),
+                        false,
+                    ),
+                    new_epoch: HummockEpoch::MAX,
+                })
+                .await
+                .unwrap();
+        }
+        let ret = builder.finish().await.unwrap();
+        let table_infos = ret
+            .into_iter()
+            .map(|output| output.sst_info.sst_info)
+            .collect_vec();
+        let level = Level {
+            level_idx: 0,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos,
+            total_file_size: 100,
+            sub_level_id: 1,
+            uncompressed_file_size: 100,
+            vnode_partition_count,
+        };
+        let mut partitions = vec![SubLevelPartition::default(); vnode_partition_count as usize];
+        assert!(partition_level(
+            table_id.table_id,
+            vnode_partition_count as usize,
+            &level,
+            &mut partitions
+        ));
     }
 }
