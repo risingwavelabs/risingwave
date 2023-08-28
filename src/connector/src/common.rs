@@ -147,6 +147,11 @@ pub struct RdKafkaPropertiesCommon {
     #[serde(rename = "properties.statistics.interval.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub statistics_interval_ms: Option<usize>,
+
+    /// Client identifier
+    #[serde(rename = "properties.client.id")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub client_id: Option<String>,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -159,6 +164,9 @@ impl RdKafkaPropertiesCommon {
         }
         if let Some(v) = self.message_max_bytes {
             c.set("receive.message.max.bytes", v.to_string());
+        }
+        if let Some(v) = self.client_id.as_ref() {
+            c.set("client.id", v);
         }
     }
 }
