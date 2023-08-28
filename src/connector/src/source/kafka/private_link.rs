@@ -14,18 +14,20 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::producer::{DeliveryResult, ProducerContext};
-use rdkafka::ClientContext;
+use rdkafka::{ClientContext, Statistics};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
 use crate::common::{AwsPrivateLinkItem, BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY};
+use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use crate::source::KAFKA_CONNECTOR;
 
@@ -89,16 +91,37 @@ impl BrokerAddrRewriter {
 
 pub struct PrivateLinkConsumerContext {
     inner: BrokerAddrRewriter,
+
+    // identifier is required when reporting metrics as a label, usually it is compose by connector
+    // format (source or sink) and corresponding id (source_id or sink_id)
+    // identifier and metrics should be set at the same time
+    identifier: Option<String>,
+    metrics: Option<Arc<RdKafkaStats>>,
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        broker_rewrite_map: Option<HashMap<String, String>>,
+        identifier: Option<String>,
+        metrics: Option<Arc<RdKafkaStats>>,
+    ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            identifier,
+            metrics,
+        })
     }
 }
 
 impl ClientContext for PrivateLinkConsumerContext {
+    /// this func serves as a callback when `poll` is completed.
+    fn stats(&self, statistics: Statistics) {
+        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
+            metrics.report(id.as_str(), &statistics);
+        }
+    }
+
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         self.inner.rewrite_broker_addr(addr)
     }
@@ -109,16 +132,36 @@ impl ConsumerContext for PrivateLinkConsumerContext {}
 
 pub struct PrivateLinkProducerContext {
     inner: BrokerAddrRewriter,
+
+    // identifier is required when reporting metrics as a label, usually it is compose by connector
+    // format (source or sink) and corresponding id (source_id or sink_id)
+    // identifier and metrics should be set at the same time
+    identifier: Option<String>,
+    metrics: Option<Arc<RdKafkaStats>>,
 }
 
 impl PrivateLinkProducerContext {
-    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+    pub fn new(
+        broker_rewrite_map: Option<HashMap<String, String>>,
+        identifier: Option<String>,
+        metrics: Option<Arc<RdKafkaStats>>,
+    ) -> anyhow::Result<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            identifier,
+            metrics,
+        })
     }
 }
 
 impl ClientContext for PrivateLinkProducerContext {
+    fn stats(&self, statistics: Statistics) {
+        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
+            metrics.report(id.as_str(), &statistics);
+        }
+    }
+
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         self.inner.rewrite_broker_addr(addr)
     }

@@ -21,8 +21,6 @@ use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption,
 };
-use risingwave_common::monitor::connection::TcpConfig;
-use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -31,6 +29,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::parse_remote_object_store_with_config;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
@@ -43,7 +42,7 @@ use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
+    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
@@ -87,11 +86,9 @@ pub async fn compactor_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
-    let registry = prometheus::Registry::new();
-    monitor_process(&registry).unwrap();
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
+    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
@@ -181,7 +178,7 @@ pub async fn compactor_serve(
         storage_memory_config,
     ));
 
-    monitor_cache(memory_collector, &registry).unwrap();
+    monitor_cache(memory_collector);
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
@@ -262,7 +259,7 @@ pub async fn compactor_serve(
 
         #[cfg(not(madsim))]
         {
-            use risingwave_common::monitor::connection::monitored_tcp_incoming;
+            use risingwave_common::monitor::connection::{monitored_tcp_incoming, TcpConfig};
             server
                 .serve_with_incoming_shutdown(
                     monitored_tcp_incoming(
@@ -288,10 +285,7 @@ pub async fn compactor_serve(
 
     // Boot metrics service.
     if config.server.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
-            registry.clone(),
-        );
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     (join_handle, observer_join_handle, shutdown_send)

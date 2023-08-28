@@ -351,30 +351,22 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [max(ak1k2.v)] }
       └─BatchSortAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v)] }
-        └─BatchExchange { order: [ak1k2.k1 ASC], dist: HashShard(ak1k2.k1) }
-          └─BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v], distribution: SomeShard }
+        └─BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v], distribution: UpstreamHashShard(ak1k2.k1) }
   stream_plan: |-
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: NoCheck }
     └─StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
       └─StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] }
-        └─StreamExchange { dist: HashShard(ak1k2.k1) }
-          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
-        └── StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] }
-            ├── result table: 1
-            ├── state tables: [ 0 ]
-            ├── distinct tables: []
-            └── StreamExchange Hash([0]) from 1
-
-    Fragment 1
-    Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-    ├── state table: 2
-    ├── Upstream
-    └── BatchPlanNode
+        └── StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] } { result table: 1, state tables: [ 0 ], distinct tables: [] }
+            └── Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
+                ├── state table: 2
+                ├── Upstream
+                └── BatchPlanNode
 
     Table 0
     ├── columns: [ ak1k2_k1, ak1k2_v, ak1k2_a__row_id ]
@@ -423,7 +415,7 @@
     └─StreamProject { exprs: [max(ak1k2.v), ak1k2.k2] }
       └─StreamHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v), count] }
         └─StreamExchange { dist: HashShard(ak1k2.k2) }
-          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], stream_key: [ak1k2.k2], pk_columns: [ak1k2.k2], pk_conflict: NoCheck }
@@ -436,7 +428,7 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+    Chain { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
     ├── state table: 2
     ├── Upstream
     └── BatchPlanNode
@@ -481,19 +473,19 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [sum(ak1k2.v)] }
       └─BatchSortAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v)] }
-        └─BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+        └─BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v], distribution: UpstreamHashShard(ak1k2.k1) }
   stream_plan: |-
     StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
       └─StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] }
-        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
         └── StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] } { result table: 0, state tables: [], distinct tables: [] }
-            └── Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+            └── Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
                 ├── state table: 1
                 ├── Upstream
                 └── BatchPlanNode
@@ -502,7 +494,7 @@
     ├── columns: [ ak1k2_k1, ak1k2_k2, sum(ak1k2_v), count ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2, 3 ]
-    ├── distribution key: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
 
     Table 1
@@ -517,7 +509,7 @@
     ├── columns: [ sum_v, ak1k2.k1, ak1k2.k2 ]
     ├── primary key: [ $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: [ 1, 2 ]
+    ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 2
 
 - id: aggk1k2_from_Ak1

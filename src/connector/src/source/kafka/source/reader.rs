@@ -90,7 +90,18 @@ impl SplitReader for KafkaSplitReader {
             );
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
+        let client_ctx = PrivateLinkConsumerContext::new(
+            broker_rewrite_map,
+            Some(format!(
+                "fragment-{}-source-{}-actor-{}",
+                source_ctx.source_info.fragment_id,
+                source_ctx.source_info.source_id,
+                source_ctx.source_info.actor_id
+            )),
+            // thread consumer will keep polling in the background, we don't need to call `poll`
+            // explicitly
+            Some(source_ctx.metrics.rdkafka_native_metric.clone()),
+        )?;
         let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)

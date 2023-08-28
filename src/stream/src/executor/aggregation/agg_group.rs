@@ -24,7 +24,7 @@ use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::agg::{AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
@@ -195,6 +195,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     pub async fn create(
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
         pk_indices: &PkIndices,
@@ -210,9 +211,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         }
 
         let mut states = Vec::with_capacity(agg_calls.len());
-        for (idx, agg_call) in agg_calls.iter().enumerate() {
+        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
             let state = AggState::create(
                 agg_call,
+                agg_func,
                 &storages[idx],
                 prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                 pk_indices,
@@ -261,11 +263,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             self.states[self.row_count_index],
             AggState::Value(ref state) => state
         );
-        let row_count = row_count_state
-            .get_output()
-            .expect("failed to get agg output")
-            .expect("row count should never output NULL")
-            .into_int64();
+        let row_count = *row_count_state
+            .as_datum()
+            .as_ref()
+            .expect("row count state should not be NULL")
+            .as_int64();
         if row_count < 0 {
             tracing::error!(group = ?self.group_key_row(), "bad row count");
             panic!("row count should be non-negative")
@@ -285,16 +287,18 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         &mut self,
         chunk: &StreamChunk,
         calls: &[AggCall],
+        funcs: &[BoxedAggregateFunction],
         visibilities: Vec<Vis>,
     ) -> StreamExecutorResult<()> {
         if self.curr_row_count() == 0 {
             tracing::trace!(group = ?self.group_key_row(), "first time see this group");
         }
-        for ((state, call), visibility) in (self.states.iter_mut())
+        for (((state, call), func), visibility) in (self.states.iter_mut())
             .zip_eq_fast(calls)
+            .zip_eq_fast(funcs)
             .zip_eq_fast(visibilities)
         {
-            state.apply_chunk(chunk, call, visibility).await?;
+            state.apply_chunk(chunk, call, func, visibility).await?;
         }
 
         if self.curr_row_count() == 0 {
@@ -306,8 +310,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
     /// the status as if they are just created, no input applied and no row in state table.
-    fn reset(&mut self) {
-        self.states.iter_mut().for_each(|state| state.reset());
+    fn reset(&mut self, funcs: &[BoxedAggregateFunction]) {
+        for (state, func) in self.states.iter_mut().zip_eq_fast(funcs) {
+            state.reset(func);
+        }
     }
 
     /// Get the outputs of all managed agg states, without group key prefix.
@@ -317,6 +323,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
+        funcs: &[BoxedAggregateFunction],
     ) -> StreamExecutorResult<(usize, OwnedRow)> {
         let row_count = self.curr_row_count();
         if row_count == 0 {
@@ -325,13 +332,16 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
             // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
             // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
-            self.reset();
+            self.reset(funcs);
         }
         futures::future::try_join_all(
             self.states
                 .iter_mut()
                 .zip_eq_fast(storages)
-                .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
+                .zip_eq_fast(funcs)
+                .map(|((state, storage), func)| {
+                    state.get_output(storage, func, self.group_key.as_ref())
+                }),
         )
         .await
         .map(|row| (row_count, OwnedRow::new(row)))
@@ -342,9 +352,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     pub async fn build_change(
         &mut self,
         storages: &[AggStateStorage<S>],
+        funcs: &[BoxedAggregateFunction],
     ) -> StreamExecutorResult<Option<Record<OwnedRow>>> {
         let prev_row_count = self.prev_row_count();
-        let (curr_row_count, curr_outputs) = self.get_outputs(storages).await?;
+        let (curr_row_count, curr_outputs) = self.get_outputs(storages, funcs).await?;
 
         let change_type = Strtg::infer_change_type(
             prev_row_count,
