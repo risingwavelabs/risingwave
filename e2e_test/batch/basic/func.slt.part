@@ -473,3 +473,66 @@ query T
 select regexp_replace('A PostgreSQL function', 'a|e|i|o|u', 'X', 1, 3, 'i');
 ----
 A PostgrXSQL function
+
+# Using Parenthesized Subexpression in Replacement
+query T
+select regexp_replace('hello hello', '(hel)(lo)', '\2\1');
+----
+lohel hello
+
+# Literal Backslash in Replacement
+query T
+select regexp_replace('path\to\directory', '\\', '/');
+----
+path/to\directory
+
+# Multiple Flags
+query T
+select regexp_replace('HELLO world', 'a|e|i|o|u', 'X', 'ig');
+----
+HXLLX wXrld
+
+# No Match Found
+query T
+select regexp_replace('apple', 'orange', 'fruit');
+----
+apple
+
+# Using `\&` in Replacement
+query T
+select regexp_replace('abc123', 'abc', 'prefix\&suffix');
+----
+prefixabcsuffix123
+
+query error invalid syntax for `regexp_replace`
+select regexp_replace('foobarbaz', 'b..', 'X', 1, 'g');
+
+query error invalid parameters specified in regexp_replace
+select regexp_replace('foobarbaz', 'b..', 'X', 'g', 1);
+
+# With Unicode
+query T
+select regexp_replace('foo💩barbaz', 'b..', 'X');
+----
+foo💩Xbaz
+
+query T
+select regexp_replace('foo💩bar💩baz', 'b..', 'X');
+----
+foo💩X💩baz
+
+query T
+select regexp_replace('foo💩bar💩baz', 'b..', 'X', 'g');
+----
+foo💩X💩X
+
+query T
+select regexp_replace('foo💩bar💩baz', '💩', 'X');
+----
+fooXbar💩baz
+
+query T
+select regexp_replace('💩💩💩💩💩', '💩', 'X', 'g');
+----
+XXXXX
+

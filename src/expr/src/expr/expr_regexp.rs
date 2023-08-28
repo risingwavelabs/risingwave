@@ -265,14 +265,12 @@ pub struct RegexpReplaceExpression {
     pub return_type: DataType,
     /// The start position to replace the source
     /// The starting index should be `0`
-    pub start: i32,
+    pub start: Option<u32>,
     /// The N, used to specified the N-th position to be replaced
     /// Note that this field is only available if `start` > 0
-    pub n: i32,
+    pub n: Option<u32>,
     /// Indicates if the `-g` flag is specified
     pub global_flag: bool,
-    /// The regex to replace `\n` to `${n}`
-    pub regex: Regex,
 }
 
 /// This trait provides the transformation from `ExprNode` to `RegexpReplaceExpression`
@@ -357,9 +355,9 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
         };
 
         // TODO: [, start [, N ]] [, flags ] nodes support
-        let mut flags = String::from("");
-        let mut start = -1;
-        let mut n = -1;
+        let mut flags: Option<String> = None;
+        let mut start: Option<u32> = None;
+        let mut n: Option<u32> = None;
         let mut n_flag = false;
         let mut f_flag = false;
 
@@ -381,14 +379,14 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                                 // This conforms with PG
                                 bail!("`start` must be greater than zero.");
                             }
-                            start = v;
+                            start = Some(v as u32);
                             "".to_string()
                         }
                         Some(ScalarImpl::Utf8(v)) => {
                             // If the `start` is not specified
                             // Then this must be the `flags`
                             f_flag = true;
-                            flags = v.to_string();
+                            flags = Some(v.to_string());
                             "".to_string()
                         }
                         // NULL replacement
@@ -418,7 +416,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                             match placeholder_datum {
                                 Some(ScalarImpl::Int32(v)) => {
                                     n_flag = true;
-                                    n = v;
+                                    n = Some(v as u32);
                                     "".to_string()
                                 }
                                 Some(ScalarImpl::Utf8(v)) => v.to_string(),
@@ -447,7 +445,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                                     .map_err(|e| ExprError::Internal(e.into()))?;
 
                                     match flag_datum {
-                                        Some(ScalarImpl::Utf8(v)) => v.to_string(),
+                                        Some(ScalarImpl::Utf8(v)) => Some(v.to_string()),
                                         // NULL replacement
                                         // FIXME: Do we need the NULL match arm here?
                                         _ => bail!("Expected flag to be a String"),
@@ -461,7 +459,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
                             };
                         }
                     } else {
-                        flags = placeholder;
+                        flags = Some(placeholder);
                     }
                 }
             }
@@ -473,21 +471,33 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             bail!("invalid parameters specified in regexp_replace");
         }
 
+        // Check if the syntax is correct
+        if flags.is_some() && start.is_some() && n.is_none() {
+            // `start`, `flag` with no `N` specified is an invalid combination
+            bail!("invalid syntax for `regexp_replace`");
+        }
+
         // Construct the final `RegexpReplaceExpression`
+        let flags = if let Some(f) = flags {
+            f
+        } else {
+            "".to_string()
+        };
+
         let ctx = RegexpContext::new(&pattern, &flags)?;
 
         // Set the `global_flag` if 'g' is specified
-        let global_flag = !flags.is_empty() && flags.starts_with('g');
+        let global_flag = flags.contains('g');
 
         // Construct the regex used to match and replace `\n` expression
         // Check: https://docs.rs/regex/latest/regex/struct.Captures.html#method.expand
         let regex = Regex::new(r"\\([1-9])").unwrap();
 
-        // Check if the syntax is correct
-        if !flags.is_empty() && start != -1 && n == -1 {
-            // `start`, `flag` with no `N` specified is an invalid combination
-            bail!("invalid syntax for `regexp_replace`");
-        }
+        // Get the replaced string
+        let replacement = regex
+            .replace_all(&replacement, "$${$1}")
+            // This is for the '\$' substitution
+            .replace("\\&", "${0}");
 
         Ok(Self {
             source,
@@ -497,7 +507,6 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             start,
             n,
             global_flag,
-            regex,
         })
     }
 }
@@ -507,9 +516,17 @@ impl RegexpReplaceExpression {
     fn match_row(&self, text: Option<&str>) -> Option<String> {
         if let Some(text) = text {
             // The start position to begin the search
-            let start = if self.start != -1 { self.start - 1 } else { 0 };
+            let start = if let Some(s) = self.start { s - 1 } else { 0 };
 
-            if (self.n == -1 && self.global_flag) || self.n == 0 {
+            // This is because the source text may contain unicode
+            let start = match text.char_indices().nth(start as usize) {
+                Some((idx, _)) => idx,
+                // With no match
+                None => return Some(text.into()),
+            };
+
+            if (self.n.is_none() && self.global_flag) || (self.n.is_some() && self.n.unwrap() == 0)
+            {
                 // `-g` enabled (& `N` is not specified) or `N` is `0`
                 // We need to replace all the occurrence of the matched pattern
 
@@ -520,22 +537,17 @@ impl RegexpReplaceExpression {
                     // There is no capture groups in the regex
                     // Just replace all matched patterns after `start`
                     return Some(
-                        self.ctx
-                            .0
-                            .replace_all(&text[start as usize..], self.replacement.clone())
-                            .into(),
+                        text[..start].to_string()
+                            + &self
+                                .ctx
+                                .0
+                                .replace_all(&text[start..], self.replacement.clone()),
                     );
                 } else {
                     println!("Path Two");
 
-                    // Get the replaced string
-                    let replaced = self
-                        .regex
-                        .replace_all(&self.replacement, "$${$1}")
-                        .to_string();
-
                     // The position to start searching for replacement
-                    let mut search_start = start as usize;
+                    let mut search_start = start;
 
                     // Construct the return string
                     let mut ret = text[..search_start].to_string();
@@ -555,11 +567,8 @@ impl RegexpReplaceExpression {
                         ret.push_str(&text[search_start..search_start + match_start]);
 
                         // Start to replacing
-                        let mut expanded = String::new();
-                        capture.expand(&replaced, &mut expanded);
-
-                        // Update the return string
-                        ret.push_str(&expanded);
+                        // Note that the result will be written directly to `ret` buffer
+                        capture.expand(&self.replacement, &mut ret);
 
                         // Update the `search_start`
                         search_start += match_end;
@@ -576,7 +585,7 @@ impl RegexpReplaceExpression {
 
                 // Construct the return string
                 let mut ret = if start > 1 {
-                    text[..start as usize].to_string()
+                    text[..start].to_string()
                 } else {
                     "".to_string()
                 };
@@ -585,30 +594,26 @@ impl RegexpReplaceExpression {
                 if self.ctx.0.captures_len() <= 1 {
                     // There is no capture groups in the regex
                     println!("Path Three");
-                    if self.n == -1 {
+                    if self.n.is_none() {
                         // `N` is not specified
-                        ret.push_str(&self.ctx.0.replacen(
-                            &text[start as usize..],
-                            1,
-                            self.replacement.clone(),
-                        ));
+                        ret.push_str(&self.ctx.0.replacen(&text[start..], 1, &self.replacement));
                     } else {
                         // Replace only the N-th match
                         let mut count = 1;
                         // The absolute index for the start of searching
-                        let mut search_start = start as usize;
+                        let mut search_start = start;
                         while let Some(capture) = self.ctx.0.captures(&text[search_start..]) {
                             // Get the current start & end index
                             let match_start = capture.get(0).unwrap().start();
                             let match_end = capture.get(0).unwrap().end();
 
-                            if count == self.n {
+                            if count == self.n.unwrap() as i32 {
                                 // We've reached the pattern to replace
                                 // Let's construct the return string
                                 ret = format!(
                                     "{}{}{}",
                                     &text[..search_start + match_start],
-                                    self.replacement.clone(),
+                                    &self.replacement,
                                     &text[search_start + match_end..]
                                 );
                                 break;
@@ -626,54 +631,46 @@ impl RegexpReplaceExpression {
                     println!("Path Four");
                     // Reset return string at the beginning
                     ret = "".to_string();
-                    if self.n == -1 {
+                    if self.n.is_none() {
                         // `N` is not specified
-                        if let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
+                        if self.ctx.0.captures(&text[start..]).is_none() {
+                            // No match
+                            return Some(text.into());
+                        }
+                        // Otherwise replace the source text
+                        if let Some(capture) = self.ctx.0.captures(&text[start..]) {
                             let match_start = capture.get(0).unwrap().start();
                             let match_end = capture.get(0).unwrap().end();
 
                             // Get the replaced string and expand it
-                            let replaced = self
-                                .regex
-                                .replace_all(&self.replacement, "$${$1}")
-                                .to_string();
-                            let mut expanded = String::new();
-                            capture.expand(&replaced, &mut expanded);
+                            capture.expand(&self.replacement, &mut ret);
 
                             // Construct the return string
                             ret = format!(
                                 "{}{}{}",
-                                &text[..start as usize + match_start],
-                                expanded,
-                                &text[start as usize + match_end..]
+                                &text[..start + match_start],
+                                ret,
+                                &text[start + match_end..]
                             );
-                        } else {
-                            // No match
-                            ret = text.into();
                         }
                     } else {
                         // Replace only the N-th match
                         let mut count = 1;
-                        while let Some(capture) = self.ctx.0.captures(&text[start as usize..]) {
-                            if count == self.n {
+                        while let Some(capture) = self.ctx.0.captures(&text[start..]) {
+                            if count == self.n.unwrap() as i32 {
                                 // We've reached the pattern to replace
                                 let match_start = capture.get(0).unwrap().start();
                                 let match_end = capture.get(0).unwrap().end();
 
                                 // Get the replaced string and expand it
-                                let replaced = self
-                                    .regex
-                                    .replace_all(&self.replacement, "$${$1}")
-                                    .to_string();
-                                let mut expanded = String::new();
-                                capture.expand(&replaced, &mut expanded);
+                                capture.expand(&self.replacement, &mut ret);
 
                                 // Construct the return string
                                 ret = format!(
                                     "{}{}{}",
-                                    &text[..start as usize + match_start],
-                                    expanded,
-                                    &text[start as usize + match_end..]
+                                    &text[..start + match_start],
+                                    ret,
+                                    &text[start + match_end..]
                                 );
                             }
 
@@ -692,7 +689,7 @@ impl RegexpReplaceExpression {
             }
         } else {
             // The input string is None
-            println!("Path Four");
+            println!("Path Five");
             None
         }
     }
@@ -752,13 +749,5 @@ impl Expression for RegexpReplaceExpression {
         Ok(self
             .match_row(Some(&source))
             .map(|replaced| replaced.into()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn dummy_test() {
-        println!("dummy test");
     }
 }
