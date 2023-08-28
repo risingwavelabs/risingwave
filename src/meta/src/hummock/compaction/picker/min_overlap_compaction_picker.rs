@@ -195,6 +195,7 @@ impl NonOverlapSubLevelPicker {
         ret.sstable_infos[0].extend(vec![sst.clone()]);
         let mut overlap_info = self.overlap_strategy.create_overlap_info();
         let mut select_sst_id_set = BTreeSet::default();
+        #[allow(clippy::single_range_in_vec_init)]
         let mut overlap_len_and_begins = vec![(sst_index..(sst_index + 1))];
         for sst in &ret.sstable_infos[0] {
             overlap_info.update(sst);

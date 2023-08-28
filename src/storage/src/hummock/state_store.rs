@@ -130,7 +130,7 @@ impl HummockStorage {
                                 .cloned()
                                 .collect_vec()
                         })
-                        .unwrap_or(Vec::new())
+                        .unwrap_or_default()
                 };
 
                 // When the system has just started and no state has been created, the memory state

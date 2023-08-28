@@ -26,7 +26,6 @@
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]

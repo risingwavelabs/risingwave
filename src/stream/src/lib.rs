@@ -34,7 +34,6 @@
 #![feature(btreemap_alloc)]
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(btree_extract_if)]
 #![feature(bound_map)]
 #![feature(iter_order_by)]

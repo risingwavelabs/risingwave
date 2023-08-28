@@ -29,7 +29,6 @@ use std::marker::PhantomData;
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
-use educe::Educe;
 use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
@@ -208,12 +207,24 @@ impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
 }
 
 /// A wrapper for u64 hash result. Generic over the hasher.
-#[derive(Educe)]
-#[educe(Default, Clone, Copy, Debug, PartialEq)]
+#[derive(Default, Clone, Copy)]
 pub struct HashCode<T: 'static + BuildHasher> {
     value: u64,
-    #[educe(Debug(ignore))]
     _phantom: PhantomData<&'static T>,
+}
+
+impl<T: BuildHasher> Debug for HashCode<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HashCode")
+            .field("value", &self.value)
+            .finish()
+    }
+}
+
+impl<T: BuildHasher> PartialEq for HashCode<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
 }
 
 impl<T: BuildHasher> From<u64> for HashCode<T> {

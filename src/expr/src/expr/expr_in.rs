@@ -172,7 +172,7 @@ mod tests {
             },
         ];
         let mut in_children = vec![input_ref_expr_node];
-        in_children.extend(constant_values.into_iter());
+        in_children.extend(constant_values);
         let call = FunctionCall {
             children: in_children,
         };

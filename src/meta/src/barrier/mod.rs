@@ -1091,7 +1091,7 @@ fn collect_synced_ssts(
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
-    for resp in resps.iter_mut() {
+    for resp in &mut *resps {
         let mut t: Vec<ExtendedSstableInfo> = resp
             .synced_sstables
             .iter_mut()

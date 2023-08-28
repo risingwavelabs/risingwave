@@ -217,7 +217,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        for (_, h) in groups.iter_mut() {
+        for (_, h) in &mut groups {
             let mut heap = TopNHeap::empty();
             swap(&mut heap, h);
             for ele in heap.dump() {

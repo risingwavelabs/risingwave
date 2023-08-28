@@ -14,8 +14,7 @@
 
 use core::fmt;
 use std::alloc::Global;
-use std::collections::btree_map::{DrainFilter, OccupiedEntry, Range};
-use std::collections::BTreeMap;
+use std::collections::btree_map::{BTreeMap, ExtractIf, OccupiedEntry, Range};
 use std::ops::RangeBounds;
 
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
@@ -109,7 +108,7 @@ impl TopNCacheState {
         self.inner.range(range)
     }
 
-    pub fn extract_if<F>(&mut self, pred: F) -> DrainFilter<'_, CacheKey, CompactedRow, F, Global>
+    pub fn extract_if<F>(&mut self, pred: F) -> ExtractIf<'_, CacheKey, CompactedRow, F, Global>
     where
         F: FnMut(&CacheKey, &mut CompactedRow) -> bool,
     {

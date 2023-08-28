@@ -1369,7 +1369,7 @@ impl MetaMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for (addr, client) in member_group.members.iter_mut() {
+                for (addr, client) in &mut member_group.members {
                     let client: Result<MetaMemberClient> = try {
                         match client {
                             Some(cached_client) => cached_client.to_owned(),
@@ -1458,7 +1458,7 @@ impl GrpcMetaClient {
     // Max retry times for connecting to meta server.
     const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    async fn start_meta_member_monitor(
+    fn start_meta_member_monitor(
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
@@ -1559,9 +1559,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client
-            .start_meta_member_monitor(addr, members, force_refresh_receiver, config)
-            .await?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
 
         client.force_refresh_leader().await?;
 

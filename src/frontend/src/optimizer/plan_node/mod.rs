@@ -331,7 +331,7 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .drain_filter(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))

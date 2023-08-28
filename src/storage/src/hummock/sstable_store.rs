@@ -427,7 +427,7 @@ impl SstableStore {
                             .read(&meta_path, Some(loc))
                             .await
                             .map_err(HummockError::object_io_error)?;
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
+                        let meta = SstableMeta::decode(&buf[..])?;
                         let sst = Sstable::new(object_id, meta);
                         let charge = sst.estimate_size();
                         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -451,6 +451,9 @@ impl SstableStore {
         })
     }
 
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub async fn sstable(
         &self,
         sst: &SstableInfo,

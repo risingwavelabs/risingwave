@@ -73,7 +73,7 @@ pub async fn compact(
         };
         grouped_payload
             .entry(compaction_group_id)
-            .or_insert_with(std::vec::Vec::new)
+            .or_default()
             .push(imm);
     }
 

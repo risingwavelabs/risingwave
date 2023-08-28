@@ -225,7 +225,7 @@ impl Eq for HeapElem {}
 
 impl PartialOrd for HeapElem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.encoded_row.partial_cmp(&other.encoded_row)
+        Some(self.cmp(other))
     }
 }
 

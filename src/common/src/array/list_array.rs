@@ -29,8 +29,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, ScalarRefImpl, ToDatumRef,
-    ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarRefImpl, ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -324,13 +323,13 @@ pub struct ListValue {
 
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
     }
 }
 
@@ -506,11 +505,19 @@ impl PartialEq for ListRef<'_> {
     }
 }
 
+impl Eq for ListRef<'_> {}
+
 impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ListRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         iter_elems_ref!(*self, lhs, {
             iter_elems_ref!(*other, rhs, {
-                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
             })
         })
     }
@@ -570,15 +577,6 @@ impl ToText for ListRef<'_> {
             DataType::List { .. } => self.write(f),
             _ => unreachable!(),
         }
-    }
-}
-
-impl Eq for ListRef<'_> {}
-
-impl Ord for ListRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two lists is deterministic.
-        self.partial_cmp(other).unwrap()
     }
 }
 

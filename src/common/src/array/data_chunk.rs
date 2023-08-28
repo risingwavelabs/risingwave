@@ -224,7 +224,7 @@ impl DataChunk {
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
-        for array in self.columns.iter() {
+        for array in &*self.columns {
             column_ref.push(array.to_protobuf());
         }
         proto
@@ -367,7 +367,7 @@ impl DataChunk {
             let array = self.column_at(*column_idx);
             array.hash_vec(&mut states[..]);
         }
-        finalize_hashers(&mut states[..])
+        finalize_hashers(&states[..])
             .into_iter()
             .map(|hash_code| hash_code.into())
             .collect_vec()
@@ -491,7 +491,7 @@ impl DataChunk {
     fn partition_sizes(&self) -> (usize, Vec<&ArrayRef>) {
         let mut col_variable: Vec<&ArrayRef> = vec![];
         let mut row_len_fixed: usize = 0;
-        for c in self.columns.iter() {
+        for c in &*self.columns {
             if let Some(field_len) = try_get_exact_serialize_datum_size(c) {
                 row_len_fixed += field_len;
             } else {
@@ -547,8 +547,7 @@ impl DataChunk {
                 }
 
                 // Then do the actual serialization
-                for c in self.columns.iter() {
-                    let c = c;
+                for c in &*self.columns {
                     assert_eq!(c.len(), rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -569,8 +568,7 @@ impl DataChunk {
                         buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
                     }
                 }
-                for c in self.columns.iter() {
-                    let c = c;
+                for c in &*self.columns {
                     assert_eq!(c.len(), *rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -828,7 +826,7 @@ impl DataChunkTestExt for DataChunk {
         let cols = self.columns();
         let vis = &self.vis2;
         let n = vis.len();
-        for col in cols.iter() {
+        for col in cols {
             assert_eq!(col.len(), n);
         }
     }

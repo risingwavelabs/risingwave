@@ -232,7 +232,6 @@ mod tests {
         type PreparedStatement = String;
         type ValuesStream = BoxStream<'static, RowSetResult>;
 
-        #[expect(clippy::unused_async)]
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
@@ -270,7 +269,6 @@ mod tests {
             Ok(String::new())
         }
 
-        #[expect(clippy::unused_async)]
         async fn execute(
             self: Arc<Self>,
             _portal: String,
