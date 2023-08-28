@@ -286,11 +286,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let read_req_bloom_filter_positive_counts =
-            RelabeledGenericCounterVec::with_default_metric_level(
-                read_req_bloom_filter_positive_counts,
-                storage_metric_level,
-            );
+        let read_req_bloom_filter_positive_counts = RelabeledGenericCounterVec::with_metric_level(
+            2,
+            read_req_bloom_filter_positive_counts,
+            storage_metric_level,
+        );
 
         let read_req_positive_but_non_exist_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_positive_but_non_exist_counts",
@@ -299,11 +299,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let read_req_positive_but_non_exist_counts =
-            RelabeledGenericCounterVec::with_default_metric_level(
-                read_req_positive_but_non_exist_counts,
-                storage_metric_level,
-            );
+        let read_req_positive_but_non_exist_counts = RelabeledGenericCounterVec::with_metric_level(
+            2,
+            read_req_positive_but_non_exist_counts,
+            storage_metric_level,
+        );
 
         let read_req_check_bloom_filter_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_check_bloom_filter_counts",
@@ -312,11 +312,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let read_req_check_bloom_filter_counts =
-            RelabeledGenericCounterVec::with_default_metric_level(
-                read_req_check_bloom_filter_counts,
-                storage_metric_level,
-            );
+        let read_req_check_bloom_filter_counts = RelabeledGenericCounterVec::with_metric_level(
+            2,
+            read_req_check_bloom_filter_counts,
+            storage_metric_level,
+        );
 
         Self {
             bloom_filter_true_negative_counts,
