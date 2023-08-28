@@ -70,7 +70,7 @@ if [[ "$mode" == "standalone" ]]; then
   EXPECTED=$(run_sql "SELECT * FROM t ORDER BY v1;")
   echo -e "Expected:\n$EXPECTED"
 
-  echo "--- Restart standalone"
+  echo "Restarting standalone"
   restart_standalone
 
   ACTUAL=$(run_sql "SELECT * FROM t ORDER BY v1;")

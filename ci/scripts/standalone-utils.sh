@@ -51,7 +51,7 @@ wait_standalone() {
   timeout 20s bash -c '
     while true; do
       echo "Polling every 1s for standalone to be ready for 20s"
-      if cargo make psql -c "SELECT 1"
+      if psql -h localhost -p 4566 -d dev -U root -c "SELECT 1;"
       then exit 0;
       else sleep 1;
       fi
