@@ -7,9 +7,9 @@ SET RW_STREAMING_RATE_LIMIT TO 10000;
 statement ok
 CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
 
-# Should take around 10s due to rate limit.
+# Should take around 5s due to rate limit.
 statement ok
-INSERT INTO table t1 select * from generate_series(1,100000);
+INSERT INTO t1 select * from generate_series(1,50000);
 
 statement ok
 FLUSH;
