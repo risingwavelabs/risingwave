@@ -589,6 +589,7 @@ pub async fn shared_compact(
     compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
     sstable_store: SstableStoreRef,
+    storage_opts: Arc<StorageOpts>,
     parallel_compact_size_mb: u32,
     filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
     worker_num: u32,

@@ -34,7 +34,9 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::parse_remote_object_store_with_config;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
-use risingwave_pb::hummock::{dispatch_compaction_task_request, CompactTask};
+use risingwave_pb::hummock::{
+    dispatch_compaction_task_request, CompactTask, DispatchCompactionTaskRequest,
+};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{
@@ -51,6 +53,7 @@ use risingwave_storage::monitor::{
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tonic::{Request, Response, Status};
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
@@ -284,6 +287,7 @@ pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: CompactorOpts,
+    request: Request<DispatchCompactionTaskRequest>,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactorMemoryCollector = HummockMemoryCollector;
 
@@ -295,7 +299,25 @@ pub async fn shared_compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+    let config = load_config(&opts.config_path, &opts);
+    info!("Starting compactor node",);
+    info!("> config: {:?}", config);
+    info!(
+        "> debug assertions: {}",
+        if cfg!(debug_assertions) { "on" } else { "off" }
+    );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
+    // Register to the cluster.
+    let (meta_client, system_params_reader) = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::Compactor,
+        &advertise_addr,
+        Default::default(),
+        &config.meta,
+    )
+    .await
+    .unwrap();
     // In dedicated compaction mode, these parameters are load from storage opt,
     // and in shared compaction mode, these parameters should be defined via cloud infra.
     let parallel_compact_size_mb: u32 = 0;
@@ -342,9 +364,15 @@ pub async fn shared_compactor_serve(
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
-    // let state_store_url = system_params_reader.state_store();
+    let state_store_url = system_params_reader.state_store();
 
     let storage_memory_config = extract_storage_memory_config(&config);
+
+    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
+        &config,
+        &system_params_reader,
+        &storage_memory_config,
+    )));
 
     let total_memory_available_bytes =
         (resource_util::memory::total_memory_available_bytes() as f64
@@ -434,41 +462,26 @@ pub async fn shared_compactor_serve(
 
     // The following will be passed via DispatchCompactionTaskRequest, so here is just a simulation.
 
-    let output_ids = vec![];
-    let id_to_table = HashMap::new();
+    let DispatchCompactionTaskRequest {
+        tables,
+        output_object_ids,
+        task: dispatch_task,
+    } = request.into_inner();
 
-    let compact_task = CompactTask {
-        input_ssts: todo!(),
-        splits: todo!(),
-        watermark: todo!(),
-        sorted_output_ssts: todo!(),
-        task_id: todo!(),
-        target_level: todo!(),
-        gc_delete_keys: todo!(),
-        base_level: todo!(),
-        task_status: todo!(),
-        compaction_group_id: todo!(),
-        existing_table_ids: todo!(),
-        compression_algorithm: todo!(),
-        target_file_size: todo!(),
-        compaction_filter_mask: todo!(),
-        table_options: todo!(),
-        current_epoch_time: todo!(),
-        target_sub_level_id: todo!(),
-        task_type: todo!(),
-        split_by_state_table: todo!(),
-        split_weight_by_vnode: todo!(),
-    };
-    let dispatch_task = dispatch_compaction_task_request::Task::CompactTask(compact_task);
+    let id_to_tables = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
+        acc.insert(table.id, table);
+        acc
+    });
 
     let mut sub_tasks = vec![
         risingwave_storage::hummock::compactor::start_shared_compactor(
-            dispatch_task,
-            id_to_table,
-            output_ids,
+            dispatch_task.unwrap(),
+            id_to_tables,
+            output_object_ids,
             Arc::new(AtomicU32::new(0)),
             compactor_metrics.clone(),
             sstable_store.clone(),
+            storage_opts,
             parallel_compact_size_mb,
             worker_num,
             max_sub_compaction,

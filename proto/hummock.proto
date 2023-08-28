@@ -468,7 +468,6 @@ message ReportCompactionTaskRequest {
   oneof event {
     ReportTask report_task = 1;
     HeartBeat heart_beat = 2;
-    VacuumTask vacuum_task = 3;
   }
 }
 

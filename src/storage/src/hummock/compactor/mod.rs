@@ -19,7 +19,7 @@ use parking_lot::RwLock;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
 use risingwave_pb::hummock::{
-    dispatch_compaction_task_request, CompactTask, ReportFullScanTaskRequest, VacuumTask,
+    dispatch_compaction_task_request, ReportFullScanTaskRequest, ReportVacuumTaskRequest,
 };
 pub mod compactor_runner;
 mod context;
@@ -636,6 +636,7 @@ pub fn start_shared_compactor(
     running_task_count: Arc<AtomicU32>,
     compactor_metrics: Arc<CompactorMetrics>,
     sstable_store: SstableStoreRef,
+    storage_opts: Arc<StorageOpts>,
     parallel_compact_size_mb: u32,
     worker_num: u32,
     max_sub_compaction: u32,
@@ -764,8 +765,8 @@ pub fn start_shared_compactor(
                 {
                     Ok(_) => {
                         // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
-                        let report_compaction_task_request = ReportCompactionTaskRequest {
-                            event: Some(ReportCompactionTaskEvent::VacuumTask(vacuum_task)),
+                        let report_vacuum_task_request = ReportVacuumTaskRequest {
+                            vacuum_task: Some(vacuum_task),
                         };
                     }
                     Err(e) => {
