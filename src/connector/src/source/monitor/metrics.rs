@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+
+use crate::source::kafka::stats::RdKafkaStats;
 
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
@@ -59,6 +61,7 @@ pub struct SourceMetrics {
     pub user_source_error_count: GenericCounterVec<AtomicU64>,
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,
+    pub rdkafka_native_metric: Arc<RdKafkaStats>,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -100,11 +103,13 @@ impl SourceMetrics {
             registry,
         )
         .unwrap();
+        let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
             user_source_error_count,
             latest_message_id,
+            rdkafka_native_metric,
         }
     }
 }

@@ -24,15 +24,8 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 /// [`HummockMetrics`] stores the performance and IO metrics of hummock storage.
 #[derive(Debug, Clone)]
 pub struct HummockMetrics {
-    pub unpin_version_before_counts: GenericCounter<AtomicU64>,
-    pub pin_snapshot_counts: GenericCounter<AtomicU64>,
-    pub unpin_snapshot_counts: GenericCounter<AtomicU64>,
     pub get_new_sst_ids_counts: GenericCounter<AtomicU64>,
     pub report_compaction_task_counts: GenericCounter<AtomicU64>,
-
-    pub unpin_version_before_latency: Histogram,
-    pub pin_snapshot_latency: Histogram,
-    pub unpin_snapshot_latency: Histogram,
     pub get_new_sst_ids_latency: Histogram,
     pub report_compaction_task_latency: Histogram,
 }
@@ -43,25 +36,6 @@ pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> =
 impl HummockMetrics {
     fn new(registry: &Registry) -> Self {
         // ----- Hummock -----
-        // gRPC count
-        let unpin_version_before_counts = register_int_counter_with_registry!(
-            "state_store_unpin_version_before_counts",
-            "Total number of unpin_version_before_counts requests that have been issued to state store",
-            registry
-        )
-        .unwrap();
-        let pin_snapshot_counts = register_int_counter_with_registry!(
-            "state_store_pin_snapshot_counts",
-            "Total number of pin_snapshot_counts requests that have been issued to state store",
-            registry
-        )
-        .unwrap();
-        let unpin_snapshot_counts = register_int_counter_with_registry!(
-            "state_store_unpin_snapshot_counts",
-            "Total number of unpin_snapshot_counts requests that have been issued to state store",
-            registry
-        )
-        .unwrap();
         let get_new_sst_ids_counts = register_int_counter_with_registry!(
             "state_store_get_new_sst_ids_counts",
             "Total number of get_new_table_id requests that have been issued to state store",
@@ -75,39 +49,15 @@ impl HummockMetrics {
         )
         .unwrap();
 
+        // 10ms ~ max 2.7h
+        let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // gRPC latency
-        // --
-        let unpin_version_before_latency_opts = histogram_opts!(
-            "state_store_unpin_version_before_latency",
-            "Total latency of unpin version before that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let unpin_version_before_latency =
-            register_histogram_with_registry!(unpin_version_before_latency_opts, registry).unwrap();
-
-        // --
-        let pin_snapshot_latency_opts = histogram_opts!(
-            "state_store_pin_snapshot_latency",
-            "Total latency of pin snapshot that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let pin_snapshot_latency =
-            register_histogram_with_registry!(pin_snapshot_latency_opts, registry).unwrap();
-
-        // --
-        let unpin_snapshot_latency_opts = histogram_opts!(
-            "state_store_unpin_snapshot_latency",
-            "Total latency of unpin snapshot that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let unpin_snapshot_latency =
-            register_histogram_with_registry!(unpin_snapshot_latency_opts, registry).unwrap();
 
         // --
         let get_new_sst_ids_latency_opts = histogram_opts!(
             "state_store_get_new_sst_ids_latency",
             "Total latency of get new table id that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+            time_buckets.clone()
         );
         let get_new_sst_ids_latency =
             register_histogram_with_registry!(get_new_sst_ids_latency_opts, registry).unwrap();
@@ -116,22 +66,15 @@ impl HummockMetrics {
         let report_compaction_task_latency_opts = histogram_opts!(
             "state_store_report_compaction_task_latency",
             "Total latency of report compaction task that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+            time_buckets
         );
         let report_compaction_task_latency =
             register_histogram_with_registry!(report_compaction_task_latency_opts, registry)
                 .unwrap();
 
         Self {
-            unpin_version_before_counts,
-            pin_snapshot_counts,
-            unpin_snapshot_counts,
             get_new_sst_ids_counts,
             report_compaction_task_counts,
-
-            unpin_version_before_latency,
-            pin_snapshot_latency,
-            unpin_snapshot_latency,
             get_new_sst_ids_latency,
             report_compaction_task_latency,
         }

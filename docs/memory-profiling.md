@@ -4,7 +4,7 @@ Note that the content below is Linux-exclusive.
 
 ## What is Heap Profile?
 
-A heap profiler records the **stack trace of the allocation** of each **live** object, so it’s possible that function A allocates something and then hand over it to struct B, in this case, the allocation will still be counted on A.
+A heap profiler records the **stack trace of the allocation** of each **live** object, so it's possible that function A allocates something and then hand over it to struct B, in this case, the allocation will still be counted on A.
 
 ## Internals
 
