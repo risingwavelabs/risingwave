@@ -35,12 +35,11 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
+    AddMutation, Dispatchers, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
