@@ -46,8 +46,6 @@ stop_standalone() {
 
 wait_standalone() {
   set +e
-  echo "Waiting 5s for recovery to progress"
-  sleep 5
   timeout 20s bash -c '
     while true; do
       echo "Polling every 1s for standalone to be ready for 20s"
