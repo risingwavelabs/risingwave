@@ -30,7 +30,6 @@
 #![feature(async_fn_in_trait)]
 #![feature(associated_type_defaults)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(async_closure)]
 
 use std::time::Duration;
 
