@@ -20,19 +20,20 @@ echo "--- creating hdr_histogram"
 ./risedev psql -c "
 CREATE MATERIALIZED VIEW hdr_histogram AS
 SELECT
+  -- Sign
   CASE WHEN value<0 THEN -1 ELSE 1 END AS sign,
 
-  -- rw
-  trunc(log(2.0))::int AS exponent,
-  -- presto
-  -- trunc(log(2.0, abs(value)))::int AS exponent,
+  -- Exponent
+  trunc(log10(value))::int AS exponent,
 
-  -- rw
-  trunc(pow(2.0, 4) * (value / pow(2.0, trunc(log(2.0))::int) - 1.0))::int AS mantissa,
-  -- presto
-  -- trunc(pow(2.0, 4) * (value / pow(2.0, trunc(log(2.0, abs(value)))::int) - 1.0))::int AS mantissa,
+  -- Mantissa
+  trunc(pow(10.0, 4) * (value / pow(10.0, trunc(log10(value))::int) - 1.0))::int AS mantissa,
 
-  count(*) AS frequency
+  --- Frequency of each bucket
+  count(*) AS frequency,
+
+  --- dummy to force stream nested loop join
+  1 as dummy
 FROM input
 GROUP BY sign, exponent, mantissa;
 "
@@ -47,30 +48,46 @@ FROM hdr_histogram;
 
 echo "--- create hdr_distribution"
 ./risedev psql -c "
-CREATE VIEW hdr_distribution AS
+EXPLAIN CREATE MATERIALIZED VIEW hdr_distribution AS
 SELECT
-  h.sign*(1.0+h.mantissa/pow(2.0, 4))*pow(2.0,h.exponent) AS bucket,
+  h.sign*(1.0+h.mantissa/pow(10.0, 4))*pow(2.0,h.exponent) AS bucket,
   h.frequency,
-  sum(g.frequency) AS cumulative_frequency,
-  sum(g.frequency) / (SELECT sum_frequency FROM hdr_sum) AS cumulative_distribution
-FROM hdr_histogram g, hdr_histogram h
+  sum(g.frequency) AS cumulative_frequency
+  -- Compute this in batch query to avoid nested loop join.
+  -- sum(g.frequency) / (SELECT sum_frequency FROM hdr_sum) AS cumulative_distribution
+FROM hdr_histogram g JOIN hdr_histogram h ON g.dummy = h.dummy
 WHERE (g.sign,g.exponent,g.mantissa) <= (h.sign,h.exponent,h.mantissa)
 GROUP BY h.sign, h.exponent, h.mantissa, h.frequency
-ORDER BY cumulative_distribution;
+ORDER BY cumulative_frequency;
+" </dev/null
+
+echo "--- create hdr_distribution"
+./risedev psql -c "
+CREATE MATERIALIZED VIEW hdr_distribution AS
+SELECT
+  h.sign*(1.0+h.mantissa/pow(10.0, 4))*pow(2.0,h.exponent) AS bucket,
+  h.frequency,
+  sum(g.frequency) AS cumulative_frequency
+  -- Compute this in batch query to avoid nested loop join.
+  -- sum(g.frequency) / (SELECT sum_frequency FROM hdr_sum) AS cumulative_distribution
+FROM hdr_histogram g JOIN hdr_histogram h ON g.dummy = h.dummy
+WHERE (g.sign,g.exponent,g.mantissa) <= (h.sign,h.exponent,h.mantissa)
+GROUP BY h.sign, h.exponent, h.mantissa, h.frequency
+ORDER BY cumulative_frequency;
 "
 
 echo "--- check approx percentile 0.9"
 ./risedev psql -c "
 SELECT bucket AS approximate_percentile
 FROM hdr_distribution
-WHERE cumulative_distribution >= 0.9
-ORDER BY cumulative_distribution
+WHERE (cumulative_frequency / (SELECT sum(frequency) FROM hdr_sum)) >= 0.9
+ORDER BY cumulative_frequency
 LIMIT 1;
 "
 
-#./risedev psql -c "
-#CREATE INDEX hdr_distribution_idx ON hdr_distribution (cumulative_distribution);
-#"
+./risedev psql -c "
+CREATE INDEX hdr_distribution_idx ON hdr_distribution (cumulative_frequency);
+"
 
 echo "--- reading from approx_percentile"
 ./risedev psql -c "
@@ -84,7 +101,7 @@ flush;
 "
 
 echo "--- reading updated approx_percentile"
-./risedev psql -c "SELECT * FROM hdr_distribution ORDER BY cumulative_distribution;"
+./risedev psql -c "SELECT * FROM hdr_distribution ORDER BY cumulative_frequency;"
 
 ./risedev k
 
