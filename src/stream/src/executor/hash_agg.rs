@@ -270,7 +270,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn ensure_keys_in_cache(
-        this: &mut ExecutorInner<K, S>,
+        this: &ExecutorInner<K, S>,
         cache: &mut AggGroupCache<K, S>,
         keys: impl IntoIterator<Item = &K>,
         stats: &mut ExecutionStats,

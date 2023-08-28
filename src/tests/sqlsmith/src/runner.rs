@@ -108,7 +108,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -129,7 +129,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}

@@ -233,7 +233,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
     }
 
     async fn ensure_partition_in_cache(
-        this: &mut ExecutorInner<S>,
+        this: &ExecutorInner<S>,
         cache: &mut PartitionCache,
         partition_key: &OwnedRow,
     ) -> StreamExecutorResult<()> {

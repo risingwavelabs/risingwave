@@ -401,7 +401,7 @@ impl<T: SplitMetaData + Clone> PartialEq<Self> for ActorSplitsAssignment<T> {
 
 impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.splits.len().partial_cmp(&self.splits.len())
+        Some(self.cmp(other))
     }
 }
 
@@ -534,7 +534,6 @@ where
                     &mut managed_sources,
                     metrics.clone(),
                 )
-                .await
             }
         }
 
@@ -715,7 +714,7 @@ where
         Ok(())
     }
 
-    async fn create_source_worker_async(
+    fn create_source_worker_async(
         connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,

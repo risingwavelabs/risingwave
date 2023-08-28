@@ -410,7 +410,7 @@ async fn start_replay(
             replayed_epochs.pop();
             let mut epochs = vec![max_committed_epoch];
             epochs.extend(
-                pin_old_snapshots(&meta_client, &mut replayed_epochs, 1)
+                pin_old_snapshots(&meta_client, &replayed_epochs, 1)
                     .await
                     .into_iter(),
             );
@@ -521,7 +521,7 @@ async fn start_replay(
 
 async fn pin_old_snapshots(
     meta_client: &MetaClient,
-    replayed_epochs: &mut [HummockEpoch],
+    replayed_epochs: &[HummockEpoch],
     num: usize,
 ) -> Vec<HummockEpoch> {
     let mut old_epochs = vec![];

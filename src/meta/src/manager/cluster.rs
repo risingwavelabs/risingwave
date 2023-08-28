@@ -332,7 +332,7 @@ where
         ))
     }
 
-    pub async fn start_heartbeat_checker(
+    pub fn start_heartbeat_checker(
         cluster_manager: ClusterManagerRef<S>,
         check_interval: Duration,
     ) -> (JoinHandle<()>, Sender<()>) {
@@ -959,7 +959,7 @@ mod tests {
         );
 
         let (join_handle, shutdown_sender) =
-            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval).await;
+            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval);
         tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One live node left.

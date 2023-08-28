@@ -462,6 +462,9 @@ impl LocalStreamManagerCore {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn create_nodes_inner(
