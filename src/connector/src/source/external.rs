@@ -24,7 +24,7 @@ use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -290,6 +290,12 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     pub fn new(properties: HashMap<String, String>, rw_schema: Schema) -> ConnectorResult<Self> {
+        if let Some(field) = rw_schema.fields.last() && field.name.as_str() != OFFSET_COLUMN_NAME {
+            return Err(ConnectorError::Config(anyhow!(
+                "last column of schema must be `_rw_offset`"
+            )));
+        }
+
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(properties).unwrap(),
         )
