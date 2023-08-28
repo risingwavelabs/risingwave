@@ -18,7 +18,6 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
     Registry,
 };
-use risingwave_common::monitor::connection::ConnectionMetrics;
 
 pub struct ObjectStoreMetrics {
     pub write_bytes: GenericCounter<AtomicU64>,
@@ -27,12 +26,10 @@ pub struct ObjectStoreMetrics {
     pub operation_size: HistogramVec,
     pub failure_count: GenericCounterVec<AtomicU64>,
     pub request_retry_count: GenericCounterVec<AtomicU64>,
-
-    pub connection_metrics: ConnectionMetrics,
 }
 
 impl ObjectStoreMetrics {
-    pub fn new(registry: Registry, connection_metrics: ConnectionMetrics) -> Self {
+    pub fn new(registry: Registry) -> Self {
         let read_bytes = register_int_counter_with_registry!(
             "object_store_read_bytes",
             "Total bytes of requests read from object store",
@@ -100,12 +97,11 @@ impl ObjectStoreMetrics {
             operation_size,
             failure_count,
             request_retry_count,
-            connection_metrics,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new(), ConnectionMetrics::unused())
+        Self::new(Registry::new())
     }
 }

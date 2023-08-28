@@ -16,7 +16,6 @@ use std::path::PathBuf;
 
 use chrono::prelude::Local;
 use futures::future::try_join_all;
-use risingwave_common::monitor::connection::ConnectionMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
 use risingwave_rpc_client::ComputeClientPool;
@@ -33,7 +32,7 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::new(1, ConnectionMetrics::unused());
+    let clients = ComputeClientPool::default();
 
     let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
@@ -91,7 +90,7 @@ pub async fn heap_profile(context: &CtlContext, dir: String) -> anyhow::Result<(
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::new(1, ConnectionMetrics::unused());
+    let clients = ComputeClientPool::default();
 
     let mut profile_futs = vec![];
 

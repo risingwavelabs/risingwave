@@ -469,7 +469,7 @@ pub(crate) mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        let compute_client_pool = Arc::new(ComputeClientPool::for_test());
+        let compute_client_pool = Arc::new(ComputeClientPool::default());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));

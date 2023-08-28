@@ -19,6 +19,7 @@ use std::io::{Error, IoSlice};
 #[cfg(not(madsim))]
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -282,8 +283,12 @@ pub struct ConnectionMetrics {
     io_err_rate: GenericCounterVec<AtomicU64>,
 }
 
+// TODO: use global registry
+pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
+    LazyLock::new(|| ConnectionMetrics::new(&Registry::new()));
+
 impl ConnectionMetrics {
-    pub fn new(registry: Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let labels = ["connection_type", "uri"];
         let connection_count = register_int_gauge_vec_with_registry!(
             "connection_count",
@@ -360,10 +365,6 @@ impl ConnectionMetrics {
             io_err_rate,
         }
     }
-
-    pub fn unused() -> Self {
-        Self::new(Registry::new())
-    }
 }
 
 pub struct TcpConfig {
@@ -373,7 +374,6 @@ pub struct TcpConfig {
 
 pub fn monitored_hyper_https_connector(
     connection_type: impl Into<String>,
-    metrics: ConnectionMetrics,
     config: TcpConfig,
 ) -> MonitoredConnection<HttpConnector, MonitorNewConnectionImpl> {
     let mut http = HttpConnector::new();
@@ -381,13 +381,12 @@ pub fn monitored_hyper_https_connector(
     http.set_nodelay(config.tcp_nodelay);
     http.set_keepalive(config.keepalive_duration);
 
-    monitor_connector(http, connection_type, metrics)
+    monitor_connector(http, connection_type)
 }
 
 pub fn monitor_connector<C>(
     connector: C,
     connection_type: impl Into<String>,
-    metrics: ConnectionMetrics,
 ) -> MonitoredConnection<C, MonitorNewConnectionImpl> {
     let connection_type = connection_type.into();
     info!(
@@ -395,20 +394,13 @@ pub fn monitor_connector<C>(
         type_name::<C>(),
         connection_type
     );
-    MonitoredConnection::new(
-        connector,
-        MonitorNewConnectionImpl {
-            connection_type,
-            metrics,
-        },
-    )
+    MonitoredConnection::new(connector, MonitorNewConnectionImpl { connection_type })
 }
 
 #[cfg(not(madsim))]
 pub fn monitored_tcp_incoming(
     listen_addr: SocketAddr,
     connection_type: impl Into<String>,
-    metrics: ConnectionMetrics,
     config: TcpConfig,
 ) -> Result<
     MonitoredConnection<TcpIncoming, MonitorNewConnectionImpl>,
@@ -419,7 +411,6 @@ pub fn monitored_tcp_incoming(
         incoming,
         MonitorNewConnectionImpl {
             connection_type: connection_type.into(),
-            metrics,
         },
     ))
 }
@@ -427,7 +418,6 @@ pub fn monitored_tcp_incoming(
 #[derive(Clone)]
 pub struct MonitorNewConnectionImpl {
     connection_type: String,
-    metrics: ConnectionMetrics,
 }
 
 impl MonitorNewConnection for MonitorNewConnectionImpl {
@@ -435,14 +425,23 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
 
     fn new_connection_monitor(&self, endpoint: String) -> Self::ConnectionMonitor {
         let labels = [self.connection_type.as_str(), endpoint.as_str()];
-        let read_rate = self.metrics.read_rate.with_label_values(&labels);
-        let reader_count = self.metrics.reader_count.with_label_values(&labels);
-        let write_rate = self.metrics.write_rate.with_label_values(&labels);
-        let writer_count = self.metrics.writer_count.with_label_values(&labels);
-        let io_err_rate = self.metrics.io_err_rate.clone();
-        let connection_count = self.metrics.connection_count.with_label_values(&labels);
+        let read_rate = GLOBAL_CONNECTION_METRICS
+            .read_rate
+            .with_label_values(&labels);
+        let reader_count = GLOBAL_CONNECTION_METRICS
+            .reader_count
+            .with_label_values(&labels);
+        let write_rate = GLOBAL_CONNECTION_METRICS
+            .write_rate
+            .with_label_values(&labels);
+        let writer_count = GLOBAL_CONNECTION_METRICS
+            .writer_count
+            .with_label_values(&labels);
+        let connection_count = GLOBAL_CONNECTION_METRICS
+            .connection_count
+            .with_label_values(&labels);
 
-        self.metrics
+        GLOBAL_CONNECTION_METRICS
             .connection_create_rate
             .with_label_values(&labels)
             .inc();
@@ -454,13 +453,12 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
             reader_count,
             write_rate,
             writer_count,
-            io_err_rate,
             connection_count,
         )
     }
 
     fn on_err(&self, endpoint: String) {
-        self.metrics
+        GLOBAL_CONNECTION_METRICS
             .connection_err_rate
             .with_label_values(&[self.connection_type.as_str(), endpoint.as_str()])
             .inc();
@@ -479,8 +477,6 @@ pub struct MonitorAsyncReadWriteImpl {
     writer_count_guard: GenericGauge<AtomicI64>,
     is_shutdown: bool,
 
-    io_err_rate: GenericCounterVec<AtomicU64>,
-
     connection_count_guard: GenericGauge<AtomicI64>,
 }
 
@@ -492,7 +488,6 @@ impl MonitorAsyncReadWriteImpl {
         reader_count: GenericGauge<AtomicI64>,
         write_rate: GenericCounter<AtomicU64>,
         writer_count: GenericGauge<AtomicI64>,
-        io_err_rate: GenericCounterVec<AtomicU64>,
         connection_count: GenericGauge<AtomicI64>,
     ) -> Self {
         reader_count.inc();
@@ -507,7 +502,6 @@ impl MonitorAsyncReadWriteImpl {
             write_rate,
             writer_count_guard: writer_count,
             is_shutdown: false,
-            io_err_rate,
             connection_count_guard: connection_count,
         }
     }
@@ -540,7 +534,8 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
-        self.io_err_rate
+        GLOBAL_CONNECTION_METRICS
+            .io_err_rate
             .with_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
@@ -564,7 +559,8 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
-        self.io_err_rate
+        GLOBAL_CONNECTION_METRICS
+            .io_err_rate
             .with_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),

@@ -91,17 +91,12 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        state_store: StateStoreImpl,
-        config: &StreamingConfig,
-        compute_client_pool: ComputeClientPool,
-    ) -> Self {
+    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
-            compute_client_pool,
+            compute_client_pool: ComputeClientPool::default(),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
             config: config.clone(),
         }
@@ -115,7 +110,7 @@ impl SharedContext {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
-            compute_client_pool: ComputeClientPool::for_test(),
+            compute_client_pool: ComputeClientPool::default(),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),

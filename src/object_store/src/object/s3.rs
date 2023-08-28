@@ -543,10 +543,7 @@ impl S3ObjectStore {
         Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
     }
 
-    pub fn http_connector(
-        config: &S3ObjectStoreConfig,
-        metrics: &ObjectStoreMetrics,
-    ) -> impl Into<HttpConnector> {
+    pub fn new_http_connector(config: &S3ObjectStoreConfig) -> impl Into<HttpConnector> {
         // Customize http connector to set keepalive.
         let native_tls = {
             let mut tls = hyper_tls::native_tls::TlsConnector::builder();
@@ -580,11 +577,7 @@ impl S3ObjectStore {
         aws_smithy_client::hyper_ext::Adapter::builder()
             .hyper_builder(hyper::client::Builder::default())
             .connector_settings(ConnectorSettings::builder().build())
-            .build(monitor_connector(
-                native_tls,
-                "S3",
-                metrics.connection_metrics.clone(),
-            ))
+            .build(monitor_connector(native_tls, "S3"))
     }
 
     pub async fn new_with_config(
@@ -594,7 +587,7 @@ impl S3ObjectStore {
     ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .http_connector(Self::http_connector(&config, &metrics));
+            .http_connector(Self::new_http_connector(&config));
 
         // Retry 3 times if we get server-side errors or throttling errors
         let client = match std::env::var("RW_S3_ENDPOINT") {
@@ -647,10 +640,7 @@ impl S3ObjectStore {
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
-                .http_connector(Self::http_connector(
-                    &S3ObjectStoreConfig::default(),
-                    &metrics,
-                ));
+                .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
 
         let config = builder
             .region(Region::new("custom"))

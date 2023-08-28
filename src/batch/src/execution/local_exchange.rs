@@ -84,7 +84,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use risingwave_common::monitor::connection::ConnectionMetrics;
     use risingwave_pb::batch_plan::{TaskId, TaskOutputId};
     use risingwave_pb::data::DataChunk;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -160,9 +159,7 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
         assert!(server_run.load(Ordering::SeqCst));
 
-        let client = ComputeClient::new(addr.into(), ConnectionMetrics::unused())
-            .await
-            .unwrap();
+        let client = ComputeClient::new(addr.into()).await.unwrap();
         let task_output_id = TaskOutputId {
             task_id: Some(TaskId::default()),
             ..Default::default()

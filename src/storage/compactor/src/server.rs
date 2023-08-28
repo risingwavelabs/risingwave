@@ -21,7 +21,7 @@ use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption,
 };
-use risingwave_common::monitor::connection::{ConnectionMetrics, TcpConfig};
+use risingwave_common::monitor::connection::TcpConfig;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -89,12 +89,8 @@ pub async fn compactor_serve(
     // Boot compactor
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
-    let connection_metrics = ConnectionMetrics::new(registry.clone());
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let object_metrics = Arc::new(ObjectStoreMetrics::new(
-        registry.clone(),
-        connection_metrics.clone(),
-    ));
+    let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
 
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
@@ -272,7 +268,6 @@ pub async fn compactor_serve(
                     monitored_tcp_incoming(
                         listen_addr,
                         "grpc-compactor-node-service",
-                        connection_metrics,
                         TcpConfig {
                             tcp_nodelay: false,
                             keepalive_duration: None,
