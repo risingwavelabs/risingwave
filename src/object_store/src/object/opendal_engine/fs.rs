@@ -24,7 +24,6 @@ impl OpendalObjectStore {
         // Create fs backend builder.
         let mut builder = Fs::default();
 
-        // Now fs engine is only used in CI, so we can hardcode root.
         builder.root(&root);
 
         let op: Operator = Operator::new(builder)?
