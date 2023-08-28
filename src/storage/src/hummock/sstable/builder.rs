@@ -28,7 +28,7 @@ use super::{
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
-use crate::hummock::sstable::FilterBuilder;
+use crate::hummock::sstable::{utils, FilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder, DEFAULT_BLOCK_SIZE};
 use crate::opts::StorageOpts;
@@ -266,6 +266,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
+            if value.is_delete() {
+                self.stale_key_count += 1;
+            }
             let table_id = full_key.user_key.table_id.table_id();
             is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
             if is_new_table {
@@ -293,7 +296,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
-                offset: self.writer.data_len() as u32,
+                offset: utils::checked_into_u32(self.writer.data_len()),
                 len: 0,
                 smallest_key: full_key.encode(),
                 uncompressed_size: 0,
@@ -409,7 +412,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             block_metas: self.block_metas,
             bloom_filter,
             estimated_size: 0,
-            key_count: self.total_key_count as u32,
+            key_count: utils::checked_into_u32(self.total_key_count),
             smallest_key,
             largest_key,
             version: VERSION,
@@ -417,9 +420,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             monotonic_tombstone_events: self.monotonic_deletes,
         };
 
-        // FIXME: just workaround
-        let encoded_size_u32 = u32::try_from(meta.encoded_size()).unwrap();
-        let meta_offset_u32 = u32::try_from(meta_offset).unwrap();
+        let encoded_size_u32 = utils::checked_into_u32(meta.encoded_size());
+        let meta_offset_u32 = utils::checked_into_u32(meta_offset);
         meta.estimated_size = encoded_size_u32.checked_add(meta_offset_u32).unwrap();
 
         // Expand the epoch of the whole sst by tombstone epoch
@@ -535,12 +537,19 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let block_meta = self.block_metas.last_mut().unwrap();
-        block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
+        block_meta.uncompressed_size =
+            utils::checked_into_u32(self.block_builder.uncompressed_block_size());
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
-        block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
+        let data_len = utils::checked_into_u32(self.writer.data_len());
+        block_meta.len = data_len.checked_sub(block_meta.offset).unwrap_or_else(|| {
+            panic!(
+                "data_len should >= meta_offset, found data_len={}, meta_offset={}",
+                data_len, block_meta.offset
+            )
+        });
         self.block_builder.clear();
         Ok(())
     }

@@ -35,12 +35,11 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
+    AddMutation, Dispatchers, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
@@ -225,6 +224,7 @@ pub enum Mutation {
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
@@ -412,6 +412,7 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
+                actor_new_dispatchers,
             } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -421,6 +422,17 @@ impl Mutation {
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
+                actor_new_dispatchers: actor_new_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Add {
                 adds,
@@ -493,6 +505,11 @@ impl Mutation {
                                 .collect(),
                         )
                     })
+                    .collect(),
+                actor_new_dispatchers: update
+                    .actor_new_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
             },
 
@@ -625,18 +642,14 @@ impl Watermark {
         new_col_idx: usize,
         on_err: impl Fn(ExprError),
     ) -> Option<Self> {
-        let Self {
-            col_idx,
-            data_type,
-            val,
-        } = self;
+        let Self { col_idx, val, .. } = self;
         let row = {
             let mut row = vec![None; col_idx + 1];
             row[col_idx] = Some(val);
             OwnedRow::new(row)
         };
         let val = expr.eval_row_infallible(&row, on_err).await?;
-        Some(Self::new(new_col_idx, data_type, val))
+        Some(Self::new(new_col_idx, expr.return_type(), val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the

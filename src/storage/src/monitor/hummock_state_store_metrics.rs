@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{
     AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec, GenericGauge,
@@ -22,13 +22,15 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, HistogramVec,
     IntGauge, Opts, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use tracing::warn;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
 /// `RocksDBStateStore` and `TikvStateStore`.
 /// In practice, keep in mind that this represents the whole Hummock utilization of
 /// a `RisingWave` instance. More granular utilization of per `materialization view`
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
     pub bloom_filter_true_negative_counts: GenericCounterVec<AtomicU64>,
     pub bloom_filter_check_counts: GenericCounterVec<AtomicU64>,
@@ -65,12 +67,15 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
-
-    registry: Registry,
 }
 
+pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: LazyLock<HummockStateStoreMetrics> =
+    LazyLock::new(|| HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl HummockStateStoreMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
+        // 10ms ~ max 2.7h
+        let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
@@ -91,7 +96,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_merge_sstable_counts",
             "Number of child iterators merged into one MergeIterator",
-            exponential_buckets(1.0, 2.0, 17).unwrap() // max 65536 times
+            vec![1.0, 10.0, 100.0, 1000.0, 10000.0]
         );
         let iter_merge_sstable_counts =
             register_histogram_vec_with_registry!(opts, &["table_id", "type"], registry).unwrap();
@@ -124,7 +129,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_remote_read_time_per_task",
             "Total time of operations which read from remote storage when enable prefetch",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
+            time_buckets.clone(),
         );
         let remote_read_time =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -132,7 +137,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_fetch_meta_duration",
             "Histogram of iterator fetch SST meta time that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+            time_buckets.clone(),
         );
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -163,7 +168,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
                 "state_store_write_batch_duration",
                 "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                exponential_buckets(0.0001, 2.0, 21).unwrap() // min 1ms ~ max 104s
+                time_buckets
             );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -171,7 +176,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_write_batch_size",
             "Total size of batched write that have been issued to state store",
-            exponential_buckets(256.0, 2.0, 25).unwrap() // min 256B ~ max 4GB
+            exponential_buckets(256.0, 16.0, 7).unwrap() // min 256B ~ max 4GB
         );
         let write_batch_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -179,7 +184,7 @@ impl HummockStateStoreMetrics {
         let merge_imm_task_counts = register_int_counter_vec_with_registry!(
             "state_store_merge_imm_task_counts",
             "Total number of merge imm task that have been finished",
-            &["table_id", "shard_id"],
+            &["table_id"],
             registry
         )
         .unwrap();
@@ -187,7 +192,7 @@ impl HummockStateStoreMetrics {
         let merge_imm_batch_memory_sz = register_int_counter_vec_with_registry!(
             "state_store_merge_imm_memory_sz",
             "Number of imm batches that have been merged by a merge task",
-            &["table_id", "shard_id"],
+            &["table_id"],
             registry
         )
         .unwrap();
@@ -265,17 +270,11 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
-            registry,
         }
     }
 
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
-    }
-
-    pub fn registry(&self) -> &Registry {
-        &self.registry
+        GLOBAL_HUMMOCK_STATE_STORE_METRICS.clone()
     }
 }
 
@@ -288,6 +287,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
+#[derive(Clone)]
 struct StateStoreCollector {
     memory_collector: Arc<dyn MemoryCollector>,
     descs: Vec<Desc>,
@@ -386,14 +386,12 @@ impl Collector for StateStoreCollector {
     }
 }
 
-use std::io::{Error, ErrorKind, Result};
-
-pub fn monitor_cache(
-    memory_collector: Arc<dyn MemoryCollector>,
-    registry: &Registry,
-) -> Result<()> {
-    let collector = StateStoreCollector::new(memory_collector);
-    registry
-        .register(Box::new(collector))
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
+    let collector = Box::new(StateStoreCollector::new(memory_collector));
+    if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
+        warn!(
+            "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
+            e
+        );
+    }
 }

@@ -193,9 +193,8 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle = tokio::spawn(async move {
-                    risingwave_compute::start(opts, prometheus::Registry::new()).await
-                });
+                let _compute_handle =
+                    tokio::spawn(async move { risingwave_compute::start(opts).await });
             }
             RisingWaveService::Frontend(mut opts) => {
                 opts.insert(0, "frontend-node".into());

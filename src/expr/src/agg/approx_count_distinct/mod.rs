@@ -13,15 +13,21 @@
 // limitations under the License.
 
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
+use std::ops::Range;
 
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
-use risingwave_expr_macro::aggregate;
+use risingwave_expr_macro::build_aggregate;
 
 use self::append_only::AppendOnlyBucket;
 use self::updatable::UpdatableBucket;
+use super::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use crate::Result;
 
 mod append_only;
@@ -37,18 +43,58 @@ const LOG_COUNT_BITS: u8 = 6;
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 /// Count the approximate number of unique non-null values.
-#[aggregate(
-    "approx_count_distinct(*) -> int64",
-    state = "UpdatableRegisters",
-    init_state = "UpdatableRegisters::new()"
-)]
-fn approx_count_distinct<'a>(
-    mut reg: UpdatableRegisters,
-    value: impl ScalarRef<'a>,
-    retract: bool,
-) -> Result<UpdatableRegisters> {
-    reg.update(value, retract)?;
-    Ok(reg)
+#[build_aggregate("approx_count_distinct(*) -> int64")]
+fn build(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
+    Ok(Box::new(ApproxCountDistinct::<UpdatableBucket> {
+        _mark: PhantomData,
+    }))
+}
+
+struct ApproxCountDistinct<B: Bucket> {
+    _mark: PhantomData<B>,
+}
+
+#[async_trait::async_trait]
+impl<B: Bucket> AggregateFunction for ApproxCountDistinct<B> {
+    fn return_type(&self) -> DataType {
+        DataType::Int64
+    }
+
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Any(Box::<UpdatableRegisters>::default())
+    }
+
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        let state = state.downcast_mut::<UpdatableRegisters>();
+        for (op, row) in input.rows() {
+            let retract = matches!(op, Op::Delete | Op::UpdateDelete);
+            if let Some(scalar) = row.datum_at(0) {
+                state.update(scalar, retract)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        let state = state.downcast_mut::<UpdatableRegisters>();
+        for (op, row) in input.rows_in(range) {
+            let retract = matches!(op, Op::Delete | Op::UpdateDelete);
+            if let Some(scalar) = row.datum_at(0) {
+                state.update(scalar, retract)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<UpdatableRegisters>();
+        Ok(Some(state.calculate_result().into()))
+    }
 }
 
 /// Approximates the count of non-null rows using a modified version of the `HyperLogLog` algorithm.
@@ -61,7 +107,7 @@ fn approx_count_distinct<'a>(
 /// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Registers<B: Bucket> {
     registers: Box<[B]>,
     // FIXME: Currently we only store the count result (i64) as the state of updatable register.
@@ -72,7 +118,7 @@ struct Registers<B: Bucket> {
 type UpdatableRegisters = Registers<UpdatableBucket>;
 type AppendOnlyRegisters = Registers<AppendOnlyBucket>;
 
-trait Bucket: Default + Clone + EstimateSize {
+trait Bucket: Debug + Default + Clone + EstimateSize + Send + Sync + 'static {
     /// Increments or decrements the bucket at `index` depending on the state of `retract`.
     /// Returns an Error if `index` is invalid or if inserting will cause an overflow in the bucket.
     fn update(&mut self, index: u8, retract: bool) -> Result<()>;
@@ -81,18 +127,22 @@ trait Bucket: Default + Clone + EstimateSize {
     fn max(&self) -> u8;
 }
 
-impl<B: Bucket> Registers<B> {
-    fn new() -> Self {
+impl<B: Bucket> AggStateDyn for Registers<B> {}
+
+impl<B: Bucket> Default for Registers<B> {
+    fn default() -> Self {
         Self {
             registers: (0..NUM_OF_REGISTERS).map(|_| B::default()).collect(),
             initial_count: 0,
         }
     }
+}
 
+impl<B: Bucket> Registers<B> {
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
-    fn update<'a>(&mut self, scalar_ref: impl ScalarRef<'a>, retract: bool) -> Result<()> {
-        let hash = self.get_hash(scalar_ref.into());
+    fn update(&mut self, scalar_ref: ScalarRefImpl<'_>, retract: bool) -> Result<()> {
+        let hash = self.get_hash(scalar_ref);
 
         let index = (hash as usize) & (NUM_OF_REGISTERS - 1); // Index is based on last few bits
         let count = self.count_hash(hash);
@@ -229,7 +279,7 @@ impl From<ScalarImpl> for UpdatableRegisters {
         // FIXME: restore state of updatable registers properly
         Self {
             initial_count: state.into_int64(),
-            ..Self::new()
+            ..Self::default()
         }
     }
 }
@@ -251,7 +301,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let mut agg = crate::agg::build(&AggCall::from_pretty(
+        let approx_count_distinct = crate::agg::build(&AggCall::from_pretty(
             "(approx_count_distinct:int8 $0:int4)",
         ))
         .unwrap();
@@ -259,12 +309,26 @@ mod tests {
         for range in [0..20000, 20000..30000, 30000..35000] {
             let col = I32Array::from_iter(range.clone()).into_ref();
             let input = StreamChunk::from(DataChunk::new(vec![col], range.len()));
-            agg.update(&input).now_or_never().unwrap().unwrap();
-            let count = agg.output().unwrap().unwrap().into_int64() as usize;
+            let mut state = approx_count_distinct.create_state();
+            approx_count_distinct
+                .update(&mut state, &input)
+                .now_or_never()
+                .unwrap()
+                .unwrap();
+            let count = approx_count_distinct
+                .get_result(&state)
+                .now_or_never()
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .into_int64() as usize;
             let actual = range.len();
             // FIXME: the error is too large?
             // assert!((actual as f32 * 0.9..actual as f32 * 1.1).contains(&(count as f32)));
-            assert!((actual as f32 * 0.5..actual as f32 * 1.5).contains(&(count as f32)));
+            let expected_range = actual as f32 * 0.5..actual as f32 * 1.5;
+            if !expected_range.contains(&(count as f32)) {
+                panic!("approximate count {} not in {:?}", count, expected_range);
+            }
         }
     }
 }

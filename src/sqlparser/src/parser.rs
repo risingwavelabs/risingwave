@@ -674,6 +674,15 @@ impl Parser {
                 Ok(Expr::Value(self.parse_value()?))
             }
             Token::Parameter(number) => self.parse_param(number),
+            Token::Pipe => {
+                let args = self.parse_comma_separated(Parser::parse_identifier)?;
+                self.expect_token(&Token::Pipe)?;
+                let body = self.parse_expr()?;
+                Ok(Expr::LambdaFunction {
+                    args,
+                    body: Box::new(body),
+                })
+            }
             Token::LParen => {
                 let expr =
                     if self.parse_keyword(Keyword::SELECT) || self.parse_keyword(Keyword::WITH) {
