@@ -100,5 +100,7 @@ LIMIT 1;
 echo "--- reading updated approx_percentile"
 ./risedev psql -c "SELECT * FROM hdr_distribution ORDER BY cumulative_frequency;"
 
-# ./risedev k
+echo "--- show N of buckets"
+./risedev psql -c "select * from hdr_distribution;"
 
+# ./risedev k
