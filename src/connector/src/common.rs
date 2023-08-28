@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Ok;
+use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use clickhouse::Client;
 use rdkafka::ClientConfig;
@@ -308,4 +309,35 @@ pub struct UpsertMessage<'a> {
     pub primary_key: Cow<'a, [u8]>,
     #[serde(borrow)]
     pub record: Cow<'a, [u8]>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct NatsCommon {
+    #[serde(rename = "nats.server_url")]
+    pub server_url: String,
+    #[serde(rename = "nats.subject")]
+    pub subject: String,
+}
+
+impl NatsCommon {
+    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+        let client = async_nats::connect(&self.server_url).await?;
+        let jetstream = async_nats::jetstream::new(client);
+        Ok(jetstream)
+    }
+
+    pub(crate) async fn build_or_get_stream(
+        &self,
+        jetstream: jetstream::Context,
+    ) -> anyhow::Result<jetstream::stream::Stream> {
+        let subject = self.subject.clone();
+        let stream = jetstream
+            .get_or_create_stream(jetstream::stream::Config {
+                // the subject default use name value
+                name: subject,
+                ..Default::default()
+            })
+            .await?;
+        Ok(stream)
+    }
 }

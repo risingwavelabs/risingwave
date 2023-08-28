@@ -21,6 +21,7 @@ pub mod kinesis;
 pub mod redis;
 pub mod remote;
 pub mod utils;
+pub mod nats;
 
 use std::collections::HashMap;
 
@@ -50,6 +51,7 @@ use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
+use crate::sink::nats::{NatsConfig, NatsSink,NATS_SINK};
 
 pub const DOWNSTREAM_SINK_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
@@ -263,6 +265,7 @@ pub enum SinkConfig {
     Iceberg(IcebergConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
+    Nats(NatsConfig),
 }
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -334,6 +337,7 @@ impl SinkConfig {
             ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
                 properties,
             )?)),
+            NATS_SINK => Ok(SinkConfig::Nats(NatsConfig::from_hashmap(properties)?)),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
@@ -353,6 +357,7 @@ pub enum SinkImpl {
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
     Iceberg(IcebergSink),
+    Nats(NatsSink),
 }
 
 impl SinkImpl {
@@ -365,6 +370,7 @@ impl SinkImpl {
             SinkImpl::Kinesis(_) => "kinesis",
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
+            SinkImpl::Nats(_) => "ntas",
         }
     }
 }
@@ -382,6 +388,7 @@ macro_rules! dispatch_sink {
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
+            SinkImpl::Nats($sink) => $body,
         }
     }};
 }
@@ -411,6 +418,7 @@ impl SinkImpl {
                 param.sink_type.is_append_only(),
             )?),
             SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param.schema())?),
+            SinkConfig::Nats(cfg) => SinkImpl::Nats(NatsSink::new(cfg, param.schema(), param.sink_type.is_append_only())),
         })
     }
 }
@@ -435,6 +443,8 @@ pub enum SinkError {
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
+    #[error("Nats error: {0}")]
+    Nats(String)
 }
 
 impl From<RpcError> for SinkError {
