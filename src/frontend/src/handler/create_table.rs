@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
-    USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
+    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -389,7 +389,6 @@ pub fn bind_pk_on_relation(
         .try_collect()?;
 
     // Add `_row_id` column if `pk_column_ids` is empty.
-    // TODO(siyuan): row_id column generated in here
     let row_id_index = pk_column_ids.is_empty().then(|| {
         let column = ColumnCatalog::row_id_column();
         let index = columns.len();
@@ -658,6 +657,7 @@ fn gen_table_plan_inner(
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
+        version: INITIAL_SOURCE_VERSION_ID,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));

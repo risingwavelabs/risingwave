@@ -25,11 +25,12 @@ use crate::binder::{
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
+    LogicalSource, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
+use crate::utils::Condition;
 
 const ERROR_WINDOW_SIZE_ARG: &str =
     "The size arg of window table function should be an interval literal.";
@@ -42,6 +43,7 @@ impl Planner {
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
             Relation::Join(join) => self.plan_join(*join),
+            Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
             Relation::TableFunction(tf) => self.plan_table_function(tf),
@@ -98,6 +100,35 @@ impl Planner {
         } else {
             Ok(LogicalJoin::create(left, right, join_type, on_clause))
         }
+    }
+
+    pub(super) fn plan_apply(&mut self, mut join: BoundJoin) -> Result<PlanRef> {
+        let join_type = join.join_type;
+        let on_clause = join.cond;
+        if on_clause.has_subquery() {
+            return Err(ErrorCode::NotImplemented(
+                "Subquery in join on condition is unsupported".into(),
+                None.into(),
+            )
+            .into());
+        }
+
+        let correlated_id = self.ctx.next_correlated_id();
+        let correlated_indices = join
+            .right
+            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+        let left = self.plan_relation(join.left)?;
+        let right = self.plan_relation(join.right)?;
+
+        Ok(LogicalApply::create(
+            left,
+            right,
+            join_type,
+            Condition::with_expr(on_clause),
+            correlated_id,
+            correlated_indices,
+            false,
+        ))
     }
 
     pub(super) fn plan_window_table_function(

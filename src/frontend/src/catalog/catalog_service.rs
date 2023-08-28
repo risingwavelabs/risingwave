@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -30,7 +30,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::DatabaseId;
+use super::{DatabaseId, TableId};
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -85,6 +85,8 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
     ) -> Result<()>;
+
+    async fn alter_source_column(&self, source: PbSource) -> Result<()>;
 
     async fn create_index(
         &self,
@@ -217,6 +219,11 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        let version = self.meta_client.alter_source_column(source).await?;
         self.wait_version(version).await
     }
 

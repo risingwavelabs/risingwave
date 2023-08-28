@@ -41,6 +41,10 @@ pub type CatalogVersion = u64;
 pub type TableVersionId = u64;
 /// The default version ID for a new table.
 pub const INITIAL_TABLE_VERSION_ID: u64 = 0;
+/// The version number of the per-source catalog.
+pub type SourceVersionId = u64;
+/// The default version ID for a new source.
+pub const INITIAL_SOURCE_VERSION_ID: u64 = 0;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";

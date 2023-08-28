@@ -627,18 +627,14 @@ impl Watermark {
         new_col_idx: usize,
         on_err: impl Fn(ExprError),
     ) -> Option<Self> {
-        let Self {
-            col_idx,
-            data_type,
-            val,
-        } = self;
+        let Self { col_idx, val, .. } = self;
         let row = {
             let mut row = vec![None; col_idx + 1];
             row[col_idx] = Some(val);
             OwnedRow::new(row)
         };
         let val = expr.eval_row_infallible(&row, on_err).await?;
-        Some(Self::new(new_col_idx, data_type, val))
+        Some(Self::new(new_col_idx, expr.return_type(), val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the
