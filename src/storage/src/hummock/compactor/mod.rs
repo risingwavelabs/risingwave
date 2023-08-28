@@ -17,6 +17,7 @@ mod compaction_filter;
 pub mod compaction_utils;
 use parking_lot::RwLock;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
 use risingwave_pb::hummock::{
     dispatch_compaction_task_request, ReportFullScanTaskRequest, ReportVacuumTaskRequest,
@@ -630,6 +631,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
 pub fn start_shared_compactor(
+    mut client: HummockManagerServiceClient<tonic::transport::Channel>,
     dispatch_task: dispatch_compaction_task_request::Task,
     id_to_table: HashMap<u32, Table>,
     output_ids: Vec<u64>,
@@ -677,6 +679,11 @@ pub fn start_shared_compactor(
                         }
                     )),
                  };
+
+                //  match client.repory_compaction_task(report_compaction_task_request).await{
+                //     Ok(_) => {},
+                //     Err(e) => tracing::warn!("Failed to report heartbeat"),
+                // }
             }
 
             _ = workload_collect_interval.tick() => {
@@ -733,13 +740,17 @@ pub fn start_shared_compactor(
                 .await;
                 shutdown.lock().unwrap().remove(&task_id);
                 running_task_count.fetch_sub(1, Ordering::SeqCst);
-                // todo: compactor pod send CompactTask via ReportCompactionTaskRequest
                 let report_compaction_task_request = ReportCompactionTaskRequest {
                     event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                         compact_task: Some(compact_task),
                         table_stats_change: to_prost_table_stats_map(table_stats),
                     })),
                 };
+
+                // match client.repory_compaction_task(report_compaction_task_request).await{
+                //     Ok(_) => {},
+                //     Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),
+                // }
             }
             dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
                 match Vacuum::handle_vacuum_task(
@@ -749,10 +760,13 @@ pub fn start_shared_compactor(
                 .await
                 {
                     Ok(_) => {
-                        // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
                         let report_vacuum_task_request = ReportVacuumTaskRequest {
                             vacuum_task: Some(vacuum_task),
                         };
+                        match client.report_vacuum_task(report_vacuum_task_request).await {
+                            Ok(_) => tracing::info!("Finished vacuuming SSTs"),
+                            Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Failed to vacuum task: {:#?}", e)
@@ -767,6 +781,13 @@ pub fn start_shared_compactor(
                             total_object_count,
                             total_object_size,
                         };
+                        match client
+                            .report_full_scan_task(report_full_scan_task_request)
+                            .await
+                        {
+                            Ok(_) => tracing::info!("Finished full scan SSTs"),
+                            Err(e) => tracing::warn!("Failed to report full scan task: {:#?}", e),
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Failed to iter object: {:#?}", e);
@@ -777,7 +798,6 @@ pub fn start_shared_compactor(
                 validate_ssts(validation_task, sstable_store.clone()).await;
             }
             dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
-                // todo(wcy): report VacuumTask via ReportCompactionTaskRequest rpc.
                 if let Some(tx) = shutdown
                     .lock()
                     .unwrap()

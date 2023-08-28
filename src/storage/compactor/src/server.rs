@@ -34,6 +34,7 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::parse_remote_object_store_with_config;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
+use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
     dispatch_compaction_task_request, CompactTask, DispatchCompactionTaskRequest,
 };
@@ -53,6 +54,7 @@ use risingwave_storage::monitor::{
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
@@ -284,6 +286,7 @@ pub async fn compactor_serve(
 }
 
 pub async fn shared_compactor_serve(
+    endpoint: &'static str,
     listen_addr: SocketAddr,
     opts: CompactorOpts,
     request: Request<DispatchCompactionTaskRequest>,
@@ -294,6 +297,9 @@ pub async fn shared_compactor_serve(
     state_store_url: &str,
     data_directory: &str,
 ) -> (JoinHandle<()>, Sender<()>) {
+    let channel = Channel::from_static(endpoint).connect().await.unwrap();
+
+    let client: HummockManagerServiceClient<Channel> = HummockManagerServiceClient::new(channel);
     type CompactorMemoryCollector = HummockMemoryCollector;
 
     let config = load_config(&opts.config_path, &opts);
@@ -405,8 +411,6 @@ pub async fn shared_compactor_serve(
     let await_tree_reg =
         await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
 
-    // The following will be passed via DispatchCompactionTaskRequest, so here is just a simulation.
-
     let DispatchCompactionTaskRequest {
         tables,
         output_object_ids,
@@ -420,6 +424,7 @@ pub async fn shared_compactor_serve(
 
     let (join_handle, shutdown_sender) =
         risingwave_storage::hummock::compactor::start_shared_compactor(
+            client,
             dispatch_task.unwrap(),
             id_to_tables,
             output_object_ids,
