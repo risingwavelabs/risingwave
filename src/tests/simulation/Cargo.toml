@@ -40,7 +40,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
-serde = "1.0.185"
+serde = "1.0.188"
 serde_derive = "1.0.183"
 serde_json = "1.0.105"
 sqllogictest = "0.15.2"
