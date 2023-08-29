@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericGauge};
 use prometheus::{
@@ -20,37 +20,41 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, IntGauge,
     Opts, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use tracing::warn;
+
+use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
 /// `RocksDBStateStore` and `TikvStateStore`.
 /// In practice, keep in mind that this represents the whole Hummock utilization of
 /// a `RisingWave` instance. More granular utilization of per `materialization view`
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
-    pub bloom_filter_true_negative_counts: RelabeledGenericCounterVec<AtomicU64>,
-    pub bloom_filter_check_counts: RelabeledGenericCounterVec<AtomicU64>,
+    pub bloom_filter_true_negative_counts: RelabeledCounterVec,
+    pub bloom_filter_check_counts: RelabeledCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
-    pub sst_store_block_request_counts: RelabeledGenericCounterVec<AtomicU64>,
-    pub iter_scan_key_counts: RelabeledGenericCounterVec<AtomicU64>,
-    pub get_shared_buffer_hit_counts: RelabeledGenericCounterVec<AtomicU64>,
+    pub sst_store_block_request_counts: RelabeledCounterVec,
+    pub iter_scan_key_counts: RelabeledCounterVec,
+    pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
     pub iter_fetch_meta_duration: RelabeledHistogramVec,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
-    pub read_req_bloom_filter_positive_counts: RelabeledGenericCounterVec<AtomicU64>,
-    pub read_req_positive_but_non_exist_counts: RelabeledGenericCounterVec<AtomicU64>,
-    pub read_req_check_bloom_filter_counts: RelabeledGenericCounterVec<AtomicU64>,
+    pub read_req_bloom_filter_positive_counts: RelabeledCounterVec,
+    pub read_req_positive_but_non_exist_counts: RelabeledCounterVec,
+    pub read_req_check_bloom_filter_counts: RelabeledCounterVec,
 
-    pub write_batch_tuple_counts: RelabeledGenericCounterVec<AtomicU64>,
+    pub write_batch_tuple_counts: RelabeledCounterVec,
     pub write_batch_duration: RelabeledHistogramVec,
     pub write_batch_size: RelabeledHistogramVec,
 
     // finished task counts
-    pub merge_imm_task_counts: RelabeledGenericCounterVec<AtomicU64>,
+    pub merge_imm_task_counts: RelabeledCounterVec,
     // merge imm ops
-    pub merge_imm_batch_memory_sz: RelabeledGenericCounterVec<AtomicU64>,
+    pub merge_imm_batch_memory_sz: RelabeledCounterVec,
 
     // spill task counts from unsealed
     pub spill_task_counts_from_unsealed: GenericCounter<AtomicU64>,
@@ -63,12 +67,20 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
+}
 
-    registry: Registry,
+pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
+
+pub fn global_hummock_state_store_metrics(storage_metric_level: u8) -> HummockStateStoreMetrics {
+    GLOBAL_HUMMOCK_STATE_STORE_METRICS
+        .get_or_init(|| {
+            HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
+        })
+        .clone()
 }
 
 impl HummockStateStoreMetrics {
-    pub fn new(registry: Registry, storage_metric_level: u8) -> Self {
+    pub fn new(registry: &Registry, storage_metric_level: u8) -> Self {
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
@@ -78,11 +90,10 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let bloom_filter_true_negative_counts =
-            RelabeledGenericCounterVec::with_default_metric_level(
-                bloom_filter_true_negative_counts,
-                storage_metric_level,
-            );
+        let bloom_filter_true_negative_counts = RelabeledCounterVec::with_default_metric_level(
+            bloom_filter_true_negative_counts,
+            storage_metric_level,
+        );
 
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_check_counts",
@@ -91,7 +102,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let bloom_filter_check_counts = RelabeledGenericCounterVec::with_default_metric_level(
+        let bloom_filter_check_counts = RelabeledCounterVec::with_default_metric_level(
             bloom_filter_check_counts,
             storage_metric_level,
         );
@@ -117,7 +128,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let sst_store_block_request_counts = RelabeledGenericCounterVec::with_metric_level(
+        let sst_store_block_request_counts = RelabeledCounterVec::with_metric_level(
             1,
             sst_store_block_request_counts,
             storage_metric_level,
@@ -130,11 +141,8 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let iter_scan_key_counts = RelabeledGenericCounterVec::with_metric_level(
-            1,
-            iter_scan_key_counts,
-            storage_metric_level,
-        );
+        let iter_scan_key_counts =
+            RelabeledCounterVec::with_metric_level(1, iter_scan_key_counts, storage_metric_level);
 
         let get_shared_buffer_hit_counts = register_int_counter_vec_with_registry!(
             "state_store_get_shared_buffer_hit_counts",
@@ -143,7 +151,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let get_shared_buffer_hit_counts = RelabeledGenericCounterVec::with_default_metric_level(
+        let get_shared_buffer_hit_counts = RelabeledCounterVec::with_default_metric_level(
             get_shared_buffer_hit_counts,
             storage_metric_level,
         );
@@ -195,7 +203,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let write_batch_tuple_counts = RelabeledGenericCounterVec::with_default_metric_level(
+        let write_batch_tuple_counts = RelabeledCounterVec::with_default_metric_level(
             write_batch_tuple_counts,
             storage_metric_level,
         );
@@ -231,7 +239,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let merge_imm_task_counts = RelabeledGenericCounterVec::with_default_metric_level(
+        let merge_imm_task_counts = RelabeledCounterVec::with_default_metric_level(
             merge_imm_task_counts,
             storage_metric_level,
         );
@@ -243,7 +251,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let merge_imm_batch_memory_sz = RelabeledGenericCounterVec::with_default_metric_level(
+        let merge_imm_batch_memory_sz = RelabeledCounterVec::with_default_metric_level(
             merge_imm_batch_memory_sz,
             storage_metric_level,
         );
@@ -255,10 +263,8 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let spill_task_counts = RelabeledGenericCounterVec::with_default_metric_level(
-            spill_task_counts,
-            storage_metric_level,
-        );
+        let spill_task_counts =
+            RelabeledCounterVec::with_default_metric_level(spill_task_counts, storage_metric_level);
 
         let spill_task_size = register_int_counter_vec_with_registry!(
             "state_store_spill_task_size",
@@ -267,10 +273,8 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let spill_task_size = RelabeledGenericCounterVec::with_default_metric_level(
-            spill_task_size,
-            storage_metric_level,
-        );
+        let spill_task_size =
+            RelabeledCounterVec::with_default_metric_level(spill_task_size, storage_metric_level);
 
         let uploader_uploading_task_size = GenericGauge::new(
             "state_store_uploader_uploading_task_size",
@@ -288,7 +292,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let read_req_bloom_filter_positive_counts = RelabeledGenericCounterVec::with_metric_level(
+        let read_req_bloom_filter_positive_counts = RelabeledCounterVec::with_metric_level(
             2,
             read_req_bloom_filter_positive_counts,
             storage_metric_level,
@@ -301,7 +305,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let read_req_positive_but_non_exist_counts = RelabeledGenericCounterVec::with_metric_level(
+        let read_req_positive_but_non_exist_counts = RelabeledCounterVec::with_metric_level(
             2,
             read_req_positive_but_non_exist_counts,
             storage_metric_level,
@@ -314,7 +318,7 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let read_req_check_bloom_filter_counts = RelabeledGenericCounterVec::with_metric_level(
+        let read_req_check_bloom_filter_counts = RelabeledCounterVec::with_metric_level(
             2,
             read_req_check_bloom_filter_counts,
             storage_metric_level,
@@ -344,17 +348,11 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
-            registry,
         }
     }
 
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new(), 0)
-    }
-
-    pub fn registry(&self) -> &Registry {
-        &self.registry
+        global_hummock_state_store_metrics(0)
     }
 }
 
@@ -367,6 +365,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
+#[derive(Clone)]
 struct StateStoreCollector {
     memory_collector: Arc<dyn MemoryCollector>,
     descs: Vec<Desc>,
@@ -465,16 +464,12 @@ impl Collector for StateStoreCollector {
     }
 }
 
-use std::io::{Error, ErrorKind, Result};
-
-use crate::monitor::relabeled_metric::{RelabeledGenericCounterVec, RelabeledHistogramVec};
-
-pub fn monitor_cache(
-    memory_collector: Arc<dyn MemoryCollector>,
-    registry: &Registry,
-) -> Result<()> {
-    let collector = StateStoreCollector::new(memory_collector);
-    registry
-        .register(Box::new(collector))
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
+    let collector = Box::new(StateStoreCollector::new(memory_collector));
+    if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
+        warn!(
+            "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
+            e
+        );
+    }
 }

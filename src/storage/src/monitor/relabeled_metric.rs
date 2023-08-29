@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{GenericCounter, GenericCounterVec};
+use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{Histogram, HistogramVec};
 
 pub const DEFAULT_STORAGE_METRIC_LEVEL: u8 = 4;
@@ -28,7 +28,7 @@ pub const DEFAULT_STORAGE_METRIC_LEVEL: u8 = 4;
 /// than specializing them one by one. However, that's undoable because prometheus crate doesn't
 /// export `MetricVecBuilder` implementation like `HistogramVecBuilder`.
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RelabeledHistogramVec {
     relabel_threshold: u8,
     metric_level: u8,
@@ -60,21 +60,24 @@ impl RelabeledHistogramVec {
     }
 }
 
-#[derive(Debug)]
-pub struct RelabeledGenericCounterVec<T: prometheus::core::Atomic> {
+#[derive(Clone, Debug)]
+pub struct RelabeledCounterVec {
     relabel_threshold: u8,
     metric_level: u8,
-    metric: GenericCounterVec<T>,
+    metric: GenericCounterVec<AtomicU64>,
 }
 
-impl<T: prometheus::core::Atomic> RelabeledGenericCounterVec<T> {
-    pub fn with_default_metric_level(metric: GenericCounterVec<T>, relabel_threshold: u8) -> Self {
+impl RelabeledCounterVec {
+    pub fn with_default_metric_level(
+        metric: GenericCounterVec<AtomicU64>,
+        relabel_threshold: u8,
+    ) -> Self {
         Self::with_metric_level(DEFAULT_STORAGE_METRIC_LEVEL, metric, relabel_threshold)
     }
 
     pub fn with_metric_level(
         metric_level: u8,
-        metric: GenericCounterVec<T>,
+        metric: GenericCounterVec<AtomicU64>,
         relabel_threshold: u8,
     ) -> Self {
         Self {
@@ -84,7 +87,7 @@ impl<T: prometheus::core::Atomic> RelabeledGenericCounterVec<T> {
         }
     }
 
-    pub fn with_label_values(&self, vals: &[&str]) -> GenericCounter<T> {
+    pub fn with_label_values(&self, vals: &[&str]) -> GenericCounter<AtomicU64> {
         if self.metric_level > self.relabel_threshold {
             return self.metric.with_label_values(&vec![""; vals.len()]);
         }

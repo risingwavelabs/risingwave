@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::AtomicU64;
+use std::sync::OnceLock;
+
 use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-use crate::monitor::relabeled_metric::{RelabeledGenericCounterVec, RelabeledHistogramVec};
+use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
     pub get_duration: RelabeledHistogramVec,
     pub get_key_size: RelabeledHistogramVec,
@@ -33,14 +35,24 @@ pub struct MonitoredStorageMetrics {
     pub iter_scan_duration: RelabeledHistogramVec,
     pub may_exist_duration: RelabeledHistogramVec,
 
-    pub iter_in_process_counts: RelabeledGenericCounterVec<AtomicU64>,
+    pub iter_in_process_counts: RelabeledCounterVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
 }
 
+pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock::new();
+
+pub fn global_storage_metrics(storage_metric_level: u8) -> MonitoredStorageMetrics {
+    GLOBAL_STORAGE_METRICS
+        .get_or_init(|| {
+            MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
+        })
+        .clone()
+}
+
 impl MonitoredStorageMetrics {
-    pub fn new(registry: Registry, storage_metric_level: u8) -> Self {
+    pub fn new(registry: &Registry, storage_metric_level: u8) -> Self {
         // 256B ~ max 4GB
         let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
         // 10ms ~ max 2.7h
@@ -130,7 +142,7 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
-        let iter_in_process_counts = RelabeledGenericCounterVec::with_default_metric_level(
+        let iter_in_process_counts = RelabeledCounterVec::with_default_metric_level(
             iter_in_process_counts,
             storage_metric_level,
         );
@@ -176,8 +188,7 @@ impl MonitoredStorageMetrics {
         }
     }
 
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new(), 0)
+        global_storage_metrics(0)
     }
 }

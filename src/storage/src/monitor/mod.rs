@@ -28,7 +28,9 @@ pub use compactor_metrics::*;
 
 mod local_metrics;
 pub use local_metrics::*;
-pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+pub use risingwave_object_store::object::object_metrics::{
+    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+};
 
 mod relabeled_metric;
 
