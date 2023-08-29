@@ -17,6 +17,7 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -423,6 +424,27 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+pub enum StorageMetricLevel {
+    #[default]
+    Disabled = 0,
+    Critical = 1,
+    Info = 2,
+    Debug = 3,
+}
+
+impl PartialEq<Self> for StorageMetricLevel {
+    fn eq(&self, other: &Self) -> bool {
+        (*self as u8).eq(&(*other as u8))
+    }
+}
+
+impl PartialOrd for StorageMetricLevel {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (*self as u8).partial_cmp(&(*other as u8))
+    }
+}
+
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StorageConfig {
@@ -542,7 +564,7 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
 
     #[serde(default = "default::storage::storage_metric_level")]
-    pub storage_metric_level: u8,
+    pub storage_metric_level: StorageMetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -896,6 +918,7 @@ pub mod default {
     }
 
     pub mod storage {
+        use crate::config::StorageMetricLevel;
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -1002,8 +1025,8 @@ pub mod default {
             512 * 1024 * 1024 // 512m
         }
 
-        pub fn storage_metric_level() -> u8 {
-            4
+        pub fn storage_metric_level() -> StorageMetricLevel {
+            StorageMetricLevel::Info
         }
     }
 
