@@ -55,6 +55,7 @@ message ReportTaxiActionResponse {}
 
 message GetTaxiAmountRequest {
     int64 DOLocationID = 1;
+    int64 PULocationID = 2;
 }
 
 message GetTaxiAmountResponse {

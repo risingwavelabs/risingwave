@@ -56,8 +56,8 @@ impl Server for FeatureStoreServer {
         &self,
         request: tonic::Request<GetTaxiAmountRequest>,
     ) -> Result<tonic::Response<GetTaxiAmountResponse>, tonic::Status> {
-        let do_location_id = request.into_inner().do_location_id;
-        let fare_amount = self.get_taxi_amount(do_location_id.clone()).await.unwrap();
+        let do_location_id = request.into_inner();
+        let fare_amount = self.get_taxi_amount(do_location_id.do_location_id.clone(),do_location_id.pu_location_id.clone()).await.unwrap();
         Ok(Response::new(GetTaxiAmountResponse {
             fare_amount: fare_amount as f64,
         }))

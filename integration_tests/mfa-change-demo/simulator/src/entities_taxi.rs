@@ -117,6 +117,7 @@ impl TaxiFeature {
         let response = client
             .get_taxi_amount(GetTaxiAmountRequest {
                 do_location_id: self.dolocation_id,
+                pu_location_id: self.pulocation_id,
             })
             .await
             .unwrap();

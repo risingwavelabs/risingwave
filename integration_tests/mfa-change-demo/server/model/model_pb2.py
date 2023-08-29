@@ -13,7 +13,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bmodel.proto\x12\x05model\"\x11\n\x0fTrainingRequest\"\x12\n\x10TrainingResponse\"*\n\x10GetAmountRequest\x12\x16\n\x0e\x64o_location_id\x18\x01 \x01(\x03\"#\n\x11GetAmountResponse\x12\x0e\n\x06\x61mount\x18\x01 \x01(\x02\x32\x88\x01\n\x05Model\x12@\n\tGetAmount\x12\x17.model.GetAmountRequest\x1a\x18.model.GetAmountResponse\"\x00\x12=\n\x08Training\x12\x16.model.TrainingRequest\x1a\x17.model.TrainingResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bmodel.proto\x12\x05model\"\x11\n\x0fTrainingRequest\"\x12\n\x10TrainingResponse\"B\n\x10GetAmountRequest\x12\x16\n\x0e\x64o_location_id\x18\x01 \x01(\x03\x12\x16\n\x0epu_location_id\x18\x02 \x01(\x03\"#\n\x11GetAmountResponse\x12\x0e\n\x06\x61mount\x18\x01 \x01(\x02\x32\x88\x01\n\x05Model\x12@\n\tGetAmount\x12\x17.model.GetAmountRequest\x1a\x18.model.GetAmountResponse\"\x00\x12=\n\x08Training\x12\x16.model.TrainingRequest\x1a\x17.model.TrainingResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -26,9 +26,9 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_TRAININGRESPONSE']._serialized_start=41
   _globals['_TRAININGRESPONSE']._serialized_end=59
   _globals['_GETAMOUNTREQUEST']._serialized_start=61
-  _globals['_GETAMOUNTREQUEST']._serialized_end=103
-  _globals['_GETAMOUNTRESPONSE']._serialized_start=105
-  _globals['_GETAMOUNTRESPONSE']._serialized_end=140
-  _globals['_MODEL']._serialized_start=143
-  _globals['_MODEL']._serialized_end=279
+  _globals['_GETAMOUNTREQUEST']._serialized_end=127
+  _globals['_GETAMOUNTRESPONSE']._serialized_start=129
+  _globals['_GETAMOUNTRESPONSE']._serialized_end=164
+  _globals['_MODEL']._serialized_start=167
+  _globals['_MODEL']._serialized_end=303
 # @@protoc_insertion_point(module_scope)

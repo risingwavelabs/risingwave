@@ -8,6 +8,8 @@ pub struct TrainingResponse {
 pub struct GetAmountRequest {
     #[prost(int64, tag="1")]
     pub do_location_id: i64,
+    #[prost(int64, tag="2")]
+    pub pu_location_id: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetAmountResponse {

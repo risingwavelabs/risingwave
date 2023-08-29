@@ -27,14 +27,15 @@ class TrainingModelService(ModelServicer):
         self.model = GradientBoostingRegressor()
         self.conn = psycopg.connect("dbname=dev user=root host=frontend-node-0 port=4566")
     def Training(self, request, context):
-        print(f"training!")
+        print(f"get data for training!")
         try:
             with self.conn.cursor() as cur:
                 cur.execute(sql.GET_BATCH_FOR_TRAINING)
                 results = cur.fetchall()
                 df = pd.DataFrame(list(results))
                 train_y = df.loc[:, 0]
-                train_x = df.drop(columns=[0,1,2])
+                train_x = df.drop(columns=[0,1,2,14,15])
+                print(f"training!")
                 self.model.fit(train_x, train_y)
                 return TrainingResponse()
         except Exception as e:
@@ -45,12 +46,18 @@ class TrainingModelService(ModelServicer):
 
     def GetAmount(self, request, context):
         do_location_id = request.do_location_id
+        pu_location_id = request.pu_location_id
         try:
             with self.conn.cursor() as cur:
-                cur.execute(sql.GET_FEATURE % do_location_id)
+                cur.execute(sql.GET_FEATURE_DO_LOCATION % do_location_id)
                 results = cur.fetchall()
                 df = pd.DataFrame(list(results))
-                train_x = df.drop(columns=[0,1])
+                train_x1 = df.drop(columns=[0,1])
+                cur.execute(sql.GET_FEATURE_PU_LOCATION % pu_location_id)
+                results = cur.fetchall()
+                df = pd.DataFrame(list(results))
+                train_x2 = df.drop(columns=[0,1])
+                train_x = pd.concat([train_x1, train_x2], axis=1)
                 result = self.model.predict(train_x)
                 return GetAmountResponse(amount = result)
         except Exception as e:
