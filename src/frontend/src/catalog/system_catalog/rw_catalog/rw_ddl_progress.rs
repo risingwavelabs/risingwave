@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::result;
-
 use itertools::Itertools;
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
@@ -22,7 +20,6 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::Epoch;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
-use crate::catalog::TableId;
 
 pub const RW_DDL_PROGRESS: BuiltinTable = BuiltinTable {
     name: "rw_ddl_progress",
@@ -52,7 +49,7 @@ impl SysCatalogReaderImpl {
             .map(|s| {
                 let initialized_at = tables
                     .get(&(s.id as u32))
-                    .and_then(|table| table.initialized_at_epoch.map(|e| Epoch::from(e)));
+                    .and_then(|table| table.initialized_at_epoch.map(Epoch::from));
 
                 OwnedRow::new(vec![
                     Some(ScalarImpl::Int64(s.id as i64)),

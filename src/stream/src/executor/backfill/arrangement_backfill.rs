@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use either::Either;
 use futures::stream::select_with_strategy;
@@ -31,7 +30,6 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
-use tokio::time;
 
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
