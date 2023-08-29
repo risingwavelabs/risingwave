@@ -97,11 +97,12 @@ FROM hdr_histogram;
 CREATE MATERIALIZED VIEW hdr_distribution AS
 SELECT
     (sign*(1.0+mantissa/pow(10.0, 4))*pow(10.0,exponent))::int AS bucket,
-        (sum(frequency)
-            OVER (PARTITION BY NULL
-          ORDER BY (sign, exponent, mantissa)
-          ROWS UNBOUNDED PRECEDING)
-            ) AS cumulative_frequency
+    -- This is window aggregation used to compute the cumulative frequency.
+    (sum(frequency)
+        OVER (PARTITION BY NULL
+      ORDER BY (sign, exponent, mantissa)
+      ROWS UNBOUNDED PRECEDING)
+        ) AS cumulative_frequency
 FROM hdr_histogram g
 GROUP BY sign, exponent, mantissa, frequency
 ORDER BY cumulative_frequency;
