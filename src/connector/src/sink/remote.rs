@@ -40,6 +40,7 @@ use tonic::Status;
 use tracing::{error, warn};
 
 use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::iceberg::REMOTE_ICEBERG_SINK;
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
 use crate::sink::SinkError::Remote;
 use crate::sink::{
@@ -48,7 +49,8 @@ use crate::sink::{
 };
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 4] = ["jdbc", "iceberg", "deltalake", "elasticsearch-7"];
+pub const VALID_REMOTE_SINKS: [&str; 4] =
+    ["jdbc", REMOTE_ICEBERG_SINK, "deltalake", "elasticsearch-7"];
 
 pub fn is_valid_remote_sink(connector_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&connector_type)

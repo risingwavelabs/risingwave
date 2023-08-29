@@ -67,6 +67,15 @@ message DropSourceResponse {
   uint64 version = 2;
 }
 
+message AlterSourceRequest {
+  catalog.Source source = 1;
+}
+
+message AlterSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
@@ -316,6 +325,7 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
+  rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

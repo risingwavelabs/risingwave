@@ -112,7 +112,11 @@ impl WithOptions {
 
 #[inline(always)]
 fn is_kafka_connector(with_options: &WithOptions) -> bool {
-    let Some(connector) = with_options.inner().get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase()) else {
+    let Some(connector) = with_options
+        .inner()
+        .get(UPSTREAM_SOURCE_KEY)
+        .map(|s| s.to_lowercase())
+    else {
         return false;
     };
     connector == KAFKA_CONNECTOR

@@ -42,6 +42,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private final boolean pubAutoCreate;
 
+    private static final String AWS_RDS_HOST = "rds.amazonaws.com";
+    private final boolean isAwsRds;
+
     public PostgresValidator(Map<String, String> userProps, TableSchema tableSchema)
             throws SQLException {
         this.userProps = userProps;
@@ -56,6 +59,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
 
+        this.isAwsRds = dbHost.contains(AWS_RDS_HOST);
         this.dbName = dbName;
         this.user = user;
         this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
@@ -203,53 +207,84 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private void validatePrivileges() throws SQLException {
         boolean isSuperUser = false;
-
-        try (var stmt =
-                jdbcConnection.prepareStatement(
-                        ValidatorUtils.getSql("postgres.superuser.check"))) {
-            stmt.setString(1, this.user);
-            var res = stmt.executeQuery();
-            while (res.next()) {
-                isSuperUser = res.getBoolean(1);
-            }
-        }
-
-        // bypass check when it is a superuser
-        if (!isSuperUser) {
-            // check whether user is superuser or replication role
+        if (this.isAwsRds) {
+            // check privileges for aws rds postgres
+            boolean hasReplicationRole;
             try (var stmt =
-                    jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.role.check"))) {
+                    jdbcConnection.prepareStatement(
+                            ValidatorUtils.getSql("postgres.rds.role.check"))) {
+                stmt.setString(1, this.user);
+                var res = stmt.executeQuery();
+                var hashSet = new HashSet<String>();
+                while (res.next()) {
+                    // check rds_superuser role or rds_replication role is granted
+                    var memberof = res.getArray("memberof");
+                    if (memberof != null) {
+                        var members = (String[]) memberof.getArray();
+                        hashSet.addAll(Arrays.asList(members));
+                    }
+                    LOG.info("rds memberof: {}", hashSet);
+                }
+                isSuperUser = hashSet.contains("rds_superuser");
+                hasReplicationRole = hashSet.contains("rds_replication");
+            }
+
+            if (!isSuperUser && !hasReplicationRole) {
+                throw ValidatorUtils.invalidArgument(
+                        "Postgres user must be superuser or replication role to start walsender.");
+            }
+        } else {
+            // check privileges for standalone postgres
+            try (var stmt =
+                    jdbcConnection.prepareStatement(
+                            ValidatorUtils.getSql("postgres.superuser.check"))) {
                 stmt.setString(1, this.user);
                 var res = stmt.executeQuery();
                 while (res.next()) {
-                    if (!res.getBoolean(1)) {
-                        throw ValidatorUtils.invalidArgument(
-                                "Postgres user must be superuser or replication role to start walsender.");
-                    }
+                    isSuperUser = res.getBoolean(1);
                 }
             }
-            // check whether user has select privilege on table for initial snapshot
-            try (var stmt =
-                    jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.table_privilege.check"))) {
-                stmt.setString(1, this.schemaName);
-                stmt.setString(2, this.tableName);
-                stmt.setString(3, this.user);
-                var res = stmt.executeQuery();
-                while (res.next()) {
-                    if (!res.getBoolean(1)) {
-                        throw ValidatorUtils.invalidArgument(
-                                "Postgres user must have select privilege on table '"
-                                        + schemaName
-                                        + "."
-                                        + tableName
-                                        + "'");
+            if (!isSuperUser) {
+                // check whether user has replication role
+                try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("postgres.role.check"))) {
+                    stmt.setString(1, this.user);
+                    var res = stmt.executeQuery();
+                    while (res.next()) {
+                        if (!res.getBoolean(1)) {
+                            throw ValidatorUtils.invalidArgument(
+                                    "Postgres user must be superuser or replication role to start walsender.");
+                        }
                     }
                 }
             }
         }
 
+        // check whether select privilege on table for snapshot read
+        validateTablePrivileges();
         validatePublicationConfig(isSuperUser);
+    }
+
+    private void validateTablePrivileges() throws SQLException {
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
+            stmt.setString(1, this.schemaName);
+            stmt.setString(2, this.tableName);
+            stmt.setString(3, this.user);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                if (!res.getBoolean(1)) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Postgres user must have select privilege on table '"
+                                    + schemaName
+                                    + "."
+                                    + tableName
+                                    + "'");
+                }
+            }
+        }
     }
 
     /* Check required privilege to create/alter a publication */

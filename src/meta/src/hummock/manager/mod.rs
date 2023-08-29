@@ -65,7 +65,9 @@ use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
+use crate::hummock::compaction::{
+    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, TombstoneCompactionSelector,
+};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
@@ -98,7 +100,7 @@ mod worker;
 use compaction::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 32;
+const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -1959,6 +1961,7 @@ where
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
+                TombstoneCompactionTrigger,
 
                 FullGc,
             }
@@ -2028,6 +2031,19 @@ where
             let full_gc_trigger =
                 IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
 
+            let mut tombstone_reclaim_trigger_interval =
+                tokio::time::interval(Duration::from_secs(
+                    hummock_manager
+                        .env
+                        .opts
+                        .periodic_tombstone_reclaim_compaction_interval_sec,
+                ));
+            tombstone_reclaim_trigger_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tombstone_reclaim_trigger_interval.reset();
+            let tombstone_reclaim_trigger = IntervalStream::new(tombstone_reclaim_trigger_interval)
+                .map(|_| HummockTimerEvent::TombstoneCompactionTrigger);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
@@ -2036,6 +2052,7 @@ where
                 Box::pin(space_reclaim_trigger),
                 Box::pin(ttl_reclaim_trigger),
                 Box::pin(full_gc_trigger),
+                Box::pin(tombstone_reclaim_trigger),
             ];
 
             let periodic_check_split_group_interval_sec = hummock_manager
@@ -2222,6 +2239,19 @@ where
                                         .await;
                                 }
 
+                                HummockTimerEvent::TombstoneCompactionTrigger => {
+                                    // Disable periodic trigger for compaction_deterministic_test.
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager
+                                        .on_handle_trigger_multi_group(
+                                            compact_task::TaskType::Tombstone,
+                                        )
+                                        .await;
+                                }
+
                                 HummockTimerEvent::FullGc => {
                                     if hummock_manager
                                         .start_full_gc(Duration::from_secs(3600))
@@ -2325,7 +2355,7 @@ where
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
+            if entry.len() > HISTORY_TABLE_INFO_STATISTIC_TIME {
                 entry.pop_front();
             }
         }
@@ -2347,6 +2377,8 @@ where
             1,
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
+        let created_tables = self.catalog_manager.get_created_table_ids().await;
+        let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
@@ -2354,16 +2386,20 @@ where
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 continue;
             }
 
             for (table_id, table_size) in &group.table_statistic {
+                if !created_tables.contains(table_id) {
+                    continue;
+                }
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
-                    if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
+                    if history.len() >= window_size {
                         is_high_write_throughput = history.iter().all(|throughput| {
                             *throughput / checkpoint_secs
                                 > self.env.opts.table_write_throughput_threshold
@@ -2409,11 +2445,8 @@ where
                     )
                     .await;
                 match ret {
-                    Ok(_) => {
-                        tracing::info!(
-                        "move state table [{}] from group-{} success, Allow split by table: false",
-                        table_id, parent_group_id
-                    );
+                    Ok(new_group_id) => {
+                        tracing::info!("move state table [{}] from group-{} to group-{} success, Allow split by table: false", table_id, parent_group_id, new_group_id);
                         return;
                     }
                     Err(e) => {
@@ -2823,6 +2856,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
     compaction_selectors.insert(
         compact_task::TaskType::Ttl,
         Box::<TtlCompactionSelector>::default(),
+    );
+    compaction_selectors.insert(
+        compact_task::TaskType::Tombstone,
+        Box::<TombstoneCompactionSelector>::default(),
     );
     compaction_selectors
 }

@@ -1111,19 +1111,22 @@ impl Binder {
 
     fn rewrite_format_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         let Some((format_expr, args)) = inputs.split_first() else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes at least 1 arguments (0 given)".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into());
         };
         let ExprImpl::Literal(expr_literal) = format_expr else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes a literal string as the first argument".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
         };
         let Some(ScalarImpl::Utf8(format_str)) = expr_literal.get_data() else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes a literal string as the first argument".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
         };
         let formatter = Formatter::parse(format_str)
             .map_err(|err| -> RwError { ErrorCode::BindError(err.to_string()).into() })?;
