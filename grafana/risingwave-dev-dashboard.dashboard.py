@@ -1444,7 +1444,7 @@ def section_streaming_errors(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Source Errors by Type",
+                    "Source Reader Errors by Type",
                     "",
                     [
                         panels.target(
