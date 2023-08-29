@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::ops::Bound;
 
 use bytes::Bytes;
@@ -316,18 +317,23 @@ impl<S> Drop for TracedStateStore<S> {
     }
 }
 
-pub struct TracedStateStoreIter<S> {
+pub struct TracedStateStoreIter<'s, S: 's> {
     inner: S,
     span: MayTraceSpan,
+    _phantom: PhantomData<&'s ()>,
 }
 
-impl<S> TracedStateStoreIter<S> {
+impl<'s, S: 's> TracedStateStoreIter<'s, S> {
     fn new(inner: S, span: MayTraceSpan) -> Self {
-        TracedStateStoreIter { inner, span }
+        TracedStateStoreIter {
+            inner,
+            span,
+            _phantom: PhantomData,
+        }
     }
 }
 
-impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
+impl<'s, S: StateStoreIterItemStream> TracedStateStoreIter<'s, S> {
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
     async fn into_stream_inner(self) {
         let inner = self.inner;
