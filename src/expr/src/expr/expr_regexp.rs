@@ -32,16 +32,20 @@ use super::{build_from_prost as expr_build_from_prost, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
-pub struct RegexpContext(pub Regex);
+pub struct RegexpContext {
+    pub regex: Regex,
+    pub global: bool,
+}
 
 impl RegexpContext {
     pub fn new(pattern: &str, flags: &str) -> Result<Self> {
         let options = RegexpOptions::from_str(flags)?;
-        Ok(Self(
-            RegexBuilder::new(pattern)
+        Ok(Self {
+            regex: RegexBuilder::new(pattern)
                 .case_insensitive(options.case_insensitive)
                 .build()?,
-        ))
+            global: options.global,
+        })
     }
 
     pub fn from_pattern(pattern: Datum) -> Result<Self> {
@@ -72,6 +76,8 @@ impl RegexpContext {
 struct RegexpOptions {
     /// `c` and `i`
     case_insensitive: bool,
+    /// `g`
+    global: bool,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -79,6 +85,7 @@ impl Default for RegexpOptions {
     fn default() -> Self {
         Self {
             case_insensitive: false,
+            global: false,
         }
     }
 }
@@ -94,8 +101,8 @@ impl FromStr for RegexpOptions {
                 'c' => opts.case_insensitive = false,
                 // Case insensitive matching here
                 'i' => opts.case_insensitive = true,
-                // Not yet support
-                'g' => {}
+                // Global matching here
+                'g' => opts.global = true,
                 _ => {
                     bail!("invalid regular expression option: \"{c}\"");
                 }
@@ -195,10 +202,10 @@ impl RegexpMatchExpression {
     fn match_one(&self, text: Option<&str>) -> Option<ListValue> {
         // If there are multiple captures, then the first one is the whole match, and should be
         // ignored in PostgreSQL's behavior.
-        let skip_flag = self.ctx.0.captures_len() > 1;
+        let skip_flag = self.ctx.regex.captures_len() > 1;
 
         if let Some(text) = text {
-            if let Some(capture) = self.ctx.0.captures(text) {
+            if let Some(capture) = self.ctx.regex.captures(text) {
                 let list = capture
                     .iter()
                     .skip(if skip_flag { 1 } else { 0 })
@@ -258,6 +265,7 @@ pub struct RegexpReplaceExpression {
     /// The source to be matched and replaced
     pub source: Box<dyn Expression>,
     /// The regex context, used to match the given pattern
+    /// Contains `flag` relevant information, now we support `icg` flag options
     pub ctx: RegexpContext,
     /// The replacement string
     pub replacement: String,
@@ -269,8 +277,6 @@ pub struct RegexpReplaceExpression {
     /// The N, used to specified the N-th position to be replaced
     /// Note that this field is only available if `start` > 0
     pub n: Option<u32>,
-    /// Indicates if the `-g` flag is specified
-    pub global_flag: bool,
 }
 
 /// This trait provides the transformation from `ExprNode` to `RegexpReplaceExpression`
@@ -354,7 +360,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             }
         };
 
-        // TODO: [, start [, N ]] [, flags ] nodes support
+        // The parsing for [, start [, N ]] [, flags ] options
         let mut flags: Option<String> = None;
         let mut start: Option<u32> = None;
         let mut n: Option<u32> = None;
@@ -484,10 +490,8 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             "".to_string()
         };
 
+        // The `icg` flags will be set if ever specified
         let ctx = RegexpContext::new(&pattern, &flags)?;
-
-        // Set the `global_flag` if 'g' is specified
-        let global_flag = flags.contains('g');
 
         // Construct the regex used to match and replace `\n` expression
         // Check: https://docs.rs/regex/latest/regex/struct.Captures.html#method.expand
@@ -506,7 +510,6 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpReplaceExpression {
             return_type,
             start,
             n,
-            global_flag,
         })
     }
 }
@@ -525,27 +528,24 @@ impl RegexpReplaceExpression {
                 None => return Some(text.into()),
             };
 
-            if (self.n.is_none() && self.global_flag) || (self.n.is_some() && self.n.unwrap() == 0)
-            {
-                // `-g` enabled (& `N` is not specified) or `N` is `0`
-                // We need to replace all the occurrence of the matched pattern
+            if (self.n.is_none() && self.ctx.global) || (self.n.is_some() && self.n.unwrap() == 0) {
+                // --------------------------------------------------------------
+                // `-g` enabled (& `N` is not specified) or `N` is `0`          |
+                // We need to replace all the occurrence of the matched pattern |
+                // --------------------------------------------------------------
 
                 // See if there is capture group or not
-                if self.ctx.0.captures_len() <= 1 {
-                    println!("Path One");
-
+                if self.ctx.regex.captures_len() <= 1 {
                     // There is no capture groups in the regex
                     // Just replace all matched patterns after `start`
                     return Some(
                         text[..start].to_string()
                             + &self
                                 .ctx
-                                .0
+                                .regex
                                 .replace_all(&text[start..], self.replacement.clone()),
                     );
                 } else {
-                    println!("Path Two");
-
                     // The position to start searching for replacement
                     let mut search_start = start;
 
@@ -553,7 +553,7 @@ impl RegexpReplaceExpression {
                     let mut ret = text[..search_start].to_string();
 
                     // Begin the actual replace logic
-                    while let Some(capture) = self.ctx.0.captures(&text[search_start..]) {
+                    while let Some(capture) = self.ctx.regex.captures(&text[search_start..]) {
                         let match_start = capture.get(0).unwrap().start();
                         let match_end = capture.get(0).unwrap().end();
 
@@ -580,8 +580,10 @@ impl RegexpReplaceExpression {
                     Some(ret)
                 }
             } else {
-                // Only replace the first matched pattern
-                // Or the N-th matched pattern if `N` is specified
+                // -------------------------------------------------
+                // Only replace the first matched pattern          |
+                // Or the N-th matched pattern if `N` is specified |
+                // -------------------------------------------------
 
                 // Construct the return string
                 let mut ret = if start > 1 {
@@ -591,18 +593,21 @@ impl RegexpReplaceExpression {
                 };
 
                 // See if there is capture group or not
-                if self.ctx.0.captures_len() <= 1 {
+                if self.ctx.regex.captures_len() <= 1 {
                     // There is no capture groups in the regex
-                    println!("Path Three");
                     if self.n.is_none() {
                         // `N` is not specified
-                        ret.push_str(&self.ctx.0.replacen(&text[start..], 1, &self.replacement));
+                        ret.push_str(&self.ctx.regex.replacen(
+                            &text[start..],
+                            1,
+                            &self.replacement,
+                        ));
                     } else {
                         // Replace only the N-th match
                         let mut count = 1;
                         // The absolute index for the start of searching
                         let mut search_start = start;
-                        while let Some(capture) = self.ctx.0.captures(&text[search_start..]) {
+                        while let Some(capture) = self.ctx.regex.captures(&text[search_start..]) {
                             // Get the current start & end index
                             let match_start = capture.get(0).unwrap().start();
                             let match_end = capture.get(0).unwrap().end();
@@ -628,17 +633,16 @@ impl RegexpReplaceExpression {
                     }
                 } else {
                     // There are capture groups in the regex
-                    println!("Path Four");
                     // Reset return string at the beginning
                     ret = "".to_string();
                     if self.n.is_none() {
                         // `N` is not specified
-                        if self.ctx.0.captures(&text[start..]).is_none() {
+                        if self.ctx.regex.captures(&text[start..]).is_none() {
                             // No match
                             return Some(text.into());
                         }
                         // Otherwise replace the source text
-                        if let Some(capture) = self.ctx.0.captures(&text[start..]) {
+                        if let Some(capture) = self.ctx.regex.captures(&text[start..]) {
                             let match_start = capture.get(0).unwrap().start();
                             let match_end = capture.get(0).unwrap().end();
 
@@ -656,7 +660,7 @@ impl RegexpReplaceExpression {
                     } else {
                         // Replace only the N-th match
                         let mut count = 1;
-                        while let Some(capture) = self.ctx.0.captures(&text[start..]) {
+                        while let Some(capture) = self.ctx.regex.captures(&text[start..]) {
                             if count == self.n.unwrap() as i32 {
                                 // We've reached the pattern to replace
                                 let match_start = capture.get(0).unwrap().start();
@@ -689,7 +693,7 @@ impl RegexpReplaceExpression {
             }
         } else {
             // The input string is None
-            println!("Path Five");
+            // Directly return
             None
         }
     }

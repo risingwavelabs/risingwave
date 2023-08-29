@@ -463,6 +463,7 @@ fn infer_type_for_special(
         }
         ExprType::RegexpReplace => {
             // regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
+            // TODO: Preprocessing?
             ensure_arity!("regexp_replace", 3 <= | inputs | <= 6);
             Ok(Some(DataType::Varchar))
         }
