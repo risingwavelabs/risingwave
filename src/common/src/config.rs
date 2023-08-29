@@ -753,7 +753,7 @@ pub struct SystemConfig {
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
 
     /// Whether to pause all data sources on next bootstrap.
-    #[serde(default = "crate::system_param::default::pause_on_next_bootstrap")]
+    #[serde(default = "default::system::pause_on_next_bootstrap")]
     pub pause_on_next_bootstrap: Option<bool>,
 }
 
@@ -1141,55 +1141,7 @@ pub mod default {
     }
 
     pub mod system {
-        use crate::system_param;
-
-        pub fn barrier_interval_ms() -> Option<u32> {
-            system_param::default::barrier_interval_ms()
-        }
-
-        pub fn checkpoint_frequency() -> Option<u64> {
-            system_param::default::checkpoint_frequency()
-        }
-
-        pub fn parallel_compact_size_mb() -> Option<u32> {
-            system_param::default::parallel_compact_size_mb()
-        }
-
-        pub fn sstable_size_mb() -> Option<u32> {
-            system_param::default::sstable_size_mb()
-        }
-
-        pub fn block_size_kb() -> Option<u32> {
-            system_param::default::block_size_kb()
-        }
-
-        pub fn bloom_false_positive() -> Option<f64> {
-            system_param::default::bloom_false_positive()
-        }
-
-        pub fn state_store() -> Option<String> {
-            system_param::default::state_store()
-        }
-
-        pub fn data_directory() -> Option<String> {
-            system_param::default::data_directory()
-        }
-
-        pub fn backup_storage_url() -> Option<String> {
-            system_param::default::backup_storage_url()
-        }
-
-        pub fn backup_storage_directory() -> Option<String> {
-            system_param::default::backup_storage_directory()
-        }
-
-        pub fn telemetry_enabled() -> Option<bool> {
-            system_param::default::telemetry_enabled()
-        }
-
-        pub fn max_concurrent_creating_streaming_jobs() -> Option<u32> {
-            system_param::default::max_concurrent_creating_streaming_jobs()
-        }
+        pub use crate::system_param::default::*;
     }
 
     pub mod batch {

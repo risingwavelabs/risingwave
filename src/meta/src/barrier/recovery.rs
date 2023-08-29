@@ -156,6 +156,9 @@ where
                     })?;
 
                     let command = Command::Plain(Some(if paused {
+                        // No split assignments if recovery with pause.
+                        // This is okay because the splits will be eventually assigned on the next
+                        // source manager tick.
                         Mutation::Pause(PauseMutation {})
                     } else {
                         // get split assignments for all actors

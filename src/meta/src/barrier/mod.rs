@@ -542,11 +542,17 @@ where
         *status = new_status;
     }
 
+    /// Check whether we should pause on bootstrap from the system parameter and reset it.
     async fn take_pause_on_bootstrap(&self) -> MetaResult<bool> {
+        const MSG: &str =
+            "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
+             It will now be reset to `false`. \
+             To resume the data sources, either restart the cluster again or use `risectl meta resume`.";
+
         let pm = self.env.system_params_manager();
         let paused = pm.get_params().await.pause_on_next_bootstrap();
         if paused {
-            tracing::warn!("The cluster will pause on this bootstrap.");
+            tracing::warn!(MSG, PAUSE_ON_NEXT_BOOTSTRAP_KEY);
             pm.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                 .await?;
         }
