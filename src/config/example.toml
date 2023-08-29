@@ -56,7 +56,7 @@ level0_max_compact_file_number = 96
 tombstone_reclaim_ratio = 40
 
 [batch]
-enable_barrier_read = true
+enable_barrier_read = false
 
 [batch.developer]
 batch_connector_message_buffer_size = 16

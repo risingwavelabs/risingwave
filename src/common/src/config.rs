@@ -1189,7 +1189,7 @@ pub mod default {
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
-            true
+            false
         }
     }
 
