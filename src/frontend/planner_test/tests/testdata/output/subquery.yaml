@@ -781,17 +781,16 @@
             │   └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
             └─BatchExchange { order: [], dist: HashShard(integers.i) }
               └─BatchProject { exprs: [integers.i, 1:Int32] }
-                └─BatchHashAgg { group_key: [integers.i, integers.i, flag], aggs: [] }
-                  └─BatchExchange { order: [], dist: HashShard(integers.i, integers.i, flag) }
-                    └─BatchExpand { column_subsets: [[integers.i, integers.i]] }
-                      └─BatchProject { exprs: [integers.i, integers.i] }
-                        └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-                          ├─BatchExchange { order: [], dist: Single }
-                          │ └─BatchHashAgg { group_key: [integers.i], aggs: [] }
-                          │   └─BatchExchange { order: [], dist: HashShard(integers.i) }
-                          │     └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
-                          └─BatchExchange { order: [], dist: Single }
-                            └─BatchScan { table: integers, columns: [], distribution: SomeShard }
+                └─BatchHashAgg { group_key: [integers.i, integers.i, 0:Int64], aggs: [] }
+                  └─BatchExchange { order: [], dist: HashShard(integers.i, integers.i, 0:Int64) }
+                    └─BatchProject { exprs: [integers.i, integers.i, 0:Int64] }
+                      └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                        ├─BatchExchange { order: [], dist: Single }
+                        │ └─BatchHashAgg { group_key: [integers.i], aggs: [] }
+                        │   └─BatchExchange { order: [], dist: HashShard(integers.i) }
+                        │     └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+                        └─BatchExchange { order: [], dist: Single }
+                          └─BatchScan { table: integers, columns: [], distribution: SomeShard }
 - name: test expand operator subquery 1
   sql: |
     CREATE TABLE integers(i INTEGER, correlated_col int);
