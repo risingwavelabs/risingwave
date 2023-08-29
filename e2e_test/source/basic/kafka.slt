@@ -653,6 +653,12 @@ select count(*) from s16
 ----
 0
 
+statement error Feature is not yet implemented: Alter source with schema registry
+alter source s18 add column v10 int;
+
+statement error Feature is not yet implemented: Alter source with schema registry
+alter source s17 add column v10 int;
+
 query III rowsort
 select * from s21;
 ----

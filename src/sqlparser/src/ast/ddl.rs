@@ -103,6 +103,7 @@ pub enum AlterSinkOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
+    AddColumn { column_def: ColumnDef },
 }
 
 impl fmt::Display for AlterTableOperation {
@@ -196,6 +197,9 @@ impl fmt::Display for AlterSourceOperation {
         match self {
             AlterSourceOperation::RenameSource { source_name } => {
                 write!(f, "RENAME TO {source_name}")
+            }
+            AlterSourceOperation::AddColumn { column_def } => {
+                write!(f, "ADD COLUMN {column_def}")
             }
         }
     }
