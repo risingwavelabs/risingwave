@@ -20,6 +20,7 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
 
 use crate::HummockEpoch;
@@ -408,6 +409,12 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 
     pub fn key_part(&self) -> &[u8] {
         &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
+impl EstimateSize for TableKey<Bytes> {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_size()
     }
 }
 
