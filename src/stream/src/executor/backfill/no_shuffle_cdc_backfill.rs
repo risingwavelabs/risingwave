@@ -250,7 +250,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
 
-            tracing::info!(
+            tracing::debug!(
                 "start the bacfill loop: [initial] binlog offset {:?}",
                 last_binlog_offset,
             );
@@ -417,12 +417,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     current_pk_pos =
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
 
-                                    tracing::debug!(
-                                        "snapshot chunk length: {:?}",
-                                        chunk.cardinality()
-                                    );
-
-                                    tracing::debug!(
+                                    tracing::trace!(
                                         "current backfill progress: {:?}",
                                         current_pk_pos
                                     );

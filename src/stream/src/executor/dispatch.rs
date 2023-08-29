@@ -634,6 +634,7 @@ impl Dispatcher for HashDataDispatcher {
 
             // Apply output indices after calculating the vnode.
             let chunk = chunk.project(&self.output_indices);
+
             for ((vnode, &op), visible) in vnodes
                 .iter()
                 .copied()

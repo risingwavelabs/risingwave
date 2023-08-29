@@ -353,7 +353,7 @@ impl UnpinWorker {
             }
 
             let min_epoch = min_snapshot.0.committed_epoch;
-            tracing::trace!(min_epoch, "unpin snapshot with RPC");
+            tracing::info!(min_epoch, "unpin snapshot with RPC");
 
             match self.meta_client.unpin_snapshot_before(min_epoch).await {
                 Ok(()) => {
