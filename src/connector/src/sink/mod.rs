@@ -28,6 +28,7 @@ pub mod utils;
 use std::collections::HashMap;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
@@ -51,7 +52,7 @@ use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
-use crate::sink::redis::{RedisConfig, RedisSink};
+use crate::sink::redis::{RedisConfig, RedisSink, REDIS_SINK};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
 #[cfg(any(test, madsim))]
 use crate::sink::test_sink::{build_test_sink, TEST_SINK_NAME};
@@ -343,6 +344,7 @@ impl SinkConfig {
             REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
                 RemoteIcebergConfig::from_hashmap(properties)?,
             )),
+            REDIS_SINK => Ok(SinkConfig::Redis(RedisConfig::from_hashmap(properties)?)),
             ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
                 properties,
             )?)),
@@ -410,7 +412,12 @@ macro_rules! dispatch_sink {
 impl SinkImpl {
     pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(
+                cfg,
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
+            )?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
                 *cfg,
                 param.schema(),
@@ -461,6 +468,8 @@ pub enum SinkError {
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
+    #[error("Redis error: {0}")]
+    Redis(String),
 }
 
 impl From<RpcError> for SinkError {
@@ -472,6 +481,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<RedisError> for SinkError {
+    fn from(value: RedisError) -> Self {
+        SinkError::Redis(format!("{}", value))
     }
 }
 

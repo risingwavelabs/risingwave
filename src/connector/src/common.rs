@@ -18,8 +18,9 @@ use std::time::Duration;
 
 use anyhow::Ok;
 use aws_sdk_kinesis::Client as KinesisClient;
-use clickhouse::Client;
+use clickhouse::Client as ClickHouseClient;
 use rdkafka::ClientConfig;
+use redis::Client as RedisClient;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
@@ -293,11 +294,28 @@ pub struct ClickHouseCommon {
 }
 
 impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        let client = Client::default()
+    pub(crate) fn build_client(&self) -> anyhow::Result<ClickHouseClient> {
+        let client = ClickHouseClient::default()
             .with_url(&self.url)
             .with_user(&self.user)
             .with_password(&self.password);
+        Ok(client)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RedisCommon {
+    #[serde(rename = "redis.url")]
+    pub url: String,
+    #[serde(rename = "redis.keyformat")]
+    pub key_format: Option<String>,
+    #[serde(rename = "redis.valueformat")]
+    pub value_format: Option<String>,
+}
+
+impl RedisCommon {
+    pub(crate) fn build_client(&self) -> anyhow::Result<RedisClient> {
+        let client = RedisClient::open(self.url.clone())?;
         Ok(client)
     }
 }

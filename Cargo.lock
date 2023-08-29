@@ -6495,6 +6495,7 @@ dependencies = [
  "protobuf-native",
  "pulsar",
  "rand",
+ "redis",
  "reqwest",
  "risingwave_common",
  "risingwave_pb",
