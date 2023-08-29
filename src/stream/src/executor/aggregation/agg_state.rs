@@ -67,15 +67,15 @@ impl AggState {
         agg_call: &AggCall,
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
-        prev_states: Option<&Datum>,
+        encoded_state: Option<&Datum>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
             AggStateStorage::Value => {
-                let state = match prev_states {
-                    Some(prev) => AggregateState::Datum(prev.clone()),
+                let state = match encoded_state {
+                    Some(encoded) => agg_func.decode_state(encoded.clone())?,
                     None => agg_func.create_state(),
                 };
                 Self::Value(state)

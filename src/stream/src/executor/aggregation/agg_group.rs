@@ -203,11 +203,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        let intermediate_states: Option<OwnedRow> = intermediate_state_table
+        let encoded_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
-        if let Some(states) = &intermediate_states {
-            assert_eq!(states.len(), agg_calls.len());
+        if let Some(encoded_states) = &encoded_states {
+            assert_eq!(encoded_states.len(), agg_calls.len());
         }
 
         let mut states = Vec::with_capacity(agg_calls.len());
@@ -216,7 +216,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_call,
                 agg_func,
                 &storages[idx],
-                intermediate_states.as_ref().map(|outputs| &outputs[idx]),
+                encoded_states.as_ref().map(|outputs| &outputs[idx]),
                 pk_indices,
                 extreme_cache_size,
                 input_schema,
@@ -224,19 +224,68 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             states.push(state);
         }
 
-        let prev_outputs = match intermediate_states {
-            Some(row) => Some(
-                row.into_iter()
-                    .zip(states.iter())
-                    .map(|(v, state)| match state {
-                        AggState::Value(state) => state.get_output(),
-                        // for minput state, the value in the intermediate state table is the
-                        // previous output.
-                        AggState::MaterializedInput(_) => Ok(v),
-                    })
-                    .try_collect()?,
-            ),
+        let prev_outputs = match encoded_states {
+            Some(_) => {
+                let mut outputs = Vec::with_capacity(states.len());
+                for ((state, storage), func) in states
+                    .iter_mut()
+                    .zip_eq_fast(storages)
+                    .zip_eq_fast(agg_funcs)
+                {
+                    let output = state.get_output(storage, func, group_key.as_ref()).await?;
+                    outputs.push(output);
+                }
+                Some(OwnedRow::new(outputs))
+            }
             None => None,
+        };
+
+        Ok(Self {
+            group_key,
+            states,
+            prev_outputs,
+            row_count_index,
+            _phantom: PhantomData,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn from_encoded_states(
+        group_key: Option<GroupKey>,
+        agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
+        storages: &[AggStateStorage<S>],
+        encoded_states: &OwnedRow,
+        pk_indices: &PkIndices,
+        row_count_index: usize,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<Self> {
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
+            let state = AggState::create(
+                agg_call,
+                agg_func,
+                &storages[idx],
+                Some(&encoded_states[idx]),
+                pk_indices,
+                extreme_cache_size,
+                input_schema,
+            )?;
+            states.push(state);
+        }
+
+        let prev_outputs = {
+            let mut outputs = Vec::with_capacity(states.len());
+            for ((state, storage), func) in states
+                .iter_mut()
+                .zip_eq_fast(storages)
+                .zip_eq_fast(agg_funcs)
+            {
+                let output = state.get_output(storage, func, group_key.as_ref()).await?;
+                outputs.push(output);
+            }
+            Some(OwnedRow::new(outputs))
         };
 
         Ok(Self {
@@ -329,6 +378,36 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         for (state, func) in self.states.iter_mut().zip_eq_fast(funcs) {
             state.reset(func);
         }
+    }
+
+    /// Encode intermediate states.
+    pub fn encode_states(
+        &self,
+        funcs: &[BoxedAggregateFunction],
+    ) -> StreamExecutorResult<OwnedRow> {
+        let mut encoded_states = Vec::with_capacity(self.states.len());
+        for (state, func) in self.states.iter().zip_eq_fast(funcs) {
+            let encoded = match state {
+                AggState::Value(s) => func.encode_state(s)?,
+                // For minput state, we don't need to store it in state table.
+                AggState::MaterializedInput(_) => None,
+            };
+            encoded_states.push(encoded);
+        }
+        let states = self
+            .group_key()
+            .map(GroupKey::table_row)
+            .chain(OwnedRow::new(encoded_states))
+            .into_owned_row();
+        Ok(states)
+    }
+
+    /// Get previous outputs.
+    pub fn prev_outputs(&self) -> OwnedRow {
+        self.group_key()
+            .map(GroupKey::table_row)
+            .chain(self.prev_outputs.as_ref().expect("no previous outputs"))
+            .into_owned_row()
     }
 
     /// Get the outputs of all managed agg states, without group key prefix.

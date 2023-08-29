@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
-use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -434,57 +433,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_watermark = vars.window_watermark.take();
         let n_dirty_group = vars.group_change_set.len();
 
-        let futs_of_all_groups = vars
-            .group_change_set
-            .drain()
-            .map(|key| {
-                // Get agg group of the key.
-                vars.agg_group_cache
-                    .get_mut_unsafe(&key)
-                    .expect("changed group must have corresponding AggGroup")
-            })
-            .map(|mut agg_group| {
-                let storages = &this.storages;
-                let funcs = &this.agg_funcs;
-                // SAFETY:
-                // 1. `key`s in `keys_in_batch` are unique by nature, because they're
-                // from `group_change_set` which is a set.
-                //
-                // 2. `MutGuard` should not be sent to other tasks.
-                let mut agg_group = unsafe { agg_group.as_mut_guard() };
-                async move {
-                    // Build aggregate result change.
-                    agg_group.build_change(storages, funcs).await
-                }
-            });
-
-        // TODO(rc): figure out a more reasonable concurrency limit.
-        const MAX_CONCURRENT_TASKS: usize = 100;
-        let mut futs_batches = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
-        while let Some(futs) = futs_batches.next() {
-            // Compute agg result changes for each group, and emit changes accordingly.
-            let changes = futures::future::try_join_all(futs).await?;
-
-            // Emit from changes
-            if this.emit_on_window_close {
-                for change in changes.into_iter().flatten() {
-                    // For EOWC, write change to the sort buffer.
-                    vars.buffer
-                        .apply_change(change, &mut this.intermediate_state_table);
-                }
-            } else {
-                for change in changes.into_iter().flatten() {
-                    // For EOU, write change to result table and directly yield the change.
-                    this.intermediate_state_table.write_record(change.as_ref());
-                    if let Some(chunk) = vars.chunk_builder.append_record(change) {
-                        yield chunk;
-                    }
-                }
-            }
+        // flush changed states into intermediate state table
+        for key in &vars.group_change_set {
+            let agg_group = vars.agg_group_cache.get_mut(key).unwrap();
+            let encoded_states = agg_group.encode_states(&this.agg_funcs)?;
+            vars.buffer
+                .update_without_old_value(encoded_states, &mut this.intermediate_state_table);
         }
 
-        // Emit remaining results from result table.
         if this.emit_on_window_close {
+            // remove all groups under watermark and emit their results
             if let Some(watermark) = window_watermark.as_ref() {
                 #[for_await]
                 for row in vars
@@ -492,7 +450,46 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     .consume(watermark.clone(), &mut this.intermediate_state_table)
                 {
                     let row = row?;
-                    if let Some(chunk) = vars.chunk_builder.append_row(Op::Insert, row) {
+                    let group_key = row
+                        .clone()
+                        .into_iter()
+                        .take(this.group_key_indices.len())
+                        .collect();
+                    let states = row.into_iter().skip(this.group_key_indices.len()).collect();
+
+                    let agg_group = AggGroup::from_encoded_states(
+                        Some(GroupKey::new(
+                            group_key,
+                            Some(this.group_key_table_pk_projection.clone()),
+                        )),
+                        &this.agg_calls,
+                        &this.agg_funcs,
+                        &this.storages,
+                        &states,
+                        &this.input_pk_indices,
+                        this.row_count_index,
+                        this.extreme_cache_size,
+                        &this.input_schema,
+                    )
+                    .await?;
+
+                    let output = agg_group.prev_outputs();
+
+                    if let Some(chunk) = vars.chunk_builder.append_row(Op::Insert, output) {
+                        yield chunk;
+                    }
+                }
+            }
+        } else {
+            // emit on update
+            // TODO(wrj,rc): we may need to parallelize it and set a reasonable concurrency limit.
+            for group_key in &vars.group_change_set {
+                let mut agg_group = vars.agg_group_cache.get_mut(group_key).unwrap();
+                let change = agg_group
+                    .build_change(&this.storages, &this.agg_funcs)
+                    .await?;
+                if let Some(change) = change {
+                    if let Some(chunk) = vars.chunk_builder.append_record(change) {
                         yield chunk;
                     }
                 }

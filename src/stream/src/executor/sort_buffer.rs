@@ -118,6 +118,18 @@ impl<S: StateStore> SortBuffer<S> {
         self.cache.insert(key, new_row.into_owned_row());
     }
 
+    /// Update a row in the buffer without giving the old value.
+    pub fn update_without_old_value(
+        &mut self,
+        new_row: impl Row,
+        buffer_table: &mut StateTable<S>,
+    ) {
+        buffer_table.update_without_old_value(&new_row);
+        let key = row_to_cache_key(self.sort_column_index, &new_row, buffer_table);
+        self.cache.delete(&key);
+        self.cache.insert(key, new_row.into_owned_row());
+    }
+
     /// Apply a change to the buffer, insert/delete/update.
     pub fn apply_change(&mut self, change: Record<impl Row>, buffer_table: &mut StateTable<S>) {
         match change {

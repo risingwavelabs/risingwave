@@ -97,12 +97,6 @@ impl<S: StateStore> ExecutorInner<S> {
             .chain(self.distinct_dedup_tables.values_mut())
             .chain(std::iter::once(&mut self.intermediate_state_table))
     }
-
-    fn all_state_tables_except_intermediate_state_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut StateTable<S>> {
-        iter_table_storage(&mut self.storages).chain(self.distinct_dedup_tables.values_mut())
-    }
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -222,30 +216,22 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             vars.distinct_dedup
                 .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
-            // Commit all state tables except for intermediate state table.
+            // Flush states into intermediate state table.
+            let encoded_states = vars.agg_group.encode_states(&this.agg_funcs)?;
+            this.intermediate_state_table
+                .update_without_old_value(encoded_states);
+
+            // Commit all state tables.
             futures::future::try_join_all(
-                this.all_state_tables_except_intermediate_state_mut()
-                    .map(|table| table.commit(epoch)),
+                this.all_state_tables_mut().map(|table| table.commit(epoch)),
             )
             .await?;
 
             // Retrieve modified states and put the changes into the builders.
-            match vars
-                .agg_group
+            vars.agg_group
                 .build_change(&this.storages, &this.agg_funcs)
                 .await?
-            {
-                Some(change) => {
-                    this.intermediate_state_table.write_record(change.as_ref());
-                    this.intermediate_state_table.commit(epoch).await?;
-                    Some(change.to_stream_chunk(&this.info.schema.data_types()))
-                }
-                None => {
-                    // Agg result is not changed.
-                    this.intermediate_state_table.commit_no_data_expected(epoch);
-                    None
-                }
-            }
+                .map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.

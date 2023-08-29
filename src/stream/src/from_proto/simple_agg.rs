@@ -46,7 +46,8 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let storages =
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
-        let intermediate_state_table = StateTable::from_table_catalog(
+        // disable sanity check so that old value is not required when updating states
+        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
             node.get_intermediate_state_table().unwrap(),
             store.clone(),
             None,

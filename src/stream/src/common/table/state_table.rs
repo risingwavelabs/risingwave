@@ -474,7 +474,6 @@ where
         }
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store.init(epoch.curr)
     }
@@ -696,9 +695,14 @@ where
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
-    fn update_inner(&mut self, key_bytes: Bytes, old_value_bytes: Bytes, new_value_bytes: Bytes) {
+    fn update_inner(
+        &mut self,
+        key_bytes: Bytes,
+        old_value_bytes: Option<Bytes>,
+        new_value_bytes: Bytes,
+    ) {
         self.local_store
-            .insert(key_bytes, new_value_bytes, Some(old_value_bytes))
+            .insert(key_bytes, new_value_bytes, old_value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
@@ -744,7 +748,19 @@ where
         let old_value_bytes = self.serialize_value(old_value);
         let new_value_bytes = self.serialize_value(new_value);
 
-        self.update_inner(new_key_bytes, old_value_bytes, new_value_bytes);
+        self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);
+    }
+
+    /// Update a row without giving old value.
+    ///
+    /// `is_consistent_op` should be set to false.
+    pub fn update_without_old_value(&mut self, new_value: impl Row) {
+        let new_pk = (&new_value).project(self.pk_indices());
+        let new_key_bytes =
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_prefix_vnode(new_pk));
+        let new_value_bytes = self.serialize_value(new_value);
+
+        self.update_inner(new_key_bytes, None, new_value_bytes);
     }
 
     /// Write a record into state table. Must have the same schema with the table.
