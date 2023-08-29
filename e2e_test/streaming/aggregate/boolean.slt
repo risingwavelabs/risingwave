@@ -1,0 +1,72 @@
+statement ok
+create table t (v boolean);
+
+statement ok
+create materialized view mv as select
+    bool_and(v),
+    bool_or(v)
+from t;
+
+query BB
+select * from mv;
+----
+NULL NULL
+
+
+statement ok
+insert into t values (true);
+# t: true
+
+statement ok
+flush;
+
+query BB
+select * from mv;
+----
+true true
+
+
+statement ok
+insert into t values (false);
+# t: true, false
+
+statement ok
+flush;
+
+query BB
+select * from mv;
+----
+false true
+
+
+statement ok
+delete from t where v = true;
+# t: false
+
+statement ok
+flush;
+
+query BB
+select * from mv;
+----
+false false
+
+
+statement ok
+delete from t;
+# t: empty
+
+statement ok
+flush;
+
+query BB
+select * from mv;
+----
+NULL NULL
+
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
