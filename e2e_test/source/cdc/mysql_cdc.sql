@@ -48,3 +48,7 @@ VALUES (1,1,'no'),
        (2,2,'no'),
        (3,3,'no'),
        (4,4,'no');
+
+CREATE USER 'dbz'@'%' IDENTIFIED BY '123456';
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'dbz'@'%';
+GRANT LOCK TABLES ON `my@db`.* TO 'dbz'@'%';

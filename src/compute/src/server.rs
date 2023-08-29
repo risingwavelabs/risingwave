@@ -17,14 +17,15 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
+use risingwave_batch::monitor::{
+    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
+};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
     load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
     STREAM_WINDOW_SIZE,
 };
-use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -34,7 +35,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
-use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -52,12 +53,12 @@ use risingwave_storage::hummock::compactor::{
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
+    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
+    GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::monitor::GLOBAL_STREAMING_METRICS;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -69,7 +70,7 @@ use crate::memory_management::{
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
-use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
+use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{
@@ -84,7 +85,6 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
-    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
@@ -166,22 +166,21 @@ pub async fn compute_node_serve(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
-
-    monitor_process(&registry).unwrap();
-    let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
-    let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
-    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
-    let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
-    let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
+    let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+    let streaming_metrics = Arc::new(GLOBAL_STREAMING_METRICS.clone());
+    let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
+    let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
+    let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
+    let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
-    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
-    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
-
+    let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
+        config.storage.storage_metric_level,
+    ));
+    let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
         hummock_metrics.clone(),
@@ -240,7 +239,7 @@ pub async fn compute_node_serve(
             flush_limiter,
             storage_memory_config,
         ));
-        monitor_cache(memory_collector, &registry).unwrap();
+        monitor_cache(memory_collector);
         let backup_reader = storage.backup_reader();
         let system_params_mgr = system_params_manager.clone();
         tokio::spawn(async move {
@@ -444,10 +443,7 @@ pub async fn compute_node_serve(
 
     // Boot metrics service.
     if config.server.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
-            registry.clone(),
-        );
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     // All set, let the meta service know we're ready.

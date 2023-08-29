@@ -56,7 +56,7 @@ level0_max_compact_file_number = 96
 tombstone_reclaim_ratio = 40
 
 [batch]
-enable_barrier_read = true
+enable_barrier_read = false
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -106,6 +106,7 @@ object_store_req_retry_max_attempts = 8
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
+storage_metric_level = "Info"
 
 [storage.data_file_cache]
 dir = ""

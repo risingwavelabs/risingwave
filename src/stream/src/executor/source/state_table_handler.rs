@@ -84,7 +84,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_with_pk_range(
+            .iter_row_with_pk_range(
                 &(start, end),
                 VirtualNode::ZERO,
                 PrefetchOptions::new_for_exhaust_iter(),
@@ -93,8 +93,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
         let mut set = HashSet::new();
         pin_mut!(iter);
-        while let Some(row) = iter.next().await {
-            let row = row?;
+        while let Some(keyed_row) = iter.next().await {
+            let row = keyed_row?;
             if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
                 let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                 let fs = split

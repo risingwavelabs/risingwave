@@ -32,7 +32,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Encode, Format, ObjectName, SourceSchemaV2,
+    ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
     SourceWatermark, TableConstraint,
 };
 
@@ -744,12 +744,6 @@ pub async fn handle_create_table(
         Err(e) => return Err(e.into()),
         Ok(_) => {}
     };
-
-    if let Some(s) = &source_schema && s.row_encode == Encode::Json && columns.is_empty() {
-        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "schema definition is required for ENCODE JSON".to_owned(),
-        )));
-    }
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
