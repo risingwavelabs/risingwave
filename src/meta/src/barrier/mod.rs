@@ -56,7 +56,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
     WorkerId,
 };
-use crate::model::{ActorId, BarrierManagerState};
+use crate::model::{ActorId, BarrierManagerState, PausedReason};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::meta_store::MetaStore;
 use crate::stream::SourceManagerRef;
@@ -598,9 +598,15 @@ where
             self.set_status(BarrierManagerStatus::Recovering).await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
-            let new_epoch = self.recovery(prev_epoch, paused).instrument(span).await;
+            let paused_reason = if paused {
+                Some(PausedReason::ConfigChange)
+            } else {
+                None
+            };
 
-            BarrierManagerState::new(new_epoch)
+            self.recovery(prev_epoch, paused_reason)
+                .instrument(span)
+                .await
         };
 
         self.set_status(BarrierManagerStatus::Running).await;
@@ -701,6 +707,7 @@ where
             info,
             prev_epoch,
             curr_epoch,
+            state.paused_reason(),
             command,
             kind,
             self.source_manager.clone(),
@@ -711,9 +718,11 @@ where
         send_latency_timer.observe_duration();
 
         checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
-        self.inject_barrier(command_ctx, barrier_complete_tx)
+        self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
             .instrument(span)
             .await;
+
+        state.set_paused_reason(command_ctx.next_paused_reason());
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it
@@ -937,9 +946,8 @@ where
                 %err,
                 prev_epoch = prev_epoch.value().0
             );
-            let new_epoch = self.recovery(prev_epoch, false).instrument(span).await;
 
-            *state = BarrierManagerState::new(new_epoch);
+            *state = self.recovery(prev_epoch, None).instrument(span).await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);

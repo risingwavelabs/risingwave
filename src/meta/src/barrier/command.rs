@@ -37,7 +37,7 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, PausedReason, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
@@ -79,6 +79,9 @@ pub enum Command {
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
+
+    Pause(PausedReason),
+    Resume(PausedReason),
 
     /// `DropStreamingJobs` command generates a `Stop` barrier by the given
     /// [`HashSet<TableId>`]. The catalog has ensured that these streaming jobs are safe to be
@@ -142,18 +145,20 @@ impl Command {
         Self::Plain(None)
     }
 
-    pub fn pause() -> Self {
-        Self::Plain(Some(Mutation::Pause(PauseMutation {})))
+    pub fn pause(reason: PausedReason) -> Self {
+        Self::Pause(reason)
     }
 
-    pub fn resume() -> Self {
-        Self::Plain(Some(Mutation::Resume(ResumeMutation {})))
+    pub fn resume(reason: PausedReason) -> Self {
+        Self::Resume(reason)
     }
 
     /// Changes to the actors to be sent or collected after this command is committed.
     pub fn changes(&self) -> CommandChanges {
         match self {
             Command::Plain(_) => CommandChanges::None,
+            Command::Pause(_) => CommandChanges::None,
+            Command::Resume(_) => CommandChanges::None,
             Command::CreateStreamingJob {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
@@ -192,12 +197,12 @@ impl Command {
         // pausing the sources on compute nodes. However, `Pause` is used for configuration change
         // like scaling and migration, which must pause the concurrent checkpoint to ensure the
         // previous checkpoint has been done.
-        matches!(self, Self::Plain(Some(Mutation::Pause(_))))
+        matches!(self, Self::Pause(PausedReason::ConfigChange))
     }
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
+        !matches!(self, Command::Plain(None) | Command::Resume(_))
     }
 }
 
@@ -214,6 +219,8 @@ pub struct CommandContext<S: MetaStore> {
 
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
+
+    pub current_paused_reason: Option<PausedReason>,
 
     pub command: Command,
 
@@ -237,6 +244,7 @@ impl<S: MetaStore> CommandContext<S> {
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
+        current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
         source_manager: SourceManagerRef<S>,
@@ -248,6 +256,7 @@ impl<S: MetaStore> CommandContext<S> {
             info: Arc::new(info),
             prev_epoch,
             curr_epoch,
+            current_paused_reason,
             command,
             kind,
             source_manager,
@@ -264,6 +273,22 @@ where
     pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
+
+            Command::Pause(_) => {
+                if self.current_paused_reason.is_none() {
+                    Some(Mutation::Pause(PauseMutation {}))
+                } else {
+                    None
+                }
+            }
+
+            Command::Resume(reason) => {
+                if self.current_paused_reason == Some(*reason) {
+                    Some(Mutation::Resume(ResumeMutation {}))
+                } else {
+                    None
+                }
+            }
 
             Command::SourceSplitAssignment(change) => {
                 let mut diff = HashMap::new();
@@ -308,6 +333,8 @@ where
                     actor_dispatchers,
                     added_actors,
                     actor_splits,
+                    pause: self.current_paused_reason.is_some(), /* If paused, the new actors
+                                                                  * should be paused too. */
                 }))
             }
 
@@ -460,6 +487,28 @@ where
         Ok(mutation)
     }
 
+    pub fn next_paused_reason(&self) -> Option<PausedReason> {
+        match &self.command {
+            Command::Pause(reason) => {
+                if self.current_paused_reason.is_none() {
+                    Some(*reason)
+                } else {
+                    self.current_paused_reason
+                }
+            }
+
+            Command::Resume(reason) => {
+                if self.current_paused_reason == Some(*reason) {
+                    None
+                } else {
+                    self.current_paused_reason
+                }
+            }
+
+            _ => self.current_paused_reason,
+        }
+    }
+
     /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
@@ -545,18 +594,17 @@ where
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
-            #[allow(clippy::single_match)]
-            Command::Plain(mutation) => match mutation {
+            Command::Plain(_) => {}
+
+            Command::Pause(_) => {
                 // After the `Pause` barrier is collected and committed, we must ensure that the
                 // storage version with this epoch is synced to all compute nodes before the
                 // execution of the next command of `Update`, as some newly created operators may
                 // immediately initialize their states on that barrier.
-                Some(Mutation::Pause(..)) => {
-                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
-                }
+                self.wait_epoch_commit(self.prev_epoch.value().0).await?;
+            }
 
-                _ => {}
-            },
+            Command::Resume(_) => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
                 self.fragment_manager

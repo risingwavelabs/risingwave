@@ -412,7 +412,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // If the first barrier is configuration change or pause, then the source executor must be
         // newly created, and we should start with the paused state.
-        if barrier.is_update() || barrier.is_pause() {
+        if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
 
@@ -721,6 +721,7 @@ mod tests {
                     }),
                 ],
             },
+            pause: false,
         });
         barrier_tx.send(init_barrier).unwrap();
 
@@ -812,6 +813,7 @@ mod tests {
                     }),
                 ],
             },
+            pause: false,
         });
         barrier_tx.send(init_barrier).unwrap();
 

@@ -20,7 +20,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
-use risingwave_pb::stream_plan::{AddMutation, PauseMutation};
+use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
     ForceStopActorsRequest, UpdateActorsRequest,
@@ -34,7 +34,7 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
-use crate::model::MigrationPlan;
+use crate::model::{BarrierManagerState, MigrationPlan, PausedReason};
 use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
@@ -111,7 +111,11 @@ where
     /// `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new epoch after recovery.
-    pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch, paused: bool) -> TracedEpoch {
+    pub(crate) async fn recovery(
+        &self,
+        prev_epoch: TracedEpoch,
+        paused_reason: Option<PausedReason>,
+    ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
@@ -155,22 +159,15 @@ where
                         warn!(err = ?err, "build_actors failed");
                     })?;
 
-                    let command = Command::Plain(Some(if paused {
-                        // No split assignments if recovery with pause.
-                        // This is okay because the splits will be eventually assigned on the next
-                        // source manager tick.
-                        Mutation::Pause(PauseMutation {})
-                    } else {
-                        // get split assignments for all actors
-                        let source_split_assignments = self.source_manager.list_assignments().await;
-
-                        Mutation::Add(AddMutation {
-                            // Actors built during recovery is not treated as newly added actors.
-                            actor_dispatchers: Default::default(),
-                            added_actors: Default::default(),
-                            actor_splits: build_actor_connector_splits(&source_split_assignments),
-                        })
-                    }));
+                    // get split assignments for all actors
+                    let source_split_assignments = self.source_manager.list_assignments().await;
+                    let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                        // Actors built during recovery is not treated as newly added actors.
+                        actor_dispatchers: Default::default(),
+                        added_actors: Default::default(),
+                        actor_splits: build_actor_connector_splits(&source_split_assignments),
+                        pause: paused_reason.is_some(),
+                    })));
 
                     // Use a different `curr_epoch` for each recovery attempt.
                     let new_epoch = prev_epoch.next();
@@ -182,6 +179,7 @@ where
                         info,
                         prev_epoch.clone(),
                         new_epoch.clone(),
+                        paused_reason,
                         command,
                         BarrierKind::Initial,
                         self.source_manager.clone(),
@@ -232,7 +230,7 @@ where
         self.scheduled_barriers.mark_ready().await;
         tracing::info!("recovery success");
 
-        new_epoch
+        BarrierManagerState::new(new_epoch, paused_reason)
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.

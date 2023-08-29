@@ -231,6 +231,7 @@ pub enum Mutation {
         added_actors: HashSet<ActorId>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
+        pause: bool,
     },
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
@@ -317,9 +318,14 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is for pause.
-    pub fn is_pause(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    pub fn is_pause_on_startup(&self) -> bool {
+        match self.mutation.as_deref() {
+            Some(
+                  Mutation::Update { .. } // new actors for scaling
+                | Mutation::Add { pause: true, .. } // new streaming job
+            ) => true,
+            _ => false,
+        }
     }
 
     /// Whether this barrier is for configuration change. Used for source executor initialization.
@@ -426,6 +432,7 @@ impl Mutation {
                 adds,
                 added_actors,
                 splits,
+                pause,
             } => PbMutation::Add(AddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -440,6 +447,7 @@ impl Mutation {
                     .collect(),
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
+                pause: *pause,
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -519,6 +527,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                pause: add.pause,
             },
 
             PbMutation::Splits(s) => {

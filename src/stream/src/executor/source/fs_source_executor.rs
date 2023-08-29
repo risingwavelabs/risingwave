@@ -281,7 +281,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // If the first barrier is configuration change or update, then the source executor must be
         // newly created, and we should start with the paused state.
-        let start_with_paused = barrier.is_update() || barrier.is_pause();
+        let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_deref() {

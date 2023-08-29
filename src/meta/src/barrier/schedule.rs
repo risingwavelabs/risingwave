@@ -26,6 +26,7 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
+use crate::model::PausedReason;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
@@ -290,8 +291,12 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
     pub async fn run_command_with_paused(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![Command::pause(), command, Command::resume()])
-            .await
+        self.run_multiple_commands(vec![
+            Command::pause(PausedReason::ConfigChange),
+            command,
+            Command::resume(PausedReason::ConfigChange),
+        ])
+        .await
     }
 
     /// Run a command and return when it's completely finished.
