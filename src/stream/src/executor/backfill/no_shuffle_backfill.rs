@@ -29,7 +29,6 @@ use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -505,8 +504,7 @@ where
                 ordered,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
-            .await?
-            .map(get_second);
+            .await?;
 
         pin_mut!(iter);
 
