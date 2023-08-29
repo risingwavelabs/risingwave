@@ -68,6 +68,10 @@ INSERT INTO input SELECT * FROM generate_series(100000, 110000);
 
 FLUSH;
 
+---------- Create HDR Histogram + HDR Distribution --------
+
+-- This section contains the main logic of the HDR Histogram.
+
 -- Here `pow(10.0, 2)` is responsible for setting the precision of the histogram.
 -- "2" is the precision.
 -- We also need a "dummy" column for as a workaround for stream nested loop join.
@@ -114,6 +118,8 @@ WHERE x.cumulative_frequency >= y.scaled_sum_freq
 ORDER BY cumulative_frequency
 LIMIT 1;
 
+---------- test-90-percentile ----------
+
 SELECT * FROM approx_percentile_90_percent;
 -- 108000.00
 
@@ -140,6 +146,8 @@ FROM hdr_distribution x, frequency_at_50 y
 WHERE x.cumulative_frequency >= y.scaled_sum_freq
 ORDER BY cumulative_frequency
 LIMIT 1;
+
+---------- test-50-percentile ----------
 
 SELECT * FROM approx_percentile_50_percent;
 -- 104000.00
