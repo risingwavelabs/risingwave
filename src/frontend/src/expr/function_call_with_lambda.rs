@@ -60,7 +60,7 @@ impl FunctionCallWithLambda {
     }
 
     pub fn inputs(&self) -> &[ExprImpl] {
-        &self.base.inputs()
+        self.base.inputs()
     }
 
     pub fn func_type(&self) -> ExprType {

@@ -103,10 +103,10 @@ impl Binder {
                     if let Some((arg_idx, arg_type)) = lambda_args.get(&ident.real_value()) {
                         Ok(InputRef::new(*arg_idx, arg_type.clone()).into())
                     } else {
-                        Err(ErrorCode::ItemNotFound(
-                            format!("Unknown arg: {}", ident.real_value()).into(),
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
                         )
-                        .into())
                     }
                 } else {
                     self.bind_column(&[ident])

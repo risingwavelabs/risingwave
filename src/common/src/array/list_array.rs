@@ -272,7 +272,7 @@ impl ListArray {
     }
 
     /// Apply the function on the underlying elements.
-    /// e.g. map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]
+    /// e.g. `map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]`
     pub async fn map_inner<E, Fut, F>(self, f: F) -> std::result::Result<ListArray, E>
     where
         F: FnOnce(ArrayImpl) -> Fut,
