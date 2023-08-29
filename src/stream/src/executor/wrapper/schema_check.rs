@@ -51,12 +51,13 @@ pub async fn schema_check(
                 }
             }
             Message::Barrier(barrier) => {
+                // Update schema for source schema change
                 if let Some(Mutation::Update {
                     source: Some(source),
-                    added_dispatchers,
+                    actor_new_dispatchers,
                     ..
                 }) = barrier.mutation.as_deref() &&
-                    added_dispatchers.contains_key(&actor_id)
+                actor_new_dispatchers.contains_key(&actor_id)
                 {
                     info = Arc::new(ExecutorInfo {
                         schema: Schema {

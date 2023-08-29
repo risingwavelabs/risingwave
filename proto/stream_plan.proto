@@ -31,9 +31,6 @@ message StopMutation {
 }
 
 message UpdateMutation {
-  message Dispatchers {
-    repeated Dispatcher dispatchers = 1;
-  }
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;

@@ -118,12 +118,13 @@ impl RowIdGenExecutor {
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.row_id_generator = Self::new_generator(&vnodes);
                     }
+                    // Update schema for source schema change
                     if let Some(Mutation::Update {
                         source: Some(source),
-                        added_dispatchers,
+                        actor_new_dispatchers,
                         ..
                     }) = barrier.mutation.as_deref() &&
-                        added_dispatchers.contains_key(&self.ctx.id)
+                        actor_new_dispatchers.contains_key(&self.ctx.id)
                     {
                         self.schema = Schema {
                             fields: source

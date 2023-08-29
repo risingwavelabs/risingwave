@@ -509,10 +509,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                 Mutation::Update {
                                     actor_splits,
                                     source,
-                                    added_dispatchers,
+                                    actor_new_dispatchers,
                                     ..
                                 } => {
-                                    if let Some(source) = source && added_dispatchers.contains_key(&self.actor_ctx.id) {
+                                    if let Some(source) = source && actor_new_dispatchers.contains_key(&self.actor_ctx.id) {
                                         source_desc_builder.alter_builder(source);
                                         source_desc = source_desc_builder
                                             .clone()

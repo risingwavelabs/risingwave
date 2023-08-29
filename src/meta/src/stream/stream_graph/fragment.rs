@@ -393,6 +393,28 @@ impl StreamFragmentGraph {
         Ok(())
     }
 
+    /// Remove the source fragment from graph. Return the dispatch strategy from source fragment to
+    /// downstream. Used only for `replace_table` and the uniqueness of the edge is ensured.
+    pub fn remove_source_fragment(&mut self) -> DispatchStrategy {
+        let source_fragment_id = self
+            .fragments
+            .values()
+            .find(|f| (f.inner.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0)
+            .map(|f| GlobalFragmentId::new(f.fragment_id))
+            .unwrap();
+        self.fragments.remove(&source_fragment_id);
+
+        let edge = self.downstreams.remove(&source_fragment_id).unwrap();
+        let edge = edge.into_iter().next().unwrap().1;
+
+        for map in &mut self.upstreams.values_mut() {
+            map.remove(&source_fragment_id);
+        }
+        self.upstreams.retain(|_, v| !v.is_empty());
+
+        edge.dispatch_strategy
+    }
+
     /// Returns the fragment id where the table is materialized.
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments
@@ -478,6 +500,7 @@ pub struct CompleteStreamFragmentGraph {
 
 pub struct FragmentGraphUpstreamContext {
     upstream_mview_fragments: HashMap<TableId, Fragment>,
+    upstream_source_fragments: Option<(DispatchStrategy, Vec<Fragment>)>,
 }
 
 pub struct FragmentGraphDownstreamContext {
@@ -508,21 +531,27 @@ impl CompleteStreamFragmentGraph {
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_mview_fragments,
+                upstream_source_fragments: None,
             }),
             None,
         )
     }
 
     /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
-    /// downstream existing `Chain` fragments.
-    pub fn with_downstreams(
+    /// downstream existing `Chain` fragments and upstream source fragments.
+    pub fn with_source_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
+        upstream_fragments: Vec<Fragment>,
+        dispatch_strategy: Option<DispatchStrategy>,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
-            None,
+            Some(FragmentGraphUpstreamContext {
+                upstream_mview_fragments: HashMap::new(),
+                upstream_source_fragments: dispatch_strategy.map(|s| (s, upstream_fragments)),
+            }),
             Some(FragmentGraphDownstreamContext {
                 original_table_fragment_id,
                 downstream_fragments,
@@ -541,6 +570,7 @@ impl CompleteStreamFragmentGraph {
 
         if let Some(FragmentGraphUpstreamContext {
             upstream_mview_fragments,
+            upstream_source_fragments,
         }) = upstream_ctx
         {
             // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
@@ -604,6 +634,35 @@ impl CompleteStreamFragmentGraph {
                 }
             }
 
+            if let Some((dispatch_strategy, source_fragments)) = upstream_source_fragments {
+                let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+                for fragment in &source_fragments {
+                    let id = GlobalFragmentId::new(fragment.fragment_id);
+                    let edge = StreamFragmentEdge {
+                        id: EdgeId::UpstreamSourceExternal {
+                            upstream_fragment_id: id,
+                            downstream_fragment_id: table_fragment_id,
+                        },
+                        dispatch_strategy: dispatch_strategy.clone(),
+                    };
+
+                    extra_upstreams
+                        .entry(table_fragment_id)
+                        .or_insert_with(HashMap::new)
+                        .try_insert(id, edge.clone())
+                        .unwrap();
+                    extra_downstreams
+                        .entry(id)
+                        .or_insert_with(HashMap::new)
+                        .try_insert(table_fragment_id, edge)
+                        .unwrap();
+                }
+                existing_fragments.extend(
+                    source_fragments
+                        .into_iter()
+                        .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
+                );
+            }
             existing_fragments.extend(
                 upstream_mview_fragments
                     .into_values()
@@ -659,8 +718,6 @@ impl CompleteStreamFragmentGraph {
         })
     }
 }
-
-
 
 impl CompleteStreamFragmentGraph {
     /// Returns **all** fragment IDs in the complete graph, including the ones that are not in the

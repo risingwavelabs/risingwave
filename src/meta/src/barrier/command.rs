@@ -26,7 +26,7 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, FragmentTypeFlag, Dispatchers, PauseMutation, ResumeMutation,
+    AddMutation, Dispatcher, Dispatchers, FragmentTypeFlag, PauseMutation, ResumeMutation,
     SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
@@ -333,18 +333,6 @@ where
                 // don't remove the original table source actors if the table has source
                 let dropped_actors = non_source_actors(old_table_fragments, source);
 
-                let added_dispatchers = dispatchers
-                    .iter()
-                    .map(|(&actor_id, dispatchers)| {
-                        (
-                            actor_id,
-                            Dispatchers {
-                                dispatchers: dispatchers.clone(),
-                            },
-                        )
-                    })
-                    .collect();
-
                 let actor_new_dispatchers = dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -362,7 +350,6 @@ where
                     merge_update: merge_updates.clone(),
                     dropped_actors,
                     source: source.clone(),
-                    added_dispatchers,
                     ..Default::default()
                 }))
             }

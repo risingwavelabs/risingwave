@@ -924,12 +924,12 @@ where
                 )
             })?;
 
-        let complete_graph = CompleteStreamFragmentGraph::with_downstreams_upstreams(
+        let complete_graph = CompleteStreamFragmentGraph::with_source_upstreams_and_downstreams(
             fragment_graph,
-            original_table_fragment.fragment_id,
-            downstream_fragments,
             upstream_fragments.clone(),
             dispatch_strategy,
+            original_table_fragment.fragment_id,
+            downstream_fragments,
         )?;
 
         // 2. Build the actor graph.
@@ -977,7 +977,6 @@ where
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
-            dispatchers,
         };
 
         Ok((ctx, table_fragments))

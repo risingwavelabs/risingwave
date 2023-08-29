@@ -156,8 +156,6 @@ pub struct ReplaceTableContext {
     /// The properties of the streaming job.
     // TODO: directly store `StreamingJob here.
     pub table_properties: HashMap<String, String>,
-
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -477,7 +475,6 @@ where
             building_locations,
             existing_locations,
             table_properties: _,
-            dispatchers,
         }: ReplaceTableContext,
         stream_job: &StreamingJob,
     ) -> MetaResult<()> {

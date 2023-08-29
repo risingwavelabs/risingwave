@@ -490,8 +490,6 @@ where
             }
         }
 
-        assert!(dispatchers.is_empty());
-
         // Commit changes and notify about the changes.
         let mut trx = Transaction::default();
 
