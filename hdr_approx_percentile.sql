@@ -30,7 +30,7 @@
 -- The significand will be 23 (123456 / 10^5 - 1 = 1.23... ).
 -- Then the histogram will store the triple (1, 5, 23)
 --
--- Next we do a stream nested loop join on the histogram itself to compute the
+-- Next we do a window aggregation on the histogram to compute the
 -- cumulative frequency of each bucket.
 -- | Bucket       | 4 | 311 | 400 | 521 |
 -- | Counts       | 3 | 6   | 7   | 8   |
