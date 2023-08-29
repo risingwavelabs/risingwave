@@ -474,6 +474,9 @@ pub struct ConfigMap {
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent-first-n" or "recent-last-n".
+    #[educe(Default(
+        expression = "ConfigString::<STREAMING_OVER_WINDOW_CACHE_POLICY>(String::from(\"full\"))"
+    ))]
     streaming_over_window_cache_policy: StreamingOverWindowCachePolicy,
 }
 
