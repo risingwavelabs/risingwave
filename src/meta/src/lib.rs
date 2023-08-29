@@ -93,6 +93,10 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_ETCD_AUTH")]
     etcd_auth: bool,
 
+    /// Disable election, only effect when --backend is etcd. By default disabled.
+    #[clap(long, env = "RW_DISABLE_LEADER_ELECTION")]
+    disable_leader_election: bool,
+
     /// Username of etcd, required when --etcd-auth is enabled.
     #[clap(long, env = "RW_ETCD_USERNAME", default_value = "")]
     etcd_username: String,
@@ -253,6 +257,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             config.meta.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
+                enable_leader_election: !opts.disable_leader_election,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
