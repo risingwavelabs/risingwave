@@ -1,0 +1,33 @@
+query T
+select array_transform('{1,2,3}'::int[], |x| x * 2);
+----
+{2,4,6}
+
+query T
+select array_transform('{1,2,3}'::int[], |x| (x::double precision+0.5));
+----
+{1.5,2.5,3.5}
+
+query T
+select array_transform('{1,2,3}'::int[], |x| (x::double precision+0.5));
+----
+{1.5,2.5,3.5}
+
+query T
+select array_transform(
+    array_transform(
+        array_transform('{1,2,3}'::int[], |x| x * 2),
+        |x| x + 0.5
+    ),
+    |x| concat(x::varchar, '!')
+)
+----
+{2.5!,4.5!,6.5!}
+
+query T
+select array_transform(
+    ARRAY['Apple', 'Airbnb', 'Amazon', 'Facebook', 'Google', 'Microsoft', 'Netflix', 'Uber'],
+    |x| case when x ilike 'A%' then 'A' else 'Other' end
+)
+----
+{A,A,A,Other,Other,Other,Other,Other}

@@ -15,6 +15,7 @@
 use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::future::Future;
 use std::hash::Hash;
 use std::mem::size_of;
 
@@ -268,6 +269,31 @@ impl ListArray {
             value_type: DataType::from(&array_data.value_type.unwrap()),
         };
         Ok(arr.into())
+    }
+
+    /// Apply the function on the underlying elements.
+    /// e.g. map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]
+    pub async fn map_inner<E, Fut, F>(self, f: F) -> std::result::Result<ListArray, E>
+    where
+        F: FnOnce(ArrayImpl) -> Fut,
+        Fut: Future<Output = std::result::Result<ArrayImpl, E>>,
+    {
+        let Self {
+            bitmap,
+            offsets,
+            value,
+            ..
+        } = self;
+
+        let new_value = (f)(*value).await?;
+        let new_value_type = new_value.data_type();
+
+        Ok(Self {
+            offsets,
+            bitmap,
+            value: Box::new(new_value),
+            value_type: new_value_type,
+        })
     }
 
     // Used for testing purposes

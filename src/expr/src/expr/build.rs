@@ -20,6 +20,7 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
+use super::expr_array_transform::ArrayTransformExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
 use super::expr_concat_ws::ConcatWsExpression;
@@ -91,6 +92,12 @@ pub fn build_func(
     ret_type: DataType,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
+    if func == PbType::ArrayTransform {
+        // TODO: The function framework can't handle the lambda arg now.
+        let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
+        return Ok(ArrayTransformExpression { array, lambda }.boxed());
+    }
+
     let args = children
         .iter()
         .map(|c| c.return_type().into())
