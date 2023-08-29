@@ -544,15 +544,15 @@ where
 
     /// Check whether we should pause on bootstrap from the system parameter and reset it.
     async fn take_pause_on_bootstrap(&self) -> MetaResult<bool> {
-        const MSG: &str =
-            "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
-             It will now be reset to `false`. \
-             To resume the data sources, either restart the cluster again or use `risectl meta resume`.";
-
         let pm = self.env.system_params_manager();
         let paused = pm.get_params().await.pause_on_next_bootstrap();
         if paused {
-            tracing::warn!(MSG, PAUSE_ON_NEXT_BOOTSTRAP_KEY);
+            tracing::warn!(
+                "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
+                 It will now be reset to `false`. \
+                 To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
+                PAUSE_ON_NEXT_BOOTSTRAP_KEY
+            );
             pm.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
                 .await?;
         }
@@ -597,12 +597,9 @@ where
             // inject the first `Initial` barrier.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
-            let paused_reason = if paused {
-                Some(PausedReason::ConfigChange)
-            } else {
-                None
-            };
+            let paused_reason = paused.then_some(PausedReason::Manual);
 
             self.recovery(prev_epoch, paused_reason)
                 .instrument(span)

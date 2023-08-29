@@ -44,12 +44,14 @@ impl BarrierManagerState {
     }
 
     pub fn set_paused_reason(&mut self, paused_reason: Option<PausedReason>) {
-        tracing::info!(current = ?self.paused_reason, new = ?paused_reason, "update paused state");
-        self.paused_reason = paused_reason;
+        if self.paused_reason != paused_reason {
+            tracing::info!(current = ?self.paused_reason, new = ?paused_reason, "update paused state");
+            self.paused_reason = paused_reason;
+        }
     }
 
-    pub fn is_paused(&self) -> bool {
-        self.paused_reason.is_some()
+    pub fn in_flight_prev_epoch(&self) -> &TracedEpoch {
+        &self.in_flight_prev_epoch
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.
