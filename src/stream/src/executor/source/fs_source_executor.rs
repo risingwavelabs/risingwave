@@ -110,7 +110,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             None,
-            false,
             self.actor_ctx.error_suppressor.clone(),
         );
         let stream_reader = source_desc

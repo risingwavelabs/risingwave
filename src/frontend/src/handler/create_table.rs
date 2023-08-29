@@ -473,7 +473,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let table_type = ExternalTableType::from_properties(&properties);
-    if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+    if table_type.can_backfill() {
         // Add a column for storing the event offset
         let offset_column = ColumnCatalog::offset_column();
         let _offset_index = columns.len();

@@ -169,12 +169,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private void validatePrivileges() throws SQLException {
         String[] privilegesRequired = {
-            "SELECT",
-            "RELOAD",
-            "SHOW DATABASES",
-            "REPLICATION SLAVE",
-            "REPLICATION CLIENT",
-            "LOCK TABLES"
+            "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT",
         };
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));

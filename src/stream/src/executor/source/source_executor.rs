@@ -64,8 +64,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     // config for the connector node
     connector_params: ConnectorParams,
-
-    cdc_backfill: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -93,12 +91,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             source_ctrl_opts,
             connector_params,
-            cdc_backfill: false,
         }
-    }
-
-    pub fn enable_cdc_backfill(&mut self) {
-        self.cdc_backfill = true;
     }
 
     async fn build_stream_source_reader(
@@ -118,7 +111,6 @@ impl<S: StateStore> SourceExecutor<S> {
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
-            self.cdc_backfill,
             self.actor_ctx.error_suppressor.clone(),
         );
         source_desc

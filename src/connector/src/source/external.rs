@@ -41,6 +41,7 @@ pub enum ExternalTableType {
     Undefined,
     MySql,
     Postgres,
+    Citus,
 }
 
 impl ExternalTableType {
@@ -52,6 +53,7 @@ impl ExternalTableType {
         match connector.as_str() {
             "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
+            "citus-cdc" => Self::Citus,
             _ => Self::Undefined,
         }
     }

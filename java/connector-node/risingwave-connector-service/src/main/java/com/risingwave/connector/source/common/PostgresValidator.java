@@ -266,11 +266,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
 
         // check whether select privilege on table for snapshot read
-        validateTablePrivileges();
+        validateTablePrivileges(isSuperUser);
         validatePublicationConfig(isSuperUser);
     }
 
-    private void validateTablePrivileges() throws SQLException {
+    private void validateTablePrivileges(boolean isSuperUser) throws SQLException {
+        if (isSuperUser) {
+            return;
+        }
+
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {

@@ -128,7 +128,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source_ctrl_opts,
                 )?))
             } else {
-                let mut source_exec = SourceExecutor::new(
+                let source_exec = SourceExecutor::new(
                     params.actor_context.clone(),
                     schema.clone(),
                     params.pk_indices.clone(),
@@ -167,8 +167,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                          (0..table_desc.columns.len()).collect_vec(),
                     );
 
-                    // enable the flag
-                    source_exec.enable_cdc_backfill();
                     // use the state table from source to store the backfill state (may refactor in future)
                     let source_state_handler = SourceStateTableHandler::from_table_catalog(
                         source.state_table.as_ref().unwrap(),
