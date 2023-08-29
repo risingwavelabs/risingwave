@@ -288,6 +288,15 @@ pub struct ScaleResizeCommands {
     #[clap(long)]
     target_parallelism: Option<u32>,
 
+    /// The target parallelism per worker, conflicts with `target_parallelism`, requires
+    /// `include_workers` to be set.
+    #[clap(
+        long,
+        requires = "include_workers",
+        conflicts_with = "target_parallelism"
+    )]
+    target_parallelism_per_worker: Option<u32>,
+
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
     #[clap(long, default_value_t = false)]

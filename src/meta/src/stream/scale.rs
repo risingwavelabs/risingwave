@@ -1681,6 +1681,7 @@ where
             include_worker_ids: BTreeSet<WorkerId>,
             exclude_worker_ids: BTreeSet<WorkerId>,
             target_parallelism: Option<usize>,
+            target_parallelism_per_worker: Option<usize>,
         }
 
         let mut fragment_worker_changes: HashMap<_, _> = fragment_worker_changes
@@ -1692,6 +1693,9 @@ where
                         include_worker_ids: changes.include_worker_ids.into_iter().collect(),
                         exclude_worker_ids: changes.exclude_worker_ids.into_iter().collect(),
                         target_parallelism: changes.target_parallelism.map(|p| p as usize),
+                        target_parallelism_per_worker: changes
+                            .target_parallelism_per_worker
+                            .map(|p| p as usize),
                     },
                 )
             })
@@ -1710,6 +1714,7 @@ where
                 include_worker_ids,
                 exclude_worker_ids,
                 target_parallelism,
+                target_parallelism_per_worker,
             },
         ) in fragment_worker_changes
         {
@@ -1813,15 +1818,43 @@ where
                         );
                     }
 
-                    if let Some(target_parallelism) = target_parallelism {
-                        if target_parallel_unit_ids.len() < target_parallelism {
-                            bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                    match (target_parallelism, target_parallelism_per_worker) {
+                        (Some(_), Some(_)) => {
+                            bail!("Cannot specify both target parallelism and target parallelism per worker");
                         }
+                        (Some(target_parallelism), _) => {
+                            if target_parallel_unit_ids.len() < target_parallelism {
+                                bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                            }
 
-                        target_parallel_unit_ids = target_parallel_unit_ids
-                            .into_iter()
-                            .take(target_parallelism)
-                            .collect();
+                            target_parallel_unit_ids = target_parallel_unit_ids
+                                .into_iter()
+                                .take(target_parallelism)
+                                .collect();
+                        }
+                        (_, Some(target_parallelism_per_worker)) => {
+                            let limited_worker_parallel_unit_ids = include_worker_ids
+                                .iter()
+                                .flat_map(|worker_id| {
+                                    worker_parallel_units
+                                        .get(worker_id)
+                                        .cloned()
+                                        .unwrap()
+                                        .into_iter()
+                                        .sorted()
+                                        .take(target_parallelism_per_worker)
+                                })
+                                .collect_vec();
+
+                            // remove all the parallel units in the limited workers
+                            target_parallel_unit_ids
+                                .retain(|id| !include_worker_parallel_unit_ids.contains(id));
+
+                            // then we re-add the limited parallel units from the limited workers
+                            target_parallel_unit_ids
+                                .extend(limited_worker_parallel_unit_ids.into_iter());
+                        }
+                        _ => {}
                     }
 
                     let to_expand_parallel_units = target_parallel_unit_ids
