@@ -453,7 +453,7 @@ impl SstableStore {
 
     // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
     // TODO: remove `allow` here after the issued is closed.
-    #[allow(clippy::needless_pass_by_ref_mut)]
+    #[expect(clippy::needless_pass_by_ref_mut)]
     pub async fn sstable(
         &self,
         sst: &SstableInfo,

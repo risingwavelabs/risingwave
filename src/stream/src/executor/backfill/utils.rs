@@ -264,7 +264,7 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 /// Flush the data
 // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
 // TODO: remove `allow` here after the issued is closed.
-#[allow(clippy::needless_pass_by_ref_mut)]
+#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,

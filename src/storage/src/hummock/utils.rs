@@ -561,7 +561,7 @@ mod tests {
 
     // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
     // TODO: remove `allow` here after the issued is closed.
-    #[allow(clippy::needless_pass_by_ref_mut)]
+    #[expect(clippy::needless_pass_by_ref_mut)]
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
             assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))

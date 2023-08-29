@@ -134,7 +134,7 @@ impl CompactorRunner {
 
     // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
     // TODO: remove `allow` here after the issued is closed.
-    #[allow(clippy::needless_pass_by_ref_mut)]
+    #[expect(clippy::needless_pass_by_ref_mut)]
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
         sstable_store: &SstableStoreRef,
