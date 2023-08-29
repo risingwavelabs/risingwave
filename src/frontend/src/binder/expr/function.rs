@@ -588,7 +588,12 @@ impl Binder {
                     "boolne",
                     rewrite(ExprType::NotEqual, Binder::rewrite_two_bool_inputs),
                 ),
-                ("coalesce", raw_call(ExprType::Coalesce)),
+                ("coalesce", rewrite(ExprType::Coalesce, |inputs| {
+                    if inputs.iter().any(ExprImpl::has_table_function) {
+                        return Err(ErrorCode::BindError("table functions are not allowed in COALESCE".into()).into());
+                    }
+                    Ok(inputs)
+                })),
                 (
                     "nullif",
                     rewrite(ExprType::Case, Binder::rewrite_nullif_to_case_when),
@@ -1288,18 +1293,19 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
+                Clause::JoinOn
+                | Clause::Where
+                | Clause::Having
+                | Clause::Filter
+                | Clause::Values
+                | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause
                     ))
                     .into());
                 }
-                Clause::JoinOn
-                | Clause::GroupBy
-                | Clause::Having
-                | Clause::Filter
-                | Clause::From => {}
+                Clause::GroupBy | Clause::From => {}
             }
         }
         Ok(())

@@ -1099,8 +1099,7 @@
     Bind error: failed to bind expression: count(a1) FILTER(WHERE unnest(ARRAY[1]) < 1)
 
     Caused by:
-      Feature is not yet implemented: table function in filter clause
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+      Invalid input syntax: table functions are not allowed in FILTER
 - name: agg order by - subquery
   sql: |
     /* This case is valid in PostgreSQL */
