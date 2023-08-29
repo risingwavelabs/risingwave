@@ -63,9 +63,9 @@ Then we identify the `#[aggregate]` macro call to examine. In this case it's `st
 
 First, we know that Rust merges the individual modules into one big file, namespaced by the module name.
 
-In this case `string_agg` is its own module, so we can search for `mod string_agg` in `expr.rs`.
+In this case `string_agg` is its own module, so we can search for `mod string_agg` in the `expr.rs` we just generated.
 
-We can see that the module now also contains `extern fn string_agg_varchar_varchar_varchar`.
+We can see that the expanded `string_agg` now also contains `extern fn string_agg_varchar_varchar_varchar`.
 
 Reading the code we understand now that it does the following:
 1. Register it to a global registry for aggregates.
