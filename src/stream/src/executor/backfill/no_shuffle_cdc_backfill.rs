@@ -15,14 +15,20 @@
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{JsonbVal, ScalarRefImpl};
 use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::SplitMetaData;
+use risingwave_storage::StateStore;
+use serde_json::Value;
 
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
@@ -34,11 +40,14 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
+    ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler,
+    StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-pub struct CdcBackfillExecutor {
+const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
+
+pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Upstream external table
@@ -55,12 +64,15 @@ pub struct CdcBackfillExecutor {
 
     info: ExecutorInfo,
 
+    /// Stores the backfill done flag
+    source_state_handler: SourceStateTableHandler<S>,
+
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
 }
 
-impl CdcBackfillExecutor {
+impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -71,6 +83,7 @@ impl CdcBackfillExecutor {
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
+        source_state_handler: SourceStateTableHandler<S>,
         chunk_size: usize,
     ) -> Self {
         Self {
@@ -86,11 +99,12 @@ impl CdcBackfillExecutor {
             metrics,
             chunk_size,
             actor_ctx,
+            source_state_handler,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
@@ -112,6 +126,7 @@ impl CdcBackfillExecutor {
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
         let mut invalid_backfill = false;
+        let mut split_id: Option<Arc<str>> = None;
         if let Some(mutation) = first_barrier.mutation.as_ref() {
             match mutation.as_ref() {
                 Mutation::Add { splits, .. }
@@ -121,7 +136,19 @@ impl CdcBackfillExecutor {
                 } => {
                     invalid_backfill = match splits.get(&self.actor_ctx.id) {
                         None => true,
-                        Some(splits) => splits.is_empty(),
+                        Some(splits) => {
+                            let is_empty = splits.is_empty();
+                            if !is_empty {
+                                let split = splits.iter().exactly_one().map_err(|err| {
+                                    StreamExecutorError::from(anyhow!(
+                                        "fail to get cdc split {}",
+                                        err
+                                    ))
+                                })?;
+                                split_id = Some(split.id())
+                            }
+                            is_empty
+                        }
                     }
                 }
                 _ => {}
@@ -143,10 +170,30 @@ impl CdcBackfillExecutor {
 
         tracing::debug!("start cdc backfill: actor {:?}", self.actor_ctx.id);
 
-        // TODO(siyuan): restore backfill offset from persistent state
-        let (backfill_offset, is_finished) = (None, false);
+        self.source_state_handler.init_epoch(first_barrier.epoch);
+
+        // start from the beginning
+        // TODO(siyuan): restore backfill offset from state store
+        let backfill_offset = None;
 
         current_pk_pos = backfill_offset;
+
+        let is_finished = {
+            // restore backfill done flag from state store
+            if let Some(split_id) = split_id.as_ref() {
+                let mut key = split_id.to_string();
+                key.push_str(BACKFILL_STATE_KEY_SUFFIX);
+                match self.source_state_handler.get(key.into()).await? {
+                    Some(row) => match row.datum_at(1) {
+                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.as_bool()?,
+                        _ => unreachable!("invalid backfill persistent state"),
+                    },
+                    None => false,
+                }
+            } else {
+                false
+            }
+        };
 
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -201,8 +248,6 @@ impl CdcBackfillExecutor {
             last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
             // drive the upstream changelog first to ensure we can receive timely changelog event,
             // otherwise the upstream changelog may be blocked by the snapshot read stream
-            // TODO: we can setup debezium connector starts at latest offset to avoid pulling old
-            // events.
             let _ = Pin::new(&mut upstream).peek().await;
 
             tracing::info!(
@@ -285,7 +330,11 @@ impl CdcBackfillExecutor {
                                         last_binlog_offset = consumed_binlog_offset.clone();
                                     }
 
-                                    // TODO(siyuan): Persist state on barrier
+                                    // seal current epoch even though there is no data
+                                    self.source_state_handler
+                                        .state_store
+                                        .commit(barrier.epoch)
+                                        .await?;
 
                                     yield Message::Barrier(barrier);
                                     // Break the for loop and start a new snapshot read stream.
@@ -349,6 +398,16 @@ impl CdcBackfillExecutor {
                                         ));
                                     }
 
+                                    // Insert a finish flag to denote the backfill has done,
+                                    // which will be persisted upon next barrier
+                                    if let Some(split_id) = split_id.as_ref() {
+                                        let mut key = split_id.to_string();
+                                        key.push_str(BACKFILL_STATE_KEY_SUFFIX);
+                                        self.source_state_handler
+                                            .set(key.into(), JsonbVal::from(Value::Bool(true)))
+                                            .await?;
+                                    }
+
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
@@ -395,13 +454,20 @@ impl CdcBackfillExecutor {
             // upstream offsets will be removed from the message before forwarding to
             // downstream
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                // persist the backfill state if any
+                if let Message::Barrier(barrier) = &msg {
+                    self.source_state_handler
+                        .state_store
+                        .commit(barrier.epoch)
+                        .await?;
+                }
                 yield msg;
             }
         }
     }
 }
 
-impl Executor for CdcBackfillExecutor {
+impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

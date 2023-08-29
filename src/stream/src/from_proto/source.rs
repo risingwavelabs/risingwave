@@ -169,6 +169,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                     // enable the flag
                     source_exec.enable_cdc_backfill();
+                    // use the state table from source to store the backfill state (may refactor in future)
+                    let source_state_handler = SourceStateTableHandler::from_table_catalog(
+                        source.state_table.as_ref().unwrap(),
+                        store.clone(),
+                    ).await;
                     let cdc_backfill = CdcBackfillExecutor::new(
                         params.actor_context.clone(),
                         external_table,
@@ -178,6 +183,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         schema.clone(),
                         pk_indices,
                         params.executor_stats,
+                        source_state_handler,
                         source_ctrl_opts.chunk_size
                     );
                     Ok(Box::new(cdc_backfill))
