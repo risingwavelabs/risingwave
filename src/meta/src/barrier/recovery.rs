@@ -105,11 +105,11 @@ where
 
     /// Recovery the whole cluster from the latest epoch.
     ///
-    /// If `paused` is true, all data sources (including connectors and DMLs) will be immediately
-    /// paused after recovery, until the user manually resume them either by SQL interface or
-    /// `risectl` command. Used for debugging purpose.
+    /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
+    /// immediately paused after recovery, until the user manually resume them either by restarting
+    /// the cluster or `risectl` command. Used for debugging purpose.
     ///
-    /// Returns the new epoch after recovery.
+    /// Returns the new state of the barrier manager after recovery.
     pub(crate) async fn recovery(
         &self,
         prev_epoch: TracedEpoch,

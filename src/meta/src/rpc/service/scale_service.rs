@@ -69,6 +69,8 @@ where
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
+        // TODO: move this out of the scale service, as scaling actually executes `pause` and
+        // `resume` with `PausedReason::ConfigChange`.
         self.barrier_scheduler
             .run_command(Command::pause(PausedReason::Manual))
             .await?;
@@ -77,6 +79,8 @@ where
 
     #[cfg_attr(coverage, no_coverage)]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
+        // TODO: move this out of the scale service, as scaling actually executes `pause` and
+        // `resume` with `PausedReason::ConfigChange`.
         self.barrier_scheduler
             .run_command(Command::resume(PausedReason::Manual))
             .await?;

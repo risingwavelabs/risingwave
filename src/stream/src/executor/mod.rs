@@ -318,11 +318,12 @@ impl Barrier {
         }
     }
 
+    /// Whether this barrier requires the executor to pause its data stream on startup.
     pub fn is_pause_on_startup(&self) -> bool {
         match self.mutation.as_deref() {
             Some(
                   Mutation::Update { .. } // new actors for scaling
-                | Mutation::Add { pause: true, .. } // new streaming job
+                | Mutation::Add { pause: true, .. } // new streaming job, or recovery
             ) => true,
             _ => false,
         }

@@ -1308,7 +1308,7 @@ where
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_command_with_paused(Command::RescheduleFragment {
+            .run_config_change_command_with_pause(Command::RescheduleFragment {
                 reschedules: reschedule_fragment,
             })
             .await?;

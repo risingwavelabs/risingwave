@@ -719,6 +719,7 @@ where
             .instrument(span)
             .await;
 
+        // Update the paused state after the barrier is injected.
         state.set_paused_reason(command_ctx.next_paused_reason());
     }
 

@@ -80,7 +80,13 @@ pub enum Command {
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
 
+    /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
+    /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
     Pause(PausedReason),
+
+    /// `Resume` command generates a `Resume` barrier with the provided [`PausedReason`] **only
+    /// if** the cluster is paused with the same reason. Otherwise, a barrier with no mutation
+    /// will be generated.
     Resume(PausedReason),
 
     /// `DropStreamingJobs` command generates a `Stop` barrier by the given
@@ -194,8 +200,8 @@ impl Command {
     /// injection. return true.
     pub fn should_pause_inject_barrier(&self) -> bool {
         // Note: the meaning for `Pause` is not pausing the periodic barrier injection, but for
-        // pausing the sources on compute nodes. However, `Pause` is used for configuration change
-        // like scaling and migration, which must pause the concurrent checkpoint to ensure the
+        // pausing the sources on compute nodes. However, when `Pause` is used for configuration
+        // change like scaling and migration, it must pause the concurrent checkpoint to ensure the
         // previous checkpoint has been done.
         matches!(self, Self::Pause(PausedReason::ConfigChange))
     }
@@ -275,6 +281,7 @@ where
             Command::Plain(mutation) => mutation.clone(),
 
             Command::Pause(_) => {
+                // Only pause when the cluster is not already paused.
                 if self.current_paused_reason.is_none() {
                     Some(Mutation::Pause(PauseMutation {}))
                 } else {
@@ -283,6 +290,7 @@ where
             }
 
             Command::Resume(reason) => {
+                // Only resume when the cluster is paused with the same reason.
                 if self.current_paused_reason == Some(*reason) {
                     Some(Mutation::Resume(ResumeMutation {}))
                 } else {
@@ -333,8 +341,8 @@ where
                     actor_dispatchers,
                     added_actors,
                     actor_splits,
-                    pause: self.current_paused_reason.is_some(), /* If paused, the new actors
-                                                                  * should be paused too. */
+                    // If the cluster is already paused, the new actors should be paused too.
+                    pause: self.current_paused_reason.is_some(),
                 }))
             }
 
@@ -487,9 +495,11 @@ where
         Ok(mutation)
     }
 
+    /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(&self) -> Option<PausedReason> {
         match &self.command {
             Command::Pause(reason) => {
+                // Only pause when the cluster is not already paused.
                 if self.current_paused_reason.is_none() {
                     Some(*reason)
                 } else {
@@ -498,6 +508,7 @@ where
             }
 
             Command::Resume(reason) => {
+                // Only resume when the cluster is paused with the same reason.
                 if self.current_paused_reason == Some(*reason) {
                     None
                 } else {

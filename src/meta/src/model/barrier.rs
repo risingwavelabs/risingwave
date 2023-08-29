@@ -14,9 +14,13 @@
 
 use crate::barrier::TracedEpoch;
 
+/// The reason why the data sources in the cluster are paused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PausedReason {
+    /// The cluster is paused due to configuration change, e.g. altering table schema and scaling.
     ConfigChange,
+    /// The cluster is paused due to manual operation, e.g. `risectl` command or the
+    /// `pause_on_next_bootstrap` system variable.
     Manual,
 }
 
@@ -28,6 +32,7 @@ pub struct BarrierManagerState {
     /// committed snapshot in `HummockManager`.
     in_flight_prev_epoch: TracedEpoch,
 
+    /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,
 }
 
