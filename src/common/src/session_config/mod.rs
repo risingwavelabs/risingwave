@@ -849,7 +849,7 @@ impl ConfigMap {
             VariableInfo{
                 name: StreamingRateLimit::entry_name().to_lowercase(),
                 setting: self.streaming_rate_limit.to_string(),
-                description: String::from("Set streaming rate limit (rows per second) for each parallelism"),
+                description: String::from("Set streaming rate limit (rows per second) for each parallelism for mv backfilling"),
             }
         ]
     }
