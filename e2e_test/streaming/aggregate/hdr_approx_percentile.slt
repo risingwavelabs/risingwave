@@ -138,7 +138,7 @@ SELECT percentile_disc(0.9) WITHIN GROUP (ORDER BY value) FROM input;
 
 query B
 SELECT
- (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) <= 0.0001
 FROM approx_percentile_90_percent, (SELECT percentile_disc(0.9) WITHIN GROUP (ORDER BY value) FROM input);
 ----
 t
@@ -175,7 +175,7 @@ SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
 
 query B
 SELECT
- (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) <= 0.0001
 FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
 ----
 t
@@ -200,7 +200,7 @@ SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
 
 query B
 SELECT
- (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) <= 0.0001
 FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
 ----
 t
@@ -225,7 +225,7 @@ SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
 
 query B
 SELECT
- (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) <= 0.0001
 FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
 ----
 t
