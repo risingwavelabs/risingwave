@@ -61,7 +61,7 @@ cargo expand -p risingwave_expr > expr.rs
 
 Then we identify the `#[aggregate]` macro call to examine. In this case it's `string_agg`.
 
-First, we know that Rust merges the files into one big file, namespaced by the module name.
+First, we know that Rust merges the individual modules into one big file, namespaced by the module name.
 
 In this case `string_agg` is its own module, so we can search for `mod string_agg` in `expr.rs`.
 
