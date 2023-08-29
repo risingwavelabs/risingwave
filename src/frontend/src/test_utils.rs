@@ -36,11 +36,12 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -464,6 +465,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }
@@ -763,8 +769,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
-        Ok(())
+    async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {
+        Ok(vec![])
     }
 
     async fn list_table_fragments(

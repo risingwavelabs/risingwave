@@ -20,28 +20,28 @@ use tokio::signal;
 use crate::common::{osstrs, RisingWaveService};
 
 #[derive(Debug, Clone, Parser)]
-pub struct MonolithicModeOpts {
+pub struct StandaloneOpts {
     /// Compute node options
-    #[clap(short, long, env = "MONOLITHIC_MODE_COMPUTE_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS", default_value = "")]
     compute_opts: String,
 
-    #[clap(short, long, env = "MONOLITHIC_MODE_META_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_META_OPTS", default_value = "")]
     /// Meta node options
     meta_opts: String,
 
-    #[clap(short, long, env = "MONOLITHIC_MODE_FRONTEND_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS", default_value = "")]
     /// Frontend node options
     frontend_opts: String,
 }
 
-fn parse_opt_args(opts: &MonolithicModeOpts) -> (Vec<String>, Vec<String>, Vec<String>) {
+fn parse_opt_args(opts: &StandaloneOpts) -> (Vec<String>, Vec<String>, Vec<String>) {
     let meta_opts = split(&opts.meta_opts).unwrap();
     let compute_opts = split(&opts.compute_opts).unwrap();
     let frontend_opts = split(&opts.frontend_opts).unwrap();
     (meta_opts, compute_opts, frontend_opts)
 }
 
-fn get_services(opts: &MonolithicModeOpts) -> Vec<RisingWaveService> {
+fn get_services(opts: &StandaloneOpts) -> Vec<RisingWaveService> {
     let (meta_opts, compute_opts, frontend_opts) = parse_opt_args(opts);
     let services = vec![
         RisingWaveService::Meta(osstrs(meta_opts)),
@@ -51,8 +51,8 @@ fn get_services(opts: &MonolithicModeOpts) -> Vec<RisingWaveService> {
     services
 }
 
-pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
-    tracing::info!("launching Risingwave in monolithic mode");
+pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
+    tracing::info!("launching Risingwave in standalone mode");
 
     let services = get_services(&opts);
 
@@ -73,9 +73,8 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle = tokio::spawn(async move {
-                    risingwave_compute::start(opts, prometheus::Registry::new()).await
-                });
+                let _compute_handle =
+                    tokio::spawn(async move { risingwave_compute::start(opts).await });
             }
             RisingWaveService::Frontend(mut opts) => {
                 opts.insert(0, "frontend-node".into());
@@ -85,10 +84,10 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
             }
             RisingWaveService::Compactor(_) => {
-                panic!("Compactor node unsupported in Risingwave monolithic mode.");
+                panic!("Compactor node unsupported in Risingwave standalone mode.");
             }
             RisingWaveService::ConnectorNode(_) => {
-                panic!("Connector node unsupported in Risingwave monolithic mode.");
+                panic!("Connector node unsupported in Risingwave standalone mode.");
             }
         }
     }
@@ -96,7 +95,7 @@ pub async fn monolithic_mode(opts: MonolithicModeOpts) -> Result<()> {
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     eprintln!("-------------------------------");
-    eprintln!("RisingWave monolithic mode is ready.");
+    eprintln!("RisingWave standalone mode is ready.");
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
@@ -123,7 +122,7 @@ mod test {
 
     #[test]
     fn test_parse_opt_args() {
-        let opts = MonolithicModeOpts {
+        let opts = StandaloneOpts {
             compute_opts: "--listen-address 127.0.0.1 --port 8000".into(),
             meta_opts: "--data-dir \"some path with spaces\" --port 8001".into(),
             frontend_opts: "--some-option".into(),

@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,7 +21,7 @@ use anyhow::anyhow;
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
-use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
@@ -328,28 +327,51 @@ enum KafkaSinkState {
 
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
-    pub conductor: KafkaTransactionConductor,
+    pub inner: FutureProducer<PrivateLinkProducerContext>,
     identifier: String,
     state: KafkaSinkState,
     schema: Schema,
     pk_indices: Vec<usize>,
-    in_transaction_epoch: Option<u64>,
     is_append_only: bool,
 }
 
 impl KafkaSinkWriter {
     pub async fn new(
-        config: KafkaConfig,
+        mut config: KafkaConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
         identifier: String,
     ) -> Result<Self> {
+        let inner: FutureProducer<PrivateLinkProducerContext> = {
+            let mut c = ClientConfig::new();
+
+            // KafkaConfig configuration
+            config.common.set_security_properties(&mut c);
+            config.set_client(&mut c);
+
+            // ClientConfig configuration
+            c.set("bootstrap.servers", &config.common.brokers)
+                .set("message.timeout.ms", "5000");
+            // Note that we will not use transaction during sinking, thus set it to false
+            config.use_transaction = false;
+
+            // Create the producer context, will be used to create the producer
+            let producer_ctx = PrivateLinkProducerContext::new(
+                config.common.broker_rewrite_map.clone(),
+                // fixme: enable kafka native metrics for sink
+                None,
+                None,
+            )?;
+
+            // Generate the producer
+            c.create_with_context(producer_ctx).await?
+        };
+
         Ok(KafkaSinkWriter {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config, &identifier).await?,
+            inner,
             identifier,
-            in_transaction_epoch: None,
             state: KafkaSinkState::Init,
             schema,
             pk_indices,
@@ -357,52 +379,66 @@ impl KafkaSinkWriter {
         })
     }
 
-    // any error should report to upper level and requires revert to previous epoch.
-    pub async fn do_with_retry<'a, F, FutKR, T>(&'a self, f: F) -> KafkaResult<T>
-    where
-        F: Fn(&'a KafkaTransactionConductor) -> FutKR,
-        FutKR: Future<Output = KafkaResult<T>> + 'a,
-    {
-        let mut err = KafkaError::Canceled;
-        for _ in 0..self.config.max_retry_num {
-            match f(&self.conductor).await {
-                Ok(res) => return Ok(res),
-                Err(e) => err = e,
-            }
-            // a back off policy
-            tokio::time::sleep(self.config.retry_interval).await;
-        }
-        Err(err)
-    }
-
-    async fn send<'a, K, P>(&'a self, mut record: BaseRecord<'a, K, P>) -> KafkaResult<()>
+    /// The wrapper function for the actual `FutureProducer::send_result`
+    /// Just for better error handling purpose
+    #[expect(clippy::unused_async)]
+    async fn send_result_inner<'a, K, P>(
+        &'a self,
+        record: FutureRecord<'a, K, P>,
+    ) -> core::result::Result<DeliveryFuture, (KafkaError, FutureRecord<'a, K, P>)>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
+        self.inner.send_result(record)
+    }
+
+    /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
+    /// messages
+    async fn send_result<'a, K, P>(&'a self, mut record: FutureRecord<'a, K, P>) -> KafkaResult<()>
+    where
+        K: ToBytes + ?Sized,
+        P: ToBytes + ?Sized,
+    {
+        // The error to be returned
         let mut err = KafkaError::Canceled;
 
         for _ in 0..self.config.max_retry_num {
-            match self.conductor.send(record).await {
-                Ok(()) => return Ok(()),
+            match self.send_result_inner(record).await {
+                Ok(delivery_future) => match delivery_future.await {
+                    Ok(delivery_future_result) => match delivery_future_result {
+                        // Successfully sent the record
+                        // Will return the partition and offset of the message (i32, i64)
+                        Ok(_) => return Ok(()),
+                        // If the message failed to be delivered. (i.e., flush)
+                        // The error & the copy of the original message will be returned
+                        // i.e., (KafkaError, OwnedMessage)
+                        // We will just stop the loop, and return the error
+                        // The sink executor will back to the latest checkpoint
+                        Err((k_err, _msg)) => {
+                            err = k_err;
+                            break;
+                        }
+                    },
+                    // Nothing to do here, since the err has already been set to
+                    // KafkaError::Canceled. This represents the producer is dropped
+                    // before the delivery status is received
+                    Err(_) => break,
+                },
+                // The enqueue buffer is full, `send_result` will immediately return
+                // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
                     err = e;
                     record = rec;
+                    // FIXME: Will there possibly exist other errors?
+                    assert!(err == KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
+                    tokio::time::sleep(self.config.retry_interval).await;
+                    continue;
                 }
             }
-            if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) = err {
-                // if the queue is full, we need to wait for some time and retry.
-                tokio::time::sleep(self.config.retry_interval).await;
-                continue;
-            } else {
-                return Err(err);
-            }
         }
-        Err(err)
-    }
 
-    fn gen_message_key(&self) -> String {
-        format!("{}-{}", self.identifier, self.in_transaction_epoch.unwrap())
+        Err(err)
     }
 
     async fn write_json_objects(
@@ -413,14 +449,14 @@ impl KafkaSinkWriter {
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
         let key_str = event_key_object.unwrap().to_string();
-        let mut record =
-            BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str()).key(key_str.as_bytes());
+        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
+            .key(key_str.as_bytes());
         let payload;
         if let Some(value) = event_object {
             payload = value.to_string();
             record = record.payload(payload.as_bytes());
         }
-        self.send(record).await?;
+        self.send_result(record).await?;
         Ok(())
     }
 
@@ -501,116 +537,22 @@ impl SinkWriterV1 for KafkaSinkWriter {
         }
     }
 
+    /// ---------------------------------------------------------------------------------------
+    /// Note: The following functions are just to satisfy `SinkWriterV1` trait                |
+    /// We do not need transaction-related functionality for sink executor, return Ok(())     |
+    /// ---------------------------------------------------------------------------------------
     // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.in_transaction_epoch = Some(epoch);
-        self.do_with_retry(|conductor| conductor.start_transaction())
-            .await?;
-        tracing::debug!("begin epoch {:?}", epoch);
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
-        self.do_with_retry(|conductor| conductor.flush()) // flush before commit
-            .await?;
-
-        self.do_with_retry(|conductor| conductor.commit_transaction())
-            .await?;
-        if let Some(epoch) = self.in_transaction_epoch.take() {
-            self.state = KafkaSinkState::Running(epoch);
-        } else {
-            tracing::error!(
-                "commit without begin_epoch, last success epoch {:?}",
-                self.state
-            );
-            return Err(SinkError::Kafka(KafkaError::Canceled));
-        }
-        tracing::debug!("commit epoch {:?}", self.state);
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
-        self.do_with_retry(|conductor| conductor.abort_transaction())
-            .await?;
-        tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
-        self.in_transaction_epoch = None;
         Ok(())
-    }
-}
-
-/// the struct conducts all transactions with Kafka
-pub struct KafkaTransactionConductor {
-    properties: KafkaConfig,
-    inner: ThreadedProducer<PrivateLinkProducerContext>,
-}
-
-impl KafkaTransactionConductor {
-    async fn new(mut config: KafkaConfig, identifier: &String) -> Result<Self> {
-        let inner: ThreadedProducer<PrivateLinkProducerContext> = {
-            let mut c = ClientConfig::new();
-            config.common.set_security_properties(&mut c);
-            config.set_client(&mut c);
-            c.set("bootstrap.servers", &config.common.brokers)
-                .set("message.timeout.ms", "5000");
-            config.use_transaction = false;
-            if config.use_transaction {
-                c.set("transactional.id", identifier); // required by kafka transaction
-            }
-            let client_ctx =
-                PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
-            c.create_with_context(client_ctx).await?
-        };
-
-        if config.use_transaction {
-            inner.init_transactions(config.timeout).await?;
-        }
-
-        Ok(KafkaTransactionConductor {
-            properties: config,
-            inner,
-        })
-    }
-
-    #[expect(clippy::unused_async)]
-    async fn start_transaction(&self) -> KafkaResult<()> {
-        if self.properties.use_transaction {
-            self.inner.begin_transaction()
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn commit_transaction(&self) -> KafkaResult<()> {
-        if self.properties.use_transaction {
-            self.inner.commit_transaction(self.properties.timeout).await
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn abort_transaction(&self) -> KafkaResult<()> {
-        if self.properties.use_transaction {
-            self.inner.abort_transaction(self.properties.timeout).await
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn flush(&self) -> KafkaResult<()> {
-        self.inner.flush(self.properties.timeout).await
-    }
-
-    #[expect(clippy::unused_async)]
-    async fn send<'a, K, P>(
-        &'a self,
-        record: BaseRecord<'a, K, P>,
-    ) -> core::result::Result<(), (KafkaError, BaseRecord<'a, K, P>)>
-    where
-        K: ToBytes + ?Sized,
-        P: ToBytes + ?Sized,
-    {
-        self.inner.send(record)
     }
 }
 
@@ -745,14 +687,20 @@ mod test {
         assert!(KafkaConfig::from_hashmap(properties).is_err());
     }
 
+    /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
+    /// to run the test
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
+        // Create a dummy kafka properties
         let properties = hashmap! {
+            "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
         };
+
+        // Create a table with two columns (| id : INT32 | v2 : VARCHAR |) here
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
@@ -767,8 +715,12 @@ mod test {
                 type_name: "".into(),
             },
         ]);
+
+        // We do not specify primary key for this schema
         let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
+
+        // Create the actual sink writer to Kafka
         let mut sink = KafkaSinkWriter::new(
             kafka_config.clone(),
             schema,
@@ -782,12 +734,13 @@ mod test {
         for i in 0..10 {
             let mut fail_flag = false;
             sink.begin_epoch(i).await?;
-            for i in 0..100 {
+            println!("epoch: {}", i);
+            for j in 0..100 {
                 match sink
-                    .send(
-                        BaseRecord::to(kafka_config.common.topic.as_str())
-                            .payload(format!("value-{}", i).as_bytes())
-                            .key(sink.gen_message_key().as_bytes()),
+                    .send_result(
+                        FutureRecord::to(kafka_config.common.topic.as_str())
+                            .payload(format!("value-{}", j).as_bytes())
+                            .key(format!("dummy_key_for_epoch-{}", i).as_bytes()),
                     )
                     .await
                 {

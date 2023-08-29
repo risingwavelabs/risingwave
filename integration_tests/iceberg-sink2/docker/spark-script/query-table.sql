@@ -1,0 +1,1 @@
+SELECT * FROM demo.s1.t1 ORDER BY id ASC;

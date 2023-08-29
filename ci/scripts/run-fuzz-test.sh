@@ -56,7 +56,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
       --testdata ./src/tests/sqlsmith/tests/testdata > $LOGDIR/fuzzing.log 2>&1 && rm $LOGDIR/*
 
     if [[ -e $LOGDIR/fuzzing.log ]]; then
-        echo "Fuzzing failed"
+        echo "Fuzzing failed, please look at the artifacts fuzzing.log and error.sql.log for more details"
         extract_error_sql $LOGDIR/fuzzing.log
         exit 1
     fi

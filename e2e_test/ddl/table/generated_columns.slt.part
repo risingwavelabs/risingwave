@@ -14,6 +14,31 @@ select * from t1;
 0 1 2 2.02
 1 2 3 3.02
 
+statement error QueryError: Bind error: update modifying the generated column is unsupported
+update t1 set v1 = 1;
+
+statement ok
+update t1 set v2 = 1;
+
+statement ok
+flush;
+
+query IIIR
+select * from t1;
+----
+0 1 2 2.02
+0 1 2 2.02
+
+statement ok
+delete from t1;
+
+statement ok
+flush;
+
+query IIIR
+select * from t1;
+----
+
 statement ok
 drop table t1;
 

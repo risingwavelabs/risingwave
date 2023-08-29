@@ -29,7 +29,7 @@ use crate::{ExprError, Result};
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
-#[aggregate("sum0(int64) -> int64", init_state = "0")]
+#[aggregate("sum0(int64) -> int64", init_state = "0i64")]
 fn sum<S, T>(state: Option<S>, input: Option<T>, retract: bool) -> Result<Option<S>>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
@@ -121,7 +121,7 @@ fn last_value<T>(_: T, input: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64", init_state = "0")]
+#[aggregate("count(*) -> int64", init_state = "0i64")]
 fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     if retract {
         state - 1
@@ -130,7 +130,7 @@ fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     }
 }
 
-#[aggregate("count() -> int64", init_state = "0")]
+#[aggregate("count() -> int64", init_state = "0i64")]
 fn count_star(state: i64, retract: bool) -> i64 {
     if retract {
         state - 1
@@ -232,9 +232,13 @@ mod tests {
     use crate::agg::AggCall;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
-        let mut agg_state = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
-        agg_state.update(&input).now_or_never().unwrap().unwrap();
-        let actual = agg_state.output().unwrap();
+        let agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let mut state = agg.create_state();
+        agg.update(&mut state, &input)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        let actual = agg.get_result(&state).now_or_never().unwrap().unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -303,7 +307,7 @@ mod tests {
     }
 
     /// Even if there is no element after some insertions and equal number of deletion operations,
-    /// sum aggregator should output `0` instead of `None`.
+    /// sum `AggregateFunction` should output `0` instead of `None`.
     #[test]
     fn sum_no_none() {
         test_agg("(sum:int8 $0:int8)", StreamChunk::from_pretty("I"), None);
@@ -511,9 +515,13 @@ mod tests {
         };
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
         let pretty = format!("({agg_desc}:int8 $0:int8)");
-        let mut agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let mut state = agg.create_state();
         b.iter(|| {
-            agg.update(&chunk).now_or_never().unwrap().unwrap();
+            agg.update(&mut state, &chunk)
+                .now_or_never()
+                .unwrap()
+                .unwrap();
         });
     }
 
