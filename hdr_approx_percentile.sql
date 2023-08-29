@@ -129,6 +129,8 @@ DROP MATERIALIZED VIEW approx_percentile_90_percent;
 
 DROP MATERIALIZED VIEW frequency_at_90;
 
+---------- 50-percentile ----------
+
 CREATE MATERIALIZED VIEW frequency_at_50 AS
 SELECT sum_frequency * 0.5 AS scaled_sum_freq FROM hdr_sum;
 
@@ -201,8 +203,6 @@ SELECT
  percentile_disc = (approximate_percentile::int)
 FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
 -- t
-
---- Cleanup 50-percentile
 
 DROP MATERIALIZED VIEW approx_percentile_50_percent;
 
