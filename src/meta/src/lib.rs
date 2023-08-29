@@ -105,6 +105,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
     dashboard_ui_path: Option<String>,
 
+    #[clap(long, env = "RW_BINARY_PATH")]
+    binary_path: Option<String>,
+
     /// For dashboard service to fetch cluster info.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
@@ -279,6 +282,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 privatelink_endpoint_default_tags,
+                rw_binary_path: opts.binary_path,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,

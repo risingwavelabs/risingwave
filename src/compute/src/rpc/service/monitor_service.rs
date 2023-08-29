@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use itertools::Itertools;
+use risingwave_common::config::ServerConfig;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    HeapProfilingRequest, HeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    DownloadRequest, DownloadResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
 use risingwave_stream::task::LocalStreamManager;
@@ -27,16 +32,19 @@ use tonic::{Request, Response, Status};
 pub struct MonitorServiceImpl {
     stream_mgr: Arc<LocalStreamManager>,
     grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
+    server_config: ServerConfig,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
         stream_mgr: Arc<LocalStreamManager>,
         grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
+        server_config: ServerConfig,
     ) -> Self {
         Self {
             stream_mgr,
             grpc_await_tree_reg,
+            server_config,
         }
     }
 }
@@ -125,7 +133,12 @@ impl MonitorService for MonitorServiceImpl {
 
         let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
         let file_name = format!("{}.risectl-dump-heap-prof.compute.dump\0", time_prefix,);
-        let dir = PathBuf::from(request.into_inner().get_dir());
+        let arg_dir = request.into_inner().get_dir().clone();
+        let dir = PathBuf::from(if arg_dir.is_empty() {
+            &self.server_config.manually_dump_heap_profile_dir
+        } else {
+            &arg_dir
+        });
         create_dir_all(&dir)?;
 
         let file_path_buf = dir.join(file_name);
@@ -158,6 +171,34 @@ impl MonitorService for MonitorServiceImpl {
     //         "heap profiling is only implemented on Linux",
     //     ))
     // }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_heap_profiling(
+        &self,
+        _request: Request<ListHeapProfilingRequest>,
+    ) -> Result<Response<ListHeapProfilingResponse>, Status> {
+        let auto_dump_dir = self.server_config.auto_dump_heap_profile.dir.clone();
+        let auto_dump_files_name: Vec<_> = fs::read_dir(auto_dump_dir.clone())?
+            .map(|entry| {
+                let entry = entry?;
+                Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
+            })
+            .try_collect()?;
+        Ok(Response::new(ListHeapProfilingResponse {
+            dir: auto_dump_dir,
+            name: auto_dump_files_name,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn download(
+        &self,
+        request: Request<DownloadRequest>,
+    ) -> Result<Response<DownloadResponse>, Status> {
+        let path = request.into_inner().get_path().clone();
+        let file = fs::read(Path::new(&path))?;
+        Ok(Response::new(DownloadResponse { result: file }))
+    }
 }
 
 pub use grpc_middleware::*;

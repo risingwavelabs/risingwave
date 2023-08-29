@@ -364,12 +364,16 @@ pub struct ServerConfig {
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
 
-    #[serde(default, flatten)]
-    pub unrecognized: Unrecognized<Self>,
-
     /// Enable heap profile dump when memory usage is high.
     #[serde(default = "default::server::auto_dump_heap_profile")]
     pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
+
+    /// Manually heap profile dump file path.
+    #[serde(default = "default::server::manually_dump_heap_profile_dir")]
+    pub manually_dump_heap_profile_dir: String,
+
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -872,6 +876,10 @@ pub mod default {
 
         pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
             Default::default()
+        }
+
+        pub fn manually_dump_heap_profile_dir() -> String {
+            "/risingwave/cache/profiling/manually".to_string()
         }
     }
 

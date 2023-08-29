@@ -31,8 +31,26 @@ message HeapProfilingRequest {
 
 message HeapProfilingResponse {}
 
+message ListHeapProfilingRequest {}
+message ListHeapProfilingResponse {
+  string dir = 1;
+  repeated string name = 2;
+}
+
+// Download files
+message DownloadRequest {
+  // The file path
+  string path = 1;
+}
+
+message DownloadResponse {
+  bytes result = 1;
+}
+
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
+  rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
+  rpc Download(DownloadRequest) returns (DownloadResponse);
 }

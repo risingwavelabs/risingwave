@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod heap_profile;
 mod prometheus;
 mod proxy;
 
 use std::collections::HashMap;
+use std::fs;
 use std::net::SocketAddr;
+use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -48,6 +51,9 @@ pub struct DashboardService<S: MetaStore> {
 
     // TODO: replace with catalog manager.
     pub meta_store: Arc<S>,
+
+    pub ui_path: Option<String>,
+    pub binary_path: Option<String>,
 }
 
 pub type Service<S> = Arc<DashboardService<S>>;
@@ -56,11 +62,12 @@ pub(super) mod handlers {
     use anyhow::Context;
     use axum::Json;
     use itertools::Itertools;
+    use risingwave_common::bail;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
-    use risingwave_pb::monitor_service::StackTraceResponse;
+    use risingwave_pb::monitor_service::{HeapProfilingResponse, StackTraceResponse, ListHeapProfilingResponse};
     use serde_json::json;
 
     use super::*;
@@ -72,6 +79,12 @@ pub(super) mod handlers {
 
     pub fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
+    }
+
+    impl From<anyhow::Error> for DashboardError {
+        fn from(value: anyhow::Error) -> Self {
+            DashboardError(value)
+        }
     }
 
     impl IntoResponse for DashboardError {
@@ -213,14 +226,89 @@ pub(super) mod handlers {
 
         Ok(result.into())
     }
+
+    pub async fn heap_profile<S: MetaStore>(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<HeapProfilingResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.heap_profile("".to_string()).await.map_err(err)?;
+
+        Ok(result.into())
+    }
+
+    pub async fn list_heap_profile<S: MetaStore>(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<ListHeapProfilingResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.list_heap_profile().await.map_err(err)?;
+
+        Ok(result.into())
+    }
+
+    pub async fn analyze_heap<S: MetaStore>(
+        Path(worker_id): Path<WorkerId>,
+        Path(file_path): Path<String>,
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<String>> {
+        if srv.ui_path.is_none() {
+            bail!("Should provide ui_path");
+        }
+
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        // Cache path for the target node.
+        let node_cache_dir =
+            FilePath::new(&srv.ui_path.clone().unwrap()).join(worker_id.to_string());
+        let cache_file_path = node_cache_dir.join(FilePath::new(&file_path).file_name().unwrap());
+
+        let result = client.download(file_path.clone()).await.map_err(err)?;
+        fs::write(cache_file_path.clone(), result.result).map_err(err)?;
+
+        if let Some(binary_path) = srv.binary_path.clone() {
+            heap_profile::run_jeprof(cache_file_path.to_string_lossy().into(), binary_path).await?;
+        } else {
+            bail!("RisingWave binary path not specified");
+        }
+
+        Ok("Analyze succeeded!".to_string().into())
+    }
 }
 
 impl<S> DashboardService<S>
 where
     S: MetaStore,
 {
-    pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
+    pub async fn serve(self) -> Result<()> {
         use handlers::*;
+        let ui_path = self.ui_path.clone();
         let srv = Arc::new(self);
 
         let cors_layer = CorsLayer::new()
@@ -242,6 +330,9 @@ where
                 get(prometheus::list_prometheus_cluster::<S>),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
+            .route("/monitor/heap_profile/:worker_id", get(heap_profile::<S>))
+            .route("/monitor/list_heap_profile/:worker_id", get(list_heap_profile::<S>))
+            .route("/monitor/download/:worker_id/*path", get(analyze_heap::<S>))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

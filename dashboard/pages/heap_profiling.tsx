@@ -46,6 +46,7 @@ export default function HeapProfiling() {
   const [dump, setDump] = useState<string | undefined>("")
   const [profileCollapsed, setProfileCollapsed] = useState<string | undefined>("")
   const [profileList, setProfileList] = useState<ListHeapProfilingResponse | undefined>()
+  const [analyzeTargetFile, setAnalyzeTargetFile] = useState<String | undefined>()
 
   useEffect(() => {
     if (computeNodes && !computeNodeId && computeNodes.length > 0) {
@@ -66,6 +67,12 @@ export default function HeapProfiling() {
       ListHeapProfilingResponse.fromJSON
     )
     return response
+  }
+
+  async function dumpProfile() {
+
+    let call_dump = () => { return api.get(`/api/heap_profile/${computeNodeId}`)}
+    useFetch(call_dump)
   }
 
   const retVal = (
@@ -106,7 +113,7 @@ export default function HeapProfiling() {
               <FormLabel>Dumped Files</FormLabel>
               <Select
                 onChange={(event) =>
-                  setProfileList(parseInt(event.target.value))
+                  setAnalyzeTargetFile(event.target.value)
                 }
               >
                 {profileList &&

@@ -367,7 +367,11 @@ pub async fn compute_node_serve(
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_await_tree_reg.clone());
+    let monitor_srv = MonitorServiceImpl::new(
+        stream_mgr.clone(),
+        grpc_await_tree_reg.clone(),
+        config.server.clone(),
+    );
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 

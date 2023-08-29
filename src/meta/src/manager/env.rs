@@ -129,6 +129,9 @@ pub struct MetaOpts {
     /// connection`.
     pub privatelink_endpoint_default_tags: Option<Vec<(String, String)>>,
 
+    /// The path to RisingWave binary
+    pub rw_binary_path: Option<String>,
+
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
@@ -180,6 +183,7 @@ impl MetaOpts {
             security_group_id: None,
             connector_rpc_endpoint: None,
             privatelink_endpoint_default_tags: None,
+            rw_binary_path: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
