@@ -66,7 +66,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test"
-    command: "ci/scripts/e2e-test.sh -p ci-dev"
+    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     depends_on:
       - "build"
       - "build-other"
@@ -184,6 +184,20 @@ steps:
 
   - label: "end-to-end iceberg sink v2 test"
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end clickhouse sink test"
+    command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"

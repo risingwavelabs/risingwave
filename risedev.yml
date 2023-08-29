@@ -145,6 +145,18 @@ profile:
         persist-data: true
       - use: connector-node
 
+  standalone-minio-etcd-compactor:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+
   standalone-full-peripherals-without-kafka:
     steps:
       - use: minio
@@ -781,6 +793,16 @@ profile:
 
   ci-iceberg-test:
     config-path: src/config/ci-iceberg-test.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-clickhouse-test:
+    config-path: src/config/ci.toml
     steps:
       - use: minio
       - use: meta-node

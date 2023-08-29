@@ -973,6 +973,7 @@ where
         let ctx = ReplaceTableContext {
             old_table_fragments,
             merge_updates,
+            dispatchers,
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),

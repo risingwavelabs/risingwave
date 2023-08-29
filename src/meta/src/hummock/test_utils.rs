@@ -326,7 +326,7 @@ pub async fn setup_compute_env_with_config(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager,
-        Arc::new(MetaMetrics::new()),
+        Arc::new(MetaMetrics::default()),
         compactor_manager,
         config,
         compactor_streams_change_tx,

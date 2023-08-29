@@ -36,12 +36,11 @@ use risingwave_expr::ExprError;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
+    AddMutation, Dispatchers, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
@@ -226,8 +225,8 @@ pub enum Mutation {
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
         source: Option<PbSource>,
-        added_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
@@ -415,8 +414,8 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
+                actor_new_dispatchers,
                 source,
-                added_dispatchers,
             } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -426,8 +425,7 @@ impl Mutation {
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
-                source: source.clone(),
-                added_dispatchers: added_dispatchers
+                actor_new_dispatchers: actor_new_dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
                         (
@@ -438,6 +436,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                source: source.clone(),
             }),
             Mutation::Add {
                 adds,
@@ -511,12 +510,12 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                source: update.source.clone(),
-                added_dispatchers: update
-                    .added_dispatchers
+                actor_new_dispatchers: update
+                    .actor_new_dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
+                source: update.source.clone(),
             },
 
             PbMutation::Add(add) => Mutation::Add {
