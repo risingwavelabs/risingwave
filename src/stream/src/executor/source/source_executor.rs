@@ -533,9 +533,10 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                         }
 
-                        if target_state.is_some() {
-                            latest_state = target_state.as_ref().unwrap().clone();
+                        if let Some(state) = &target_state {
+                            latest_state = state.clone();
                         }
+
                         self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
                             .await?;
 

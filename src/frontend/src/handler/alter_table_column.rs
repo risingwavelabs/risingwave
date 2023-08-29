@@ -21,7 +21,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
+use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, Encode, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::{
@@ -85,6 +85,24 @@ pub async fn handle_alter_table_column(
         .clone()
         .map(|source_schema| source_schema.into_source_schema_v2());
 
+    if let Some(source_schema) = &source_schema {
+        match source_schema.row_encode {
+            Encode::Avro | Encode::Protobuf => {
+                return Err(RwError::from(ErrorCode::NotImplemented(
+                    "Alter source with schema registry".into(),
+                    None.into(),
+                )));
+            }
+            Encode::Native => {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    "Alter source with encode native".into(),
+                    "Alter source with encode JSON | BYTES | CSV".into(),
+                )));
+            }
+            _ => {}
+        }
+    }
+
     match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
@@ -107,7 +125,7 @@ pub async fn handle_alter_table_column(
                 .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
             {
                 Err(ErrorCode::InvalidInputSyntax(
-                    "alter table add generated columns is not supported".to_owned(),
+                    "alter table add generated columns is not supported".to_string(),
                 ))?
             }
 

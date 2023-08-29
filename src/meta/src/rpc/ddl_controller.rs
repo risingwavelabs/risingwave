@@ -835,11 +835,6 @@ where
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<StreamFragmentGraph> {
-        // let mut dispatch_strategy = None;
-        // // If table has associated source, delete the source in the graph
-        // if stream_job.has_associated_source() {
-        //     (fragment_graph, dispatch_strategy) = Self::remove_source_from_graph(fragment_graph);
-        // }
         // 1. Build fragment graph.
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
