@@ -21,16 +21,15 @@ use risingwave_common::catalog::Schema;
 
 use super::*;
 
-
 /// Flow Control Executor is used to control the rate of the input executor.
-/// Currently it is placed after the `BackfillExecutor`.
 ///
-/// upstream MaterializeExecutor -> BackfillExecutor -> Flow Control Executor
+/// Currently it is placed after the `BackfillExecutor`:
+/// upstream `MaterializeExecutor` -> `BackfillExecutor` -> `FlowControlExecutor`
 ///
 /// The rate limit is set statically at the moment, and cannot be changed in a running
 /// stream graph.
 ///
-/// It is mainly to be used for problematic MVs that are consuming too much resources.
+/// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
     rate_limit: u32,
@@ -39,6 +38,8 @@ pub struct FlowControlExecutor {
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: u32) -> Self {
+        #[cfg(madsim)]
+        println!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self { input, rate_limit }
     }
 
@@ -52,13 +53,16 @@ impl FlowControlExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    let result = rate_limiter
-                        .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                        .await;
-                    assert!(
-                        result.is_ok(),
-                        "the capacity of rate_limiter must be larger than the cardinality of chunk"
-                    );
+                    #[cfg(not(madsim))]
+                    {
+                        let result = rate_limiter
+                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
+                            .await;
+                        assert!(
+                            result.is_ok(),
+                            "the capacity of rate_limiter must be larger than the cardinality of chunk"
+                        );
+                    }
                     yield Message::Chunk(chunk);
                 }
                 _ => yield msg,
