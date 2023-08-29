@@ -648,16 +648,12 @@ pub fn start_shared_compactor(
     let task_progress = task_progress_manager.clone();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let periodic_event_update_interval = Duration::from_millis(1000);
-    let mut system =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
-    let pid = sysinfo::get_current_pid().unwrap();
 
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
         let shutdown = shutdown_map.clone();
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
-        let mut last_workload = CompactorWorkload::default();
+
         tokio::select! {
             _ = periodic_event_interval.tick() => {
                 let mut progress_list = Vec::new();
@@ -686,24 +682,7 @@ pub fn start_shared_compactor(
                 // }
             }
 
-            _ = workload_collect_interval.tick() => {
-                let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
-                debug_assert!(refresh_result);
-                let cpu = if let Some(process) = system.process(pid) {
-                    process.cpu_usage().div(worker_num as f32) as u32
-                } else {
-                    tracing::warn!("fail to get process pid {:?}", pid);
-                    0
-                };
-
-                tracing::debug!("compactor cpu usage {cpu}");
-                let workload = CompactorWorkload {
-                    cpu,
-                };
-
-                last_workload = workload.clone();
-
-            }
+           
             _ = &mut shutdown_rx => {
                 tracing::info!("Compactor is shutting down");
                 return
