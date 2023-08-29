@@ -466,14 +466,18 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
     }
 }
 
+const READ_WRITE_RATE_REPORT_INTERVAL: u64 = 1024;
+
 pub struct MonitorAsyncReadWriteImpl {
     endpoint: String,
     connection_type: String,
 
+    unreported_read_rate: u64,
     read_rate: GenericCounter<AtomicU64>,
     reader_count_guard: GenericGauge<AtomicI64>,
     is_eof: bool,
 
+    unreported_write_rate: u64,
     write_rate: GenericCounter<AtomicU64>,
     writer_count_guard: GenericGauge<AtomicI64>,
     is_shutdown: bool,
@@ -497,9 +501,11 @@ impl MonitorAsyncReadWriteImpl {
         Self {
             endpoint,
             connection_type,
+            unreported_read_rate: 0,
             read_rate,
             reader_count_guard: reader_count,
             is_eof: false,
+            unreported_write_rate: 0,
             write_rate,
             writer_count_guard: writer_count,
             is_shutdown: false,
@@ -510,6 +516,12 @@ impl MonitorAsyncReadWriteImpl {
 
 impl Drop for MonitorAsyncReadWriteImpl {
     fn drop(&mut self) {
+        if self.unreported_read_rate > 0 {
+            self.read_rate.inc_by(self.unreported_read_rate);
+        }
+        if self.unreported_write_rate > 0 {
+            self.write_rate.inc_by(self.unreported_write_rate);
+        }
         if !self.is_eof {
             self.reader_count_guard.dec();
         }
@@ -522,7 +534,11 @@ impl Drop for MonitorAsyncReadWriteImpl {
 
 impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     fn on_read(&mut self, size: usize) {
-        self.read_rate.inc_by(size as u64);
+        self.unreported_read_rate += size as u64;
+        if self.unreported_read_rate >= READ_WRITE_RATE_REPORT_INTERVAL {
+            self.read_rate.inc_by(self.unreported_read_rate);
+            self.unreported_read_rate = 0;
+        }
     }
 
     fn on_eof(&mut self) {
@@ -547,7 +563,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write(&mut self, size: usize) {
-        self.write_rate.inc_by(size as u64);
+        self.unreported_write_rate += size as u64;
+        if self.unreported_write_rate >= READ_WRITE_RATE_REPORT_INTERVAL {
+            self.write_rate.inc_by(self.unreported_write_rate);
+            self.unreported_write_rate = 0;
+        }
     }
 
     fn on_shutdown(&mut self) {
