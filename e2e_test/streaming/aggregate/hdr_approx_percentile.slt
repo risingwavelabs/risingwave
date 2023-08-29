@@ -130,6 +130,18 @@ SELECT * FROM approx_percentile_90_percent;
 ----
 108000.00
 
+query I
+SELECT percentile_disc(0.9) WITHIN GROUP (ORDER BY value) FROM input;
+----
+108889
+
+query B
+SELECT
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+FROM approx_percentile_90_percent, (SELECT percentile_disc(0.9) WITHIN GROUP (ORDER BY value) FROM input);
+----
+t
+
 statement ok
 DROP MATERIALIZED VIEW approx_percentile_90_percent;
 
@@ -140,7 +152,7 @@ DROP MATERIALIZED VIEW frequency_at_90;
 
 statement ok
 CREATE MATERIALIZED VIEW frequency_at_50 AS
-SELECT sum_frequency * 0.9 AS scaled_sum_freq FROM hdr_sum;
+SELECT sum_frequency * 0.5 AS scaled_sum_freq FROM hdr_sum;
 
 statement ok
 CREATE MATERIALIZED VIEW approx_percentile_50_percent AS
@@ -153,7 +165,19 @@ LIMIT 1;
 query I
 SELECT * FROM approx_percentile_50_percent;
 ----
-108000.00
+104000.00
+
+query I
+SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
+----
+104444
+
+query B
+SELECT
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
+----
+t
 
 ### Delete > 100000
 
@@ -166,7 +190,19 @@ flush;
 query I
 SELECT * FROM approx_percentile_50_percent;
 ----
-10800.00
+10400.00
+
+query I
+SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
+----
+10445
+
+query B
+SELECT
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
+----
+t
 
 ### Delete > 10000
 
@@ -179,7 +215,20 @@ flush;
 query I
 SELECT * FROM approx_percentile_50_percent;
 ----
-1090.00
+1040.00
+
+query I
+SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
+----
+1045
+
+query B
+SELECT
+ (abs(percentile_disc - approximate_percentile) / percentile_disc) < 0.01
+FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
+----
+t
+
 
 ### Delete > 100
 
@@ -192,7 +241,19 @@ flush;
 query I
 SELECT * FROM approx_percentile_50_percent;
 ----
-9.0
+5.0
+
+query I
+SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input;
+----
+5
+
+query B
+SELECT
+ percentile_disc = (approximate_percentile::int)
+FROM approx_percentile_50_percent, (SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY value) FROM input);
+----
+t
 
 ### Cleanup 50-percentile
 
