@@ -40,9 +40,10 @@ use risingwave_stream::executor::external::ExternalStorageTable;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, Barrier, BoxedExecutor as StreamBoxedExecutor,
-    BoxedMessageStream, CdcBackfillExecutor, Executor, MaterializeExecutor, Message, Mutation,
-    PkIndices, PkIndicesRef, StreamExecutorError,
+    default_source_internal_table, expect_first_barrier, ActorContext, Barrier,
+    BoxedExecutor as StreamBoxedExecutor, BoxedMessageStream, CdcBackfillExecutor, Executor,
+    MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler,
+    StreamExecutorError,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
@@ -189,6 +190,12 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         vec![0, 1],
     );
 
+    let source_state_handler = SourceStateTableHandler::from_table_catalog(
+        &default_source_internal_table(0x2333),
+        MemoryStateStore::new(),
+    )
+    .await;
+
     let cdc_backfill = CdcBackfillExecutor::new(
         ActorContext::create(0x1a),
         external_table,
@@ -198,6 +205,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         schema.clone(),
         vec![0],
         Arc::new(StreamingMetrics::unused()),
+        source_state_handler,
         4, // 4 rows in a snapshot chunk
     );
 

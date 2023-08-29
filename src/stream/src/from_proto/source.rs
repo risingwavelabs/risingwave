@@ -158,7 +158,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                     let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
                     let external_table = ExternalStorageTable::new(
-                         TableId::new(table_desc.table_id),
+                         TableId::new(source.source_id),
                         upstream_table_name,
                         table_reader,
                         schema.clone(),
