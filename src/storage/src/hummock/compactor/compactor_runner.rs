@@ -117,10 +117,10 @@ impl CompactorRunner {
                 split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
             },
-            compactor_metrics.clone(),
+            compactor_metrics,
             is_share_buffer_compact,
             sstable_store.clone(),
-            memory_limiter.clone(),
+            memory_limiter,
             sstable_object_id_manager,
             storage_opts.compact_iter_recreate_timeout_ms,
         );
@@ -128,7 +128,7 @@ impl CompactorRunner {
         Self {
             compactor,
             compact_task: task,
-            sstable_store: sstable_store.clone(),
+            sstable_store,
             key_range,
             split_index,
         }
@@ -568,6 +568,7 @@ where
 
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
+#[allow(clippy::too_many_arguments)]
 pub async fn shared_compact(
     compactor_metrics: Arc<CompactorMetrics>,
     compact_task: CompactTask,
@@ -597,6 +598,7 @@ pub async fn shared_compact(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn compact_inner(
     compactor_metrics: Arc<CompactorMetrics>,
     mut compact_task: CompactTask,

@@ -43,7 +43,6 @@ pub use compaction_filter::{
     TtlCompactionFilter,
 };
 pub use context::CompactorContext;
-use futures::channel::oneshot::Receiver;
 use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -73,12 +72,10 @@ use self::task_progress::TaskProgressManagerRef;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompactionDeleteRanges, GetObjectId, HummockResult, MemoryLimiter,
-    SharedComapctorObjectIdManager, SstableBuilderOptions, SstableObjectIdManager, SstableStoreRef,
-    Xor16FilterBuilder,
+    SharedComapctorObjectIdManager, SstableBuilderOptions, SstableStoreRef, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::{
-    self, FilterKeyExtractorBuilder, FilterKeyExtractorImpl, FilterKeyExtractorManager,
-    FilterKeyExtractorManagerFactory,
+    FilterKeyExtractorBuilder, FilterKeyExtractorImpl, FilterKeyExtractorManagerFactory,
 };
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, shared_compact};
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -630,6 +627,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
+#[allow(clippy::too_many_arguments)]
 pub fn start_shared_compactor(
     mut client: HummockManagerServiceClient<tonic::transport::Channel>,
     dispatch_task: dispatch_compaction_task_request::Task,
@@ -678,7 +676,7 @@ pub fn start_shared_compactor(
 
                  match client.report_compaction_task(report_compaction_task_request).await{
                     Ok(_) => {},
-                    Err(e) => tracing::warn!("Failed to report heartbeat"),
+                    Err(_) => tracing::warn!("Failed to report heartbeat"),
                 }
             }
 

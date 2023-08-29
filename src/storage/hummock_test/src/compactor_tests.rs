@@ -280,8 +280,13 @@ pub(crate) mod tests {
             compact_task.current_epoch_time = 0;
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (mut result_task, task_stats) =
-                compact(Arc::new(compact_ctx.clone()), compact_task.clone(), rx).await;
+            let (mut result_task, task_stats) = compact(
+                Arc::new(compact_ctx.clone()),
+                Box::new(compact_ctx.sstable_object_id_manager.clone()),
+                compact_task.clone(),
+                rx,
+            )
+            .await;
 
             hummock_manager_ref
                 .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -424,8 +429,14 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let compact_ctx = Arc::new(compact_ctx);
+        let (mut result_task, task_stats) = compact(
+            compact_ctx.clone(),
+            Box::new(compact_ctx.sstable_object_id_manager.clone()),
+            compact_task.clone(),
+            rx,
+        )
+        .await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -734,8 +745,14 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let compact_ctx = Arc::new(compact_ctx);
+        let (mut result_task, task_stats) = compact(
+            compact_ctx.clone(),
+            Box::new(compact_ctx.sstable_object_id_manager.clone()),
+            compact_task.clone(),
+            rx,
+        )
+        .await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -903,8 +920,14 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let compact_ctx = Arc::new(compact_ctx);
+        let (mut result_task, task_stats) = compact(
+            compact_ctx.clone(),
+            Box::new(compact_ctx.sstable_object_id_manager.clone()),
+            compact_task.clone(),
+            rx,
+        )
+        .await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -1072,8 +1095,14 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let compact_ctx = Arc::new(compact_ctx);
+        let (mut result_task, task_stats) = compact(
+            compact_ctx.clone(),
+            Box::new(compact_ctx.sstable_object_id_manager.clone()),
+            compact_task.clone(),
+            rx,
+        )
+        .await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -1220,8 +1249,14 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) =
-            compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
+        let compact_ctx = Arc::new(compact_ctx);
+        let (mut result_task, task_stats) = compact(
+            compact_ctx.clone(),
+            Box::new(compact_ctx.sstable_object_id_manager.clone()),
+            compact_task.clone(),
+            rx,
+        )
+        .await;
 
         hummock_manager_ref
             .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))

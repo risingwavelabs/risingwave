@@ -36,8 +36,7 @@ use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableObjectIdManagerRef, SstableStore, SstableWriterFactory,
-    SstableWriterOptions,
+    SstableBuilderOptions, SstableStore, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 

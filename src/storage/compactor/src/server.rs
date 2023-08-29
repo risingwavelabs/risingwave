@@ -35,9 +35,7 @@ use risingwave_object_store::object::parse_remote_object_store_with_config;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
-use risingwave_pb::hummock::{
-    dispatch_compaction_task_request, CompactTask, DispatchCompactionTaskRequest,
-};
+use risingwave_pb::hummock::DispatchCompactionTaskRequest;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{
@@ -55,7 +53,7 @@ use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
-use tonic::{Request, Response, Status};
+use tonic::Request;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
@@ -285,7 +283,7 @@ pub async fn compactor_serve(
     (join_handle, observer_join_handle, shutdown_send)
 }
 
-pub async fn shared_compactor_serve(
+pub async fn _shared_compactor_serve(
     endpoint: &'static str,
     listen_addr: SocketAddr,
     opts: CompactorOpts,
@@ -430,7 +428,7 @@ pub async fn shared_compactor_serve(
             output_object_ids,
             Arc::new(AtomicU32::new(0)),
             compactor_metrics.clone(),
-            sstable_store.clone(),
+            sstable_store,
             storage_opts,
             worker_num,
             memory_limiter,
