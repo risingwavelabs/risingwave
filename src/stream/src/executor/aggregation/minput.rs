@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::row::RowExt;
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -197,7 +197,7 @@ impl MaterializedInputState {
 
             #[for_await]
             for keyed_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
-                let state_row: OwnedRow = keyed_row?.into_row();
+                let state_row = keyed_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
                     self.cache_key_serializer.serialize(

@@ -390,7 +390,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
         self.next()
             .await
             .transpose()
-            .map(|r| r.map(|keyed_row| keyed_row.into_row()))
+            .map(|r| r.map(|keyed_row| keyed_row.into_owned_row()))
     }
 }
 

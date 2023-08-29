@@ -94,7 +94,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         let mut set = HashSet::new();
         pin_mut!(iter);
         while let Some(keyed_row) = iter.next().await {
-            let row = keyed_row?.into_row();
+            let row = keyed_row?;
             if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
                 let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                 let fs = split

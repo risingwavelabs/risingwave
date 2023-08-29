@@ -21,8 +21,6 @@ use futures_async_stream::try_stream;
 
 use super::KeyedRow;
 
-pub trait MergeSortKey = Eq + PartialEq + Ord + PartialOrd;
-
 struct Node<K: AsRef<[u8]>, S> {
     stream: S,
 
@@ -128,7 +126,7 @@ mod tests {
             let expected = gen_pk_and_row(i as u8).unwrap();
             let actual = result.unwrap();
             assert_eq!(actual.key(), expected.key());
-            assert_eq!(actual.into_row(), expected.into_row());
+            assert_eq!(actual.into_owned_row(), expected.into_owned_row());
         }
     }
 }

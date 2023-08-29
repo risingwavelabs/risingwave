@@ -236,7 +236,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let value = res?.into_row();
+            let value = res?.into_owned_row();
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
@@ -400,11 +400,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
 
                         #[for_await]
                         for res in stream::select_all(streams) {
-                            let row = res?.into_row();
+                            let row = res?;
                             if let Some(chunk) = stream_chunk_builder.append_row_matched(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
-                                row,
+                                row.as_ref(),
                             ) {
                                 yield Message::Chunk(chunk);
                             }

@@ -234,7 +234,7 @@ fn key_value_to_full_row<S: StateStore>(
     table: &StateTable<S>,
 ) -> StreamExecutorResult<OwnedRow> {
     let Some(val_indices) = table.value_indices() else {
-        return Ok(keyed_row.into_row());
+        return Ok(keyed_row.into_owned_row());
     };
     let pk_indices = table.pk_indices();
     let indices: BTreeSet<_> = val_indices
@@ -253,7 +253,7 @@ fn key_value_to_full_row<S: StateStore>(
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }
-    for (i, v) in keyed_row.into_row().into_iter().enumerate() {
+    for (i, v) in keyed_row.into_owned_row().into_iter().enumerate() {
         row[val_indices[i]] = v;
     }
     Ok(OwnedRow::new(row))

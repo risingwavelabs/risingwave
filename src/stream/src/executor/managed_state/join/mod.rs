@@ -416,16 +416,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for (row, degree) in table_iter.zip(degree_table_iter) {
-                let keyed_row = row?;
-                let degree_keyed_row = degree?;
-                let pk1 = keyed_row.key();
-                let pk2 = degree_keyed_row.key();
+                let row = row?;
+                let degree_row = degree?;
+                let pk1 = row.key();
+                let pk2 = degree_row.key();
                 debug_assert_eq!(
                     pk1, pk2,
                     "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
                 );
-                let row = keyed_row.into_row();
-                let degree_row = degree_keyed_row.into_row();
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
@@ -435,7 +433,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .expect("degree should not be NULL");
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row, degree_i64.into_int64() as u64).encode(),
+                    JoinRow::new(row.into_owned_row(), degree_i64.into_int64() as u64).encode(),
                 );
             }
         } else {
@@ -447,12 +445,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for entry in table_iter {
-                let row = entry?.into_row();
+                let row = entry?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                entry_state.insert(pk, JoinRow::new(row, 0).encode());
+                entry_state.insert(pk, JoinRow::new(row.into_owned_row(), 0).encode());
             }
         };
 

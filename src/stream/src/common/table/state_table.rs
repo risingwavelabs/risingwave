@@ -893,7 +893,7 @@ where
                     #[for_await]
                     for entry in merged_stream.take(self.watermark_cache.capacity()) {
                         let keyed_row = entry?;
-                        let (_, pk) = deserialize_pk_with_vnode(keyed_row.key(), &self.pk_serde)?;
+                        let pk = self.pk_serde.deserialize(keyed_row.key())?;
                         if !pk.is_null_at(0) {
                             pks.push(pk);
                         }

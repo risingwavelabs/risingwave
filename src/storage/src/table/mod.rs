@@ -15,6 +15,7 @@
 pub mod batch_table;
 pub mod merge_sort;
 
+use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
@@ -101,7 +102,7 @@ where
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                for (datum, builder) in row.into_row().iter().zip_eq_fast(builders.iter_mut()) {
+                for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
                     builder.append(datum);
                 }
             }
@@ -138,7 +139,7 @@ where
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                builder.append_one_row_no_finish(row.into_row());
+                builder.append_one_row_no_finish(row.into_owned_row());
             }
             None => break,
         }
@@ -224,15 +225,23 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
         }
     }
 
-    pub fn into_row(self) -> OwnedRow {
+    pub fn into_owned_row(self) -> OwnedRow {
         self.row
     }
 
-    pub fn vnode(&self) -> &[u8] {
+    pub fn vnode(&self) -> VirtualNode {
         self.vnode_prefixed_key.vnode_part()
     }
 
     pub fn key(&self) -> &[u8] {
         self.vnode_prefixed_key.key_part()
+    }
+}
+
+impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.row
     }
 }
