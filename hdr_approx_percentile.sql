@@ -72,7 +72,7 @@ FLUSH;
 
 -- This section contains the main logic of the HDR Histogram.
 
--- Here `pow(10.0, 2)` is responsible for setting the precision of the histogram.
+-- Here `pow(10.0, 4)` is responsible for setting the precision of the histogram.
 -- "2" is the precision.
 -- We also need a "dummy" column for as a workaround for stream nested loop join.
 CREATE MATERIALIZED VIEW hdr_histogram AS
@@ -80,7 +80,7 @@ SELECT
   CASE WHEN value<0 THEN -1 ELSE 1 END AS sign,
   trunc(log10(value))::int AS exponent,
   trunc(
-    pow(10.0, 2)
+    pow(10.0, 4)
      * (value / pow(10.0, trunc(log10(value))::int) - 1.0))::int AS mantissa,
   count(*) AS frequency,
   1 as dummy
@@ -92,16 +92,18 @@ SELECT
   sum(frequency) AS sum_frequency
 FROM hdr_histogram;
 
--- Here `pow(10.0, 2)` is responsible for recovering the position of the mantissa, with the precision.
+-- Here `pow(10.0, 4)` is responsible for recovering the position of the mantissa, with the precision.
 -- "2" is the precision.
 CREATE MATERIALIZED VIEW hdr_distribution AS
 SELECT
-  h.sign*(1.0+h.mantissa/pow(10.0, 2))*pow(10.0,h.exponent) AS bucket,
-  h.frequency,
-  sum(g.frequency) AS cumulative_frequency
-FROM hdr_histogram g JOIN hdr_histogram h ON g.dummy = h.dummy
-WHERE (g.sign,g.exponent,g.mantissa) <= (h.sign,h.exponent,h.mantissa)
-GROUP BY h.sign, h.exponent, h.mantissa, h.frequency
+    (sign*(1.0+mantissa/pow(10.0, 4))*pow(10.0,exponent))::int AS bucket,
+        (sum(frequency)
+            OVER (PARTITION BY NULL
+          ORDER BY (sign, exponent, mantissa)
+          ROWS UNBOUNDED PRECEDING)
+            ) AS cumulative_frequency
+FROM hdr_histogram g
+GROUP BY sign, exponent, mantissa, frequency
 ORDER BY cumulative_frequency;
 
 CREATE INDEX hdr_distribution_idx ON hdr_distribution (cumulative_frequency);
