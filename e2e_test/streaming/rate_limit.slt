@@ -1,0 +1,26 @@
+statement ok
+CREATE TABLE t1(v1 int, v2 int);
+
+statement ok
+SET RW_STREAMING_RATE_LIMIT TO 10000;
+
+statement ok
+CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
+
+# Should take around 5s due to rate limit.
+statement ok
+INSERT INTO t1 select * from generate_series(1,50000);
+
+statement ok
+FLUSH;
+
+query I
+select count(*) from m;
+----
+50000
+
+statement ok
+DROP MATERIALIZED VIEW m;
+
+statement ok
+DROP TABLE t1;
