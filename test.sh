@@ -2,8 +2,48 @@
 
 set -euo pipefail
 
+# --------
+# Overview
+# --------
+#
+# This is a demo script to show how to use hdr_histogram (http://hdrhistogram.org/)
+# to compute approximate percentile in RisingWave streaming.
+#
+# hdr_histogram stores N significant digits of each value, thereby reducing the
+# number of buckets needed to store the distribution.
+#
+# ----------------------
+# Implementation details
+# ----------------------
+#
+# First we create the histogram itself, where each value is encoded as a triple:
+# 1. The sign of the value (1 or -1)
+# 2. The exponent of the value (the power of 10, truncated to an integer)
+# 3. The significand of the value (the digits after the decimal point, truncated to $PRECISION digits)
+#
+# With the following parameters:
+# precision=2
+# value=123456
+#
+# The exponent will be 5 (log10(123456) = 5.0915... ~ 5)
+# The significand will be 23 (123456 / 10^5 - 1 = 1.23... ).
+# Then the histogram will store the triple (1, 5, 23)
+#
+# Next we do a stream nested loop join on the histogram itself to compute the
+# cumulative frequency of each bucket.
+# | Bucket       | 4 | 311 | 400 | 521 |
+# | Counts       | 3 | 6   | 7   | 8   |
+# | C. Frequency | 3 | 9   | 16  | 24  |
+#
+# Finally we can compute the approximate percentile
+# 1. Compute the sum of all frequencies. (24)
+# 2. Select a percentile (90%)
+# 3. Compute the frequency corresponding to the percentile (24 * 0.9 = 21.6)
+# 4. Find the first bucket with the cumulative frequency >= 21.6 (400)
+
 # Lower = less precision, faster
 # Higher = more precision, slower
+# At PRECISION 2, 1000_000 rows takes < 3 minutes to process on my local machine.
 PRECISION=2
 
 ./risedev d
@@ -31,7 +71,9 @@ SELECT
   trunc(log10(value))::int AS exponent,
 
   -- Mantissa
-  trunc(pow(10.0, $PRECISION) * (value / pow(10.0, trunc(log10(value))::int) - 1.0))::int AS mantissa,
+  trunc(
+    pow(10.0, $PRECISION)
+     * (value / pow(10.0, trunc(log10(value))::int) - 1.0))::int AS mantissa,
 
   --- Frequency of each bucket
   count(*) AS frequency,
