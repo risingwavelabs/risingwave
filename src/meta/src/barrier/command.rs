@@ -607,12 +607,14 @@ where
         match &self.command {
             Command::Plain(_) => {}
 
-            Command::Pause(_) => {
-                // After the `Pause` barrier is collected and committed, we must ensure that the
-                // storage version with this epoch is synced to all compute nodes before the
-                // execution of the next command of `Update`, as some newly created operators may
-                // immediately initialize their states on that barrier.
-                self.wait_epoch_commit(self.prev_epoch.value().0).await?;
+            Command::Pause(reason) => {
+                if let PausedReason::ConfigChange = reason {
+                    // After the `Pause` barrier is collected and committed, we must ensure that the
+                    // storage version with this epoch is synced to all compute nodes before the
+                    // execution of the next command of `Update`, as some newly created operators
+                    // may immediately initialize their states on that barrier.
+                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
+                }
             }
 
             Command::Resume(_) => {}
