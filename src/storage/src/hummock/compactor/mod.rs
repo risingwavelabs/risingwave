@@ -676,13 +676,13 @@ pub fn start_shared_compactor(
                     )),
                  };
 
-                //  match client.repory_compaction_task(report_compaction_task_request).await{
-                //     Ok(_) => {},
-                //     Err(e) => tracing::warn!("Failed to report heartbeat"),
-                // }
+                 match client.report_compaction_task(report_compaction_task_request).await{
+                    Ok(_) => {},
+                    Err(e) => tracing::warn!("Failed to report heartbeat"),
+                }
             }
 
-           
+
             _ = &mut shutdown_rx => {
                 tracing::info!("Compactor is shutting down");
                 return
@@ -726,10 +726,13 @@ pub fn start_shared_compactor(
                     })),
                 };
 
-                // match client.repory_compaction_task(report_compaction_task_request).await{
-                //     Ok(_) => {},
-                //     Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),
-                // }
+                match client
+                    .report_compaction_task(report_compaction_task_request)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),
+                }
             }
             dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
                 match Vacuum::handle_vacuum_task(

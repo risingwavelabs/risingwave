@@ -19,6 +19,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
+use risingwave_pb::hummock::report_compaction_task_request::Event::{HeartBeat, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
@@ -522,5 +523,31 @@ where
         }
 
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    async fn report_compaction_task(
+        &self,
+        request: Request<ReportCompactionTaskRequest>,
+    ) -> Result<Response<ReportCompactionTaskResponse>, Status> {
+        let req = request.into_inner();
+        if let Some(event) = req.event {
+            match event {
+                ReportTask(report_task) => {
+                    self.hummock_manager
+                        .report_compact_task(
+                            &mut report_task.compact_task.unwrap(),
+                            Some(report_task.table_stats_change),
+                        )
+                        .await?;
+                }
+                HeartBeat(heartbeat) => {
+                    self.hummock_manager
+                        .compactor_manager
+                        .update_task_heartbeats(&heartbeat.progress);
+                }
+            };
+        }
+
+        Ok(Response::new(ReportCompactionTaskResponse { status: None }))
     }
 }
