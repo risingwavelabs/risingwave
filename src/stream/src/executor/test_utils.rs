@@ -386,7 +386,7 @@ pub mod agg_executor {
             add_column_desc(agg_call.return_type.clone());
         });
 
-        StateTable::new_without_distribution(
+        StateTable::new_without_distribution_inconsistent_op(
             store,
             table_id,
             column_descs,
