@@ -21,9 +21,16 @@ use risingwave_common::catalog::Schema;
 
 use super::*;
 
-/// `FlowControlExecutor` project data with the `expr`. The `expr` takes a chunk of data,
-/// and returns a new data chunk. And then, `FlowControlExecutor` will insert, delete
-/// or update element into next operator according to the result of the expression.
+
+/// Flow Control Executor is used to control the rate of the input executor.
+/// Currently it is placed after the `BackfillExecutor`.
+///
+/// upstream MaterializeExecutor -> BackfillExecutor -> Flow Control Executor
+///
+/// The rate limit is set statically at the moment, and cannot be changed in a running
+/// stream graph.
+///
+/// It is mainly to be used for problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
     rate_limit: u32,
