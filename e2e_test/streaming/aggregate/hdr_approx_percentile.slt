@@ -40,7 +40,7 @@
 # 1. Compute the sum of all frequencies. (24)
 # 2. Select a percentile (90%)
 # 3. Compute the frequency corresponding to the percentile (24 * 0.9 = 21.6)
-# 4. Find the first bucket with the cumulative frequency >= 21.6 (400)
+# 4. Find the first bucket with the cumulative frequency >= 21.6 (521)
 #
 # Step 3 and 4 are required for us to use dynamic filter,
 # since we don't support complex expressions in the dynamic filter.
