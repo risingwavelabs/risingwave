@@ -37,6 +37,7 @@ memcomparable = "0.2"
 multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
+parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
@@ -68,7 +69,6 @@ tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
-parse-display = "0.8"
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }

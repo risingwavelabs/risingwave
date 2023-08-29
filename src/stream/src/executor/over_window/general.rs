@@ -638,6 +638,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                 shrink_partition_cache(
                                     &part_key.0,
                                     &mut range_cache,
+                                    this.cache_policy,
                                     recently_accessed_range,
                                 );
                             }

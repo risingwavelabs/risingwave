@@ -80,19 +80,146 @@ pub(super) fn new_empty_partition_cache() -> PartitionCache {
     cache
 }
 
+const MAGIC_CACHE_SIZE: usize = 1024;
+const MAGIC_JITTER_PREVENTION: usize = MAGIC_CACHE_SIZE / 8;
+
 pub(super) fn shrink_partition_cache(
     this_partition_key: &OwnedRow,
     range_cache: &mut PartitionCache,
+    cache_policy: CachePolicy,
     recently_accessed_range: RangeInclusive<StateKey>,
 ) {
     tracing::debug!(
         this_partition_key=?this_partition_key,
+        cache_policy=?cache_policy,
         recently_accessed_range=?recently_accessed_range,
-        "shrinking range cache"
+        "find the range to retain in the range cache"
     );
 
-    let (start, end) = recently_accessed_range.into_inner();
-    let (left_removed, right_removed) = range_cache.retain_range(&start.into()..=&end.into());
+    let (start, end) = match cache_policy {
+        CachePolicy::Full => {
+            // evict nothing if the policy is to cache full partition
+            return;
+        }
+        CachePolicy::Recent => {
+            let (sk_start, sk_end) = recently_accessed_range.into_inner();
+            let (ck_start, ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
+
+            let mut cursor = range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
+            for _ in 0..MAGIC_JITTER_PREVENTION {
+                if cursor.key().is_none() {
+                    break;
+                }
+                cursor.move_prev();
+            }
+            let start = cursor
+                .key()
+                .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
+                .clone();
+
+            let mut cursor = range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
+            for _ in 0..MAGIC_JITTER_PREVENTION {
+                if cursor.key().is_none() {
+                    break;
+                }
+                cursor.move_next();
+            }
+            let end = cursor
+                .key()
+                .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
+                .clone();
+
+            (start, end)
+        }
+        CachePolicy::RecentFirstN => {
+            if range_cache.len() <= MAGIC_CACHE_SIZE {
+                // no need to evict if cache len <= N
+                return;
+            } else {
+                let (sk_start, _sk_end) = recently_accessed_range.into_inner();
+                let ck_start = CacheKey::from(sk_start);
+
+                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is first
+
+                let mut cursor = range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
+                // go back for at most `MAGIC_JITTER_PREVENTION` entries
+                for _ in 0..MAGIC_JITTER_PREVENTION {
+                    if cursor.key().is_none() {
+                        break;
+                    }
+                    cursor.move_prev();
+                    capacity_remain -= 1;
+                }
+                let start = cursor
+                    .key()
+                    .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
+                    .clone();
+
+                let mut cursor = range_cache.inner().lower_bound(Bound::Included(&ck_start));
+                // go forward for at most `capacity_remain` entries
+                for _ in 0..capacity_remain {
+                    if cursor.key().is_none() {
+                        break;
+                    }
+                    cursor.move_next();
+                }
+                let end = cursor
+                    .key()
+                    .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
+                    .clone();
+
+                (start, end)
+            }
+        }
+        CachePolicy::RecentLastN => {
+            if range_cache.len() <= MAGIC_CACHE_SIZE {
+                // no need to evict if cache len <= N
+                return;
+            } else {
+                let (_sk_start, sk_end) = recently_accessed_range.into_inner();
+                let ck_end = CacheKey::from(sk_end);
+
+                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is first
+
+                let mut cursor = range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
+                // go forward for at most `MAGIC_JITTER_PREVENTION` entries
+                for _ in 0..MAGIC_JITTER_PREVENTION {
+                    if cursor.key().is_none() {
+                        break;
+                    }
+                    cursor.move_next();
+                    capacity_remain -= 1;
+                }
+                let end = cursor
+                    .key()
+                    .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
+                    .clone();
+
+                let mut cursor = range_cache.inner().upper_bound(Bound::Included(&ck_end));
+                // go back for at most `capacity_remain` entries
+                for _ in 0..capacity_remain {
+                    if cursor.key().is_none() {
+                        break;
+                    }
+                    cursor.move_prev();
+                }
+                let start = cursor
+                    .key()
+                    .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
+                    .clone();
+
+                (start, end)
+            }
+        }
+    };
+
+    tracing::debug!(
+        this_partition_key=?this_partition_key,
+        retain_range=?(&start..=&end),
+        "retain range in the range cache"
+    );
+
+    let (left_removed, right_removed) = range_cache.retain_range(&start..=&end);
     if range_cache.is_empty() {
         if !left_removed.is_empty() || !right_removed.is_empty() {
             range_cache.insert(CacheKey::Smallest, OwnedRow::empty());
