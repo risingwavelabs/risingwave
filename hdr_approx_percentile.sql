@@ -4,11 +4,7 @@
 --
 -- This is a demo test to show how to use hdr_histogram (http://hdrhistogram.org/)
 -- to compute `approx_percentile` in the RisingWave stream engine.
---
--- The advantage of this approach is that it supports updatable approx_percentile.
--- The disadvantage is that it requires quadratic computation and storage
--- as the precision increases,
--- due to streaming nested loop join.
+-- It supports non-append-only streams, i.e. streams with updates and deletes are supported.
 --
 -- The way it works is that hdr_histogram stores N significant digits of each value,
 -- thereby reducing the number of buckets needed to store the distribution.
