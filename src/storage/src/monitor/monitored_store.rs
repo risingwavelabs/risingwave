@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -80,19 +79,18 @@ pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreI
     input
 }
 
-pub type MonitoredStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
-    impl StateStoreIterItemStream + 's;
+pub type MonitoredStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
 
 // Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
 // the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
 // `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
 impl<S> MonitoredStateStore<S> {
-    async fn monitored_iter<'a, 's: 'a, St: StateStoreIterItemStream + 's>(
+    async fn monitored_iter<'a, St: StateStoreIterItemStream + 'a>(
         &'a self,
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
-    ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
+    ) -> StorageResult<MonitoredStateStoreIterStream<St>> {
         // start time takes iterator build time into account
         let start_time = Instant::now();
         let table_id_label = table_id.to_string();
@@ -123,7 +121,6 @@ impl<S> MonitoredStateStore<S> {
                 storage_metrics: self.storage_metrics.clone(),
                 table_id,
             },
-            _phantom: Default::default(),
         };
         Ok(monitored.into_stream())
     }
@@ -361,10 +358,9 @@ impl MonitoredStateStore<HummockStorage> {
 }
 
 /// A state store iterator wrapper for monitoring metrics.
-pub struct MonitoredStateStoreIter<'s, S: 's> {
+pub struct MonitoredStateStoreIter<S> {
     inner: S,
     stats: MonitoredStateStoreIterStats,
-    _phantom: PhantomData<&'s ()>,
 }
 
 struct MonitoredStateStoreIterStats {
@@ -376,10 +372,7 @@ struct MonitoredStateStoreIterStats {
     table_id: TableId,
 }
 
-impl<'s, S: StateStoreIterItemStream> MonitoredStateStoreIter<'s, S>
-where
-    S: 's,
-{
+impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
     async fn into_stream_inner(self) {
         let inner = self.inner;
@@ -398,7 +391,7 @@ where
         drop(stats);
     }
 
-    fn into_stream(self) -> MonitoredStateStoreIterStream<'s, S> {
+    fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
         Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::ops::Bound;
 
 use bytes::Bytes;
@@ -66,11 +65,11 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    async fn traced_iter<'a, 's, St: StateStoreIterItemStream + 's>(
+    async fn traced_iter<'a, St: StateStoreIterItemStream>(
         &'a self,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
         span: MayTraceSpan,
-    ) -> StorageResult<TracedStateStoreIterStream<'s, St>> {
+    ) -> StorageResult<TracedStateStoreIterStream<St>> {
         let res = iter_stream_future.await;
         if res.is_ok() {
             span.may_send_result(OperationResult::Iter(TraceResult::Ok(())));
@@ -105,8 +104,8 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-type TracedStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
-    impl StateStoreIterItemStream + 's;
+type TracedStateStoreIterStream<S: StateStoreIterItemStream> =
+    impl StateStoreIterItemStream;
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
@@ -317,23 +316,18 @@ impl<S> Drop for TracedStateStore<S> {
     }
 }
 
-pub struct TracedStateStoreIter<'s, S: 's> {
+pub struct TracedStateStoreIter<S> {
     inner: S,
     span: MayTraceSpan,
-    _phantom: PhantomData<&'s ()>,
 }
 
-impl<'s, S: 's> TracedStateStoreIter<'s, S> {
+impl<S> TracedStateStoreIter<S> {
     fn new(inner: S, span: MayTraceSpan) -> Self {
-        TracedStateStoreIter {
-            inner,
-            span,
-            _phantom: PhantomData,
-        }
+        TracedStateStoreIter { inner, span }
     }
 }
 
-impl<'s, S: StateStoreIterItemStream> TracedStateStoreIter<'s, S> {
+impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
     async fn into_stream_inner(self) {
         let inner = self.inner;
@@ -354,7 +348,7 @@ impl<'s, S: StateStoreIterItemStream> TracedStateStoreIter<'s, S> {
         }
     }
 
-    fn into_stream(self) -> impl StateStoreIterItemStream {
+    fn into_stream(self) -> TracedStateStoreIterStream<S> {
         Self::into_stream_inner(self)
     }
 }
