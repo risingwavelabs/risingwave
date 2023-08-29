@@ -19,7 +19,7 @@ use std::ops::Bound;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::future::try_join_all;
-use futures::Stream;
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
@@ -463,6 +463,19 @@ pub(crate) fn compute_bounds(
     }
 }
 
+#[try_stream(ok = OwnedRow, error = StreamExecutorError)]
+pub(crate) async fn owned_row_iter<S, E>(storage_iter: S)
+where
+    StreamExecutorError: From<E>,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>>,
+{
+    pin_mut!(storage_iter);
+    while let Some(row) = storage_iter.next().await {
+        let row = row?;
+        yield row.into_owned_row()
+    }
+}
+
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
 pub(crate) async fn iter_chunks<'a, S, E>(
     mut iter: S,
@@ -470,7 +483,7 @@ pub(crate) async fn iter_chunks<'a, S, E>(
     builder: &'a mut DataChunkBuilder,
 ) where
     StreamExecutorError: From<E>,
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin + 'a,
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) =
         collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
