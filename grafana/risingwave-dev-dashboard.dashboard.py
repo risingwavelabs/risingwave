@@ -1443,6 +1443,16 @@ def section_streaming_errors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Source Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('reader_fail_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]

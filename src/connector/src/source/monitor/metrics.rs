@@ -63,6 +63,8 @@ pub struct SourceMetrics {
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
+    /// Reader failure count
+    pub reader_fail_count: GenericCounterVec<AtomicU64>,
 }
 
 impl SourceMetrics {
@@ -102,6 +104,13 @@ impl SourceMetrics {
         )
         .unwrap();
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
+        let reader_fail_count = register_int_counter_vec_with_registry!(
+            "reader_fail_count",
+            "Total number of failures of source reader",
+            &["actor_id", "source_id"],
+            registry
+        )
+        .unwrap();
         SourceMetrics {
             registry,
             partition_input_count,
@@ -109,6 +118,7 @@ impl SourceMetrics {
             user_source_error_count,
             latest_message_id,
             rdkafka_native_metric,
+            reader_fail_count,
         }
     }
 

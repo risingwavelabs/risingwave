@@ -193,6 +193,10 @@ macro_rules! impl_common_split_reader_logic {
                 let metrics = self.source_ctx.metrics.clone();
                 let source_ctx = self.source_ctx.clone();
 
+                let actor_id_2 = actor_id.clone();
+                let source_id_2 = source_id.clone();
+                let metrics_2 = metrics.clone();
+
                 let data_stream = self.into_data_stream();
 
                 let data_stream = data_stream
@@ -228,7 +232,17 @@ macro_rules! impl_common_split_reader_logic {
                     $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
                 #[for_await]
                 for msg_batch in parser.into_stream(data_stream) {
-                    yield msg_batch?;
+                    match msg_batch {
+                        // Parser error is handled by parser itself
+                        Err(e) => {
+                            metrics_2.
+                                reader_fail_count
+                                .with_label_values(&[&actor_id_2, &source_id_2])
+                                .inc_by(1);
+                            tracing::warn!(%e, "reader error");
+                        }
+                        Ok(msg_batch) => yield msg_batch,
+                    }
                 }
             }
         }
