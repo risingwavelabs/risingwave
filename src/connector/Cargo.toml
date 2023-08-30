@@ -21,8 +21,8 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0de
     "bzip",
     "xz",
 ] }
-arrow-array = "45"
-arrow-schema = "45"
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 auto_impl = "1"

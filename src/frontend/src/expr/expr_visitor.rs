@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Now, Parameter,
-    Subquery, TableFunction, UserDefinedFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
+    Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// Traverse an expression tree.
@@ -36,6 +36,7 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
             ExprImpl::Literal(inner) => self.visit_literal(inner),
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call_with_lambda(inner),
             ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
@@ -53,6 +54,9 @@ pub trait ExprVisitor<R: Default> {
             .map(|expr| self.visit_expr(expr))
             .reduce(Self::merge)
             .unwrap_or_default()
+    }
+    fn visit_function_call_with_lambda(&mut self, func_call: &FunctionCallWithLambda) -> R {
+        self.visit_function_call(func_call.base())
     }
     fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
         let mut r = agg_call
