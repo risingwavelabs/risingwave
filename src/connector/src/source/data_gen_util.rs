@@ -19,8 +19,9 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 /// Spawn the data generator to a dedicated runtime, returns a channel receiver
-/// for acquiring the generated data. This is used for the [`super::datagen::DatagenSplitReader`] and
-/// [`super::nexmark::NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
+/// for acquiring the generated data. This is used for the [`super::datagen::DatagenSplitReader`]
+/// and [`super::nexmark::source::reader::NexmarkSplitReader`] in case that they are CPU intensive and may block the
+/// streaming actors.
 pub fn spawn_data_generation_stream<T: Send + 'static>(
     stream: impl Stream<Item = T> + Send + 'static,
     buffer_size: usize,

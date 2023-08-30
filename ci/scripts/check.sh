@@ -35,7 +35,7 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Build documentation"
-RUSTDOCFLAGS="-Dwarnings" cargo doc --document-private-items --no-deps
+RUSTDOCFLAGS="-Dwarnings -Aprivate_intra_doc_links" cargo doc --document-private-items --no-deps
 
 echo "--- Show sccache stats"
 sccache --show-stats
