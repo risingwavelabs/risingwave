@@ -54,7 +54,7 @@ done
 wait
 
 echo "Fulfill kafka topics"
-python3 -m pip install requests fastavro confluent_kafka
+python3 -m pip install requests fastavro confluent_kafka jsonschema
 for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
@@ -65,7 +65,9 @@ for filename in $kafka_data_files; do
     if [[ "$topic" = *bin ]]; then
         ${KCAT_BIN} -P -b message_queue:29092 -t "$topic" "$filename"
     elif [[ "$topic" = *avro_json ]]; then
-        python3 source/avro_producer.py "message_queue:29092" "http://message_queue:8081" "$filename" "topic"
+        python3 source/schema_registry_producer.py "message_queue:29092" "http://message_queue:8081" "$filename" "topic" "avro"
+    elif [[ "$topic" = *json_schema ]]; then
+        python3 source/schema_registry_producer.py "kafka:9093" "http://schemaregistry:8082" "$filename" "topic" "json"
     else
         cat "$filename" | ${KCAT_BIN} -P -K ^  -b message_queue:29092 -t "$topic"
     fi
@@ -75,9 +77,9 @@ done
 # write schema with name strategy
 
 ## topic: upsert_avro_json-record, key subject: string, value subject: CPLM.OBJ_ATTRIBUTE_VALUE
-(python3 source/avro_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "record") &
+(python3 source/schema_registry_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "record" "avro") &
 ## topic: upsert_avro_json-topic-record,
 ## key subject: upsert_avro_json-topic-record-string
 ## value subject: upsert_avro_json-topic-record-CPLM.OBJ_ATTRIBUTE_VALUE
-(python3 source/avro_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "topic-record") &
+(python3 source/schema_registry_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "topic-record" "avro") &
 wait
