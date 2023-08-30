@@ -18,6 +18,7 @@ use futures::{pin_mut, Stream, StreamExt};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+/// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`]
 /// and [`NexmarkSplitReader`] in case that they are CPU intensive
 /// and may block the streaming actors.
