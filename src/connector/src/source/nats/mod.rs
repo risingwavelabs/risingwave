@@ -12,25 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod base;
-pub mod cdc;
-pub mod data_gen_util;
-pub mod datagen;
-pub mod dummy_connector;
-pub mod filesystem;
-pub mod google_pubsub;
-pub mod kafka;
-pub mod kinesis;
-pub mod monitor;
-pub mod nexmark;
-pub mod nats;
-pub mod pulsar;
-pub use base::*;
-pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
-pub use kafka::KAFKA_CONNECTOR;
-pub use kinesis::KINESIS_CONNECTOR;
-mod manager;
-pub use manager::SourceColumnDesc;
+pub mod enumerator;
+pub mod source;
+pub mod split;
 
-pub use crate::source::nexmark::NEXMARK_CONNECTOR;
-pub use crate::source::pulsar::PULSAR_CONNECTOR;
+use std::collections::HashMap;
+
+use anyhow::anyhow;
+use risingwave_pb::connector_service::TableSchema;
+use serde::Deserialize;
+
+use crate::common::KafkaCommon;
+pub const NATS_CONNECTOR: &str = "nats";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct NatsProperties {
+    /// Properties specified in the WITH clause by user
+    pub props: HashMap<String, String>,
+
+    /// Schema of the source specified by users
+    pub table_schema: Option<TableSchema>,
+}
+
+impl NatsProperties {}
