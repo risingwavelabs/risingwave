@@ -16,9 +16,9 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "45"
-arrow-buffer = "45"
-arrow-schema = "45"
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
@@ -44,6 +44,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
+hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.11"
 itoa = "1.0"
@@ -56,6 +57,7 @@ opentelemetry = { version = "0.20", default-features = false }
 parking_lot = "0.12"
 parse-display = "0.8"
 paste = "1"
+pin-project-lite = "0.2"
 postgres-types = { version = "0.2.6", features = [
     "derive",
     "with-chrono-0_4",
@@ -102,6 +104,9 @@ uuid = "1.4.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+http-body = "0.4.5"
+tower-layer = "0.3.2"
+tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false }

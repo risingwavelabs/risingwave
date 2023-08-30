@@ -35,7 +35,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk,
+    iter_chunks, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -507,10 +507,11 @@ where
             .await?;
         let iter = iter.map(|result| result.map(|r| r.into_owned_row()));
 
-        pin_mut!(iter);
+        let row_iter = owned_row_iter(iter);
+        pin_mut!(row_iter);
 
         #[for_await]
-        for chunk in iter_chunks(iter, chunk_size, builder) {
+        for chunk in iter_chunks(row_iter, chunk_size, builder) {
             yield Some(chunk?);
         }
         yield None;
