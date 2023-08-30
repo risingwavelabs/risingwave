@@ -25,6 +25,9 @@ You may choose the read to macro definition directly,
 but something complementary / easier is to use `cargo expand`
 to expand the macro and read the expanded code.
 
+You can also setup `rust-analyzer` in the editor to expand macros on the fly.
+See https://rust-analyzer.github.io/manual.html#expand-macro-recursively.
+
 ### Example 1: declarative macro `commit_meta!()`
 
 For instance, within `meta::manager::catalog::CatalogManager::finish_create_table_procedure`
