@@ -256,6 +256,7 @@ impl JoinStreamChunkBuilder {
         )
     }
 
+    /// Take out the remaining rows as a chunk. Return `None` if the builder is empty.
     #[must_use]
     pub fn take(&mut self) -> Option<StreamChunk> {
         self.builder.take()
