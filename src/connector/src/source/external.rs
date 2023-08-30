@@ -419,10 +419,10 @@ impl MySqlExternalTableReader {
                         };
                         Ok((pk.clone(), val))
                     } else {
-                        return Err(ConnectorError::Internal(anyhow!(
+                        Err(ConnectorError::Internal(anyhow!(
                             "primary key {} cannot be null",
                             pk
-                        )));
+                        )))
                     }
                 })
                 .try_collect()?;
