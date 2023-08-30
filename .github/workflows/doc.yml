@@ -58,7 +58,7 @@ jobs:
           tool: cargo-docset
       - name: build docsets
         run: |
-          RUSTDOCFLAGS='docsrs' cargo docset
+          RUSTDOCFLAGS='--cfg docsrs' cargo docset
 
           echo "<entry>
           <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
