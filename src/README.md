@@ -27,6 +27,7 @@ to expand the macro and read the expanded code.
 
 You can also setup `rust-analyzer` in the editor to expand macros on the fly.
 See https://rust-analyzer.github.io/manual.html#expand-macro-recursively.
+This is the **better option** if you want to understand the code interactively.
 
 ### Example 1: declarative macro `commit_meta!()`
 
