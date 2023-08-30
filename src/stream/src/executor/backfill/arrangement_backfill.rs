@@ -181,7 +181,7 @@ where
                         &mut builders,
                     );
                     pin_mut!(snapshot);
-                    let empty = snapshot.try_next().await?.unwrap().is_none();
+                    let empty = snapshot.try_next().await?.is_none();
                     // #[for_await]
                     // for c in snapshot {
                     //     println!("Backfill: snapshot_empty_check: {:?}", c);

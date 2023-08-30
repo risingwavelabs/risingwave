@@ -17,7 +17,6 @@ use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;

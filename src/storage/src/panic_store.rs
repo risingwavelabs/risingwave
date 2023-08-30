@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -123,7 +122,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+    async fn init(&mut self, _epoch: EpochPair) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 
