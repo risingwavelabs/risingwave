@@ -42,9 +42,9 @@ jobs:
           echo "<entry>
           <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
           <url>https://risingwavelabs.github.io/risingwave/risingwave.docset.tgz</url>
-          </entry>" > docset-feed.xml
+          </entry>" > RisingWave.xml
 
-          cp -t artifact "risingwave.docset.tgz" "docset-feed.xml"
+          cp -t artifact "risingwave.docset.tgz" "RisingWave.xml"
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
