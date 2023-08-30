@@ -575,11 +575,14 @@ pub struct StorageConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct CacheRefillConfig {
-    #[serde(default = "default::cache_refill::refill_data_file_cache_levels")]
-    pub refill_data_file_cache_levels: Vec<u32>,
+    #[serde(default = "default::cache_refill::data_refill_levels")]
+    pub data_refill_levels: Vec<u32>,
 
-    #[serde(default = "default::cache_refill::refill_timeout_ms")]
-    pub refill_timeout_ms: u64,
+    #[serde(default = "default::cache_refill::timeout_ms")]
+    pub timeout_ms: u64,
+
+    #[serde(default = "default::cache_refill::concurrency")]
+    pub concurrency: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -1120,12 +1123,16 @@ pub mod default {
     }
 
     pub mod cache_refill {
-        pub fn refill_data_file_cache_levels() -> Vec<u32> {
+        pub fn data_refill_levels() -> Vec<u32> {
             vec![]
         }
 
-        pub fn refill_timeout_ms() -> u64 {
+        pub fn timeout_ms() -> u64 {
             6000
+        }
+
+        pub fn concurrency() -> usize {
+            100
         }
     }
 

@@ -24,6 +24,7 @@ use futures::{Future, FutureExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -32,8 +33,9 @@ use crate::monitor::StoreLocalStatistic;
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
-    pub cache_refill_timeout: Duration,
-    pub refill_data_file_cache_levels: HashSet<u32>,
+    pub timeout: Duration,
+    pub data_refill_levels: HashSet<u32>,
+    pub concurrency: usize,
 }
 
 struct Item {
@@ -43,21 +45,25 @@ struct Item {
 
 /// A cache refiller for hummock data.
 pub struct CacheRefiller {
-    sstable_store: SstableStoreRef,
+    /// order: old => new
+    queue: VecDeque<Item>,
 
     config: Arc<CacheRefillConfig>,
 
-    /// order: old => new
-    queue: VecDeque<Item>,
+    concurrency: Arc<Semaphore>,
+
+    sstable_store: SstableStoreRef,
 }
 
 impl CacheRefiller {
     pub fn new(config: CacheRefillConfig, sstable_store: SstableStoreRef) -> Self {
         let config = Arc::new(config);
+        let concurrency = Arc::new(Semaphore::new(config.concurrency));
         Self {
-            sstable_store,
-            config,
             queue: VecDeque::new(),
+            config,
+            concurrency,
+            sstable_store,
         }
     }
 
@@ -71,8 +77,9 @@ impl CacheRefiller {
             deltas,
 
             context: Arc::new(CacheRefillContext {
-                sstable_store: self.sstable_store.clone(),
                 config: self.config.clone(),
+                concurrency: self.concurrency.clone(),
+                sstable_store: self.sstable_store.clone(),
             }),
         };
         let event = CacheRefillerEvent {
@@ -118,8 +125,9 @@ pub struct CacheRefillerEvent {
 }
 
 struct CacheRefillContext {
-    sstable_store: SstableStoreRef,
     config: Arc<CacheRefillConfig>,
+    concurrency: Arc<Semaphore>,
+    sstable_store: SstableStoreRef,
 }
 
 pub struct CacheRefillTask {
@@ -136,6 +144,7 @@ impl CacheRefillTask {
             .map(|delta| {
                 let context = self.context.clone();
                 async move {
+                    let permit = context.concurrency.acquire().await.unwrap();
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
                         Err(e) => {
@@ -144,11 +153,13 @@ impl CacheRefillTask {
                         }
                     };
                     Self::data_cache_refill(&context, delta, holders).await;
+                    drop(permit);
                 }
             })
             .collect_vec();
         let future = join_all(tasks);
-        let _ = tokio::time::timeout(self.context.config.cache_refill_timeout, future).await;
+
+        let _ = tokio::time::timeout(self.context.config.timeout, future).await;
     }
 
     async fn meta_cache_refill(
@@ -184,7 +195,7 @@ impl CacheRefillTask {
         // return if filtered
         if !context
             .config
-            .refill_data_file_cache_levels
+            .data_refill_levels
             .contains(&delta.insert_sst_level)
             || !delta
                 .delete_sst_object_ids
