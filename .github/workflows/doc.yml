@@ -29,7 +29,7 @@ jobs:
           cp docs/rustdoc/rust.css target/doc/rust.css
 
           mkdir artifact
-          cp -R target/doc artifact
+          cp -R target/doc/* artifact
       - name: Install cargo-docset
         uses: taiki-e/install-action@v2
         with:
