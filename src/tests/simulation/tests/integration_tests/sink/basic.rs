@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::pending;
 use std::io::Write;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -29,7 +28,7 @@ use risingwave_connector::sink::boxed::{BoxCoordinator, BoxWriter};
 use risingwave_connector::sink::test_sink::registry_build_sink;
 use risingwave_connector::sink::{Sink, SinkWriter, SinkWriterParam};
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 
 struct TestWriter {
     row_counter: Arc<AtomicUsize>,
@@ -133,7 +132,7 @@ async fn test_sink_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |param| {
+        move |_param| {
             Ok(Box::new(TestSink {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),
@@ -205,7 +204,7 @@ async fn test_sink_decouple_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |param| {
+        move |_param| {
             Ok(Box::new(TestSink {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),

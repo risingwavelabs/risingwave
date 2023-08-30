@@ -16,12 +16,9 @@
 
 use std::io::Write;
 
-use anyhow::Result;
-use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
-use tokio::runtime::Handle;
 use tokio::time::Duration;
 
 fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {

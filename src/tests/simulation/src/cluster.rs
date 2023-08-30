@@ -29,11 +29,12 @@ use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 #[cfg(madsim)]
-use madsim::runtime::NodeHandle;
+use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+#[cfg(not(madsim))]
 use tokio::runtime::Handle;
 
 use crate::client::RisingWave;
@@ -170,7 +171,6 @@ impl Cluster {
     #[cfg_or_panic(madsim)]
     pub async fn start(conf: Configuration) -> Result<Self> {
         use madsim::net::ipvs::*;
-        use madsim::runtime::NodeHandle;
 
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
@@ -532,7 +532,7 @@ impl Cluster {
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
-            tokio::runtime::Handle::current().kill(name);
+            Handle::current().kill(name);
 
             let mut t =
                 rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
@@ -544,7 +544,7 @@ impl Cluster {
             }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
-            tokio::runtime::Handle::current().restart(name);
+            Handle::current().restart(name);
         }))
         .await;
     }
