@@ -65,7 +65,10 @@ jobs:
           </entry>" > docset-feed.xml
 
           # add docset to artifact
-          tar -rvf "$RUNNER_TEMP/artifact.tar" risingwave.docset.tgz docset-feed.xml
+          tar \
+            --dereference --hard-dereference \
+            -rvf "$RUNNER_TEMP/artifact.tar" \
+            risingwave.docset.tgz docset-feed.xml
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
