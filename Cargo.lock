@@ -1495,6 +1495,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "cfg-or-panic"
 version = "0.1.0"
+source = "git+https://github.com/BugenZhao/cfg-or-panic.git?rev=90fec32#90fec325f464224193852471ac5399cd8e334051"
 dependencies = [
  "proc-macro2",
  "quote",

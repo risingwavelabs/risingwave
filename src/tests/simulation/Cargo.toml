@@ -14,7 +14,7 @@ normal = ["serde"]
 anyhow = "1.0"
 async-trait = "0.1"
 aws-sdk-s3 = { version = "0.2", package = "madsim-aws-sdk-s3" }
-cfg-or-panic = { path = "/Users/bugenzhao/Developer/cfg-or-panic/cfg-or-panic" }
+cfg-or-panic = { git = "https://github.com/BugenZhao/cfg-or-panic.git", rev = "90fec32" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
 easy-ext = "1"
