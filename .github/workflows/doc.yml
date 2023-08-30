@@ -25,7 +25,7 @@ jobs:
           version: "v0.5.2"
       - name: build rustdocs
         run: |
-          cargo doc --workspace --no-deps --document-private-items
+          cargo doc  --document-private-items -p syn@2.0.29
           cp docs/rustdoc/rust.css target/doc/rust.css
 
           mkdir artifact
@@ -36,7 +36,7 @@ jobs:
           tool: cargo-docset
       - name: build docsets
         run: |
-          cargo docset --no-clean
+          cargo docset --no-clean -p syn@2.0.29
           tar -czf risingwave.docset.tgz target/docset/risingwave.docset
 
           echo "<entry>
