@@ -354,32 +354,32 @@ pub enum Expr {
         timestamp: Box<Expr>,
         time_zone: String,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
+    /// `EXTRACT(DateTimeField FROM <expr>)`
     Extract {
         field: String,
         expr: Box<Expr>,
     },
-    /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
+    /// `SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])`
     Substring {
         expr: Box<Expr>,
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     Position {
         substring: Box<Expr>,
         string: Box<Expr>,
     },
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     Overlay {
         expr: Box<Expr>,
         new_substring: Box<Expr>,
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
+    /// `TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)`\
     /// Or\
-    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
+    /// `TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])`
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
