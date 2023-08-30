@@ -26,7 +26,6 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
     STREAM_WINDOW_SIZE,
 };
-use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -394,7 +393,7 @@ pub async fn compute_node_serve(
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
-        tonic::transport::Server::builder()
+        let server = tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .layer(TracingExtractLayer::new())
@@ -417,32 +416,47 @@ pub async fn compute_node_serve(
             })
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
-            .add_service(HealthServer::new(health_srv))
-            .monitored_serve_with_shutdown(
-                listen_addr,
-                "grpc-compute-node-service",
-                TcpConfig {
-                    tcp_nodelay: true,
-                    keepalive_duration: None,
-                },
-                async move {
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        _ = &mut shutdown_recv => {
-                            for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
-                                    continue;
-                                }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                                }
-                            }
-                        },
+            .add_service(HealthServer::new(health_srv));
+        let shutdown_signal = async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = &mut shutdown_recv => {
+                    for (join_handle, shutdown_sender) in sub_tasks {
+                        if let Err(err) = shutdown_sender.send(()) {
+                            tracing::warn!("Failed to send shutdown: {:?}", err);
+                            continue;
+                        }
+                        if let Err(err) = join_handle.await {
+                            tracing::warn!("Failed to join shutdown: {:?}", err);
+                        }
                     }
                 },
-            )
-            .await;
+            }
+        };
+        #[cfg(not(madsim))]
+        {
+            use risingwave_common::monitor::connection::{monitored_tcp_incoming, TcpConfig};
+            server
+                .serve_with_incoming_shutdown(
+                    monitored_tcp_incoming(
+                        listen_addr,
+                        "grpc-compute-node-service",
+                        TcpConfig {
+                            tcp_nodelay: true,
+                            keepalive_duration: None,
+                        },
+                    )
+                    .unwrap(),
+                    shutdown_signal,
+                )
+                .await
+                .unwrap();
+        }
+        #[cfg(madsim)]
+        server
+            .serve_with_shutdown(listen_addr, shutdown_signal)
+            .await
+            .unwrap();
     });
     join_handle_vec.push(join_handle);
 
