@@ -22,7 +22,6 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
@@ -260,14 +259,6 @@ impl SinkWriter for KinesisSinkWriter {
     }
 
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

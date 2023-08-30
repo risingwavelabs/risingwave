@@ -45,63 +45,50 @@ pub type LogStoreResult<T> = Result<T, LogStoreError>;
 pub enum LogStoreReadItem {
     StreamChunk(StreamChunk),
     Barrier { is_checkpoint: bool },
+    UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
 pub trait LogWriter {
-    type InitFuture<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    type WriteChunkFuture<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    type FlushCurrentEpoch<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
-    where
-        Self: 'a;
-
     /// Initialize the log writer with an epoch
-    fn init(&mut self, epoch: u64) -> Self::InitFuture<'_>;
+    fn init(&mut self, epoch: u64) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Write a stream chunk to the log writer
-    fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_>;
+    fn write_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Mark current epoch as finished and sealed, and flush the unconsumed log data.
     fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> Self::FlushCurrentEpoch<'_>;
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Update the vnode bitmap of the log writer
-    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>);
+    fn update_vnode_bitmap(
+        &mut self,
+        new_vnodes: Arc<Bitmap>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogReader {
-    type InitFuture<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    type NextItemFuture<'a>: Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + 'a
-    where
-        Self: 'a;
-    type TruncateFuture<'a>: Future<Output = LogStoreResult<()>> + Send + 'a
-    where
-        Self: 'a;
-
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
-    fn init(&mut self) -> Self::InitFuture<'_>;
+    fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Emit the next item.
-    fn next_item(&mut self) -> Self::NextItemFuture<'_>;
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(&mut self) -> Self::TruncateFuture<'_>;
+    fn truncate(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: 'static {
     type Reader: LogReader + Send + 'static;
     type Writer: LogWriter + Send + 'static;
 
-    type BuildFuture: Future<Output = (Self::Reader, Self::Writer)> + Send;
-
-    fn build(self) -> Self::BuildFuture;
+    fn build(self) -> impl Future<Output = (Self::Reader, Self::Writer)> + Send;
 }

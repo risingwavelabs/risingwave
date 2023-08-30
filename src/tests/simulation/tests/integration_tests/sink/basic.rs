@@ -59,10 +59,6 @@ impl SinkWriter for TestWriter {
         Ok(())
     }
 
-    async fn abort(&mut self) -> risingwave_connector::sink::Result<()> {
-        Ok(())
-    }
-
     async fn update_vnode_bitmap(
         &mut self,
         _vnode_bitmap: Bitmap,

@@ -20,7 +20,6 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
@@ -408,15 +407,6 @@ where
             self.stream_handle.barrier(epoch).await?;
             Ok(<Self as HandleBarrierResponse>::non_checkpoint_return_value())
         }
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        // TODO: handle scaling
-        Ok(())
     }
 }
 
