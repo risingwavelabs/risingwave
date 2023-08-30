@@ -25,7 +25,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use parse_display::{Display, FromStr};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::memcmp_encoding;
@@ -471,7 +471,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         let mut new_cache = new_empty_partition_cache();
         let table_iter = table
-            .iter_with_pk_prefix(
+            .iter_row_with_pk_prefix(
                 self.this_partition_key,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
@@ -479,7 +479,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         #[for_await]
         for row in table_iter {
-            let row: OwnedRow = row?;
+            let row: OwnedRow = row?.into_owned_row();
             new_cache.insert(self.row_to_state_key(&row)?.into(), row);
         }
         *self.range_cache = new_cache;
@@ -585,7 +585,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> StreamExecutorResult<()> {
         let streams = stream::iter(table.vnode_bitmap().iter_vnodes())
             .map(|vnode| {
-                table.iter_with_pk_range(
+                table.iter_row_with_pk_range(
                     &table_pk_range,
                     vnode,
                     PrefetchOptions::new_for_exhaust_iter(),
@@ -599,7 +599,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         #[for_await]
         for row in select_all(streams) {
-            let row: OwnedRow = row?;
+            let row: OwnedRow = row?.into_owned_row();
             let key = self.row_to_state_key(&row)?;
             self.range_cache.insert(CacheKey::from(key), row);
         }
@@ -665,7 +665,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    table.iter_key_and_val_with_pk_range(
+                    table.iter_row_with_pk_range(
                         &pk_range,
                         vnode,
                         PrefetchOptions::new_for_exhaust_iter(),
@@ -673,19 +673,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 }))
                 .await?
                 .into_iter()
-                .map(|stream| {
-                    // XXX(rc): A dirty hack to workaround the vnode prefix returned by table
-                    // iterator. See https://github.com/risingwavelabs/risingwave/issues/11673.
-                    stream.map(|result: StreamExecutorResult<(bytes::Bytes, OwnedRow)>| {
-                        result.map(|(mut k, v)| (k.split_off(VirtualNode::SIZE), v))
-                    })
-                })
                 .map(Box::pin)
                 .collect();
 
             #[for_await]
-            for kv in merge_sort(streams) {
-                let (_, row): (_, OwnedRow) = kv?;
+            for row in merge_sort(streams) {
+                let row: OwnedRow = row?.into_owned_row();
 
                 // For leftward extension, we now must iterate the table in order from the beginning
                 // of this partition and fill only the last n rows to the cache.
@@ -770,27 +763,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    table.iter_key_and_val_with_pk_range(
-                        &pk_range,
-                        vnode,
-                        PrefetchOptions::default(),
-                    )
+                    table.iter_row_with_pk_range(&pk_range, vnode, PrefetchOptions::default())
                 }))
                 .await?
                 .into_iter()
-                .map(|stream| {
-                    // XXX(rc): A dirty hack to workaround the vnode prefix returned by table
-                    // iterator. See https://github.com/risingwavelabs/risingwave/issues/11673.
-                    stream.map(|result: StreamExecutorResult<(bytes::Bytes, OwnedRow)>| {
-                        result.map(|(mut k, v)| (k.split_off(VirtualNode::SIZE), v))
-                    })
-                })
                 .map(Box::pin)
                 .collect();
 
             #[for_await]
-            for kv in merge_sort(streams) {
-                let (_, row): (_, OwnedRow) = kv?;
+            for row in merge_sort(streams) {
+                let row: OwnedRow = row?.into_owned_row();
 
                 if !Row::eq(
                     self.this_partition_key,
