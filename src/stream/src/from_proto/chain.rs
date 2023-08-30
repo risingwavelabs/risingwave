@@ -24,10 +24,10 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
-
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
+    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor,
+    RearrangedChainExecutor,
 };
 
 pub struct ChainExecutorBuilder;

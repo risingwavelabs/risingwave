@@ -134,14 +134,15 @@ pub async fn collect_data_chunk_with_builder<E, S, R>(
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
+    R: Row,
+    S: Stream<Item = Result<R, E>> + Unpin,
 {
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
                 println!("appending: {:?}", row);
                 println!("builder: {:?}", builder.data_types());
-                builder.append_one_row_no_finish(row.into_owned_row()));
+                builder.append_one_row_no_finish(row);
             }
             None => break,
         }
@@ -214,6 +215,7 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     );
 }
 
+#[derive(Debug)]
 pub struct KeyedRow<T: AsRef<[u8]>> {
     vnode_prefixed_key: TableKey<T>,
     row: OwnedRow,

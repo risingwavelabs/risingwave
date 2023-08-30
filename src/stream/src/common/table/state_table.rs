@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -1157,12 +1158,11 @@ where
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
-            ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            read_version_from_backup: false,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
 
         Ok(self.local_store.iter(key_range, read_options).await?)
@@ -1189,9 +1189,9 @@ where
             "Only replicated tables can use this function"
         );
         Ok(self
-            .iter_with_pk_range(pk_range, vnode, prefetch_options)
+            .iter_row_with_pk_range(pk_range, vnode, prefetch_options)
             .await?
-            .map(|row| row.map(|r| r.project(&self.output_indices))))
+            .map(|row| row.map(|r| r.into_owned_row().project(&self.output_indices))))
     }
 
     async fn iter_kv_with_pk_prefix(
@@ -1248,7 +1248,6 @@ where
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
-
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode =
             prefixed_range(memcomparable_range, &vnode.to_be_bytes());

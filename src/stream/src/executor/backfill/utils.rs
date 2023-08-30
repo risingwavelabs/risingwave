@@ -387,7 +387,8 @@ pub(crate) async fn iter_chunks<'a, S, E, R>(
     builder: &'a mut DataChunkBuilder,
 ) where
     StreamExecutorError: From<E>,
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin + 'a,
+    R: Row,
+    S: Stream<Item = Result<R, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) =
         collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)

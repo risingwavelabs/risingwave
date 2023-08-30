@@ -505,6 +505,7 @@ where
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
+        let iter = iter.map(|result| result.map(|r| r.into_owned_row()));
 
         pin_mut!(iter);
 
