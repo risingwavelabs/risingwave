@@ -33,6 +33,7 @@ pub struct ObjectStoreMetrics {
     pub operation_size: HistogramVec,
     pub failure_count: GenericCounterVec<AtomicU64>,
     pub request_retry_count: GenericCounterVec<AtomicU64>,
+    pub refill_data_file_cache_count: GenericCounterVec<AtomicU64>,
 }
 
 impl ObjectStoreMetrics {
@@ -97,6 +98,14 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
+        let refill_data_file_cache_count = register_int_counter_vec_with_registry!(
+            "compute_refill_data_file_cache_count",
+            "compute refill data file cache count",
+            &["extra"],
+            registry
+        )
+        .unwrap();
+
         Self {
             write_bytes,
             read_bytes,
@@ -104,6 +113,7 @@ impl ObjectStoreMetrics {
             operation_size,
             failure_count,
             request_retry_count,
+            refill_data_file_cache_count,
         }
     }
 

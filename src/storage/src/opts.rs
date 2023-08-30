@@ -80,6 +80,7 @@ pub struct StorageOpts {
     pub data_file_cache_reclaim_rate_limit_mb: usize,
 
     pub data_file_cache_refill_levels: Vec<u32>,
+    pub data_file_cache_refill_timeout_ms: u64,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -173,7 +174,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
             data_file_cache_refill_levels: c.storage.data_file_cache.refill_levels.clone(),
-
+            data_file_cache_refill_timeout_ms: c.storage.data_file_cache.refill_timeout_ms,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,

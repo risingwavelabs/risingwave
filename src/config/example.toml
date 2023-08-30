@@ -123,6 +123,7 @@ rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
 refill_levels = []
+refill_timeout_ms = 6000
 
 [storage.meta_file_cache]
 dir = ""
@@ -139,6 +140,7 @@ rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
 refill_levels = []
+refill_timeout_ms = 6000
 
 [system]
 barrier_interval_ms = 1000

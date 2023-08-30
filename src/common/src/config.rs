@@ -620,6 +620,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::refill_levels")]
     pub refill_levels: Vec<u32>,
 
+    #[serde(default = "default::file_cache::refill_timeout_ms")]
+    pub refill_timeout_ms: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1108,6 +1111,10 @@ pub mod default {
 
         pub fn refill_levels() -> Vec<u32> {
             vec![]
+        }
+
+        pub fn refill_timeout_ms() -> u64 {
+            6000
         }
     }
 
