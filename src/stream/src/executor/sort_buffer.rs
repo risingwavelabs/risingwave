@@ -28,9 +28,9 @@ use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
-use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::merge_sort::merge_sort;
+use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
 
 use super::{StreamExecutorError, StreamExecutorResult};
@@ -202,7 +202,7 @@ impl<S: StateStore> SortBuffer<S> {
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_key_and_val_with_pk_range(
+                buffer_table.iter_row_with_pk_range(
                     &pk_range,
                     vnode,
                     PrefetchOptions {
@@ -230,11 +230,11 @@ impl<S: StateStore> SortBuffer<S> {
 /// Merge the key part and value part of a row into a full row. This is needed for state table with
 /// non-None value indices.
 fn key_value_to_full_row<S: StateStore>(
-    (key, value): (Bytes, OwnedRow),
+    keyed_row: KeyedRow<Bytes>,
     table: &StateTable<S>,
 ) -> StreamExecutorResult<OwnedRow> {
     let Some(val_indices) = table.value_indices() else {
-        return Ok(value);
+        return Ok(keyed_row.into_owned_row());
     };
     let pk_indices = table.pk_indices();
     let indices: BTreeSet<_> = val_indices
@@ -246,13 +246,14 @@ fn key_value_to_full_row<S: StateStore>(
     assert!(indices.iter().copied().eq(0..len));
 
     let mut row = vec![None; len];
-    let key = deserialize_pk_with_vnode(&key, table.pk_serde())
-        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?
-        .1;
+    let key = table
+        .pk_serde()
+        .deserialize(keyed_row.key())
+        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?;
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }
-    for (i, v) in value.into_iter().enumerate() {
+    for (i, v) in keyed_row.into_owned_row().into_iter().enumerate() {
         row[val_indices[i]] = v;
     }
     Ok(OwnedRow::new(row))
