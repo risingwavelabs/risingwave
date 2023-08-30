@@ -289,16 +289,20 @@ pub(super) mod handlers {
             FilePath::new(&srv.ui_path.clone().unwrap()).join(worker_id.to_string());
         let cache_file_path = node_cache_dir.join(FilePath::new(&file_path).file_name().unwrap());
 
-        let result = client.download(file_path.clone()).await.map_err(err)?;
-        fs::write(cache_file_path.clone(), result.result).map_err(err)?;
+        if !cache_file_path.exists() {
+            let result = client.download(file_path.clone()).await.map_err(err)?;
+            fs::write(cache_file_path.clone(), result.result).map_err(err)?;
+    
+            if let Some(binary_path) = srv.binary_path.clone() {
+                heap_profile::run_jeprof(cache_file_path.to_string_lossy().into(), binary_path).await?;
+            } else {
+                bail!("RisingWave binary path not specified");
+            }
+        } 
 
-        if let Some(binary_path) = srv.binary_path.clone() {
-            heap_profile::run_jeprof(cache_file_path.to_string_lossy().into(), binary_path).await?;
-        } else {
-            bail!("RisingWave binary path not specified");
-        }
+        let collapsed_str = String::from_utf8_lossy(&fs::read(cache_file_path).map_err(err)?).to_string();
 
-        Ok("Analyze succeeded!".to_string().into())
+        Ok(collapsed_str.into())
     }
 }
 
@@ -332,7 +336,7 @@ where
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
             .route("/monitor/heap_profile/:worker_id", get(heap_profile::<S>))
             .route("/monitor/list_heap_profile/:worker_id", get(list_heap_profile::<S>))
-            .route("/monitor/download/:worker_id/*path", get(analyze_heap::<S>))
+            .route("/monitor/analyze/:worker_id/*path", get(analyze_heap::<S>))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

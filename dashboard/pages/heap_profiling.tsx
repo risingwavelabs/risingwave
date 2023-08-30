@@ -36,6 +36,7 @@ import api from "./api/api"
 import { getClusterInfoComputeNode } from "./api/cluster"
 import useFetch from "./api/fetch"
 import { Label } from "recharts"
+import path from "path"
 
 const SIDEBAR_WIDTH = 200
 
@@ -46,7 +47,7 @@ export default function HeapProfiling() {
   const [dump, setDump] = useState<string | undefined>("")
   const [profileCollapsed, setProfileCollapsed] = useState<string | undefined>("")
   const [profileList, setProfileList] = useState<ListHeapProfilingResponse | undefined>()
-  const [analyzeTargetFile, setAnalyzeTargetFile] = useState<String | undefined>()
+  const [analyzeTargetFileName, setAnalyzeTargetFileName] = useState<string | undefined>()
 
   useEffect(() => {
     if (computeNodes && !computeNodeId && computeNodes.length > 0) {
@@ -70,9 +71,18 @@ export default function HeapProfiling() {
   }
 
   async function dumpProfile() {
+    let callDump = () => { return api.get(`/api/heap_profile/${computeNodeId}`)}
+    useFetch(callDump)
+  }
 
-    let call_dump = () => { return api.get(`/api/heap_profile/${computeNodeId}`)}
-    useFetch(call_dump)
+  async function analyzeHeapFile() {
+    if (profileList === undefined || analyzeTargetFileName === undefined) {
+      return
+    }
+
+    let analyzeFilePath = path.join(profileList.dir, analyzeTargetFileName)
+    let callAnalyze = () => { return api.get(`/api/analyze/${analyzeFilePath}`)}
+    useFetch(callAnalyze)
   }
 
   const retVal = (
@@ -113,7 +123,7 @@ export default function HeapProfiling() {
               <FormLabel>Dumped Files</FormLabel>
               <Select
                 onChange={(event) =>
-                  setAnalyzeTargetFile(event.target.value)
+                  setAnalyzeTargetFileName(event.target.value)
                 }
               >
                 {profileList &&
@@ -123,7 +133,7 @@ export default function HeapProfiling() {
                     </option>
                   ))}
               </Select>
-              <Button onClick={(_) => dumpTree()} width="full">
+              <Button onClick={(_) => dumpProfile()} width="full">
                 Analyze
               </Button>
             </VStack>
