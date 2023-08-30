@@ -23,8 +23,16 @@
 # value=123456
 #
 # The exponent will be 5 (log10(123456) = 5.0915... ~ 5)
-# The significand will be 23 (123456 / 10^5 - 1 = 1.23... ).
+# The significand will be 23 (123456 / 10^5 - 1 = 0.23... ).
 # Then the histogram will store the triple (1, 5, 23)
+#
+# NOTE(kwannoel): We don't have to use base-10 for the exponent and significand.
+# But RisingWave currently only supports log10, ln.
+# So we use base-10 for convenience, and because it's more intuitive for the examples here.
+#
+# The bucket is computed as:
+# (sign*(1.0+mantissa/pow(10.0, 2))*pow(10.0,exponent))::int
+# (1 * (1.0 + 23 / 10^2) * 10^5) = 123000
 #
 # Next, we use window sum aggregation to compute the cumulative frequency of each bucket.
 # | Bucket       | 4 | 311 | 400 | 521 |
