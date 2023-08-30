@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  # for test
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
@@ -18,7 +22,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.3
         with:
           version: "v0.5.2"
-      - name: Docs
+      - name: build rustdocs
         run: |
           RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
           cp docs/rustdoc/rust.css target/doc/rust.css
@@ -32,10 +36,45 @@ jobs:
           while read line; do
               echo "::warning title=Invalid file permissions automatically fixed::$line"
           done
-      - name: Upload artifacts
-        uses: actions/upload-pages-artifact@v1
+      - name: Archive artifact
+        shell: sh
+        if: runner.os == 'Linux'
+        run: |
+          chmod -c -R +rX "$INPUT_PATH" | while read line; do
+            echo "::warning title=Invalid file permissions automatically fixed::$line"
+          done
+          tar \
+            --dereference --hard-dereference \
+            --directory "$INPUT_PATH" \
+            -cvf "$RUNNER_TEMP/artifact.tar" \
+            --exclude=.git \
+            --exclude=.github \
+            .
+        env:
+          INPUT_PATH: target/doc
+      - name: Install cargo-docset
+        uses: taiki-e/install-action@v2
         with:
-          path: target/doc
+          tool: cargo-docset
+      - name: build docsets
+        run: |
+          cargo docset
+
+          echo "<entry>
+          <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
+          <url>https://risingwavelabs.github.io/risingwave/risingwave.docset.tgz
+          </entry>" > docset-feed.xml
+
+          # add docset to artifact
+          tar -rvf "$RUNNER_TEMP/artifact.tar" risingwave.docset.tgz docset-feed.xml
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     needs: build
