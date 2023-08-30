@@ -12,10 +12,11 @@ import "source.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+message Dispatchers {
+  repeated Dispatcher dispatchers = 1;
+}
+
 message AddMutation {
-  message Dispatchers {
-    repeated Dispatcher dispatchers = 1;
-  }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // All actors to be added (to the main connected component of the graph) in this update.
@@ -65,6 +66,9 @@ message UpdateMutation {
   repeated uint32 dropped_actors = 4;
   // Source updates.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+  // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
+  // Consistent with the semantics in AddMutation.
+  map<uint32, Dispatchers> actor_new_dispatchers = 6;
 }
 
 message SourceChangeSplitMutation {
@@ -445,6 +449,9 @@ message ChainNode {
 
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
+
+  // The rate limit for the chain node.
+  optional uint32 rate_limit = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

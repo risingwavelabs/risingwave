@@ -27,6 +27,7 @@ either = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+governor = { version = "0.6", default-features = false, features = ["std", "dashmap", "jitter"] }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.11"

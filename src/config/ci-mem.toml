@@ -1,0 +1,20 @@
+[meta]
+disable_recovery = true
+max_heartbeat_interval_secs = 600
+
+[streaming]
+in_flight_barrier_nums = 10
+
+[streaming.developer]
+stream_exchange_concurrent_barriers = 10
+
+[batch]
+enable_barrier_read = true
+
+[storage]
+imm_merge_threshold = 2
+
+[system]
+barrier_interval_ms = 250
+checkpoint_frequency = 5
+max_concurrent_creating_streaming_jobs = 0

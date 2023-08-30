@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 35] = [
+const CONFIG_KEYS: [&str; 36] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -69,6 +69,7 @@ const CONFIG_KEYS: [&str; 35] = [
     "LOCK_TIMEOUT",
     "ROW_SECURITY",
     "STANDARD_CONFORMING_STRINGS",
+    "RW_STREAMING_RATE_LIMIT",
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
 ];
 
@@ -108,7 +109,8 @@ const STATEMENT_TIMEOUT: usize = 30;
 const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
 const STANDARD_CONFORMING_STRINGS: usize = 33;
-const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 34;
+const RW_STREAMING_RATE_LIMIT: usize = 34;
+const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 35;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -331,6 +333,7 @@ type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
+type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
 type StreamingOverWindowCachePolicy = ConfigString<STREAMING_OVER_WINDOW_CACHE_POLICY>;
 
 /// Report status or notice to caller.
@@ -472,6 +475,8 @@ pub struct ConfigMap {
     ))]
     standard_conforming_strings: StandardConformingStrings,
 
+    streaming_rate_limit: StreamingRateLimit,
+
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent-first-n" or "recent-last-n".
     #[educe(Default(
@@ -589,6 +594,8 @@ impl ConfigMap {
             self.row_security = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
             self.standard_conforming_strings = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
+            self.streaming_rate_limit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingOverWindowCachePolicy::entry_name()) {
             self.streaming_over_window_cache_policy = val.as_slice().try_into()?;
         } else {
@@ -672,6 +679,8 @@ impl ConfigMap {
             Ok(self.row_security.to_string())
         } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
             Ok(self.standard_conforming_strings.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
+            Ok(self.streaming_rate_limit.to_string())
         } else if key.eq_ignore_ascii_case(StreamingOverWindowCachePolicy::entry_name()) {
             Ok(self.streaming_over_window_cache_policy.to_string())
         } else {
@@ -852,6 +861,11 @@ impl ConfigMap {
                 description: String::from("Unused in RisingWave"),
             },
             VariableInfo{
+                name: StreamingRateLimit::entry_name().to_lowercase(),
+                setting: self.streaming_rate_limit.to_string(),
+                description: String::from("Set streaming rate limit (rows per second) for each parallelism for mv backfilling"),
+            },
+            VariableInfo{
                 name: StreamingOverWindowCachePolicy::entry_name().to_lowercase(),
                 setting: self.streaming_over_window_cache_policy.to_string(),
                 description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent-first-n" or "recent-last-n"."#),
@@ -978,6 +992,13 @@ impl ConfigMap {
 
     pub fn get_standard_conforming_strings(&self) -> &str {
         &self.standard_conforming_strings
+    }
+
+    pub fn get_streaming_rate_limit(&self) -> Option<u32> {
+        if self.streaming_rate_limit.0 != 0 {
+            return Some(self.streaming_rate_limit.0 as u32);
+        }
+        None
     }
 
     pub fn get_streaming_over_window_cache_policy(&self) -> &str {
