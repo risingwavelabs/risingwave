@@ -22,6 +22,7 @@ use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
 use regex::Regex;
+use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -298,56 +299,40 @@ pub async fn start_service_as_election_follower(
     });
 
     let health_srv = HealthServiceImpl::new();
-    let server = tonic::transport::Server::builder()
+    tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(
             GLOBAL_META_METRICS.clone(),
         )))
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
-        .add_service(HealthServer::new(health_srv));
-    let shutdown_signal = async move {
-        tokio::select! {
-            // shutdown service if all services should be shut down
-            res = svc_shutdown_rx.changed() => {
-                match res {
-                    Ok(_) => tracing::info!("Shutting down services"),
-                    Err(_) => tracing::error!("Service shutdown sender dropped")
-                }
+        .add_service(HealthServer::new(health_srv))
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-follower-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
             },
-            // shutdown service if follower becomes leader
-            res = follower_shutdown_rx => {
-                match res {
-                    Ok(_) => tracing::info!("Shutting down follower services"),
-                    Err(_) => tracing::error!("Follower service shutdown sender dropped")
-                }
-            },
-        }
-    };
-
-    #[cfg(not(madsim))]
-    {
-        use risingwave_common::monitor::connection::{monitored_tcp_incoming, TcpConfig};
-        server
-            .serve_with_incoming_shutdown(
-                monitored_tcp_incoming(
-                    address_info.listen_addr,
-                    "grpc-meta-follower-service",
-                    TcpConfig {
-                        tcp_nodelay: true,
-                        keepalive_duration: None,
+            async move {
+                tokio::select! {
+                    // shutdown service if all services should be shut down
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown sender dropped")
+                        }
                     },
-                )
-                .unwrap(),
-                shutdown_signal,
-            )
-            .await
-            .unwrap();
-    }
-    #[cfg(madsim)]
-    server
-        .serve_with_shutdown(address_info.listen_addr, shutdown_signal)
-        .await
-        .unwrap();
+                    // shutdown service if follower becomes leader
+                    res = follower_shutdown_rx => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down follower services"),
+                            Err(_) => tracing::error!("Follower service shutdown sender dropped")
+                        }
+                    },
+                }
+            },
+        )
+        .await;
 }
 
 /// Starts all services needed for the meta leader node
@@ -719,7 +704,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
 
-    let server = tonic::transport::Server::builder()
+    tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -739,45 +724,30 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
-        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv));
-    let shutdown_signal = async move {
-        tokio::select! {
-            res = svc_shutdown_rx.changed() => {
-                match res {
-                    Ok(_) => tracing::info!("Shutting down services"),
-                    Err(_) => tracing::error!("Service shutdown receiver dropped")
-                }
-                shutdown_all.await;
+        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-leader-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
             },
-            _ = idle_recv => {
-                shutdown_all.await;
-            },
-        }
-    };
-    #[cfg(not(madsim))]
-    {
-        use risingwave_common::monitor::connection::{monitored_tcp_incoming, TcpConfig};
-        server
-            .serve_with_incoming_shutdown(
-                monitored_tcp_incoming(
-                    address_info.listen_addr,
-                    "grpc-meta-leader-service",
-                    TcpConfig {
-                        tcp_nodelay: true,
-                        keepalive_duration: None,
+            async move {
+                tokio::select! {
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown receiver dropped")
+                        }
+                        shutdown_all.await;
                     },
-                )
-                .unwrap(),
-                shutdown_signal,
-            )
-            .await
-            .unwrap();
-    }
-    #[cfg(madsim)]
-    server
-        .serve_with_shutdown(address_info.listen_addr, shutdown_signal)
-        .await
-        .unwrap();
+                    _ = idle_recv => {
+                        shutdown_all.await;
+                    },
+                }
+            },
+        )
+        .await;
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {

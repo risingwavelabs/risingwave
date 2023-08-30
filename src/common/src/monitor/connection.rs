@@ -428,6 +428,64 @@ impl Endpoint {
 }
 
 #[cfg(not(madsim))]
+#[easy_ext::ext(RouterExt)]
+impl<L> tonic::transport::server::Router<L> {
+    pub async fn monitored_serve_with_shutdown<ResBody>(
+        self,
+        listen_addr: std::net::SocketAddr,
+        connection_type: impl Into<String>,
+        config: TcpConfig,
+        signal: impl Future<Output = ()>,
+    ) where
+        L: tower_layer::Layer<tonic::transport::server::Routes>,
+        L::Service: Service<
+                http::request::Request<hyper::Body>,
+                Response = http::response::Response<ResBody>,
+            > + Clone
+            + Send
+            + 'static,
+        <<L as tower_layer::Layer<tonic::transport::server::Routes>>::Service as Service<
+            http::request::Request<hyper::Body>,
+        >>::Future: Send + 'static,
+        <<L as tower_layer::Layer<tonic::transport::server::Routes>>::Service as Service<
+            http::request::Request<hyper::Body>,
+        >>::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+        ResBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+        ResBody::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let incoming = tonic::transport::server::TcpIncoming::new(
+            listen_addr,
+            config.tcp_nodelay,
+            config.keepalive_duration,
+        )
+        .unwrap();
+        let incoming = MonitoredConnection::new(
+            incoming,
+            MonitorNewConnectionImpl {
+                connection_type: connection_type.into(),
+            },
+        );
+        self.serve_with_incoming_shutdown(incoming, signal)
+            .await
+            .unwrap()
+    }
+}
+
+#[cfg(madsim)]
+#[easy_ext::ext(RouterExt)]
+impl<L> tonic::transport::server::Router<L> {
+    pub async fn monitored_serve_with_shutdown(
+        self,
+        listen_addr: std::net::SocketAddr,
+        connection_type: impl Into<String>,
+        config: TcpConfig,
+        signal: impl Future<Output = ()>,
+    ) {
+        self.serve_with_shutdown(listen_addr, signal).await.unwrap()
+    }
+}
+
+#[cfg(not(madsim))]
 pub fn monitored_tcp_incoming(
     listen_addr: std::net::SocketAddr,
     connection_type: impl Into<String>,
