@@ -45,7 +45,6 @@ jobs:
           </entry>" > docset-feed.xml
 
           cp -t artifact "risingwave.docset.tgz" "docset-feed.xml"
-          rm artifact/.lock
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
