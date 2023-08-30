@@ -144,7 +144,6 @@ impl CacheRefillTask {
             .map(|delta| {
                 let context = self.context.clone();
                 async move {
-                    let permit = context.concurrency.acquire().await.unwrap();
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
                         Err(e) => {
@@ -153,7 +152,6 @@ impl CacheRefillTask {
                         }
                     };
                     Self::data_cache_refill(&context, delta, holders).await;
-                    drop(permit);
                 }
             })
             .collect_vec();
@@ -219,6 +217,7 @@ impl CacheRefillTask {
                 let meta = sst_info.value();
                 let mut stat = StoreLocalStatistic::default();
                 let task = async move {
+                    let permit = context.concurrency.acquire().await.unwrap();
                     match context
                         .sstable_store
                         .may_fill_data_file_cache(meta, block_index, &mut stat)
@@ -236,6 +235,7 @@ impl CacheRefillTask {
                             tracing::warn!("data cache refill error: {:?}", e);
                         }
                     }
+                    drop(permit);
                 };
                 tasks.push(task);
             }
