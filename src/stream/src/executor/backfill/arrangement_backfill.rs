@@ -135,7 +135,7 @@ where
         //     "first barrier: {:?}, actor: {:?}",
         //     first_barrier, self.actor_id
         // );
-        self.state_table.init_epoch(first_barrier.epoch);
+        self.state_table.init_epoch(first_barrier.epoch).await?;
         // .await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
@@ -149,7 +149,7 @@ where
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-        upstream_table.init(first_epoch).await?;
+        upstream_table.init_epoch(first_epoch).await?;
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         // TODO(kwannoel): This initial committed progress should also be read from state table,

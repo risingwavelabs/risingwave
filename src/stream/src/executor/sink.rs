@@ -26,6 +26,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -167,7 +168,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer.init(epoch_pair.curr).await?;
+        log_writer
+            .init(EpochPair::new_test_epoch(epoch_pair.curr))
+            .await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);

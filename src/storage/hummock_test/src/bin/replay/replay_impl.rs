@@ -19,6 +19,7 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
@@ -31,6 +32,7 @@ use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
@@ -38,6 +40,7 @@ use risingwave_storage::store::{
 };
 use risingwave_storage::{StateStore, StateStoreReadIterStream};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
 pub(crate) struct GlobalReplayIter<S>
 where
     S: StateStoreReadIterStream,
@@ -199,8 +202,9 @@ pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 
 #[async_trait::async_trait]
 impl LocalReplay for LocalReplayImpl {
-    fn init(&mut self, epoch: EpochPair) {
-        self.0.init(epoch);
+    async fn init(&mut self, epoch: EpochPair) -> Result<()> {
+        self.0.init(epoch).await.unwrap(); // FIXME(kwannoel): coerce error
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {

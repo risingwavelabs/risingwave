@@ -584,7 +584,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        this.state_table.init_epoch(barrier.epoch);
+        this.state_table.init_epoch(barrier.epoch).await?;
         vars.partitions.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);

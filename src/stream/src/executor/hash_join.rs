@@ -30,6 +30,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
@@ -217,8 +218,8 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.ht.init(epoch);
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.ht.init(epoch).await
     }
 }
 
@@ -716,8 +717,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.side_l.init(barrier.epoch);
-        self.side_r.init(barrier.epoch);
+        self.side_l.init(barrier.epoch).await?;
+        self.side_r.init(barrier.epoch).await?;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);

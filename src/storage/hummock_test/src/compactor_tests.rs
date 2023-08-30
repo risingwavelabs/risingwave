@@ -26,7 +26,7 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
-    use risingwave_common::util::epoch::Epoch;
+    use risingwave_common::util::epoch::{Epoch, EpochPair};
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -135,7 +135,10 @@ pub(crate) mod tests {
         let mut local = storage.new_local(Default::default()).await;
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
-        local.init(epochs[0]);
+        local
+            .init(EpochPair::new_test_epoch(epochs[0]))
+            .await
+            .unwrap();
         for (i, &epoch) in epochs.iter().enumerate() {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&epoch.to_be_bytes());
@@ -514,7 +517,7 @@ pub(crate) mod tests {
             epoch += 1;
 
             if idx == 0 {
-                local.init(epoch);
+                local.init(EpochPair::new_test_epoch(epoch)).await.unwrap();
             }
 
             for _ in 0..keys_per_epoch {
@@ -671,8 +674,14 @@ pub(crate) mod tests {
             epoch += 1;
             let next_epoch = epoch + 1;
             if index == 0 {
-                storage_1.init(epoch);
-                storage_2.init(epoch);
+                storage_1
+                    .init(EpochPair::new_test_epoch(epoch))
+                    .await
+                    .unwrap();
+                storage_2
+                    .init(EpochPair::new_test_epoch(epoch))
+                    .await
+                    .unwrap();
             }
 
             let (storage, other) = if index % 2 == 0 {
@@ -843,7 +852,7 @@ pub(crate) mod tests {
             epoch += millisec_interval_epoch;
             let next_epoch = epoch + millisec_interval_epoch;
             if i == 0 {
-                local.init(epoch);
+                local.init(EpochPair::new_test_epoch(epoch)).await.unwrap();
             }
             epoch_set.insert(epoch);
             let mut prefix = BytesMut::default();
@@ -1019,7 +1028,7 @@ pub(crate) mod tests {
         for i in 0..kv_count {
             epoch += millisec_interval_epoch;
             if i == 0 {
-                local.init(epoch);
+                local.init(EpochPair::new_test_epoch(epoch)).await.unwrap();
             }
             let next_epoch = epoch + millisec_interval_epoch;
             epoch_set.insert(epoch);
@@ -1173,7 +1182,7 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
-        local.init(130);
+        local.init(EpochPair::new_test_epoch(130)).await.unwrap();
         let prefix_key_range = |k: u16| {
             let key = k.to_be_bytes();
             (

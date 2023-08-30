@@ -76,7 +76,7 @@ async fn test_storage_table_value_indices() {
         value_indices.into_iter().map(|v| v as usize).collect_vec(),
     );
     let mut epoch = EpochPair::new_test_epoch(1);
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -196,7 +196,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     let table = StorageTable::for_test(
         test_env.storage.clone(),
@@ -313,7 +313,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         false,
     );
     let mut epoch = EpochPair::new_test_epoch(1);
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
     state.insert(OwnedRow::new(vec![
@@ -422,7 +422,7 @@ async fn test_batch_scan_with_value_indices() {
         false,
     );
     let mut epoch = EpochPair::new_test_epoch(1);
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

@@ -277,7 +277,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(1)).await.unwrap();
             tb
         };
 
@@ -357,7 +357,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(1)).await.unwrap();
             tb
         };
 
@@ -404,7 +404,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(1)).await.unwrap();
             tb
         };
 

@@ -301,7 +301,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         self.stream_source_core
             .split_state_store
-            .init_epoch(barrier.epoch);
+            .init_epoch(barrier.epoch)
+            .await?;
 
         let all_completed: HashSet<SplitId> = self
             .stream_source_core

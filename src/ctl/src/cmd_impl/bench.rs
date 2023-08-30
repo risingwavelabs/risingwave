@@ -98,7 +98,7 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                     tracing::info!(thread = i, "starting scan");
                     let state_table = {
                         let mut tb = make_state_table(hummock, &table).await;
-                        tb.init_epoch(EpochPair::new_test_epoch(u64::MAX));
+                        tb.init_epoch(EpochPair::new_test_epoch(u64::MAX)).await?;
                         tb
                     };
                     loop {
