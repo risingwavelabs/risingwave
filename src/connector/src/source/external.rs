@@ -315,7 +315,7 @@ impl MySqlExternalTableReader {
             .fields
             .iter()
             .filter(|f| f.name != OFFSET_COLUMN_NAME)
-            .map(|f| f.name.as_str())
+            .map(|f| format!("`{}`", f.name.as_str()))
             .join(",");
 
         Ok(Self {
@@ -335,11 +335,11 @@ impl MySqlExternalTableReader {
     async fn snapshot_read_inner(
         &self,
         table_name: SchemaTableName,
-        start_pk: Option<OwnedRow>,
+        start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
     ) {
         let order_key = primary_keys.iter().join(",");
-        let sql = if start_pk.is_none() {
+        let sql = if start_pk_row.is_none() {
             format!(
                 "SELECT {} FROM {} ORDER BY {}",
                 self.field_names,
@@ -366,7 +366,7 @@ impl MySqlExternalTableReader {
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
-        if start_pk.is_none() {
+        if start_pk_row.is_none() {
             let mut result_set = conn.query_iter(sql).await?;
             let rs_stream = result_set.stream::<mysql_async::Row>().await?;
             if let Some(rs_stream) = rs_stream {
@@ -393,9 +393,9 @@ impl MySqlExternalTableReader {
                 .collect::<HashMap<_, _>>();
 
             // fill in start primary key params
-            let params = primary_keys
+            let params: Vec<_> = primary_keys
                 .iter()
-                .zip_eq_fast(start_pk.unwrap().into_iter())
+                .zip_eq_fast(start_pk_row.unwrap().into_iter())
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
@@ -410,14 +410,22 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
-                            _ => unimplemented!("unsupported data type: {:?}", ty),
+                            _ => {
+                                return Err(ConnectorError::Internal(anyhow!(
+                                    "unsupported primary key data type: {}",
+                                    ty
+                                )))
+                            }
                         };
-                        (pk.clone(), val)
+                        Ok((pk.clone(), val))
                     } else {
-                        (pk.clone(), Value::NULL)
+                        return Err(ConnectorError::Internal(anyhow!(
+                            "primary key {} cannot be null",
+                            pk
+                        )));
                     }
                 })
-                .collect_vec();
+                .try_collect()?;
 
             let rs_stream = sql
                 .with(Params::from(params))
