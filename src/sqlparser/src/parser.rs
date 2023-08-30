@@ -133,7 +133,7 @@ impl std::error::Error for ParserError {}
 type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
 
 /// Reference:
-/// https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE
+/// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
