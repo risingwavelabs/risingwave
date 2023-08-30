@@ -9753,7 +9753,6 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-client",
- "byteorder",
  "bytes",
  "cc",
  "chrono",
@@ -9762,7 +9761,6 @@ dependencies = [
  "combine",
  "crossbeam-epoch",
  "crossbeam-utils",
- "deranged",
  "either",
  "fail",
  "fixedbitset",
@@ -9825,7 +9823,6 @@ dependencies = [
  "syn 1.0.109",
  "syn 2.0.29",
  "time 0.3.27",
- "time-macros",
  "tinyvec",
  "tokio",
  "tokio-postgres",
@@ -9840,7 +9837,6 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
- "zeroize",
 ]
 
 [[package]]

@@ -387,7 +387,7 @@ impl SinkImpl {
             SinkImpl::Kinesis(_) => "kinesis",
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
-            SinkImpl::Nats(_) => "ntas",
+            SinkImpl::Nats(_) => "nats",
             SinkImpl::RemoteIceberg(_) => "iceberg",
             SinkImpl::TestSink(_) => "test",
         }

@@ -23,6 +23,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::Retry;
 
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
@@ -92,7 +94,10 @@ impl Sink for NatsSink {
         match async_nats::connect(&self.config.common.server_url).await {
             Ok(_client) => {}
             Err(error) => {
-                return Err(SinkError::Nats(format!("validate nats sink error: {:?}", error)));
+                return Err(SinkError::Nats(format!(
+                    "validate nats sink error: {:?}",
+                    error
+                )));
             }
         }
         Ok(())
@@ -105,34 +110,55 @@ impl Sink for NatsSink {
 
 impl NatsSinkWriter {
     pub async fn new(config: NatsConfig, schema: Schema) -> Result<Self> {
+        Retry::spawn(
+            ExponentialBackoff::from_millis(100).map(jitter).take(3),
+            || async {
+                let context = config
+                    .common
+                    .build_context()
+                    .await
+                    .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
+                let stream = config
+                    .common
+                    .build_or_get_stream(context.clone())
+                    .await
+                    .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
+                Ok(NatsSinkWriter {
+                    config,
+                    context,
+                    stream,
+                    schema,
+                })
+            },
+        )
+        .await
+        .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))
+
         // Connect to NATS server and Create a JetStream instance
-        let context = config
-            .common
-            .build_context()
-            .await
-            .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
-        // Get or create a stream
-        let stream = config.common.build_or_get_stream(context.clone()).await?;
-        Ok(Self {
-            config,
-            context,
-            stream,
-            schema,
-        })
+        // let context = config
+        //     .common
+        //     .build_context()
+        //     .await
+        //     .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
+        // // Get or create a stream
+        // let stream = config.common.build_or_get_stream(context.clone()).await?;
+        // Ok(Self {
+        //     config,
+        //     context,
+        //     stream,
+        //     schema,
+        // })
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let data = chunk_to_json(chunk, &self.schema).unwrap();
         for item in data {
             self.context
-                .publish(
-                    self.config.common.subject.clone(),
-                    item.into(),
-                )
+                .publish(self.config.common.subject.clone(), item.into())
                 .await
                 .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
         }
-        
+
         Ok(())
     }
 }
