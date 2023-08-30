@@ -994,7 +994,7 @@ pub mod default {
         }
 
         pub fn max_preload_wait_time_mill() -> u64 {
-            10
+            0
         }
 
         pub fn object_store_streaming_read_timeout_ms() -> u64 {

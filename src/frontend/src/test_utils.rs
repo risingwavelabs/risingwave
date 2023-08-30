@@ -32,7 +32,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
@@ -818,6 +818,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
+    }
+
+    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+        Ok(HashMap::new())
     }
 }
 
