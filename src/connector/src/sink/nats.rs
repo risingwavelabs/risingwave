@@ -13,6 +13,7 @@
 // limitations under the License.
 use core::fmt::Debug;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_nats::jetstream::context::Context;
@@ -123,31 +124,16 @@ impl NatsSinkWriter {
                     .build_or_get_stream(context.clone())
                     .await
                     .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
-                Ok(NatsSinkWriter {
-                    config,
+                Ok::<_, SinkError>(Self {
+                    config: config.clone(),
                     context,
                     stream,
-                    schema,
+                    schema: schema.clone(),
                 })
             },
         )
         .await
         .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))
-
-        // Connect to NATS server and Create a JetStream instance
-        // let context = config
-        //     .common
-        //     .build_context()
-        //     .await
-        //     .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
-        // // Get or create a stream
-        // let stream = config.common.build_or_get_stream(context.clone()).await?;
-        // Ok(Self {
-        //     config,
-        //     context,
-        //     stream,
-        //     schema,
-        // })
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
