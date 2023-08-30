@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+env:
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+  RUSTDOCFLAGS: "--cfg docsrs --markdown-css rust.css --markdown-no-toc --index-page /home/runner/work/risingwave/risingwave/docs/rustdoc/index.md -Zunstable-options"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,24 +23,32 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.3
         with:
           version: "v0.5.2"
-      - name: Docs
+      - name: build rustdocs
         run: |
-          RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+          cargo doc --workspace --no-deps --document-private-items
           cp docs/rustdoc/rust.css target/doc/rust.css
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
-      - name: Fix file permissions
-        shell: sh
+
+          mkdir artifact
+          cp -R target/doc artifact
+      - name: Install cargo-docset
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-docset
+      - name: build docsets
         run: |
-          chmod -c -R +rX "target/doc" |
-          while read line; do
-              echo "::warning title=Invalid file permissions automatically fixed::$line"
-          done
+          cargo docset --no-clean
+          tar -czf risingwave.docset.tgz target/docset/risingwave.docset
+
+          echo "<entry>
+          <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
+          <url>https://risingwavelabs.github.io/risingwave/risingwave.docset.tgz</url>
+          </entry>" > RisingWave.xml
+
+          cp -t artifact "risingwave.docset.tgz" "RisingWave.xml"
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
-          path: target/doc
+          path: artifact
 
   deploy:
     needs: build
