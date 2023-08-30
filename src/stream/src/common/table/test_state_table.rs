@@ -281,7 +281,7 @@ async fn test_state_table_iter_with_prefix() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_with_pk_prefix(&pk_prefix, Default::default())
+        .iter_row_with_pk_prefix(&pk_prefix, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -412,7 +412,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -437,7 +437,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -576,7 +576,7 @@ async fn test_state_table_iter_with_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter(Default::default()).await.unwrap();
+        let iter = state_table.iter_row(Default::default()).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -631,7 +631,7 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter(Default::default()).await.unwrap();
+    let iter = state_table.iter_row(Default::default()).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -737,7 +737,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter(Default::default()).await.unwrap();
+        let iter = state_table.iter_row(Default::default()).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -813,7 +813,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter(Default::default()).await.unwrap();
+    let iter = state_table.iter_row(Default::default()).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1000,13 +1000,13 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter())
+        .iter_row(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_owned_row())
         .collect();
 
     assert_eq!(rows.len(), 2);
@@ -1117,13 +1117,13 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter())
+        .iter_row(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_owned_row())
         .collect();
 
     assert_eq!(rows.len(), 3);
@@ -1229,13 +1229,13 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter())
+        .iter_row(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_owned_row())
         .collect();
 
     assert_eq!(rows.len(), 3);
@@ -1511,13 +1511,13 @@ async fn test_state_table_watermark_cache_ignore_null() {
     state_table.write_chunk(chunk);
 
     let inserted_rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter())
+        .iter_row(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_owned_row())
         .collect();
 
     assert_eq!(inserted_rows.len(), 4);
@@ -1798,13 +1798,13 @@ async fn test_state_table_watermark_cache_refill() {
     }
 
     let inserted_rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter())
+        .iter_row(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| row.unwrap().into_owned_row())
         .collect();
 
     assert_eq!(inserted_rows.len(), 4);

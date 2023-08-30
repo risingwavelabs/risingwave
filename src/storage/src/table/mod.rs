@@ -15,8 +15,10 @@
 pub mod batch_table;
 pub mod merge_sort;
 
+use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
+use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -26,6 +28,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::key::TableKey;
 
 use crate::error::StorageResult;
 
@@ -92,7 +95,7 @@ pub async fn collect_data_chunk<E, S>(
     chunk_size: Option<usize>,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
 {
     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
     let mut row_count = 0;
@@ -131,12 +134,12 @@ pub async fn collect_data_chunk_with_builder<E, S>(
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
 {
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                builder.append_one_row_no_finish(row);
+                builder.append_one_row_no_finish(row.into_owned_row());
             }
             None => break,
         }
@@ -207,4 +210,38 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
         "vnode {} should not be accessed by this table",
         vnode
     );
+}
+
+pub struct KeyedRow<T: AsRef<[u8]>> {
+    vnode_prefixed_key: TableKey<T>,
+    row: OwnedRow,
+}
+
+impl<T: AsRef<[u8]>> KeyedRow<T> {
+    pub fn new(table_key: TableKey<T>, row: OwnedRow) -> Self {
+        Self {
+            vnode_prefixed_key: table_key,
+            row,
+        }
+    }
+
+    pub fn into_owned_row(self) -> OwnedRow {
+        self.row
+    }
+
+    pub fn vnode(&self) -> VirtualNode {
+        self.vnode_prefixed_key.vnode_part()
+    }
+
+    pub fn key(&self) -> &[u8] {
+        self.vnode_prefixed_key.key_part()
+    }
+}
+
+impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.row
+    }
 }
