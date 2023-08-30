@@ -170,7 +170,7 @@ pub async fn handle_create_mv(
         if has_order_by {
             context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-If ORDER BY is accompanied with a LIMIT clause, it will still preserve order, via TopN.
+If ORDER BY is accompanied by a LIMIT clause, it will still preserve order, via TopN.
 You can use EXPLAIN <query> to check the query plans.
 "#.to_string());
         }
