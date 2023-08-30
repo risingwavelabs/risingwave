@@ -41,6 +41,7 @@ impl ExprVisitor<()> for CseExprCounter {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
             ExprImpl::Literal(inner) => self.visit_literal(inner),
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call_with_lambda(inner),
             ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
