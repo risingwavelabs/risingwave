@@ -469,6 +469,11 @@ impl Binder {
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
+        if inputs.iter().any(ExprImpl::has_table_function) {
+            return Err(
+                ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
+            );
+        }
         Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
