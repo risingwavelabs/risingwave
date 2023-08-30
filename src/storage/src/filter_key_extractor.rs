@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use dyn_clone::DynClone;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
@@ -372,16 +371,7 @@ impl FilterKeyExtractorManager {
     pub fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
         self.inner.sync(filter_key_extractor_map)
     }
-}
-#[async_trait::async_trait]
-pub trait AcquireFilterKeyExtractor: DynClone + Send + Sync + 'static {
-    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl>;
-}
 
-dyn_clone::clone_trait_object!(AcquireFilterKeyExtractor);
-
-#[async_trait::async_trait]
-impl AcquireFilterKeyExtractor for FilterKeyExtractorManagerRef {
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// `table_id` does not util version update (notify), and retry to get
@@ -389,6 +379,7 @@ impl AcquireFilterKeyExtractor for FilterKeyExtractorManagerRef {
         self.inner.acquire(table_id_set).await
     }
 }
+
 #[derive(Clone)]
 pub enum FilterKeyExtractorManagerFactory {
     FilterKeyExtractorManagerRef(Arc<FilterKeyExtractorManager>),
@@ -405,8 +396,8 @@ impl FilterKeyExtractorManagerFactory {
                 filter_key_exactor_manager,
             ) => filter_key_exactor_manager.acquire(table_id_set).await,
             FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
-                shared_key_exactor,
-            ) => shared_key_exactor.acquire(table_id_set).await,
+                filter_key_extractor_builder,
+            ) => filter_key_extractor_builder.acquire(table_id_set),
         }
     }
 }
@@ -420,10 +411,8 @@ impl FilterKeyExtractorBuilder {
     pub fn new(id_to_table: HashMap<u32, Table>) -> Self {
         Self { id_to_table }
     }
-}
-#[async_trait::async_trait]
-impl AcquireFilterKeyExtractor for FilterKeyExtractorBuilder {
-    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
+
+    fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         for table_id in table_id_set {
             if let Some(table) = self.id_to_table.get(&table_id) {
@@ -434,6 +423,7 @@ impl AcquireFilterKeyExtractor for FilterKeyExtractorBuilder {
         Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
     }
 }
+
 pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
 
 #[cfg(test)]
@@ -460,8 +450,8 @@ mod tests {
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
-        AcquireFilterKeyExtractor, FilterKeyExtractorImpl, FilterKeyExtractorManager,
-        FullKeyFilterKeyExtractor, MultiFilterKeyExtractor,
+        FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+        MultiFilterKeyExtractor,
     };
 
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
