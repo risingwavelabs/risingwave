@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(madsim)]
+
 use std::io::Write;
 
 use anyhow::Result;
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
-use madsim::runtime::Handle;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
+use tokio::runtime::Handle;
 use tokio::time::Duration;
 
 fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {
@@ -81,7 +84,7 @@ telemetry_enabled = false
     }
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_serving_cluster_availability() {
     let config = cluster_config_no_compute_nodes();
     let mut cluster = Cluster::start(config).await.unwrap();

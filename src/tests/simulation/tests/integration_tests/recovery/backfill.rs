@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::sleep;
+use tokio::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
@@ -46,7 +46,7 @@ async fn test_no_backfill_state(session: &mut Session) -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_snapshot_mv() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -98,7 +98,7 @@ async fn test_snapshot_mv() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_backfill_mv() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -151,7 +151,7 @@ async fn test_backfill_mv() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_index_backfill() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();

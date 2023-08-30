@@ -13,16 +13,14 @@
 // limitations under the License.
 
 use anyhow::Result;
-use itertools::{any, Itertools};
+use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM=1;";
 const ROOT_TABLE_CREATE: &str = "create table t1 (_id int, data jsonb);";
 const INSERT_SEED_SQL: &str =
     r#"insert into t1 values (1, '{"orders": {"id": 1, "price": "2.30", "customer_id": 2}}');"#;
-const INSERT_AND_FLUSH_SQL: &str = r#"insert into t1 values (1, '{"orders": {"id": 1, "price": "2.30", "customer_id": 2}}'); FLUSH;"#;
 const INSERT_RECURSE_SQL: &str = "insert into t1 select _id + 1, data from t1;";
-const INSERT_RECURSE_AND_FLUSH_SQL: &str = "insert into t1 select _id + 1, data from t1;";
 const MV1: &str = r#"
 create materialized view mv1 as
 with p1 as (
@@ -47,7 +45,7 @@ select
 from p2;
 "#;
 
-#[madsim::test]
+#[tokio::test]
 async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_backfill()).await?;
     let mut session = cluster.start_session();

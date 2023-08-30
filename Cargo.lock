@@ -1493,6 +1493,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg-or-panic"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.29",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7061,8 +7070,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "cfg-or-panic",
  "clap 4.3.22",
  "console",
+ "easy-ext",
  "futures",
  "glob",
  "itertools 0.11.0",

@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::export::futures::StreamExt;
-use madsim::rand::prelude::SliceRandom;
-use madsim::rand::thread_rng;
-use madsim::time;
+use tokio::export::futures::StreamExt;
+use tokio::rand::prelude::SliceRandom;
+use tokio::rand::thread_rng;
+use tokio::time;
 use rdkafka::consumer::{MessageStream, StreamConsumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
@@ -70,7 +70,7 @@ pub struct Before {
     pub count: i64,
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_sink_append_only() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
@@ -122,7 +122,7 @@ async fn test_sink_append_only() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_sink_debezium() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 

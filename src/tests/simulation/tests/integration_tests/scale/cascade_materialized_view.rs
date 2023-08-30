@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::sleep;
+use tokio::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
@@ -28,7 +28,7 @@ const MV3: &str = "create materialized view m3 as select * from m2 where v1 < 15
 const MV4: &str = "create materialized view m4 as select m1.v1 as m1v, m3.v1 as m3v from m1 join m3 on m1.v1 = m3.v1;";
 const MV5: &str = "create materialized view m5 as select * from m4;";
 
-#[madsim::test]
+#[tokio::test]
 async fn test_simple_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -113,7 +113,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();

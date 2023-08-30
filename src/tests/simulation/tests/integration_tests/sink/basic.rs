@@ -22,7 +22,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use itertools::Itertools;
-use madsim::time::{sleep, timeout};
+use tokio::time::{sleep, timeout};
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -106,7 +106,7 @@ impl Sink for TestSink {
     }
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_sink_basic() -> Result<()> {
     let config_path = {
         let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
@@ -178,7 +178,7 @@ async fn test_sink_basic() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_sink_decouple_basic() -> Result<()> {
     let config_path = {
         let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");

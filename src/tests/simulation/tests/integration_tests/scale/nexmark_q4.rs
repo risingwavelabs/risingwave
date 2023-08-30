@@ -15,7 +15,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::time::sleep;
+use tokio::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::predicate::{
     identity_contains, upstream_fragment_count, BoxedPredicate,
@@ -55,7 +55,7 @@ async fn wait_initial_data(cluster: &mut NexmarkCluster) -> Result<String> {
         .await
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_q4_ref() -> Result<()> {
     let mut cluster = init().await?;
 
@@ -93,7 +93,7 @@ async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>)
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_q4_materialize_agg() -> Result<()> {
     nexmark_q4_common([
         identity_contains("materialize"),
@@ -102,12 +102,12 @@ async fn nexmark_q4_materialize_agg() -> Result<()> {
     .await
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_q4_source() -> Result<()> {
     nexmark_q4_common([identity_contains("source: bid")]).await
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_q4_agg_join() -> Result<()> {
     nexmark_q4_common([
         identity_contains("hashagg"),
@@ -117,7 +117,7 @@ async fn nexmark_q4_agg_join() -> Result<()> {
     .await
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_q4_cascade() -> Result<()> {
     let mut cluster = init().await?;
 
@@ -165,7 +165,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
 }
 
 // https://github.com/risingwavelabs/risingwave/issues/5567
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     let mut cluster = init().await?;
 

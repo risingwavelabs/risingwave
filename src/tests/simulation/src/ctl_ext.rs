@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(madsim), expect(unused_imports))]
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
 use madsim::rand::thread_rng;
@@ -219,6 +222,7 @@ impl Fragment {
 
 impl Cluster {
     /// Locate fragments that satisfy all the predicates.
+    #[cfg_or_panic(madsim)]
     pub async fn locate_fragments(
         &mut self,
         predicates: impl IntoIterator<Item = BoxedPredicate>,
@@ -291,6 +295,7 @@ impl Cluster {
         self.locate_one_fragment([predicate::id(id)]).await
     }
 
+    #[cfg_or_panic(madsim)]
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let response = self
             .ctl
@@ -305,6 +310,7 @@ impl Cluster {
     }
 
     // update node schedulability
+    #[cfg_or_panic(madsim)]
     async fn update_worker_node_schedulability(
         &self,
         worker_ids: Vec<u32>,
@@ -350,6 +356,7 @@ impl Cluster {
         self.reschedule_helper(plan, true).await
     }
 
+    #[cfg_or_panic(madsim)]
     async fn reschedule_helper(
         &mut self,
         plan: impl Into<String>,
@@ -394,6 +401,7 @@ impl Cluster {
         Ok(())
     }
 
+    #[cfg_or_panic(madsim)]
     pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
         let revision = self
             .ctl

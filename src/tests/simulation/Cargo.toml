@@ -14,8 +14,10 @@ normal = ["serde"]
 anyhow = "1.0"
 async-trait = "0.1"
 aws-sdk-s3 = { version = "0.2", package = "madsim-aws-sdk-s3" }
+cfg-or-panic = { path = "/Users/bugenzhao/Developer/cfg-or-panic/cfg-or-panic" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
+easy-ext = "1"
 etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"

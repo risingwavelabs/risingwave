@@ -17,7 +17,7 @@ use std::time::SystemTime;
 
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
-use rdkafka::producer::{BaseProducer, BaseRecord};
+use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use rdkafka::ClientConfig;
 
 /// Create a kafka topic
