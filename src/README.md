@@ -70,4 +70,4 @@ We can see that the expanded `string_agg` now also contains `extern fn string_ag
 Reading the code we understand now that it does the following:
 1. Register it to a global registry for aggregates.
 2. "it" here refers to an `AggFuncSig`, whose definition we can checkout.
-3. Of note is that it will generate an anonymous struct which implements the `AggFunc` trait.
+3. Of note is that it will generate an anonymous struct which implements the `AggregateFunction` trait.
