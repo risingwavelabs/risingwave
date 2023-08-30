@@ -114,7 +114,8 @@ impl StreamChunkBuilder {
             Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
             Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
             Record::Update { old_row, new_row } => {
-                let _none = self.append_row(Op::UpdateDelete, old_row);
+                let none = self.append_row(Op::UpdateDelete, old_row);
+                debug_assert!(none.is_none());
                 self.append_row(Op::UpdateInsert, new_row)
             }
         }
