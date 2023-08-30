@@ -57,7 +57,7 @@ macro_rules! for_all_undeprecated_params {
             { telemetry_enabled, bool, Some(true), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
-            $({ $field, $type, $default },)*
+            $({ $field, $type, $default, $is_mutable },)*
         }
     };
 }
@@ -68,7 +68,7 @@ macro_rules! for_all_params {
     ($macro:ident) => {
         for_all_undeprecated_params!(
             $macro /* Define future deprecated params here, such as
-                    * ,{ backup_storage_directory, String, "backup".to_string() } */
+                    * ,{ backup_storage_directory, String, "backup".to_string(), true } */
         );
     };
 }
@@ -371,6 +371,7 @@ mod tests {
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (TELEMETRY_ENABLED_KEY, "false"),
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
+            (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
         ];
 
         // To kv - missing field.

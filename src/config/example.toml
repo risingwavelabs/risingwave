@@ -150,3 +150,4 @@ backup_storage_url = "memory"
 backup_storage_directory = "backup"
 telemetry_enabled = true
 max_concurrent_creating_streaming_jobs = 1
+pause_on_next_bootstrap = false

@@ -318,7 +318,11 @@ mod tests {
     }
 
     fn get_system_params() -> SystemParams {
-        SystemConfig::default().into_init_system_params()
+        SystemParams {
+            state_store: Some("state_store".to_string()),
+            data_directory: Some("data_directory".to_string()),
+            ..SystemConfig::default().into_init_system_params()
+        }
     }
 
     #[tokio::test]
