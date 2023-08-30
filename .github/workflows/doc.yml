@@ -62,7 +62,7 @@ jobs:
 
           echo "<entry>
           <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
-          <url>https://risingwavelabs.github.io/risingwave/risingwave.docset.tgz
+          <url>https://risingwavelabs.github.io/risingwave/risingwave.docset.tgz</url>
           </entry>" > docset-feed.xml
 
           # add docset to artifact
