@@ -518,6 +518,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub meta_file_cache: FileCacheConfig,
 
+    #[serde(default)]
+    pub cache_refill: CacheRefillConfig,
+
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
@@ -570,6 +573,18 @@ pub struct StorageConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct CacheRefillConfig {
+    #[serde(default = "default::cache_refill::refill_data_file_cache_levels")]
+    pub refill_data_file_cache_levels: Vec<u32>,
+
+    #[serde(default = "default::cache_refill::refill_timeout_ms")]
+    pub refill_timeout_ms: u64,
+
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
+}
+
 /// The subsection `[storage.file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::file_cache`].
@@ -616,12 +631,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
-
-    #[serde(default = "default::file_cache::refill_levels")]
-    pub refill_levels: Vec<u32>,
-
-    #[serde(default = "default::file_cache::refill_timeout_ms")]
-    pub refill_timeout_ms: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -1108,8 +1117,10 @@ pub mod default {
         pub fn reclaim_rate_limit_mb() -> usize {
             0
         }
+    }
 
-        pub fn refill_levels() -> Vec<u32> {
+    pub mod cache_refill {
+        pub fn refill_data_file_cache_levels() -> Vec<u32> {
             vec![]
         }
 

@@ -197,11 +197,9 @@ impl HummockStorage {
             compactor_context.clone(),
             state_store_metrics.clone(),
             CacheRefillConfig {
-                cache_refill_timeout: Duration::from_millis(
-                    options.data_file_cache_refill_timeout_ms,
-                ),
+                cache_refill_timeout: Duration::from_millis(options.cache_refill_refill_timeout_ms),
                 refill_data_file_cache_levels: options
-                    .data_file_cache_refill_levels
+                    .cache_refill_refill_data_file_cache_levels
                     .iter()
                     .copied()
                     .collect(),

@@ -79,8 +79,8 @@ pub struct StorageOpts {
     pub data_file_cache_flush_rate_limit_mb: usize,
     pub data_file_cache_reclaim_rate_limit_mb: usize,
 
-    pub data_file_cache_refill_levels: Vec<u32>,
-    pub data_file_cache_refill_timeout_ms: u64,
+    pub cache_refill_refill_data_file_cache_levels: Vec<u32>,
+    pub cache_refill_refill_timeout_ms: u64,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -173,8 +173,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_rated_random_rate_mb: c.storage.data_file_cache.rated_random_rate_mb,
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
-            data_file_cache_refill_levels: c.storage.data_file_cache.refill_levels.clone(),
-            data_file_cache_refill_timeout_ms: c.storage.data_file_cache.refill_timeout_ms,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -195,6 +193,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_rated_random_rate_mb: c.storage.meta_file_cache.rated_random_rate_mb,
             meta_file_cache_flush_rate_limit_mb: c.storage.meta_file_cache.flush_rate_limit_mb,
             meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
+            cache_refill_refill_data_file_cache_levels: c
+                .storage
+                .cache_refill
+                .refill_data_file_cache_levels
+                .clone(),
+            cache_refill_refill_timeout_ms: c.storage.cache_refill.refill_timeout_ms,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             object_store_streaming_read_timeout_ms: c
                 .storage

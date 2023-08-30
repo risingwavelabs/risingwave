@@ -391,7 +391,7 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update_pre(&mut self, version_payload: Payload) {
+    fn handle_version_update(&mut self, version_payload: Payload) {
         let pinned_version = self
             .refiller
             .last_new_pinned_version()
@@ -424,7 +424,7 @@ impl HummockEventHandler {
             .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
     }
 
-    fn handle_version_update_post(
+    fn apply_version_update(
         &mut self,
         pinned_version: Arc<PinnedVersion>,
         new_pinned_version: PinnedVersion,
@@ -479,7 +479,7 @@ impl HummockEventHandler {
                 }
                 event = self.refiller.next_event() => {
                     let CacheRefillerEvent {pinned_version, new_pinned_version } = event;
-                    self.handle_version_update_post(pinned_version, new_pinned_version);
+                    self.apply_version_update(pinned_version, new_pinned_version);
                 }
                 event = self.hummock_event_rx.recv().boxed() => {
                     let Some(event) = event else { break };
@@ -544,7 +544,7 @@ impl HummockEventHandler {
             }
 
             HummockEvent::VersionUpdate(version_payload) => {
-                self.handle_version_update_pre(version_payload);
+                self.handle_version_update(version_payload);
             }
 
             HummockEvent::ImmToUploader(imm) => {

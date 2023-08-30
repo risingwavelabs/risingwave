@@ -564,7 +564,7 @@ impl StateStoreImpl {
                 event_listener: vec![],
                 prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
                 prometheus_namespace: Some("data".to_string()),
-                enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
+                enable_filter: !opts.cache_refill_refill_data_file_cache_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
