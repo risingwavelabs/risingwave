@@ -36,7 +36,7 @@ jobs:
           tool: cargo-docset
       - name: build docsets
         run: |
-          cargo docset --no-clean
+          cargo docset --no-clean --docset-name RisingWave
           tar -czf risingwave.docset.tgz target/docset/risingwave.docset
 
           echo "<entry>
