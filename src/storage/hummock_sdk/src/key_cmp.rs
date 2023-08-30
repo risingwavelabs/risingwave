@@ -17,7 +17,8 @@ use std::cmp::{self, Ordering};
 use super::key::split_key_epoch;
 use crate::key::UserKey;
 
-/// A comparator for comparing [`crate::key::FullKey`] and [`crate::key::UserKey`] with possibly different table key types.
+/// A comparator for comparing [`crate::key::FullKey`] and [`crate::key::UserKey`] with possibly
+/// different table key types.
 pub struct KeyComparator;
 
 impl KeyComparator {

@@ -32,8 +32,8 @@ use crate::expr::Expr;
 impl Binder {
     /// Binds a table function AST, which is a function call in a relation position.
     ///
-    /// Besides [`crate::expr::TableFunction`] expr, it can also be other things like window table functions, or
-    /// scalar functions.
+    /// Besides [`crate::expr::TableFunction`] expr, it can also be other things like window table
+    /// functions, or scalar functions.
     pub(super) fn bind_table_function(
         &mut self,
         name: ObjectName,

@@ -305,8 +305,8 @@ impl AggKind {
 }
 
 /// Macros to generate match arms for [`AggKind`](crate::agg::AggKind).
-/// IMPORTANT: These macros must be carefully maintained especially when adding new [`AggKind`](crate::agg::AggKind)
-/// variants.
+/// IMPORTANT: These macros must be carefully maintained especially when adding new
+/// [`AggKind`](crate::agg::AggKind) variants.
 pub mod agg_kinds {
     /// [`AggKind`](crate::agg::AggKind)s that are currently not supported in streaming mode.
     #[macro_export]
@@ -325,8 +325,8 @@ pub mod agg_kinds {
     }
     pub use unimplemented_in_stream;
 
-    /// [`AggKind`](crate::agg::AggKind)s that should've been rewritten to other kinds. These kinds should not appear
-    /// when generating physical plan nodes.
+    /// [`AggKind`](crate::agg::AggKind)s that should've been rewritten to other kinds. These kinds
+    /// should not appear when generating physical plan nodes.
     #[macro_export]
     macro_rules! rewritten {
         () => {
@@ -340,8 +340,8 @@ pub mod agg_kinds {
     }
     pub use rewritten;
 
-    /// [`AggKind`](crate::agg::AggKind)s of which the aggregate results are not affected by the user given ORDER BY
-    /// clause.
+    /// [`AggKind`](crate::agg::AggKind)s of which the aggregate results are not affected by the
+    /// user given ORDER BY clause.
     #[macro_export]
     macro_rules! result_unaffected_by_order_by {
         () => {
@@ -365,9 +365,9 @@ pub mod agg_kinds {
     }
     pub use result_unaffected_by_order_by;
 
-    /// [`AggKind`](crate::agg::AggKind)s that must be called with ORDER BY clause. These are slightly different from
-    /// variants not in [`result_unaffected_by_order_by`], in that variants returned by this macro
-    /// should be banned while the others should just be warned.
+    /// [`AggKind`](crate::agg::AggKind)s that must be called with ORDER BY clause. These are
+    /// slightly different from variants not in [`result_unaffected_by_order_by`], in that
+    /// variants returned by this macro should be banned while the others should just be warned.
     #[macro_export]
     macro_rules! must_have_order_by {
         () => {
@@ -380,8 +380,8 @@ pub mod agg_kinds {
     }
     pub use must_have_order_by;
 
-    /// [`AggKind`](crate::agg::AggKind)s of which the aggregate results are not affected by the user given DISTINCT
-    /// keyword.
+    /// [`AggKind`](crate::agg::AggKind)s of which the aggregate results are not affected by the
+    /// user given DISTINCT keyword.
     #[macro_export]
     macro_rules! result_unaffected_by_distinct {
         () => {
@@ -414,7 +414,8 @@ pub mod agg_kinds {
     }
     pub use simply_cannot_two_phase;
 
-    /// [`AggKind`](crate::agg::AggKind)s that are implemented with a single value state (so-called stateless).
+    /// [`AggKind`](crate::agg::AggKind)s that are implemented with a single value state (so-called
+    /// stateless).
     #[macro_export]
     macro_rules! single_value_state {
         () => {
@@ -427,8 +428,8 @@ pub mod agg_kinds {
     }
     pub use single_value_state;
 
-    /// [`AggKind`](crate::agg::AggKind)s that are implemented with a single value state (so-called stateless) iff the
-    /// input is append-only.
+    /// [`AggKind`](crate::agg::AggKind)s that are implemented with a single value state (so-called
+    /// stateless) iff the input is append-only.
     #[macro_export]
     macro_rules! single_value_state_iff_in_append_only {
         () => {

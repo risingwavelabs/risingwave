@@ -589,7 +589,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
 
 /// Rewritten version of [`crate::expr::AggCall`] which uses `InputRef` instead of `ExprImpl`.
-/// Refer to [`super::super::logical_agg::LogicalAggBuilder::try_rewrite_agg_call`] for more details.
+/// Refer to [`super::super::logical_agg::LogicalAggBuilder::try_rewrite_agg_call`] for more
+/// details.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggCall {
     /// Kind of aggregation function

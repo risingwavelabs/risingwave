@@ -18,7 +18,8 @@
 //!
 //! ## Construction
 //!
-//! Expressions can be constructed by [`build_func()`] function, which returns a [`BoxedExpression`].
+//! Expressions can be constructed by [`build_func()`] function, which returns a
+//! [`BoxedExpression`].
 //!
 //! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost()`]
 //! function.
