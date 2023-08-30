@@ -172,7 +172,7 @@ impl ListArrayBuilder {
 /// Each item of this `ListArray` is a `List<T>`, or called `T[]` (T array).
 ///
 /// * As other arrays, there is a null bitmap, with `1` meaning nonnull and `0` meaning null.
-/// * As [`BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has all
+/// * As [`super::BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has all
 ///   items concatenated, and the offsets `Vec` stores start and end indices into it for slicing.
 ///   Effectively, the inner array is the flattened form, and `offsets.len() == n + 1`.
 ///

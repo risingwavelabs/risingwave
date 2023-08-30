@@ -28,7 +28,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
 
-/// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
+/// Rewritten version of [`crate::expr::WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanWindowFunction {
     pub kind: WindowFuncKind,

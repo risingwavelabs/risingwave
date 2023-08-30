@@ -1104,7 +1104,7 @@ pub enum Statement {
     CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
-    /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
     CreateFunction {
         or_replace: bool,
         temporary: bool,
@@ -1186,7 +1186,7 @@ pub enum Statement {
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
-    /// SET <variable>
+    /// `SET <variable>`
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
     /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
@@ -1196,7 +1196,7 @@ pub enum Statement {
         variable: Ident,
         value: Vec<SetVariableValue>,
     },
-    /// SHOW <variable>
+    /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },

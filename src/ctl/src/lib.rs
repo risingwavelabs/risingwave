@@ -354,12 +354,14 @@ enum MetaCommands {
     /// `added` when both are provided.
     ///
     /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// ```text
     /// {
     ///     100: Reschedule {
     ///         added_parallel_units: [4,5],
     ///         removed_parallel_units: [1,2,3],
     ///     }
     /// }
+    /// ```
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
     #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
