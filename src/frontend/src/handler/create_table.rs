@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
-    USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
+    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
@@ -29,7 +29,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Encode, Format, ObjectName, SourceSchemaV2,
+    ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
     SourceWatermark, TableConstraint,
 };
 
@@ -609,6 +609,7 @@ fn gen_table_plan_inner(
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
+        version: INITIAL_SOURCE_VERSION_ID,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
@@ -695,12 +696,6 @@ pub async fn handle_create_table(
         Err(e) => return Err(e.into()),
         Ok(_) => {}
     };
-
-    if let Some(s) = &source_schema && s.row_encode == Encode::Json && columns.is_empty() {
-        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "schema definition is required for ENCODE JSON".to_owned(),
-        )));
-    }
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
@@ -893,7 +888,8 @@ mod tests {
                 columns: column_defs,
                 constraints,
                 ..
-            } = ast.remove(0) else {
+            } = ast.remove(0)
+            else {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {

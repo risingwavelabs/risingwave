@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
@@ -32,7 +33,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_storage::table::collect_data_chunk_with_builder;
+use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;
@@ -386,8 +387,7 @@ pub(crate) async fn iter_chunks<'a, S, E, R>(
     builder: &'a mut DataChunkBuilder,
 ) where
     StreamExecutorError: From<E>,
-    R: Row,
-    S: Stream<Item = Result<R, E>> + Unpin + 'a,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) =
         collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)

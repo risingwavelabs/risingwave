@@ -356,6 +356,14 @@ create source s26 (id int) with (
 ) FORMAT PLAIN ENCODE BYTES
 
 statement ok
+create table s27 with (
+  connector = 'kafka',
+  topic = 'json_schema_without_schema',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/json-complex-schema')
+
+statement ok
 CREATE TABLE mongo_customers (
 	_id BIGINT PRIMARY KEY,
 	payload jsonb
@@ -645,6 +653,12 @@ select count(*) from s16
 ----
 0
 
+statement error Feature is not yet implemented: Alter source with schema registry
+alter source s18 add column v10 int;
+
+statement error Feature is not yet implemented: Alter source with schema registry
+alter source s17 add column v10 int;
+
 query III rowsort
 select * from s21;
 ----
@@ -748,6 +762,11 @@ select count(*) from source_with_rdkafka_props
 ----
 4
 
+query TFITT
+select * from s27
+----
+(9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
+
 statement ok
 drop materialized view source_mv1
 
@@ -807,6 +826,9 @@ drop source s23
 
 statement ok
 drop source s24
+
+statement ok
+drop table s27
 
 statement ok
 DROP TABLE mongo_customers;

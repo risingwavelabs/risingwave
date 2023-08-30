@@ -78,6 +78,9 @@ message Source {
 
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
+
+  // Per-source catalog version, used by schema change.
+  uint64 version = 100;
 }
 
 enum SinkType {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -26,6 +26,7 @@ use prometheus::{
     IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::metrics::TrAdderGauge;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 use crate::task::TaskId;
 
@@ -56,9 +57,12 @@ macro_rules! def_task_metrics {
 
 for_all_task_metrics!(def_task_metrics);
 
+pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
+    LazyLock::new(|| BatchTaskMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl BatchTaskMetrics {
     /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         let task_labels = vec!["query_id", "stage_id", "task_id"];
         let mut descs = Vec::with_capacity(8);
 
@@ -145,7 +149,7 @@ impl BatchTaskMetrics {
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        GLOBAL_BATCH_TASK_METRICS.clone()
     }
 
     fn clean_metrics(&self) {
@@ -225,8 +229,11 @@ macro_rules! def_executor_metrics {
 
 for_all_executor_metrics!(def_executor_metrics);
 
+pub static GLOBAL_BATCH_EXECUTOR_METRICS: LazyLock<BatchExecutorMetrics> =
+    LazyLock::new(|| BatchExecutorMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl BatchExecutorMetrics {
-    pub fn new(register: Registry) -> Self {
+    fn new(register: &Registry) -> Self {
         let executor_labels = vec!["query_id", "stage_id", "task_id", "executor_id"];
         let mut descs = Vec::with_capacity(2);
 
@@ -277,7 +284,7 @@ impl BatchExecutorMetrics {
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        GLOBAL_BATCH_EXECUTOR_METRICS.clone()
     }
 
     fn clean_metrics(&self) {
@@ -417,8 +424,11 @@ pub struct BatchManagerMetrics {
     pub batch_heartbeat_worker_num: IntGauge,
 }
 
+pub static GLOBAL_BATCH_MANAGER_METRICS: LazyLock<BatchManagerMetrics> =
+    LazyLock::new(|| BatchManagerMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl BatchManagerMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
         let batch_total_mem = TrAdderGauge::new(
             "batch_total_mem",
@@ -447,6 +457,6 @@ impl BatchManagerMetrics {
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(Registry::new())
+        GLOBAL_BATCH_MANAGER_METRICS.clone()
     }
 }

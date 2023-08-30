@@ -588,7 +588,12 @@ impl Binder {
                     "boolne",
                     rewrite(ExprType::NotEqual, Binder::rewrite_two_bool_inputs),
                 ),
-                ("coalesce", raw_call(ExprType::Coalesce)),
+                ("coalesce", rewrite(ExprType::Coalesce, |inputs| {
+                    if inputs.iter().any(ExprImpl::has_table_function) {
+                        return Err(ErrorCode::BindError("table functions are not allowed in COALESCE".into()).into());
+                    }
+                    Ok(inputs)
+                })),
                 (
                     "nullif",
                     rewrite(ExprType::Case, Binder::rewrite_nullif_to_case_when),
@@ -680,6 +685,7 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("regexp_replace", raw_call(ExprType::RegexpReplace)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -1111,19 +1117,22 @@ impl Binder {
 
     fn rewrite_format_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         let Some((format_expr, args)) = inputs.split_first() else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes at least 1 arguments (0 given)".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into());
         };
         let ExprImpl::Literal(expr_literal) = format_expr else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes a literal string as the first argument".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
         };
         let Some(ScalarImpl::Utf8(format_str)) = expr_literal.get_data() else {
-            return Err(
-                ErrorCode::BindError("Function `format` takes a literal string as the first argument".to_string()).into(),
-            );
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
         };
         let formatter = Formatter::parse(format_str)
             .map_err(|err| -> RwError { ErrorCode::BindError(err.to_string()).into() })?;
@@ -1285,18 +1294,19 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
+                Clause::JoinOn
+                | Clause::Where
+                | Clause::Having
+                | Clause::Filter
+                | Clause::Values
+                | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause
                     ))
                     .into());
                 }
-                Clause::JoinOn
-                | Clause::GroupBy
-                | Clause::Having
-                | Clause::Filter
-                | Clause::From => {}
+                Clause::GroupBy | Clause::From => {}
             }
         }
         Ok(())

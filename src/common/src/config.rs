@@ -17,6 +17,7 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -245,6 +246,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
+    pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
+
     #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -420,6 +424,27 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+pub enum StorageMetricLevel {
+    #[default]
+    Disabled = 0,
+    Critical = 1,
+    Info = 2,
+    Debug = 3,
+}
+
+impl PartialEq<Self> for StorageMetricLevel {
+    fn eq(&self, other: &Self) -> bool {
+        (*self as u8).eq(&(*other as u8))
+    }
+}
+
+impl PartialOrd for StorageMetricLevel {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (*self as u8).partial_cmp(&(*other as u8))
+    }
+}
+
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StorageConfig {
@@ -535,9 +560,11 @@ pub struct StorageConfig {
     pub compactor_max_sst_key_count: u64,
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
-
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+
+    #[serde(default = "default::storage::storage_metric_level")]
+    pub storage_metric_level: StorageMetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -837,6 +864,10 @@ pub mod default {
             180 // 3mi
         }
 
+        pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
+            600
+        }
+
         pub fn move_table_size_limit() -> u64 {
             10 * 1024 * 1024 * 1024 // 10GB
         }
@@ -887,6 +918,7 @@ pub mod default {
     }
 
     pub mod storage {
+        use crate::config::StorageMetricLevel;
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -991,6 +1023,10 @@ pub mod default {
 
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
+        }
+
+        pub fn storage_metric_level() -> StorageMetricLevel {
+            StorageMetricLevel::Info
         }
     }
 
@@ -1182,7 +1218,7 @@ pub mod default {
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
-            true
+            false
         }
     }
 
@@ -1201,6 +1237,7 @@ pub mod default {
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1242,6 +1279,9 @@ pub mod default {
         }
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+        pub fn tombstone_reclaim_ratio() -> u32 {
+            DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
     }
 
@@ -1366,6 +1406,8 @@ pub struct CompactionConfig {
     pub max_space_reclaim_bytes: u64,
     #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
     pub level0_max_compact_file_number: u64,
+    #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
+    pub tombstone_reclaim_ratio: u32,
 }
 
 #[cfg(test)]

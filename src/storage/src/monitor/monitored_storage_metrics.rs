@@ -12,50 +12,78 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericCounterVec};
+use std::sync::OnceLock;
+
 use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram,
-    HistogramVec, Registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
+use risingwave_common::config::StorageMetricLevel;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+
+use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
-    pub get_duration: HistogramVec,
-    pub get_key_size: HistogramVec,
-    pub get_value_size: HistogramVec,
+    pub get_duration: RelabeledHistogramVec,
+    pub get_key_size: RelabeledHistogramVec,
+    pub get_value_size: RelabeledHistogramVec,
 
-    pub iter_size: HistogramVec,
-    pub iter_item: HistogramVec,
-    pub iter_init_duration: HistogramVec,
-    pub iter_scan_duration: HistogramVec,
-    pub may_exist_duration: HistogramVec,
+    pub iter_size: RelabeledHistogramVec,
+    pub iter_item: RelabeledHistogramVec,
+    pub iter_init_duration: RelabeledHistogramVec,
+    pub iter_scan_duration: RelabeledHistogramVec,
+    pub may_exist_duration: RelabeledHistogramVec,
 
-    pub iter_in_process_counts: GenericCounterVec<AtomicU64>,
+    pub iter_in_process_counts: RelabeledCounterVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
 }
 
+pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock::new();
+
+pub fn global_storage_metrics(storage_metric_level: StorageMetricLevel) -> MonitoredStorageMetrics {
+    GLOBAL_STORAGE_METRICS
+        .get_or_init(|| {
+            MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
+        })
+        .clone()
+}
+
 impl MonitoredStorageMetrics {
-    pub fn new(registry: Registry) -> Self {
+    pub fn new(registry: &Registry, storage_metric_level: StorageMetricLevel) -> Self {
+        // 256B ~ max 4GB
+        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 10ms ~ max 2.7h
+        let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // ----- get -----
         let opts = histogram_opts!(
             "state_store_get_key_size",
             "Total key bytes of get that have been issued to state store",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            size_buckets.clone()
         );
         let get_key_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let get_key_size = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Debug,
+            get_key_size,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_get_value_size",
             "Total value bytes that have been requested from remote storage",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            size_buckets.clone()
         );
         let get_value_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let get_value_size = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Debug,
+            get_value_size,
+            storage_metric_level,
+        );
 
         let mut buckets = exponential_buckets(0.000004, 2.0, 4).unwrap(); // 4 ~ 32us
         buckets.extend(linear_buckets(0.00006, 0.00004, 5).unwrap()); // 60 ~ 220us.
@@ -71,22 +99,37 @@ impl MonitoredStorageMetrics {
         let get_duration =
             register_histogram_vec_with_registry!(get_duration_opts, &["table_id"], registry)
                 .unwrap();
+        let get_duration = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Critical,
+            get_duration,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_size",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            size_buckets.clone()
         );
         let iter_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_size = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Debug,
+            iter_size,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            exponential_buckets(1.0, 2.0, 20).unwrap() // max 2^20 items
+            size_buckets
         );
         let iter_item =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_item = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Debug,
+            iter_item,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_init_duration",
@@ -95,6 +138,11 @@ impl MonitoredStorageMetrics {
         );
         let iter_init_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_init_duration = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Critical,
+            iter_init_duration,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
@@ -103,6 +151,11 @@ impl MonitoredStorageMetrics {
         );
         let iter_scan_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_scan_duration = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Critical,
+            iter_scan_duration,
+            storage_metric_level,
+        );
 
         let iter_in_process_counts = register_int_counter_vec_with_registry!(
             "state_store_iter_in_process_counts",
@@ -111,6 +164,11 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
+        let iter_in_process_counts = RelabeledCounterVec::with_metric_level(
+            StorageMetricLevel::Debug,
+            iter_in_process_counts,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_may_exist_duration",
@@ -119,18 +177,23 @@ impl MonitoredStorageMetrics {
         );
         let may_exist_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let may_exist_duration = RelabeledHistogramVec::with_metric_level(
+            StorageMetricLevel::Debug,
+            may_exist_duration,
+            storage_metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_sync_duration",
             "Histogram of time spent on compacting shared buffer to remote storage",
-            exponential_buckets(0.01, 2.0, 16).unwrap() // max 327s
+            time_buckets.clone()
         );
         let sync_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_sync_size",
             "Total size of upload to l0 every epoch",
-            exponential_buckets(10.0, 2.0, 25).unwrap()
+            time_buckets
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -149,8 +212,7 @@ impl MonitoredStorageMetrics {
         }
     }
 
-    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        global_storage_metrics(StorageMetricLevel::Disabled)
     }
 }
