@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 35] = [
+const CONFIG_KEYS: [&str; 36] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -69,6 +69,7 @@ const CONFIG_KEYS: [&str; 35] = [
     "LOCK_TIMEOUT",
     "ROW_SECURITY",
     "STANDARD_CONFORMING_STRINGS",
+    "RW_STREAMING_RATE_LIMIT",
     "CDC_BACKFILL",
 ];
 
@@ -108,7 +109,8 @@ const STATEMENT_TIMEOUT: usize = 30;
 const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
 const STANDARD_CONFORMING_STRINGS: usize = 33;
-const CDC_BACKFILL: usize = 34;
+const RW_STREAMING_RATE_LIMIT: usize = 34;
+const CDC_BACKFILL: usize = 35;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -331,6 +333,7 @@ type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
+type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, true>;
 
 /// Report status or notice to caller.
@@ -472,6 +475,8 @@ pub struct ConfigMap {
     ))]
     standard_conforming_strings: StandardConformingStrings,
 
+    streaming_rate_limit: StreamingRateLimit,
+
     cdc_backfill: CdcBackfill,
 }
 
@@ -584,6 +589,8 @@ impl ConfigMap {
             self.row_security = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
             self.standard_conforming_strings = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
+            self.streaming_rate_limit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
             self.cdc_backfill = val.as_slice().try_into()?
         } else {
@@ -667,6 +674,8 @@ impl ConfigMap {
             Ok(self.row_security.to_string())
         } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
             Ok(self.standard_conforming_strings.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
+            Ok(self.streaming_rate_limit.to_string())
         } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
             Ok(self.cdc_backfill.to_string())
         } else {
@@ -847,6 +856,11 @@ impl ConfigMap {
                 description: String::from("Unused in RisingWave"),
             },
             VariableInfo{
+                name: StreamingRateLimit::entry_name().to_lowercase(),
+                setting: self.streaming_rate_limit.to_string(),
+                description: String::from("Set streaming rate limit (rows per second) for each parallelism for mv backfilling"),
+            },
+            VariableInfo{
                 name: CdcBackfill::entry_name().to_lowercase(),
                 setting: self.cdc_backfill.to_string(),
                 description: String::from("Enable backfill for CDC table to allow lock-free and incremental snapshot"),
@@ -973,6 +987,13 @@ impl ConfigMap {
 
     pub fn get_standard_conforming_strings(&self) -> &str {
         &self.standard_conforming_strings
+    }
+
+    pub fn get_streaming_rate_limit(&self) -> Option<u32> {
+        if self.streaming_rate_limit.0 != 0 {
+            return Some(self.streaming_rate_limit.0 as u32);
+        }
+        None
     }
 
     pub fn get_cdc_backfill(&self) -> bool {
