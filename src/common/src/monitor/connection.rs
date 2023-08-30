@@ -16,16 +16,13 @@ use std::any::type_name;
 use std::cmp::Ordering;
 use std::future::Future;
 use std::io::{Error, IoSlice};
-#[cfg(not(madsim))]
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures::FutureExt;
-#[cfg(not(madsim))]
-use futures::Stream;
 use http::Uri;
 use hyper::client::connect::Connection;
 use hyper::client::HttpConnector;
@@ -38,8 +35,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-#[cfg(not(madsim))]
-use tonic::transport::server::{Connected, TcpConnectInfo, TcpIncoming};
+use tonic::transport::{Channel, Endpoint};
 use tracing::{info, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
@@ -195,7 +191,9 @@ impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
 }
 
 #[cfg(not(madsim))]
-impl<C: Connected, M> Connected for MonitoredConnection<C, M> {
+impl<C: tonic::transport::server::Connected, M> tonic::transport::server::Connected
+    for MonitoredConnection<C, M>
+{
     type ConnectInfo = C::ConnectInfo;
 
     fn connect_info(&self) -> Self::ConnectInfo {
@@ -221,7 +219,11 @@ where
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + 'static;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        let ret = self.inner.poll_ready(cx);
+        if let Poll::Ready(Err(_)) = &ret {
+            self.monitor.on_err("<poll_ready>".to_string());
+        }
+        ret
     }
 
     fn call(&mut self, uri: Uri) -> Self::Future {
@@ -243,10 +245,11 @@ where
 }
 
 #[cfg(not(madsim))]
-impl<Con, E, C: Stream<Item = Result<Con, E>>, M: MonitorNewConnection> Stream
+impl<Con, E, C: futures::Stream<Item = Result<Con, E>>, M: MonitorNewConnection> futures::Stream
     for MonitoredConnection<C, M>
 where
-    Con: Connected<ConnectInfo = TcpConnectInfo>,
+    Con:
+        tonic::transport::server::Connected<ConnectInfo = tonic::transport::server::TcpConnectInfo>,
 {
     type Item = Result<MonitoredConnection<Con, M::ConnectionMonitor>, E>;
 
@@ -373,18 +376,6 @@ pub struct TcpConfig {
     pub keepalive_duration: Option<Duration>,
 }
 
-pub fn monitored_hyper_https_connector(
-    connection_type: impl Into<String>,
-    config: TcpConfig,
-) -> MonitoredConnection<HttpConnector, MonitorNewConnectionImpl> {
-    let mut http = HttpConnector::new();
-    http.enforce_http(false);
-    http.set_nodelay(config.tcp_nodelay);
-    http.set_keepalive(config.keepalive_duration);
-
-    monitor_connector(http, connection_type)
-}
-
 pub fn monitor_connector<C>(
     connector: C,
     connection_type: impl Into<String>,
@@ -398,16 +389,107 @@ pub fn monitor_connector<C>(
     MonitoredConnection::new(connector, MonitorNewConnectionImpl { connection_type })
 }
 
+#[easy_ext::ext(EndpointExt)]
+impl Endpoint {
+    pub async fn monitored_connect(
+        self,
+        connection_type: impl Into<String>,
+        config: TcpConfig,
+    ) -> Result<Channel, tonic::transport::Error> {
+        #[cfg(not(madsim))]
+        {
+            let mut http = HttpConnector::new();
+            http.enforce_http(false);
+            http.set_nodelay(config.tcp_nodelay);
+            http.set_keepalive(config.keepalive_duration);
+
+            let connector = monitor_connector(http, connection_type);
+            self.connect_with_connector(connector).await
+        }
+        #[cfg(madsim)]
+        {
+            self.connect(connector).await
+        }
+    }
+
+    #[cfg(not(madsim))]
+    pub fn monitored_connect_lazy(
+        self,
+        connection_type: impl Into<String>,
+        config: TcpConfig,
+    ) -> Channel {
+        let mut http = HttpConnector::new();
+        http.enforce_http(false);
+        http.set_nodelay(config.tcp_nodelay);
+        http.set_keepalive(config.keepalive_duration);
+
+        let connector = monitor_connector(http, connection_type);
+        self.connect_with_connector_lazy(connector)
+    }
+}
+
+#[easy_ext::ext(RouterExt)]
+impl<L> tonic::transport::server::Router<L> {
+    pub async fn monitored_serve_with_shutdown<ResBody>(
+        self,
+        listen_addr: std::net::SocketAddr,
+        connection_type: impl Into<String>,
+        config: TcpConfig,
+        signal: impl Future<Output = ()>,
+    ) where
+        L: tower_layer::Layer<tonic::transport::server::Routes>,
+        L::Service: Service<
+                http::request::Request<hyper::Body>,
+                Response = http::response::Response<ResBody>,
+            > + Clone
+            + Send
+            + 'static,
+        <<L as tower_layer::Layer<tonic::transport::server::Routes>>::Service as Service<
+            http::request::Request<hyper::Body>,
+        >>::Future: Send + 'static,
+        <<L as tower_layer::Layer<tonic::transport::server::Routes>>::Service as Service<
+            http::request::Request<hyper::Body>,
+        >>::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+        ResBody: http_body::Body<Data = Bytes> + Send + 'static,
+        ResBody::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        #[cfg(not(madsim))]
+        {
+            let incoming = tonic::transport::server::TcpIncoming::new(
+                listen_addr,
+                config.tcp_nodelay,
+                config.keepalive_duration,
+            )
+            .unwrap();
+            let incoming = MonitoredConnection::new(
+                incoming,
+                MonitorNewConnectionImpl {
+                    connection_type: connection_type.into(),
+                },
+            );
+            self.serve_with_incoming_shutdown(incoming, signal)
+                .await
+                .unwrap()
+        }
+        #[cfg(madsim)]
+        self.serve_with_shutdown(listen_addr, signal).await.unwrap()
+    }
+}
+
 #[cfg(not(madsim))]
 pub fn monitored_tcp_incoming(
-    listen_addr: SocketAddr,
+    listen_addr: std::net::SocketAddr,
     connection_type: impl Into<String>,
     config: TcpConfig,
 ) -> Result<
-    MonitoredConnection<TcpIncoming, MonitorNewConnectionImpl>,
+    MonitoredConnection<tonic::transport::server::TcpIncoming, MonitorNewConnectionImpl>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    let incoming = TcpIncoming::new(listen_addr, config.tcp_nodelay, config.keepalive_duration)?;
+    let incoming = tonic::transport::server::TcpIncoming::new(
+        listen_addr,
+        config.tcp_nodelay,
+        config.keepalive_duration,
+    )?;
     Ok(MonitoredConnection::new(
         incoming,
         MonitorNewConnectionImpl {
