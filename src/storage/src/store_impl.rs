@@ -230,6 +230,7 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -475,6 +476,19 @@ pub mod verify {
                 assert_eq!(ret, expected.is_dirty());
             }
             ret
+        }
+
+        fn init_sync(
+            &mut self,
+            epoch: EpochPair,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            async move {
+                self.actual.init_sync(epoch.clone()).await?;
+                if let Some(expected) = &mut self.expected {
+                    expected.init_sync(epoch).await?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -736,6 +750,7 @@ pub mod boxed_state_store {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -824,6 +839,8 @@ pub mod boxed_state_store {
         fn init(&mut self, epoch: u64);
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
+
+        async fn init_sync(&mut self, epoch: EpochPair) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -882,6 +899,10 @@ pub mod boxed_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
             self.seal_current_epoch(next_epoch)
+        }
+
+        async fn init_sync(&mut self, epoch: EpochPair) -> StorageResult<()> {
+            self.init_sync(epoch).await
         }
     }
 
@@ -948,6 +969,13 @@ pub mod boxed_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
             self.deref_mut().seal_current_epoch(next_epoch)
+        }
+
+        fn init_sync(
+            &mut self,
+            epoch: EpochPair,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().init_sync(epoch)
         }
     }
 

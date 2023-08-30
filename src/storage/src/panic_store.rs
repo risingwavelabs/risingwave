@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
@@ -125,6 +127,11 @@ impl LocalStateStore for PanicStateStore {
     }
 
     fn seal_current_epoch(&mut self, _next_epoch: u64) {
+        panic!("should not operate on the panic state store!")
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn init_sync(&mut self, _epoch: EpochPair) -> StorageResult<()> {
         panic!("should not operate on the panic state store!")
     }
 }

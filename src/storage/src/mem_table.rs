@@ -23,6 +23,7 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -559,6 +560,16 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+    }
+
+    fn init_sync(
+        &mut self,
+        epoch: EpochPair,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        async move {
+            self.init(epoch.curr);
+            Ok(())
+        }
     }
 }
 

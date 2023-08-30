@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::time::Instant;
 use tracing::error;
@@ -280,6 +281,13 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     fn seal_current_epoch(&mut self, next_epoch: u64) {
         // TODO: may collect metrics
         self.inner.seal_current_epoch(next_epoch)
+    }
+
+    fn init_sync(
+        &mut self,
+        epoch: EpochPair,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.inner.init_sync(epoch)
     }
 }
 

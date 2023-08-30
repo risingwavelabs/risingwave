@@ -270,9 +270,7 @@ pub trait LocalStateStore: StaticSendSync {
     fn init_sync(
         &mut self,
         _epoch: EpochPair,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        async { unimplemented!() }
-    }
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 }
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory

@@ -412,12 +412,9 @@ impl LocalStateStore for LocalHummockStorage {
         &mut self,
         epoch: EpochPair,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        assert!(self.is_replicated);
         async move {
-            // NOTE(kwannoel): We need to synchronize with upstream
-            // if we are replicating.
-            if self.is_replicated {
-                self.wait_for_epoch(epoch.prev).await?;
-            }
+            self.wait_for_epoch(epoch.prev).await?;
             self.init(epoch.curr);
             Ok(())
         }
