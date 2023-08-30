@@ -48,7 +48,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
-          path: target/doc
+          path: target/artifact
 
   deploy:
     needs: build
