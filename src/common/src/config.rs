@@ -570,9 +570,9 @@ pub struct StorageConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-/// The subsection `[storage.file_cache]` in `risingwave.toml`.
+/// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
-/// It's put at [`StorageConfig::file_cache`].
+/// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
