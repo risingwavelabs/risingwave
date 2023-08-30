@@ -57,7 +57,7 @@ jobs:
       - name: build docsets
         run: |
           cargo docset --no-clean
-          tar -cvzf risingwave.docset.tgz target/docset/risingwave.docset
+          tar -czf risingwave.docset.tgz target/docset/risingwave.docset
 
           echo "<entry>
           <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
