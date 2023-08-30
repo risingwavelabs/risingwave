@@ -1112,7 +1112,7 @@ impl Parser {
         })
     }
 
-    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])` 
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
 
