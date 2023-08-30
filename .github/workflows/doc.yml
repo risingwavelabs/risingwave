@@ -25,7 +25,7 @@ jobs:
           version: "v0.5.2"
       - name: build rustdocs
         run: |
-          cargo doc  --document-private-items -p syn@2.0.29
+          cargo doc --workspace --no-deps --document-private-items
           cp docs/rustdoc/rust.css target/doc/rust.css
 
           mkdir artifact
@@ -36,7 +36,7 @@ jobs:
           tool: cargo-docset
       - name: build docsets
         run: |
-          cargo docset --no-clean -p syn@2.0.29
+          cargo docset --no-clean
           tar -czf risingwave.docset.tgz target/docset/syn@2.0.29.docset
 
           echo "<entry>
@@ -48,7 +48,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
-          path: target/artifact
+          path: artifact
 
   deploy:
     needs: build
