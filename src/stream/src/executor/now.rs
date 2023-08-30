@@ -81,10 +81,10 @@ impl<S: StateStore> NowExecutor<S> {
                 state_table.init_epoch(barrier.epoch);
 
                 let state_row = {
-                    let data_iter = state_table.iter(Default::default()).await?;
+                    let data_iter = state_table.iter_row(Default::default()).await?;
                     pin_mut!(data_iter);
-                    if let Some(state_row) = data_iter.next().await {
-                        Some(state_row?)
+                    if let Some(keyed_row) = data_iter.next().await {
+                        Some(keyed_row?)
                     } else {
                         None
                     }

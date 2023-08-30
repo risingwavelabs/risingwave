@@ -4,6 +4,7 @@ from confluent_kafka.serialization import SerializationContext, MessageField
 from confluent_kafka.schema_registry import SchemaRegistryClient, record_subject_name_strategy, \
     topic_record_subject_name_strategy
 from confluent_kafka.schema_registry.avro import AvroSerializer
+from confluent_kafka.schema_registry.json_schema import JSONSerializer
 import sys
 import json
 import os
@@ -24,12 +25,13 @@ def delivery_report(err, msg):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print("datagen.py <brokerlist> <schema-registry-url> <file> <name-strategy>")
+    if len(sys.argv) < 5:
+        print("datagen.py <brokerlist> <schema-registry-url> <file> <name-strategy> <json/avro>")
     broker_list = sys.argv[1]
     schema_registry_url = sys.argv[2]
     file = sys.argv[3]
     topic = os.path.basename(file).split(".")[0]
+    type = sys.argv[5]
     if sys.argv[4] not in ['topic', 'record', 'topic-record', '', None]:
         print("name strategy must be one of: topic, record, topic_record")
         exit(1)
@@ -39,7 +41,9 @@ if __name__ == '__main__':
     print("broker_list: {}".format(broker_list))
     print("schema_registry_url: {}".format(schema_registry_url))
     print("topic: {}".format(topic))
-    print("name strategy: {}".format(sys.argv[4] if sys.argv[4] is not None else 'topic'))
+    print("name strategy: {}".format(
+        sys.argv[4] if sys.argv[4] is not None else 'topic'))
+    print("type: {}".format(type))
 
     schema_registry_conf = {'url': schema_registry_url}
     kafka_conf = {'bootstrap.servers': broker_list}
@@ -60,15 +64,25 @@ if __name__ == '__main__':
             if i == 0:
                 parts = line.split("^")
                 if len(parts) > 1:
-                    key_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
-                                                    schema_str=parts[0],
-                                                    conf=avro_ser_conf)
-                    value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
-                                                      schema_str=parts[1],
-                                                      conf=avro_ser_conf)
+                    if type == 'avro':
+                        key_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
+                                                        schema_str=parts[0],
+                                                        conf=avro_ser_conf)
+                        value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
+                                                          schema_str=parts[1],
+                                                          conf=avro_ser_conf)
+                    else:
+                        key_serializer = JSONSerializer(schema_registry_client=schema_registry_client,
+                                                        schema_str=parts[0])
+                        value_serializer = JSONSerializer(schema_registry_client=schema_registry_client,
+                                                          schema_str=parts[1])
                 else:
-                    value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
-                                                      schema_str=parts[0])
+                    if type == 'avro':
+                        value_serializer = AvroSerializer(schema_registry_client=schema_registry_client,
+                                                          schema_str=parts[0])
+                    else:
+                        value_serializer = JSONSerializer(schema_registry_client=schema_registry_client,
+                                                          schema_str=parts[0])
             else:
                 parts = line.split("^")
                 if len(parts) > 1:

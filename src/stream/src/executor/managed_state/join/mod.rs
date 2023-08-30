@@ -405,19 +405,21 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter_fut = self
                 .state
                 .table
-                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
+                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
             let degree_table_iter_fut = self
                 .degree_state
                 .table
-                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
+                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
             #[for_await]
             for (row, degree) in table_iter.zip(degree_table_iter) {
-                let (pk1, row) = row?;
-                let (pk2, degree) = degree?;
+                let row = row?;
+                let degree_row = degree?;
+                let pk1 = row.key();
+                let pk2 = degree_row.key();
                 debug_assert_eq!(
                     pk1, pk2,
                     "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
@@ -426,29 +428,29 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                let degree_i64 = degree
-                    .datum_at(degree.len() - 1)
+                let degree_i64 = degree_row
+                    .datum_at(degree_row.len() - 1)
                     .expect("degree should not be NULL");
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row, degree_i64.into_int64() as u64).encode(),
+                    JoinRow::new(row.into_owned_row(), degree_i64.into_int64() as u64).encode(),
                 );
             }
         } else {
             let table_iter = self
                 .state
                 .table
-                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
                 .await?;
 
             #[for_await]
-            for row in table_iter {
-                let row: OwnedRow = row?;
+            for entry in table_iter {
+                let row = entry?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                entry_state.insert(pk, JoinRow::new(row, 0).encode());
+                entry_state.insert(pk, JoinRow::new(row.into_owned_row(), 0).encode());
             }
         };
 
