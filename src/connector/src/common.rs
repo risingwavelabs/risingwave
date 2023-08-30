@@ -332,6 +332,22 @@ pub struct NatsCommon {
     pub server_url: String,
     #[serde(rename = "nats.subject")]
     pub subject: String,
+    #[serde(rename = "nats.user")]
+    pub user: Option<String>,
+    #[serde(rename = "nats.password")]
+    pub password: Option<String>,
+    #[serde(rename = "nats.max_bytes")]
+    pub max_bytes: Option<i64>,
+    #[serde(rename = "nats.max_messages")]
+    pub max_messages: Option<i64>,
+    #[serde(rename = "nats.max_messages_per_subject")]
+    pub max_messages_per_subject: Option<i64>,
+    #[serde(rename = "nats.max_consumers")]
+    pub max_consumers: Option<i32>,
+    #[serde(rename = "nats.max_age")]
+    pub max_age: Option<Duration>,
+    #[serde(rename = "nats.max_message_size")]
+    pub max_message_size: Option<i32>,
 }
 
 impl NatsCommon {
@@ -345,14 +361,30 @@ impl NatsCommon {
         &self,
         jetstream: jetstream::Context,
     ) -> anyhow::Result<jetstream::stream::Stream> {
-        let subject = self.subject.clone();
-        let stream = jetstream
-            .get_or_create_stream(jetstream::stream::Config {
-                // the subject default use name value
-                name: subject,
-                ..Default::default()
-            })
-            .await?;
+        let mut config = jetstream::stream::Config {
+            // the subject default use name value
+            name: self.subject.clone(),
+            ..Default::default()
+        };
+        if let Some(v) = self.max_bytes {
+            config.max_bytes = v;
+        }
+        if let Some(v) = self.max_messages {
+            config.max_messages = v;
+        }
+        if let Some(v) = self.max_messages_per_subject {
+            config.max_messages_per_subject = v;
+        }
+        if let Some(v) = self.max_consumers {
+            config.max_consumers = v;
+        }
+        if let Some(v) = self.max_age {
+            config.max_age = v;
+        }
+        if let Some(v) = self.max_message_size {
+            config.max_message_size = v;
+        }
+        let stream = jetstream.get_or_create_stream(config).await?;
         Ok(stream)
     }
 }

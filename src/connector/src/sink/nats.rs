@@ -13,7 +13,6 @@
 // limitations under the License.
 use core::fmt::Debug;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_nats::jetstream::context::Context;
