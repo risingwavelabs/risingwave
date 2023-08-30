@@ -21,13 +21,13 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{AppendOnlyDedupExecutor, BoxedExecutor};
+use crate::executor::{BoxedExecutor, DedupExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-pub struct AppendOnlyDedupExecutorBuilder;
+pub struct DedupExecutorBuilder;
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
+impl ExecutorBuilder for DedupExecutorBuilder {
     type Node = DedupNode;
 
     async fn new_boxed_executor(
@@ -45,7 +45,7 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
             .iter()
             .map(|idx| *idx as _)
             .collect_vec();
-        Ok(Box::new(AppendOnlyDedupExecutor::new(
+        Ok(Box::new(DedupExecutor::new(
             input,
             state_table,
             pk_indices,

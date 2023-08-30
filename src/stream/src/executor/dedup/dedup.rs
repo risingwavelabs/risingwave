@@ -17,7 +17,8 @@ use std::sync::Arc;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use num_traits::FromBytes;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -34,9 +35,9 @@ use crate::executor::{
 };
 use crate::task::AtomicU64Ref;
 
-/// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
-/// messages. It only accepts append-only input, and its output will be append-only as well.
-pub struct AppendOnlyDedupExecutor<S: StateStore> {
+/// [`DedupExecutor`] drops any message that has duplicate pk columns with previous
+/// messages. It accepts append-only and non-append-only input.
+pub struct DedupExecutor<S: StateStore> {
     input: Option<BoxedExecutor>,
     state_table: StateTable<S>,
     cache: DedupCache<OwnedRow>,
@@ -47,7 +48,7 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
     ctx: ActorContextRef,
 }
 
-impl<S: StateStore> AppendOnlyDedupExecutor<S> {
+impl<S: StateStore> DedupExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
         state_table: StateTable<S>,
@@ -58,14 +59,13 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let schema = input.schema().clone();
-        let metrics_info =
-            MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
+        let metrics_info = MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "Dedup");
         Self {
             input: Some(input),
             state_table,
             cache: DedupCache::new(watermark_epoch, metrics_info),
             pk_indices,
-            identity: format!("AppendOnlyDedupExecutor {:X}", executor_id),
+            identity: format!("DedupExecutor {:X}", executor_id),
             schema,
             ctx,
         }
@@ -90,9 +90,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
             match msg? {
                 Message::Chunk(chunk) => {
-                    // Append-only dedup executor only receives INSERT messages.
-                    debug_assert!(chunk.ops().iter().all(|&op| op == Op::Insert));
-
                     // Extract pk for all rows (regardless of visibility) in the chunk.
                     let keys = chunk
                         .data_chunk()
@@ -101,6 +98,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                             row_ref.map(|row| row.project(self.pk_indices()).to_owned_row())
                         })
                         .collect_vec();
+                    let ops = chunk.ops();
 
                     // Ensure that if a key for a visible row exists before, then it is in the
                     // cache, by querying the storage.
@@ -108,10 +106,10 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                     // Now check for duplication and insert new keys into the cache.
                     let mut vis_builder = BitmapBuilder::with_capacity(chunk.capacity());
-                    for key in keys {
+                    for (key, op) in keys.into_iter().zip(ops.iter()) {
                         match key {
                             Some(key) => {
-                                if self.cache.dedup_insert(key) {
+                                if self.cache.dedup_insert(op, key) {
                                     // The key doesn't exist before. The row should be visible.
                                     vis_builder.append(true);
                                 } else {
@@ -131,6 +129,8 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         // Construct the new chunk and write the data to state table.
                         let (ops, columns, _) = chunk.into_inner();
                         let chunk = StreamChunk::new(ops, columns, Some(vis));
+
+                        // todo: state table should also keep the count row
                         self.state_table.write_chunk(chunk.clone());
 
                         commit_data = true;
@@ -189,6 +189,8 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (key, value) = result;
+
+                // todo: state table should also load prev count
                 if value?.is_some() {
                     // Only insert into the cache when we have this key in storage.
                     self.cache.insert(key.to_owned());
@@ -200,7 +202,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for AppendOnlyDedupExecutor<S> {
+impl<S: StateStore> Executor for DedupExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
     }
@@ -259,7 +261,7 @@ mod tests {
         .await;
 
         let (mut tx, input) = MockSource::channel(schema, pk_indices.clone());
-        let mut dedup_executor = Box::new(AppendOnlyDedupExecutor::new(
+        let mut dedup_executor = Box::new(DedupExecutor::new(
             Box::new(input),
             state_table,
             pk_indices,

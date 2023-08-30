@@ -250,6 +250,13 @@ impl StreamGraphFormatter {
                 ));
             }
             stream_node::NodeBody::AppendOnlyDedup(node) => {
+                // deprecated: use `stream_node::NodeBody::Dedup` instead
+                fields.push((
+                    "state table",
+                    self.pretty_add_table(node.get_state_table().unwrap()),
+                ));
+            }
+            stream_node::NodeBody::Dedup(node) => {
                 fields.push((
                     "state table",
                     self.pretty_add_table(node.get_state_table().unwrap()),

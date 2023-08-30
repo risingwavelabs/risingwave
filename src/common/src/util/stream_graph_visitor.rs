@@ -175,6 +175,10 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "AppendOnlyDedup");
             }
 
+            NodeBody::Dedup(node) => {
+                always!(node.state_table, "Dedup");
+            }
+
             // EOWC over window
             NodeBody::EowcOverWindow(node) => {
                 always!(node.state_table, "EowcOverWindow");

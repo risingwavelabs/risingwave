@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod append_only_dedup;
 mod cache;
+mod dedup;
 
-pub use append_only_dedup::AppendOnlyDedupExecutor;
+pub use dedup::DedupExecutor;

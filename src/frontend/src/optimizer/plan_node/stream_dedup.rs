@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
@@ -55,6 +57,7 @@ impl StreamDedup {
         schema.fields().iter().for_each(|field| {
             builder.add_column(field);
         });
+        builder.add_column(&Field::with_name(DataType::Int64, "dup_count"));
 
         self.logical.dedup_cols.iter().for_each(|idx| {
             builder.add_order_column(*idx, OrderType::ascending());
@@ -70,7 +73,7 @@ impl StreamDedup {
 }
 
 // assert!(self.base.append_only());
-impl_distill_by_unit!(StreamDedup, logical, "StreamAppendOnlyDedup");
+impl_distill_by_unit!(StreamDedup, logical, "StreamDedup");
 
 impl PlanTreeNodeUnary for StreamDedup {
     fn input(&self) -> PlanRef {
@@ -91,7 +94,7 @@ impl StreamNode for StreamDedup {
         let table_catalog = self
             .infer_internal_table_catalog()
             .with_id(state.gen_table_id_wrapped());
-        PbNodeBody::AppendOnlyDedup(DedupNode {
+        PbNodeBody::Dedup(DedupNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             dedup_column_indices: self
                 .logical
