@@ -38,6 +38,7 @@ pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
+pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
@@ -58,6 +59,7 @@ mod csv_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
+mod mysql;
 mod plain_parser;
 mod protobuf;
 mod schema_registry;
@@ -169,7 +171,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Insert)
+        writer.op_builder.push(Op::Insert);
     }
 }
 
@@ -192,7 +194,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Delete)
+        writer.op_builder.push(Op::Delete);
     }
 }
 
@@ -237,10 +239,10 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_meta {
+                if desc.is_meta() || desc.is_offset() {
                     return Ok(());
                 }
-                let output = if desc.is_row_id {
+                let output = if desc.is_row_id() {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
@@ -435,10 +437,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 continue;
             }
 
-            split_offset_mapping.insert(msg.split_id, msg.offset);
+            let msg_offset = msg.offset;
+            split_offset_mapping.insert(msg.split_id, msg_offset.clone());
 
             let old_op_num = builder.op_num();
-
             match parser
                 .parse_one_with_txn(msg.key, msg.payload, builder.row_writer())
                 .await
@@ -452,26 +454,36 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         *len += new_op_num - old_op_num;
                     }
 
+                    // fill in meta column for specific source and offset column if needed
                     for _ in old_op_num..new_op_num {
-                        // TODO: support more kinds of SourceMeta
-                        if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                            let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                        if !desc.is_meta {
-                            return None;
-                        }
-                        match desc.name.as_str() {
-                            KAFKA_TIMESTAMP_COLUMN_NAME => Some(kafka_meta.timestamp.map(|ts| {
-                                risingwave_common::cast::i64_to_timestamptz(ts)
-                                    .unwrap()
-                                    .into()
-                            })),
-                            _ => {
-                                unreachable!("kafka will not have this meta column: {}", desc.name)
-                            }
-                        }
-                    };
-                            builder.row_writer().fulfill_meta_column(f)?;
-                        }
+                        let f =
+                            |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                                if desc.is_meta() && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                                    match desc.name.as_str() {
+                                        KAFKA_TIMESTAMP_COLUMN_NAME => {
+                                            Some(kafka_meta.timestamp.map(|ts| {
+                                                risingwave_common::cast::i64_to_timestamptz(ts)
+                                                    .unwrap()
+                                                    .into()
+                                            }))
+                                        }
+                                        _ => {
+                                            unreachable!(
+                                                "kafka will not have this meta column: {}",
+                                                desc.name
+                                            )
+                                        }
+                                    }
+                                } else if desc.is_offset() {
+                                    Some(Some(msg_offset.as_str().into()))
+                                } else {
+                                    // None will be ignored by `fulfill_meta_column`
+                                    None
+                                }
+                            };
+
+                        // fill in meta or offset column if any
+                        builder.row_writer().fulfill_meta_column(f)?;
                     }
                 }
 
