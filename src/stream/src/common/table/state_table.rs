@@ -38,7 +38,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::StorageError;
+use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -524,6 +524,11 @@ where
         } else {
             self.dist_key_in_pk_indices.is_empty()
         }
+    }
+
+    pub async fn init_epoch_synced(&mut self, epoch: EpochPair) {
+        assert!(IS_REPLICATED);
+        self.local_store.init_sync(epoch).await.unwrap();
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called

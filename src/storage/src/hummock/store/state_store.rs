@@ -21,6 +21,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
@@ -404,6 +405,22 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn init_sync(
+        &mut self,
+        epoch: EpochPair,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        async move {
+            // NOTE(kwannoel): We need to synchronize with upstream
+            // if we are replicating.
+            if self.is_replicated {
+                self.wait_for_epoch(epoch.prev).await?;
+            }
+            self.init(epoch.curr);
+            Ok(())
+        }
     }
 }
 

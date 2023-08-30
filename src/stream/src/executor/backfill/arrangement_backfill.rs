@@ -135,7 +135,8 @@ where
         //     first_barrier, self.actor_id
         // );
         self.state_table.init_epoch(first_barrier.epoch);
-        upstream_table.init_epoch(first_barrier.epoch);
+        upstream_table.init_epoch_synced(first_barrier.epoch).await;
+        // .await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 

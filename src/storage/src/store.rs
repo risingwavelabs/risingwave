@@ -17,11 +17,12 @@ use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
@@ -264,6 +265,14 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
+
+    /// Initialize with epoch. By default it is unimplemented.
+    fn init_sync(
+        &mut self,
+        _epoch: EpochPair,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        async { unimplemented!() }
+    }
 }
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
