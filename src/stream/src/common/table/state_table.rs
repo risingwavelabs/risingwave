@@ -526,14 +526,9 @@ where
         }
     }
 
-    pub async fn init_epoch_synced(&mut self, epoch: EpochPair) {
-        assert!(IS_REPLICATED);
-        self.local_store.init_sync(epoch).await.unwrap();
-    }
-
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.local_store.init(epoch.curr)
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        self.local_store.init(epoch).await
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called

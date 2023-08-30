@@ -385,12 +385,16 @@ impl LocalStateStore for LocalHummockStorage {
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        if self.is_replicated {
+            self.wait_for_epoch(epoch.prev).await?;
+        }
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -405,19 +409,6 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
-    }
-
-    #[allow(clippy::manual_async_fn)]
-    fn init_sync(
-        &mut self,
-        epoch: EpochPair,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        assert!(self.is_replicated);
-        async move {
-            self.wait_for_epoch(epoch.prev).await?;
-            self.init(epoch.curr);
-            Ok(())
-        }
     }
 }
 

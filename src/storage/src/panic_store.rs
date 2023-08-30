@@ -122,16 +122,12 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn init(&mut self, _epoch: u64) {
+    #[allow(clippy::unused_async)]
+    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 
     fn seal_current_epoch(&mut self, _next_epoch: u64) {
-        panic!("should not operate on the panic state store!")
-    }
-
-    #[allow(clippy::unused_async)]
-    async fn init_sync(&mut self, _epoch: EpochPair) -> StorageResult<()> {
         panic!("should not operate on the panic state store!")
     }
 }

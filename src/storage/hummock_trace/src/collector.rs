@@ -23,6 +23,7 @@ use std::sync::LazyLock;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::runtime::Runtime;
@@ -323,7 +324,10 @@ impl TraceSpan {
         )
     }
 
-    pub fn new_local_storage_init_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
+    pub fn new_local_storage_init_span(
+        epoch: EpochPair,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
         Self::new_global_op(Operation::LocalStorageInit(epoch), storage_type)
     }
 

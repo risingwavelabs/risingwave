@@ -448,11 +448,12 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.actual.init(epoch);
+        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+            self.actual.init(epoch).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch);
+                expected.init(epoch).await?;
             }
+            Ok(())
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -476,19 +477,6 @@ pub mod verify {
                 assert_eq!(ret, expected.is_dirty());
             }
             ret
-        }
-
-        fn init_sync(
-            &mut self,
-            epoch: EpochPair,
-        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            async move {
-                self.actual.init_sync(epoch.clone()).await?;
-                if let Some(expected) = &mut self.expected {
-                    expected.init_sync(epoch).await?;
-                }
-                Ok(())
-            }
         }
     }
 
@@ -836,11 +824,9 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        fn init(&mut self, epoch: u64);
+        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
-
-        async fn init_sync(&mut self, epoch: EpochPair) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -893,16 +879,12 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.init(epoch)
+        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+            self.init(epoch).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
             self.seal_current_epoch(next_epoch)
-        }
-
-        async fn init_sync(&mut self, epoch: EpochPair) -> StorageResult<()> {
-            self.init_sync(epoch).await
         }
     }
 
@@ -963,19 +945,15 @@ pub mod boxed_state_store {
             self.deref().is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
+        fn init(
+            &mut self,
+            epoch: EpochPair,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.deref_mut().init(epoch)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
             self.deref_mut().seal_current_epoch(next_epoch)
-        }
-
-        fn init_sync(
-            &mut self,
-            epoch: EpochPair,
-        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref_mut().init_sync(epoch)
         }
     }
 

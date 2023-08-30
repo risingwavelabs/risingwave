@@ -19,6 +19,7 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
@@ -163,7 +164,7 @@ pub enum Operation {
     DropLocalStorage,
 
     /// Init of a local storage
-    LocalStorageInit(u64),
+    LocalStorageInit(EpochPair),
 
     /// Try wait epoch
     TryWaitEpoch(TracedHummockReadEpoch),

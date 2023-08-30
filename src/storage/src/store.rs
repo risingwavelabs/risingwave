@@ -244,7 +244,13 @@ pub trait LocalStateStore: StaticSendSync {
 
     fn is_dirty(&self) -> bool;
 
-    fn init(&mut self, epoch: u64);
+    /// Initializes the state store with given `epoch` pair.
+    /// Typically we will use `epoch.curr` as the initialized epoch,
+    /// Since state table will begin as empty.
+    /// In some cases like replicated state table, state table may not be empty initially,
+    /// as such we need to wait for `epoch.prev` checkpoint to complete,
+    /// hence this interface is made async.
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
@@ -265,12 +271,6 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
-
-    /// Initialize with epoch. By default it is unimplemented.
-    fn init_sync(
-        &mut self,
-        _epoch: EpochPair,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 }
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory

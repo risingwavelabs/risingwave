@@ -390,9 +390,9 @@ mod tests {
         let store = MemoryStateStore::new();
         let mut epoch = EpochPair::new_test_epoch(1);
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &[], store).await;
-        dedup_tables
-            .values_mut()
-            .for_each(|table| table.init_epoch(epoch));
+        for table in dedup_tables.values_mut() {
+            table.init_epoch(epoch).await.unwrap();
+        }
 
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,

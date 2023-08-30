@@ -127,6 +127,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let first_epoch = first_barrier.epoch;
         let first_checkpointing_epoch = first_barrier.epoch.prev;
         let cur_checkpointing_epoch = first_barrier.epoch.curr;
 
@@ -135,7 +136,6 @@ where
         //     first_barrier, self.actor_id
         // );
         self.state_table.init_epoch(first_barrier.epoch);
-        upstream_table.init_epoch_synced(first_barrier.epoch).await;
         // .await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
@@ -149,6 +149,7 @@ where
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
+        upstream_table.init(first_epoch).await?;
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         // TODO(kwannoel): This initial committed progress should also be read from state table,

@@ -199,7 +199,7 @@ pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 
 #[async_trait::async_trait]
 impl LocalReplay for LocalReplayImpl {
-    fn init(&mut self, epoch: u64) {
+    fn init(&mut self, epoch: EpochPair) {
         self.0.init(epoch);
     }
 

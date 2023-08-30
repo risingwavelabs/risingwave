@@ -17,6 +17,7 @@ use std::ops::Bound;
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
@@ -195,9 +196,9 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    fn init(&mut self, epoch: u64) {
+    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
         let _span = TraceSpan::new_local_storage_init_span(epoch, self.storage_type);
-        self.inner.init(epoch)
+        self.inner.init(epoch).await
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {

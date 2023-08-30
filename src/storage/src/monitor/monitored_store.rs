@@ -273,21 +273,13 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
-        // TODO: may collect metrics
-        self.inner.init(epoch)
+    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        self.inner.init(epoch).await
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
         // TODO: may collect metrics
         self.inner.seal_current_epoch(next_epoch)
-    }
-
-    fn init_sync(
-        &mut self,
-        epoch: EpochPair,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        self.inner.init_sync(epoch)
     }
 }
 
