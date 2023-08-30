@@ -326,6 +326,7 @@ pub struct UpsertMessage<'a> {
     pub record: Cow<'a, [u8]>,
 }
 
+#[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NatsCommon {
     #[serde(rename = "nats.server_url")]
@@ -337,22 +338,29 @@ pub struct NatsCommon {
     #[serde(rename = "nats.password")]
     pub password: Option<String>,
     #[serde(rename = "nats.max_bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_bytes: Option<i64>,
     #[serde(rename = "nats.max_messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages: Option<i64>,
     #[serde(rename = "nats.max_messages_per_subject")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages_per_subject: Option<i64>,
     #[serde(rename = "nats.max_consumers")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_consumers: Option<i32>,
-    #[serde(rename = "nats.max_age")]
-    pub max_age: Option<Duration>,
     #[serde(rename = "nats.max_message_size")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
 }
 
 impl NatsCommon {
     pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
-        let client = async_nats::connect(&self.server_url).await?;
+        let mut connect_options = async_nats::ConnectOptions::new();
+        if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
+            connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
+        }
+        let client = connect_options.connect(self.server_url.clone()).await?;
         let jetstream = async_nats::jetstream::new(client);
         Ok(jetstream)
     }
@@ -377,9 +385,6 @@ impl NatsCommon {
         }
         if let Some(v) = self.max_consumers {
             config.max_consumers = v;
-        }
-        if let Some(v) = self.max_age {
-            config.max_age = v;
         }
         if let Some(v) = self.max_message_size {
             config.max_message_size = v;

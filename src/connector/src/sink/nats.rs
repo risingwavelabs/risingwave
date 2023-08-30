@@ -91,8 +91,8 @@ impl Sink for NatsSink {
         if !self.is_append_only {
             return Err(SinkError::Nats("only support append-only mode".to_string()));
         }
-        match async_nats::connect(&self.config.common.server_url).await {
-            Ok(_client) => {}
+        match self.config.common.build_context().await {
+            Ok(_jetstream) => {}
             Err(error) => {
                 return Err(SinkError::Nats(format!(
                     "validate nats sink error: {:?}",
