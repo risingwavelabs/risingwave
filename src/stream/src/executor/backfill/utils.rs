@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -32,7 +33,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
@@ -467,6 +467,7 @@ pub(crate) fn compute_bounds(
     }
 }
 
+#[try_stream(ok = OwnedRow, error = StreamExecutorError)]
 pub(crate) async fn owned_row_iter<S, E>(storage_iter: S)
 where
     StreamExecutorError: From<E>,
@@ -479,7 +480,7 @@ where
     }
 }
 
-#[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+#[try_stream(ok = StreamChunk, error = StreamExecutorError)]
 pub(crate) async fn iter_chunks<'a, S, E, R>(
     mut iter: S,
     chunk_size: usize,
