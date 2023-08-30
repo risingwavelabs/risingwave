@@ -8,6 +8,10 @@ on:
   pull_request:
     branches:
       - main
+env:
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+  RUSTDOCFLAGS: "--cfg docsrs --markdown-css rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options"
 
 jobs:
   build:
@@ -24,11 +28,8 @@ jobs:
           version: "v0.5.2"
       - name: build rustdocs
         run: |
-          RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+          cargo doc --workspace --no-deps --document-private-items
           cp docs/rustdoc/rust.css target/doc/rust.css
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
       - name: Fix file permissions
         shell: sh
         run: |
@@ -58,7 +59,8 @@ jobs:
           tool: cargo-docset
       - name: build docsets
         run: |
-          RUSTDOCFLAGS='--cfg docsrs' cargo docset
+          cargo docset --no-clean
+          tar -cvzf risingwave.docset.tgz target/docset/risingwave.docset
 
           echo "<entry>
           <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
