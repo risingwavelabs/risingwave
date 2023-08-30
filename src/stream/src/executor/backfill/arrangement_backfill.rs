@@ -35,8 +35,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
-    persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode,
+    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -126,12 +126,7 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let first_epoch = first_barrier.epoch;
 
-        // println!(
-        //     "first barrier: {:?}, actor: {:?}",
-        //     first_barrier, self.actor_id
-        // );
         self.state_table.init_epoch(first_barrier.epoch).await?;
-        // .await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
@@ -177,17 +172,12 @@ where
                     );
                     pin_mut!(snapshot);
                     let next = snapshot.try_next().await?;
-                    // #[for_await]
-                    // for c in snapshot {
-                    //     println!("Backfill: snapshot_empty_check: {:?}", c);
-                    // }
                     next.is_none()
                 };
                 let builder_is_empty = builders.iter().all(|b| b.is_empty());
                 snapshot_is_empty && builder_is_empty
             }
         };
-        // println!("is_snapshot_empty: {}", is_snapshot_empty);
 
         // | backfill_is_finished | snapshot_empty | -> | need_to_backfill |
         // | -------------------- | -------------- | -- | ---------------- |
@@ -279,9 +269,7 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
-                                        // println!("Backfill: Barrier from upstream {:?}",
-                                        // barrier); We have
-                                        // to process the barrier outside of the loop.
+                                        // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
                                         // so we can do replication of upstream state_table.
@@ -291,7 +279,6 @@ where
                                         break;
                                     }
                                     Message::Chunk(chunk) => {
-                                        // println!("Backfill: Chunk from upstream {:?}", chunk);
                                         // Buffer the upstream chunk.
                                         upstream_chunk_buffer.push(chunk.compact());
                                     }
@@ -304,7 +291,6 @@ where
                             Either::Right(msg) => {
                                 match msg? {
                                     None => {
-                                        // println!("Backfill: Snapshot read stream is empty");
                                         // End of the snapshot read stream.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows
@@ -316,7 +302,6 @@ where
                                             cur_barrier_snapshot_processed_rows +=
                                                 chunk_cardinality;
                                             total_snapshot_processed_rows += chunk_cardinality;
-                                            // println!("{:#?}", "yielding chunks");
                                             yield Message::Chunk(mapping_chunk(
                                                 chunk,
                                                 &self.output_indices,
@@ -326,9 +311,7 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, chunk)) => {
-                                        // println!("Backfill: Chunk from snapshot read, {:?}",
-                                        // chunk); Raise the
-                                        // current position.
+                                        // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
                                         update_pos_by_vnode(
@@ -341,7 +324,6 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
-                                        // println!("snapshot_read: {:#?}", chunk);
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
