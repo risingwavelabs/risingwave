@@ -53,6 +53,7 @@ rustflags = [
     "-Wclippy::no_effect_underscore_binding",
     "-Wclippy::await_holding_lock",
     "-Wrustdoc::broken_intra_doc_links",
+    "-Arustdoc::private_intra_doc_links",
     "-Wfuture_incompatible",
     "-Wnonstandard_style",
     "-Wrust_2018_idioms",
