@@ -413,41 +413,39 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             .await?;
 
                                         if let Some(SplitImpl::MySqlCdc(split)) = cdc_split.as_mut()
-                                        {
-                                            split.mysql_split.as_mut().map(|s| {
-                                                let start_offset =
-                                                    last_binlog_offset.as_ref().map(|cdc_offset| {
-                                                        let source_offset =
-                                                            if let CdcOffset::MySql(o) = cdc_offset
-                                                            {
-                                                                DebeziumSourceOffset {
-                                                                    file: Some(o.filename.clone()),
-                                                                    pos: Some(o.position),
-                                                                    ..Default::default()
-                                                                }
-                                                            } else {
-                                                                DebeziumSourceOffset::default()
-                                                            };
+                                            && let Some(s) = split.mysql_split.as_mut() {
+                                            let start_offset =
+                                                last_binlog_offset.as_ref().map(|cdc_offset| {
+                                                    let source_offset =
+                                                        if let CdcOffset::MySql(o) = cdc_offset
+                                                        {
+                                                            DebeziumSourceOffset {
+                                                                file: Some(o.filename.clone()),
+                                                                pos: Some(o.position),
+                                                                ..Default::default()
+                                                            }
+                                                        } else {
+                                                            DebeziumSourceOffset::default()
+                                                        };
 
-                                                        let mut server = "RW_CDC_".to_string();
-                                                        server.push_str(
-                                                            upstream_table_id.to_string().as_str(),
-                                                        );
-                                                        DebeziumOffset {
-                                                            source_partition: hashmap! {
-                                                                "server".to_string() => server
-                                                            },
-                                                            source_offset,
-                                                        }
-                                                    });
-
-                                                // persist the last binlog offset into split state
-                                                s.inner.start_offset = start_offset.map(|o| {
-                                                    let value = serde_json::to_value(o).unwrap();
-                                                    value.to_string()
+                                                    let mut server = "RW_CDC_".to_string();
+                                                    server.push_str(
+                                                        upstream_table_id.to_string().as_str(),
+                                                    );
+                                                    DebeziumOffset {
+                                                        source_partition: hashmap! {
+                                                            "server".to_string() => server
+                                                        },
+                                                        source_offset,
+                                                    }
                                                 });
-                                                s.inner.snapshot_done = true;
+
+                                            // persist the last binlog offset into split state
+                                            s.inner.start_offset = start_offset.map(|o| {
+                                                let value = serde_json::to_value(o).unwrap();
+                                                value.to_string()
                                             });
+                                            s.inner.snapshot_done = true;
                                         }
 
                                         if let Some(split_impl) = cdc_split {
