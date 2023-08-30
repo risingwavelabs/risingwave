@@ -15,7 +15,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::predicate::{
     identity_contains, upstream_fragment_count, BoxedPredicate,
@@ -23,6 +22,7 @@ use risingwave_simulation::ctl_ext::predicate::{
 use risingwave_simulation::nexmark::queries::q4::*;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 #[cfg(target_os = "linux")]
 const RESULT: &str = r#"

@@ -22,9 +22,8 @@ use anyhow::{anyhow, Result};
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
-use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
@@ -351,7 +350,7 @@ impl Cluster {
         self.reschedule_helper(plan, false).await
     }
 
-    /// Same as reschedule, but resolve the no_shuffle upstream
+    /// Same as reschedule, but resolve the no-shuffle upstream
     pub async fn reschedule_resolve_no_shuffle(&mut self, plan: impl Into<String>) -> Result<()> {
         self.reschedule_helper(plan, true).await
     }

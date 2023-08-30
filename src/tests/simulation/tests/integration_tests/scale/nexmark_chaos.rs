@@ -17,11 +17,11 @@ use std::time::Duration;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use itertools::Itertools;
-use tokio::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::Fragment;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 /// Common code for Nexmark chaos tests.
 ///

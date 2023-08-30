@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 const SELECT: &str = "select * from mv1 order by v1;";
 

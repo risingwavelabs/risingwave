@@ -141,8 +141,8 @@ pub struct Args {
     e2e_extended_test: bool,
 }
 
+#[tokio::main]
 #[cfg_or_panic(madsim)]
-#[madsim::main]
 async fn main() {
     use std::sync::Arc;
 

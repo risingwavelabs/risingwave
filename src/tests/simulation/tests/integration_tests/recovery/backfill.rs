@@ -17,10 +17,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use tokio::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 const ROOT_TABLE_CREATE: &str = "create table t1 (v1 int);";
 const ROOT_TABLE_DROP: &str = "drop table t1;";

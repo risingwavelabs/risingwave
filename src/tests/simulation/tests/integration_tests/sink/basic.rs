@@ -22,7 +22,6 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use itertools::Itertools;
-use tokio::time::{sleep, timeout};
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -30,6 +29,7 @@ use risingwave_connector::sink::boxed::{BoxCoordinator, BoxWriter};
 use risingwave_connector::sink::test_sink::registry_build_sink;
 use risingwave_connector::sink::{Sink, SinkWriter, SinkWriterParam};
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
+use tokio::time::{sleep, timeout};
 
 struct TestWriter {
     row_counter: Arc<AtomicUsize>,

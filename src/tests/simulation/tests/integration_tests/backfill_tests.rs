@@ -68,7 +68,7 @@ async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
     let sessions = (0..3).map(|_| cluster.start_session()).collect_vec();
 
     // Create lots of base table update
-    for mut session in sessions.into_iter() {
+    for mut session in sessions {
         let task = tokio::spawn(async move {
             session.run(INSERT_RECURSE_SQL).await?;
             anyhow::Ok(())
@@ -80,7 +80,7 @@ async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
     let sessions = (0..10).map(|_| cluster.start_session()).collect_vec();
 
     // Create lots of base table update
-    for mut session in sessions.into_iter() {
+    for mut session in sessions {
         let task = tokio::spawn(async move {
             for _ in 0..10 {
                 session.run("FLUSH;").await?;

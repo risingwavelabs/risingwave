@@ -135,7 +135,7 @@ async fn test_resize_single() -> Result<()> {
                 .parallel_units
                 .iter()
                 .map(|parallel_unit| parallel_unit.id)
-                .contains(&used_parallel_unit_id)
+                .contains(used_parallel_unit_id)
         })
         .collect_vec();
 
