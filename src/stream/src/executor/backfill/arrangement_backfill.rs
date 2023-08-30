@@ -178,7 +178,6 @@ where
                         backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                         self.chunk_size,
                         &mut builders,
-                        Some(first_checkpointing_epoch),
                     );
                     pin_mut!(snapshot);
                     let empty = snapshot.try_next().await?.unwrap().is_none();
@@ -267,8 +266,6 @@ where
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                         self.chunk_size,
                         &mut builders,
-                        None,
-                        // Some(snapshot_read_epoch),
                     )
                     .map(Either::Right),);
 
@@ -573,9 +570,6 @@ where
         backfill_state: BackfillState,
         chunk_size: usize,
         builders: &'a mut [DataChunkBuilder],
-        // If present, we will use it for snapshot read.
-        // It is required for the first snapshot read.
-        snapshot_read_epoch: Option<u64>,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for (vnode, builder) in upstream_table
@@ -597,11 +591,7 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_with_pk_range_and_output_indices(
-                    &range_bounds,
-                    vnode,
-                    PrefetchOptions::new_with_epoch(snapshot_read_epoch),
-                )
+                .iter_with_pk_range_and_output_indices(&range_bounds, vnode, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?
