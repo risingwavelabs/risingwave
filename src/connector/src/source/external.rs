@@ -114,7 +114,6 @@ impl SchemaTableName {
     }
 }
 
-// TODO(siyuan): replace string offset with BinlogOffset
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
 pub struct MySqlOffset {
     pub filename: String,
@@ -144,7 +143,7 @@ pub enum CdcOffset {
 // {
 //     "sourcePartition":
 //     {
-//         "server": "RW_CDC_public.te"
+//         "server": "RW_CDC_1004"
 //     },
 //     "sourceOffset":
 //     {
@@ -163,7 +162,7 @@ pub struct DebeziumOffset {
     pub source_offset: DebeziumSourceOffset,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DebeziumSourceOffset {
     // postgres snapshot progress
     pub last_snapshot_record: Option<bool>,

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::default::Default;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 
@@ -21,12 +22,13 @@ use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use maplit::hashmap;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarRefImpl};
-use risingwave_connector::source::external::CdcOffset;
-use risingwave_connector::source::SplitMetaData;
+use risingwave_connector::source::external::{CdcOffset, DebeziumOffset, DebeziumSourceOffset};
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
 use serde_json::Value;
 
@@ -127,6 +129,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut invalid_backfill = false;
         let mut split_id: Option<Arc<str>> = None;
+        let mut cdc_split: Option<SplitImpl> = None;
         if let Some(mutation) = first_barrier.mutation.as_ref() {
             match mutation.as_ref() {
                 Mutation::Add { splits, .. }
@@ -145,7 +148,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         err
                                     ))
                                 })?;
-                                split_id = Some(split.id())
+                                split_id = Some(split.id());
+                                cdc_split = Some(split.clone());
                             }
                             is_empty
                         }
@@ -398,14 +402,59 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         ));
                                     }
 
-                                    // Insert a finish flag to denote the backfill has done,
-                                    // which will be persisted upon next barrier
+                                    // When snapshot read stream ends, we should persist two states:
+                                    // 1) a backfill finish flag to denote the backfill has done
+                                    // 2) a consumed binlog offset to denote the last binlog offset
                                     if let Some(split_id) = split_id.as_ref() {
                                         let mut key = split_id.to_string();
                                         key.push_str(BACKFILL_STATE_KEY_SUFFIX);
                                         self.source_state_handler
                                             .set(key.into(), JsonbVal::from(Value::Bool(true)))
                                             .await?;
+
+                                        if let Some(SplitImpl::MySqlCdc(split)) = cdc_split.as_mut()
+                                        {
+                                            split.mysql_split.as_mut().map(|s| {
+                                                let start_offset =
+                                                    last_binlog_offset.as_ref().map(|cdc_offset| {
+                                                        let source_offset =
+                                                            if let CdcOffset::MySql(o) = cdc_offset
+                                                            {
+                                                                DebeziumSourceOffset {
+                                                                    file: Some(o.filename.clone()),
+                                                                    pos: Some(o.position),
+                                                                    ..Default::default()
+                                                                }
+                                                            } else {
+                                                                DebeziumSourceOffset::default()
+                                                            };
+
+                                                        let mut server = "RW_CDC_".to_string();
+                                                        server.push_str(
+                                                            upstream_table_id.to_string().as_str(),
+                                                        );
+                                                        DebeziumOffset {
+                                                            source_partition: hashmap! {
+                                                                "server".to_string() => server
+                                                            },
+                                                            source_offset,
+                                                        }
+                                                    });
+
+                                                // persist the last binlog offset into split state
+                                                s.inner.start_offset = start_offset.map(|o| {
+                                                    let value = serde_json::to_value(o).unwrap();
+                                                    value.to_string()
+                                                });
+                                                s.inner.snapshot_done = true;
+                                            });
+                                        }
+
+                                        if let Some(split_impl) = cdc_split {
+                                            self.source_state_handler
+                                                .set(split_impl.id(), split_impl.encode_to_json())
+                                                .await?
+                                        }
                                     }
 
                                     break 'backfill_loop;
