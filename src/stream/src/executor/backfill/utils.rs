@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
@@ -33,7 +32,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
+use risingwave_storage::table::collect_data_chunk_with_builder;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;
@@ -133,7 +132,7 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let v = match backfill_state.get_progress(&vnode)? {
             // We want to just forward the row, if the vnode has finished backfill.
-            BackfillProgressPerVnode::Completed(current_pos) => true,
+            BackfillProgressPerVnode::Completed(_current_pos) => true,
             // If not started, no need to forward.
             BackfillProgressPerVnode::NotStarted => false,
             // If in progress, we need to check row <= current_pos.
@@ -409,17 +408,17 @@ pub(crate) async fn iter_chunks<'a, S, E, R>(
 /// so we know whether we need to persist the state or not.
 ///
 /// The state is encoded as follows:
-/// NotStarted:
+/// `NotStarted`:
 /// - Not persist to store at all.
 ///
-/// InProgress:
+/// `InProgress`:
 /// - Format: | vnode | pk | false |
 /// - If change in current pos: Persist.
 /// - No change in current pos: Do not persist.
 ///
 /// Completed
 /// - Format: | vnode | pk | true |
-/// - If previous state is InProgress / NotStarted: Persist.
+/// - If previous state is `InProgress` / `NotStarted`: Persist.
 /// - If previous state is Completed: Do not persist.
 ///
 /// TODO(kwannoel): Why this did not persist state for all vnodes?

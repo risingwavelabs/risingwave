@@ -30,7 +30,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
-use risingwave_storage::error::StorageResult;
 use risingwave_storage::StateStore;
 use tokio::time::Instant;
 

@@ -15,8 +15,6 @@
 use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
-use std::thread::sleep;
-use std::time::Duration;
 
 use either::Either;
 use futures::stream::select_with_strategy;
@@ -32,7 +30,6 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -128,8 +125,6 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let first_epoch = first_barrier.epoch;
-        let first_checkpointing_epoch = first_barrier.epoch.prev;
-        let cur_checkpointing_epoch = first_barrier.epoch.curr;
 
         // println!(
         //     "first barrier: {:?}, actor: {:?}",
@@ -181,12 +176,12 @@ where
                         &mut builders,
                     );
                     pin_mut!(snapshot);
-                    let empty = snapshot.try_next().await?.is_none();
+                    let next = snapshot.try_next().await?;
                     // #[for_await]
                     // for c in snapshot {
                     //     println!("Backfill: snapshot_empty_check: {:?}", c);
                     // }
-                    empty
+                    next.is_none()
                 };
                 let builder_is_empty = builders.iter().all(|b| b.is_empty());
                 snapshot_is_empty && builder_is_empty
