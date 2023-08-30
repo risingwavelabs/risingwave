@@ -397,6 +397,20 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
     }
 }
 
+impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn vnode_part(&self) -> VirtualNode {
+        VirtualNode::from_be_bytes(
+            self.0.as_ref()[..VirtualNode::SIZE]
+                .try_into()
+                .expect("slice with incorrect length"),
+        )
+    }
+
+    pub fn key_part(&self) -> &[u8] {
+        &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
@@ -474,12 +488,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 
     pub fn get_vnode_id(&self) -> usize {
-        VirtualNode::from_be_bytes(
-            self.table_key.as_ref()[..VirtualNode::SIZE]
-                .try_into()
-                .expect("slice with incorrect length"),
-        )
-        .to_index()
+        self.table_key.vnode_part().to_index()
     }
 }
 
