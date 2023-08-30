@@ -504,7 +504,6 @@ where
 
     /// FIXME(kwannoel): Should this constructed in plan phase?
     pub fn get_output_data_types(&self) -> Vec<DataType> {
-        println!("output_indices: {:?}", self.output_indices);
         self.output_indices
             .iter()
             .map(|i| self.data_types[*i].clone())

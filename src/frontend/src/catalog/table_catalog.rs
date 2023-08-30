@@ -240,8 +240,6 @@ impl TableCatalog {
     }
 
     pub fn with_output_column_ids(mut self, output_column_ids: &[i32]) -> Self {
-        println!("output_column_ids: {:#?}", output_column_ids);
-        println!("own table ids: {:#?}", self.columns());
         let output_indices = output_column_ids
             .iter()
             .map(|&x| {
@@ -384,7 +382,6 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
-        println!("output indices prost: {:#?}", self.output_indices);
         PbTable {
             id: self.id.table_id,
             schema_id,

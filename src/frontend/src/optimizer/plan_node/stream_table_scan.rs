@@ -250,10 +250,6 @@ impl StreamTableScan {
             .to_internal_table_prost();
 
         let table_desc = Some(self.logical.table_desc.to_protobuf());
-        println!("table_desc: {:#?}", table_desc);
-
-        println!("output_col_ids: {:#?}", self.logical.output_column_ids());
-        println!("upstream_col_ids: {:#?}", upstream_column_ids);
 
         // For arrangement backfill we need to maintain 2 sets of output_indices.
         // 1. output_indices for the updates.

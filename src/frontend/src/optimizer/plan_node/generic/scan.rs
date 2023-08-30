@@ -159,16 +159,13 @@ impl Scan {
 
     /// Get the ids of the output columns and primary key columns.
     pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
-        println!("primary key: {:#?}", self.primary_key());
         let mut ids = self.output_column_ids();
         for column_order in self.primary_key() {
             let id = self.table_desc.columns[column_order.column_index].column_id;
             if !ids.contains(&id) {
-                println!("id: {:#?}", id);
                 ids.push(id);
             }
         }
-        println!("ids: {:#?}", ids);
         ids
     }
 
