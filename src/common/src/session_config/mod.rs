@@ -331,7 +331,7 @@ type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
-type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
+type CdcBackfill = ConfigBool<CDC_BACKFILL, true>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {

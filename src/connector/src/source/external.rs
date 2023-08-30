@@ -230,6 +230,7 @@ pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,
     config: ExternalTableConfig,
     rw_schema: Schema,
+    field_names: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -310,10 +311,19 @@ impl MySqlExternalTableReader {
             config.username, config.password, config.host, config.port, config.database
         );
         let pool = mysql_async::Pool::from_url(database_url)?;
+
+        let field_names = rw_schema
+            .fields
+            .iter()
+            .filter(|f| f.name != OFFSET_COLUMN_NAME)
+            .map(|f| f.name.as_str())
+            .join(",");
+
         Ok(Self {
             pool,
             config,
             rw_schema,
+            field_names,
         })
     }
 
@@ -332,14 +342,16 @@ impl MySqlExternalTableReader {
         let order_key = primary_keys.iter().join(",");
         let sql = if start_pk.is_none() {
             format!(
-                "SELECT * FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {}",
+                self.field_names,
                 self.get_normalized_table_name(&table_name),
                 order_key
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT * FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
                 order_key
