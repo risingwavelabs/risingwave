@@ -30,7 +30,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
-use risingwave_object_store::object::parse_remote_object_store_with_config;
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -131,13 +131,12 @@ pub async fn compactor_serve(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = parse_remote_object_store_with_config(
+    let mut object_store = parse_remote_object_store(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        Some(Arc::new(config.storage.clone())),
     )
     .await;
     object_store.set_opts(

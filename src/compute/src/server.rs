@@ -53,8 +53,8 @@ use risingwave_storage::hummock::compactor::{
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
-    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
-    GLOBAL_HUMMOCK_STATE_STORE_METRICS, GLOBAL_OBJECT_STORE_METRICS, GLOBAL_STORAGE_METRICS,
+    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
+    GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
@@ -175,9 +175,11 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(GLOBAL_HUMMOCK_STATE_STORE_METRICS.clone());
+    let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
+        config.storage.storage_metric_level,
+    ));
     let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let storage_metrics = Arc::new(GLOBAL_STORAGE_METRICS.clone());
+    let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
