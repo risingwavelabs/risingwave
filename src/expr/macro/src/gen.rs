@@ -294,6 +294,10 @@ impl FunctionAttr {
             args.push(data_type_name(ty));
         }
         let ret = data_type_name(&self.ret);
+        let state_type = match &self.state_type {
+            Some(ty) => data_type_name(ty),
+            None => ret.clone(),
+        };
         let append_only = match build_fn {
             false => !user_fn.retract,
             true => self.append_only,
@@ -318,6 +322,7 @@ impl FunctionAttr {
                 unsafe { crate::sig::agg::_register(#descriptor_type {
                     func: crate::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
+                    state_type: #state_type,
                     ret_type: #ret,
                     build: #build_fn,
                     append_only: #append_only,

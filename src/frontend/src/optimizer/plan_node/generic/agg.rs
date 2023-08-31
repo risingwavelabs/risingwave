@@ -23,6 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding;
 use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
 use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
@@ -467,20 +468,44 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
+    /// table schema:
+    /// group key | state for AGG1 | state for AGG2 | ...
     pub fn infer_intermediate_state_table(
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let out_fields = me.schema().fields();
+        let in_append_only = self.input.append_only();
+
+        let fields = self
+            .agg_calls
+            .iter()
+            .map(|agg_call| Field {
+                data_type: AGG_FUNC_SIG_MAP
+                    .get_state_type(
+                        agg_call.agg_kind,
+                        &agg_call
+                            .inputs
+                            .iter()
+                            .map(|input| (&input.data_type).into())
+                            .collect_vec(),
+                        in_append_only,
+                    )
+                    .expect("agg not found")
+                    .into(),
+                name: format!("{:?}_state", agg_call.agg_kind),
+                sub_fields: vec![],
+                type_name: String::default(),
+            })
+            .collect_vec();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let n_group_key_cols = self.group_key.len();
 
         let (mut table_builder, _, _) = self.create_table_builder(me.ctx(), window_col_idx);
         let read_prefix_len_hint = table_builder.get_current_pk_len();
 
-        for field in out_fields.iter().skip(n_group_key_cols) {
+        for field in fields.iter().skip(n_group_key_cols) {
             table_builder.add_column(field);
         }
 
@@ -492,7 +517,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
         // the intermediate state table is composed of group_key and all agg_call's states, so the
         // value_indices of this table should skip group_key.len().
-        table_builder.set_value_indices((n_group_key_cols..out_fields.len()).collect());
+        table_builder.set_value_indices((n_group_key_cols..fields.len()).collect());
         table_builder.build(tb_dist, read_prefix_len_hint)
     }
 

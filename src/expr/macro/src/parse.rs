@@ -69,6 +69,8 @@ impl Parse for FunctionAttr {
                 parsed.state = Some(get_value()?);
             } else if meta.path().is_ident("init_state") {
                 parsed.init_state = Some(get_value()?);
+            } else if meta.path().is_ident("state_type") {
+                parsed.state_type = Some(get_value()?);
             } else if meta.path().is_ident("prebuild") {
                 parsed.prebuild = Some(get_value()?);
             } else if meta.path().is_ident("type_infer") {

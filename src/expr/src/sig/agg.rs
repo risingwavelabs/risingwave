@@ -36,6 +36,7 @@ pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {
 pub struct AggFuncSig {
     pub func: AggKind,
     pub inputs_type: &'static [DataTypeName],
+    pub state_type: DataTypeName,
     pub ret_type: DataTypeName,
     pub build: fn(agg: &AggCall) -> Result<BoxedAggregateFunction>,
     pub append_only: bool,
@@ -83,6 +84,19 @@ impl AggFuncSigMap {
     pub fn get_return_type(&self, ty: AggKind, args: &[DataTypeName]) -> Option<DataTypeName> {
         let v = self.0.get(&(ty, args.len()))?;
         v.iter().find(|d| d.inputs_type == args).map(|d| d.ret_type)
+    }
+
+    /// Returns the state type for the given function and arguments.
+    pub fn get_state_type(
+        &self,
+        ty: AggKind,
+        args: &[DataTypeName],
+        append_only: bool,
+    ) -> Option<DataTypeName> {
+        let v = self.0.get(&(ty, args.len()))?;
+        v.iter()
+            .find(|d| d.inputs_type == args && d.append_only == append_only)
+            .map(|d| d.state_type)
     }
 }
 

@@ -404,16 +404,32 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[derive(Debug, Clone, Default)]
 struct FunctionAttr {
+    /// Function name
     name: String,
+    /// Input argument types
     args: Vec<String>,
+    /// Return type
     ret: String,
+    /// Whether it is a table function
     is_table_function: bool,
+    /// Whether it is an append-only aggregate function
     append_only: bool,
+    /// Optional function for batch evaluation.
     batch_fn: Option<String>,
+    /// Rust state type for aggregate function.
     state: Option<String>,
+    /// SQL state type for aggregate function.
+    /// If not specified, it will be the same as return type.
+    state_type: Option<String>,
+    /// Initial state value for aggregate function.
+    /// If not specified, it will be NULL.
     init_state: Option<String>,
+    /// Prebuild function for arguments.
+    /// This could be any Rust expression.
     prebuild: Option<String>,
+    /// Type inference function.
     type_infer: Option<String>,
+    /// Whether the function is deprecated.
     deprecated: bool,
 }
 

@@ -93,7 +93,11 @@ fn bool_and_append_only(state: bool, input: bool) -> bool {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("bool_and(boolean) -> boolean", state = "BoolAndState")]
+#[aggregate(
+    "bool_and(boolean) -> boolean",
+    state = "BoolAndState",
+    state_type = "int64"
+)]
 fn bool_and(mut state: BoolAndState, input: bool, retract: bool) -> BoolAndState {
     if input == false {
         if retract {
