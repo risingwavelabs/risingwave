@@ -71,7 +71,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 ///
 /// Basic idea:
 ///
-/// ```ignore
+/// ```text
 /// ──────────────┬────────────────────────────────────────────────────── curr evict row
 ///               │ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING
 ///        (1)    │ ─┬─

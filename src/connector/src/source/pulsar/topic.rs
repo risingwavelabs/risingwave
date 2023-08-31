@@ -93,10 +93,10 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
 
 /// `parse_topic` parses a topic name into its components.
 /// The short topic name can be:
-/// - <topic>
-/// - <tenant>/<namespace>/<topic>
+/// - `<topic>`
+/// - `<tenant>/<namespace>/<topic>`
 /// The fully qualified topic name can be:
-/// <domain>://<tenant>/<namespace>/<topic>
+/// `<domain>://<tenant>/<namespace>/<topic>`
 pub fn parse_topic(topic: &str) -> Result<Topic> {
     let mut complete_topic = topic.to_string();
 

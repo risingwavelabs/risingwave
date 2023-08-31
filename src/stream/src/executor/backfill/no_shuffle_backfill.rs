@@ -44,7 +44,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
+/// An implementation of the [RFC: Use Backfill To Let Mv On Mv Stream Again](https://github.com/risingwavelabs/rfcs/pull/13).
 /// `BackfillExecutor` is used to create a materialized view on another materialized view.
 ///
 /// It can only buffer chunks between two barriers instead of unbundled memory usage of

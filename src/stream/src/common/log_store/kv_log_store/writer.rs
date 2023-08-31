@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::Bound::Included;
+use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -131,7 +131,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                     let range_end = self
                         .serde
                         .serialize_truncation_offset_watermark(vnode, truncation_offset);
-                    delete_range.push((Included(range_begin), Included(range_end)));
+                    delete_range.push((Included(range_begin), Excluded(range_end)));
                 }
             }
             self.state_store.flush(delete_range).await?;

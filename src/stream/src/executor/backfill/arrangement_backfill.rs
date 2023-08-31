@@ -45,7 +45,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// Similar to [`BackfillExecutor`].
+/// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
 /// - [`ArrangementBackfillExecutor`] can reside on a different CN, so it can be scaled
 ///   independently.
