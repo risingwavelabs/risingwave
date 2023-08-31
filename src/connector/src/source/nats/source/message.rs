@@ -12,8 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::source::base::SourceMessage;
+use std::sync::Arc;
+
+use async_nats;
+
+use crate::source::{base::SourceMessage, SourceMeta};
 
 impl SourceMessage {
-    // pub fn from_nats_message(){}
+    pub fn fromt_nats_jetstream_message(
+        message: &async_nats::jetstream::message::Message,
+    ) -> Self {
+        SourceMessage {
+            key: None,
+            payload: Some(message.message.payload.to_vec()),
+            offset: "".to_string(),
+            split_id: Arc::from(""),
+            meta: SourceMeta::Empty,
+        }
+    }
 }

@@ -21,8 +21,8 @@ use crate::source::{SplitId, SplitMetaData};
 /// The states of a NATS split, which will be persisted to checkpoint.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct NatsSplit {
-    // pub(crate) topic: String,
-    pub(crate) partition: i32,
+    pub(crate) subject: String,
+    // pub(crate) partition: i32,
     // pub(crate) start_offset: Option<i64>,
     // pub(crate) stop_offset: Option<i64>,
 }
@@ -30,7 +30,7 @@ pub struct NatsSplit {
 impl SplitMetaData for NatsSplit {
     fn id(&self) -> SplitId {
         // TODO: should avoid constructing a string every time
-        format!("{}", self.partition).into()
+        format!("{}", 0).into()
     }
 
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
@@ -42,4 +42,13 @@ impl SplitMetaData for NatsSplit {
     }
 }
 
-impl NatsSplit {}
+impl NatsSplit {
+    pub fn new(subject: String) -> Self {
+        Self {
+            subject,
+            // partition,
+            // start_offset,
+            // stop_offset,
+        }
+    }
+}

@@ -12,12 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub struct NatsSplitReader{}
-use crate::source::SplitReader;
+use anyhow::Result;
+use async_trait::async_trait;
+use futures_async_stream::try_stream;
 
-impl SplitReader for NatsSplitReader {
-    // async fn new(){}
-    // async fn into_stream(){}
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::nats::NatsProperties;
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitImpl, SplitReader,
+};
+
+impl_common_split_reader_logic!(NatsSplitReader, NatsProperties);
+
+pub struct NatsSplitReader {
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
 }
 
-impl NatsSpliteReader{}
+#[async_trait]
+impl SplitReader for NatsSplitReader {
+    type Properties = NatsProperties;
+
+    async fn new(
+        properties: NatsProperties,
+        state: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
+        columns: Option<Vec<Column>>,
+    ) -> Result<Self> {
+        Ok(Self {
+            parser_config,
+            source_ctx,
+        })
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
+    }
+}
+
+impl NatsSplitReader {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn into_data_stream(self) {}
+}
