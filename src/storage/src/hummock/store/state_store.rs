@@ -344,6 +344,15 @@ impl LocalStateStore for LocalHummockStorage {
             prev_epoch
         );
     }
+
+    async fn try_flush(
+        &mut self,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        next_epoch: u64,
+    ) -> StorageResult<()> {
+        self.flush(delete_ranges).await?;
+        Ok(())
+    }
 }
 
 impl LocalHummockStorage {

@@ -447,6 +447,19 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
+        async fn try_flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+            next_epoch: u64,
+        ) -> StorageResult<()> {
+            if let Some(expected) = &mut self.expected {
+                expected
+                    .try_flush(delete_ranges.clone(), next_epoch)
+                    .await?;
+            }
+            self.actual.try_flush(delete_ranges, next_epoch).await
+        }
+
         fn init(&mut self, epoch: u64) {
             self.actual.init(epoch);
             if let Some(expected) = &mut self.expected {
@@ -817,6 +830,12 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize>;
 
+        async fn try_flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+            next_epoch: u64,
+        ) -> StorageResult<()>;
+
         fn epoch(&self) -> u64;
 
         fn is_dirty(&self) -> bool;
@@ -866,6 +885,14 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize> {
             self.flush(delete_ranges).await
+        }
+
+        async fn try_flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+            next_epoch: u64,
+        ) -> StorageResult<()> {
+            self.try_flush(delete_ranges, next_epoch).await
         }
 
         fn epoch(&self) -> u64 {
@@ -932,6 +959,14 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
             self.deref_mut().flush(delete_ranges)
+        }
+
+        fn try_flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+            next_epoch: u64,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().try_flush(delete_ranges, next_epoch)
         }
 
         fn epoch(&self) -> u64 {

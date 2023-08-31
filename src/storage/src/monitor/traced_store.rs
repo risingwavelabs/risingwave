@@ -204,6 +204,14 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         let _span = TraceSpan::new_seal_current_epoch_span(next_epoch, self.storage_type);
         self.inner.seal_current_epoch(next_epoch)
     }
+
+    async fn try_flush(
+        &mut self,
+        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        _next_epoch: u64,
+    ) -> StorageResult<()> {
+        unimplemented!()
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {

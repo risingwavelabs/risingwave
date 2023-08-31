@@ -127,6 +127,15 @@ impl LocalStateStore for PanicStateStore {
     fn seal_current_epoch(&mut self, _next_epoch: u64) {
         panic!("should not operate on the panic state store!")
     }
+
+    #[allow(clippy::unused_async)]
+    async fn try_flush(
+        &mut self,
+        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        _next_epoch: u64,
+    ) -> StorageResult<()> {
+        panic!("should not operate on the panic state store!");
+    }
 }
 
 impl StateStore for PanicStateStore {
