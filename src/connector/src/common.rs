@@ -309,6 +309,8 @@ pub struct ClickHouseCommon {
     pub database: String,
     #[serde(rename = "clickhouse.table")]
     pub table: String,
+    #[serde(rename = "clickhouse.sign")]
+    pub sign: Option<String>,
 }
 
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
