@@ -417,7 +417,7 @@ pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)
 }
 
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
-/// `table_key` and `table_id` (in [`ReadOptions`] or [`WriteOptions`]) as the input. The storage
+/// `table_key` and `table_id` (in `ReadOptions` or `WriteOptions`) as the input. The storage
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.

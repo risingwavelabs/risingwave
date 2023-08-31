@@ -73,3 +73,10 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: only one set in grouping sets
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, sum(sales) FROM items_sold GROUP BY GROUPING SETS(brand);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
