@@ -20,7 +20,9 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
+use risingwave_connector::source::{
+    SourceColumnDesc, SourceColumnType, SourceEncode, SourceFormat, SourceStruct,
+};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbEncodeType, PbFormatType, RowFormatType};
@@ -91,7 +93,7 @@ impl SourceDescBuilder {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
         if let Some(row_id_index) = self.row_id_index {
-            columns[row_id_index].is_row_id = true;
+            columns[row_id_index].column_type = SourceColumnType::RowId;
         }
         for pk_index in &self.pk_indices {
             columns[*pk_index].is_pk = true;

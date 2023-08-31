@@ -20,6 +20,7 @@
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -191,10 +192,7 @@ use std::pin::Pin;
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(
-    opts: ComputeNodeOpts,
-    registry: prometheus::Registry,
-) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -216,7 +214,7 @@ pub fn start(
         tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
+            compute_node_serve(listen_addr, advertise_addr, opts).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

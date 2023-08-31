@@ -47,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Add new dependencies](#add-new-dependencies)
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
+- [Understanding RisingWave Macros](#understanding-risingwave-macros)
 
 ## Read the design docs
 
@@ -61,6 +62,8 @@ You can also read the [crate level documentation](https://risingwavelabs.github.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
 - The `dashboard` folder contains RisingWave dashboard v2.
+
+The [src/README.md](../src/README.md) file contains more details about Design Patterns in RisingWave.
 
 ## Set up the development environment
 
@@ -340,7 +343,7 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 
 > **Note**
 >
-> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won’t affect other tests due to table cleanups.
+> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 
 Alternatively, you can also run some specific tests:
 

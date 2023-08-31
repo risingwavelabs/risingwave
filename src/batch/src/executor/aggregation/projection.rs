@@ -16,58 +16,48 @@ use std::ops::Range;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::agg::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::Result;
 
-#[derive(Clone)]
 pub struct Projection {
-    inner: BoxedAggState,
+    inner: BoxedAggregateFunction,
     indices: Vec<usize>,
 }
 
 impl Projection {
-    pub fn new(indices: Vec<usize>, inner: BoxedAggState) -> Self {
+    pub fn new(indices: Vec<usize>, inner: BoxedAggregateFunction) -> Self {
         Self { inner, indices }
     }
 }
 
 #[async_trait::async_trait]
-impl Aggregator for Projection {
+impl AggregateFunction for Projection {
     fn return_type(&self) -> DataType {
         self.inner.return_type()
     }
 
-    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
-        self.inner.update(&input.project(&self.indices)).await
+    fn create_state(&self) -> AggregateState {
+        self.inner.create_state()
     }
 
-    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
         self.inner
-            .update_range(&input.project(&self.indices), range)
+            .update(state, &input.project(&self.indices))
             .await
     }
 
-    fn get_output(&self) -> Result<Datum> {
-        self.inner.get_output()
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        self.inner
+            .update_range(state, &input.project(&self.indices), range)
+            .await
     }
 
-    fn output(&mut self) -> Result<Datum> {
-        self.inner.output()
-    }
-
-    fn reset(&mut self) {
-        self.inner.reset();
-    }
-
-    fn get_state(&self) -> Datum {
-        self.inner.get_state()
-    }
-
-    fn set_state(&mut self, state: Datum) {
-        self.inner.set_state(state);
-    }
-
-    fn estimated_size(&self) -> usize {
-        std::mem::size_of::<Self>() + self.inner.estimated_size()
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        self.inner.get_result(state).await
     }
 }

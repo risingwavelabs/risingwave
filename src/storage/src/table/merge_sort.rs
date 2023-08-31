@@ -18,47 +18,46 @@ use std::error::Error;
 
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::row::OwnedRow;
 
-pub trait MergeSortKey = Eq + PartialEq + Ord + PartialOrd;
+use super::KeyedRow;
 
-struct Node<K: MergeSortKey, S> {
+struct Node<K: AsRef<[u8]>, S> {
     stream: S,
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
-    peeked: (K, OwnedRow),
+    peeked: KeyedRow<K>,
 }
 
-impl<K: MergeSortKey, S> PartialEq for Node<K, S> {
+impl<K: AsRef<[u8]>, S> PartialEq for Node<K, S> {
     fn eq(&self, other: &Self) -> bool {
-        match self.peeked.0 == other.peeked.0 {
+        match self.peeked.key() == other.peeked.key() {
             true => unreachable!("primary key from different iters should be unique"),
             false => false,
         }
     }
 }
-impl<K: MergeSortKey, S> Eq for Node<K, S> {}
+impl<K: AsRef<[u8]>, S> Eq for Node<K, S> {}
 
-impl<K: MergeSortKey, S> PartialOrd for Node<K, S> {
+impl<K: AsRef<[u8]>, S> PartialOrd for Node<K, S> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<K: MergeSortKey, S> Ord for Node<K, S> {
+impl<K: AsRef<[u8]>, S> Ord for Node<K, S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
-        self.peeked.0.cmp(&other.peeked.0).reverse()
+        self.peeked.key().cmp(other.peeked.key()).reverse()
     }
 }
 
-#[try_stream(ok=(K, OwnedRow), error=E)]
+#[try_stream(ok=KeyedRow<K>, error=E)]
 pub async fn merge_sort<'a, K, E, R>(streams: Vec<R>)
 where
-    K: MergeSortKey + 'a,
+    K: AsRef<[u8]> + 'a,
     E: Error + 'a,
-    R: Stream<Item = Result<(K, OwnedRow), E>> + 'a + Unpin,
+    R: Stream<Item = Result<KeyedRow<K>, E>> + 'a + Unpin,
 {
     let mut heap = BinaryHeap::new();
     for mut stream in streams {
@@ -80,14 +79,19 @@ where
 #[cfg(test)]
 mod tests {
     use futures_async_stream::for_await;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_hummock_sdk::key::TableKey;
 
     use super::*;
     use crate::error::StorageResult;
 
-    fn gen_pk_and_row(i: u8) -> StorageResult<(Vec<u8>, OwnedRow)> {
-        Ok((
-            vec![i],
+    fn gen_pk_and_row(i: u8) -> StorageResult<KeyedRow<Vec<u8>>> {
+        let mut key = VirtualNode::ZERO.to_be_bytes().to_vec();
+        key.extend(vec![i]);
+        Ok(KeyedRow::new(
+            TableKey(key),
             OwnedRow::new(vec![Some(ScalarImpl::Int64(i as _))]),
         ))
     }
@@ -119,7 +123,10 @@ mod tests {
 
         #[for_await]
         for (i, result) in merge_sorted.enumerate() {
-            assert_eq!(result.unwrap(), gen_pk_and_row(i as u8).unwrap());
+            let expected = gen_pk_and_row(i as u8).unwrap();
+            let actual = result.unwrap();
+            assert_eq!(actual.key(), expected.key());
+            assert_eq!(actual.into_owned_row(), expected.into_owned_row());
         }
     }
 }

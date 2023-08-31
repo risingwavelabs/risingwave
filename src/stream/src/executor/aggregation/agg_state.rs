@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::agg::{build, AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
@@ -45,7 +45,7 @@ pub enum AggStateStorage<S: StateStore> {
 pub enum AggState {
     /// State as single scalar value.
     /// e.g. `count`, `sum`, append-only `min`/`max`.
-    Value(BoxedAggState),
+    Value(AggregateState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
     MaterializedInput(Box<MaterializedInputState>),
@@ -65,6 +65,7 @@ impl AggState {
     #[allow(clippy::too_many_arguments)]
     pub fn create(
         agg_call: &AggCall,
+        agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
@@ -73,10 +74,10 @@ impl AggState {
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
             AggStateStorage::Value => {
-                let mut state = build(agg_call)?;
-                if let Some(prev) = prev_output {
-                    state.set_state(prev.clone());
-                }
+                let state = match prev_output {
+                    Some(prev) => AggregateState::Datum(prev.clone()),
+                    None => agg_func.create_state(),
+                };
                 Self::Value(state)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
@@ -96,12 +97,13 @@ impl AggState {
         &mut self,
         chunk: &StreamChunk,
         call: &AggCall,
+        func: &BoxedAggregateFunction,
         visibility: Vis,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
                 let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
-                state.update(&chunk).await?;
+                func.update(state, &chunk).await?;
                 Ok(())
             }
             Self::MaterializedInput(state) => {
@@ -116,28 +118,29 @@ impl AggState {
     pub async fn get_output(
         &mut self,
         storage: &AggStateStorage<impl StateStore>,
+        func: &BoxedAggregateFunction,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Value));
-                Ok(state.get_output()?)
+                Ok(func.get_result(state).await?)
             }
             Self::MaterializedInput(state) => {
                 let state_table = must_match!(
                     storage,
                     AggStateStorage::MaterializedInput { table, .. } => table
                 );
-                state.get_output(state_table, group_key).await
+                state.get_output(state_table, group_key, func).await
             }
         }
     }
 
     /// Reset the value state to initial state.
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, func: &BoxedAggregateFunction) {
         if let Self::Value(state) = self {
             // now only value states need to be reset
-            state.reset();
+            *state = func.create_state();
         }
     }
 }
