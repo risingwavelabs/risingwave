@@ -333,6 +333,8 @@ pub struct KafkaSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    /// The buffer that stores <event_key_object, event_object>
+    future_record_buffer: Vec<(Option<Value>, Option<Value>)>,
 }
 
 impl KafkaSinkWriter {
@@ -376,6 +378,7 @@ impl KafkaSinkWriter {
             schema,
             pk_indices,
             is_append_only,
+            future_record_buffer: Vec::new(),
         })
     }
 
@@ -444,7 +447,7 @@ impl KafkaSinkWriter {
         Err(err)
     }
 
-    async fn write_json_objects(
+    async fn write_json_objects_inner(
         &self,
         event_key_object: Option<Value>,
         event_object: Option<Value>,
@@ -463,10 +466,37 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+    async fn write_json_objects(
+        &mut self,
+        event_key_object: Option<Value>,
+        event_object: Option<Value>,
+    ) -> Result<()> {
+        self.future_record_buffer
+            .push((event_key_object, event_object));
+        Ok(())
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        // Commit all together
+        for (key, value) in &self.future_record_buffer {
+            self.write_json_objects_inner(key.clone(), value.clone())
+                .await?;
+        }
+
+        // Clear the buffer
+        self.future_record_buffer.clear();
+
+        Ok(())
+    }
+
+    async fn debezium_update(&mut self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+
+        // Initialize the dbz_stream
         let dbz_stream = gen_debezium_message_stream(
-            &self.schema,
-            &self.pk_indices,
+            &schema,
+            &pk_indices,
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
@@ -481,13 +511,13 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            UpsertAdapterOpts::default(),
-        );
+    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+
+        // Initialize the upsert_stream
+        let upsert_stream =
+            gen_upsert_message_stream(&schema, &pk_indices, chunk, UpsertAdapterOpts::default());
 
         #[for_await]
         for msg in upsert_stream {
@@ -498,10 +528,14 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+
+        // Initialize the append_only_stream
         let append_only_stream = gen_append_only_message_stream(
-            &self.schema,
-            &self.pk_indices,
+            &schema,
+            &pk_indices,
             chunk,
             AppendOnlyAdapterOpts::default(),
         );
@@ -551,6 +585,8 @@ impl SinkWriterV1 for KafkaSinkWriter {
     }
 
     async fn commit(&mut self) -> Result<()> {
+        // Group delivery (await the `FutureRecord`) here
+        self.commit().await?;
         Ok(())
     }
 
@@ -691,7 +727,7 @@ mod test {
     }
 
     /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
-    /// to run the test
+    /// to run the test, also remember to modify `risedev.yml`
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
