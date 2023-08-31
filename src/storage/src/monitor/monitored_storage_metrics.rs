@@ -19,9 +19,8 @@ use prometheus::{
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
 use risingwave_common::config::MetricLevel;
+use risingwave_common::metrics::{RelabeledCounterVec, RelabeledHistogramVec};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-
-use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug, Clone)]

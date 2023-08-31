@@ -21,10 +21,9 @@ use prometheus::{
     Opts, Registry,
 };
 use risingwave_common::config::MetricLevel;
+use risingwave_common::metrics::{RelabeledCounterVec, RelabeledHistogramVec};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tracing::warn;
-
-use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
 /// `RocksDBStateStore` and `TikvStateStore`.

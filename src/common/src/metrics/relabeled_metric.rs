@@ -14,7 +14,8 @@
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{Histogram, HistogramVec};
-use risingwave_common::config::MetricLevel;
+
+use crate::config::MetricLevel;
 
 /// For all `Relabeled*Vec` below,
 /// - when `metric_level` <= `relabel_threshold`, they behaves exactly the same as their inner
@@ -26,7 +27,6 @@ use risingwave_common::config::MetricLevel;
 /// We could have use one single struct to represent all `MetricVec<T: MetricVecBuilder>`, rather
 /// than specializing them one by one. However, that's undoable because prometheus crate doesn't
 /// export `MetricVecBuilder` implementation like `HistogramVecBuilder`.
-
 #[derive(Clone, Debug)]
 pub struct RelabeledHistogramVec {
     relabel_threshold: MetricLevel,
