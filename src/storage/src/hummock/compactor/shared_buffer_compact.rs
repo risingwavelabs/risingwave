@@ -457,7 +457,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         split_weight_by_vnode: u32,
         use_block_based_filter: bool,
-        sstable_object_id_manager: Box<dyn GetObjectId>,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -476,7 +476,7 @@ impl SharedBufferCompactRunner {
                 split_weight_by_vnode,
                 use_block_based_filter,
             },
-            sstable_object_id_manager,
+            object_id_getter,
         );
         Self {
             compactor,

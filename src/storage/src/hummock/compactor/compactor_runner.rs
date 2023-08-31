@@ -62,7 +62,7 @@ impl CompactorRunner {
         split_index: usize,
         context: Arc<CompactorContext>,
         task: CompactTask,
-        sstable_object_id_manager: Box<dyn GetObjectId>,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
@@ -103,7 +103,7 @@ impl CompactorRunner {
                 split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
             },
-            sstable_object_id_manager,
+            object_id_getter,
         );
 
         Self {
@@ -238,7 +238,7 @@ pub async fn compact(
     compactor_context: Arc<CompactorContext>,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    sstable_object_id_manager: Box<dyn GetObjectId>,
+    object_id_getter: Box<dyn GetObjectId>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
@@ -444,7 +444,7 @@ pub async fn compact(
             split_index,
             compactor_context.clone(),
             compact_task.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_getter.clone(),
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();

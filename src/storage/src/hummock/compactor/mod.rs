@@ -77,7 +77,7 @@ use crate::hummock::{
 pub struct Compactor {
     /// The context of the compactor.
     context: Arc<CompactorContext>,
-    sstable_object_id_manager: Box<dyn GetObjectId>,
+    object_id_getter: Box<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
@@ -91,14 +91,14 @@ impl Compactor {
         context: Arc<CompactorContext>,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
-        sstable_object_id_manager: Box<dyn GetObjectId>,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
         Self {
             context,
             options,
             task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
-            sstable_object_id_manager,
+            object_id_getter,
         }
     }
 
@@ -144,7 +144,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -156,7 +156,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -171,7 +171,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -183,7 +183,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
-                    self.sstable_object_id_manager.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -264,10 +264,10 @@ impl Compactor {
         del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-        sstable_object_id_manager: Box<dyn GetObjectId>,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
-            sstable_object_id_manager,
+            object_id_getter,
             limiter: self.context.memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
