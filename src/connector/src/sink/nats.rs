@@ -20,6 +20,7 @@ use async_nats::jetstream::stream::Stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::anyhow_error;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -89,12 +90,14 @@ impl Sink for NatsSink {
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         if !self.is_append_only {
-            return Err(SinkError::Nats("only support append-only mode".to_string()));
+            return Err(SinkError::Nats(anyhow!(
+                "Nats sink only support append-only mode"
+            )));
         }
         match self.config.common.build_context().await {
             Ok(_jetstream) => {}
             Err(error) => {
-                return Err(SinkError::Nats(format!(
+                return Err(SinkError::Nats(anyhow_error!(
                     "validate nats sink error: {:?}",
                     error
                 )));
@@ -110,41 +113,40 @@ impl Sink for NatsSink {
 
 impl NatsSinkWriter {
     pub async fn new(config: NatsConfig, schema: Schema) -> Result<Self> {
-        Retry::spawn(
-            ExponentialBackoff::from_millis(100).map(jitter).take(3),
-            || async {
-                let context = config
-                    .common
-                    .build_context()
-                    .await
-                    .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
-                let stream = config
-                    .common
-                    .build_or_get_stream(context.clone())
-                    .await
-                    .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
-                Ok::<_, SinkError>(Self {
-                    config: config.clone(),
-                    context,
-                    stream,
-                    schema: schema.clone(),
-                })
-            },
-        )
-        .await
-        .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))
+        let context = config
+            .common
+            .build_context()
+            .await
+            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+        let stream = config
+            .common
+            .build_or_get_stream(context.clone())
+            .await
+            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+        Ok::<_, SinkError>(Self {
+            config: config.clone(),
+            context,
+            stream,
+            schema: schema.clone(),
+        })
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let data = chunk_to_json(chunk, &self.schema).unwrap();
-        for item in data {
-            self.context
-                .publish(self.config.common.subject.clone(), item.into())
-                .await
-                .map_err(|e| SinkError::Nats(format!("nats sink error {}", e)))?;
-        }
-
-        Ok(())
+        Retry::spawn(
+            ExponentialBackoff::from_millis(100).map(jitter).take(3),
+            || async {
+                let data = chunk_to_json(chunk.clone(), &self.schema).unwrap();
+                for item in data {
+                    self.context
+                        .publish(self.config.common.subject.clone(), item.into())
+                        .await
+                        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+                }
+                Ok::<_, SinkError>(())
+            },
+        )
+        .await
+        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))
     }
 }
 

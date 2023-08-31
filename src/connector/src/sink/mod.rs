@@ -474,7 +474,7 @@ pub enum SinkError {
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
     #[error("Nats error: {0}")]
-    Nats(String),
+    Nats(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {
