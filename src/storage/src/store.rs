@@ -272,6 +272,12 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
+pub trait LocalStateStoreTestExt: LocalStateStore {
+    fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.init(EpochPair::new_test_epoch(epoch))
+    }
+}
+
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
 /// TODO(kwannoel): Refactor this to `StateTableReadOptions`

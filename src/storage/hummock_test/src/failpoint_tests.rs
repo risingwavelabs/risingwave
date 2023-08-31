@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -74,7 +75,7 @@ async fn test_failpoints_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local.init(1);
+    local.init_for_test(1).await.unwrap();
     local
         .ingest_batch(
             batch1,
