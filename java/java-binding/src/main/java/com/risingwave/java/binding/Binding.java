@@ -85,5 +85,5 @@ public class Binding {
 
     static native long streamChunkIteratorFromPretty(String str);
 
-    public static native boolean sendMsgToChannel(long channelPtr, Object msg);
+    public static native boolean sendMsgToChannel(long channelPtr, byte[] msg);
 }

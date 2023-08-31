@@ -433,7 +433,7 @@ fn run_jvm() {
 
         NativeMethod {
             name: JNIString::from("sendMsgToChannel"),
-            sig: JNIString::from("(JLjava/lang/Object;)Z"),
+            sig: JNIString::from("(J[B)Z"),
             fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_sendMsgToChannel as *mut c_void,
         },
 

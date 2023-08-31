@@ -49,6 +49,7 @@ public class JniSourceHandler {
                     // Thread will block on the channel to get output from engine
                     var resp =
                             runner.getEngine().getOutputChannel().poll(500, TimeUnit.MILLISECONDS);
+                    boolean success;
                     if (resp != null) {
                         ConnectorNodeMetrics.incSourceRowsReceived(
                                 config.getSourceType().toString(),
@@ -58,9 +59,11 @@ public class JniSourceHandler {
                                 "Engine#{}: emit one chunk {} events to network ",
                                 config.getSourceId(),
                                 resp.getEventsCount());
+                        success = Binding.sendMsgToChannel(channelPtr, resp.toByteArray());
+                    } else {
+                        // If resp is null means just check whether channel is closed.
+                        success = Binding.sendMsgToChannel(channelPtr, null);
                     }
-                    // If resp is null means just check whether channel is closed.
-                    boolean success = Binding.sendMsgToChannel(channelPtr, resp);
                     if (!success) {
                         LOG.info(
                                 "Engine#{}: JNI sender broken detected, stop the engine",
