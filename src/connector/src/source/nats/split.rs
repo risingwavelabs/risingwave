@@ -22,15 +22,15 @@ use crate::source::{SplitId, SplitMetaData};
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct NatsSplit {
     pub(crate) subject: String,
-    // pub(crate) partition: i32,
-    // pub(crate) start_offset: Option<i64>,
-    // pub(crate) stop_offset: Option<i64>,
+    // To simplify the logic, just return 1 split for first version. May use parallelism in future.
+    pub(crate) split_num: i32,
+    // nats does not provide offset
 }
 
 impl SplitMetaData for NatsSplit {
     fn id(&self) -> SplitId {
         // TODO: should avoid constructing a string every time
-        format!("{}", 0).into()
+        format!("{}", self.split_num).into()
     }
 
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
@@ -43,12 +43,7 @@ impl SplitMetaData for NatsSplit {
 }
 
 impl NatsSplit {
-    pub fn new(subject: String) -> Self {
-        Self {
-            subject,
-            // partition,
-            // start_offset,
-            // stop_offset,
-        }
+    pub fn new(subject: String, split_num: i32) -> Self {
+        Self { subject, split_num }
     }
 }

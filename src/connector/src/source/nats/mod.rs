@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use risingwave_pb::connector_service::TableSchema;
 use serde::Deserialize;
 
-use crate::common::KafkaCommon;
+use crate::common::NatsCommon;
 pub const NATS_CONNECTOR: &str = "nats";
 
 #[derive(Clone, Debug, Deserialize)]
@@ -32,6 +32,9 @@ pub struct NatsProperties {
 
     /// Schema of the source specified by users
     pub table_schema: Option<TableSchema>,
+
+    #[serde(flatten)]
+    pub common: NatsCommon,
 }
 
 impl NatsProperties {}

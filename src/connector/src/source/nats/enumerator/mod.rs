@@ -17,11 +17,11 @@ use async_trait::async_trait;
 
 use super::source::NatsSplit;
 use super::NatsProperties;
-use crate::source::{SplitEnumerator, SourceEnumeratorContextRef};
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct NatsSplitEnumerator {
-    source_id: u32,
+    subject: String,
     split_num: i32,
 }
 
@@ -34,22 +34,20 @@ impl SplitEnumerator for NatsSplitEnumerator {
         properties: Self::Properties,
         context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<NatsSplitEnumerator> {
-        Ok(Self{
-            source_id: 0,
+        Ok(Self {
+            subject: properties.common.subject.clone(),
             split_num: 0,
         })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<NatsSplit>> {
+        // To simplify the logic, just return 1 split for first version
+        let nats_split = NatsSplit {
+            subject: self.subject.clone(),
+            split_num: 1,
+        };
         let mut splits = vec![];
-        for i in 0..self.split_num {
-            splits.push(NatsSplit {
-                // split_num: self.split_num,
-                // split_index: i,
-                // start_offset: None,
-                partition : 0,
-            });
-        }
+
         Ok(splits)
     }
 }
