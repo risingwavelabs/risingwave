@@ -76,6 +76,7 @@ impl Client {
         T: DeserializeOwned + Send + Sync + 'static,
     {
         let mut fut_req = Vec::with_capacity(self.url.len());
+        let mut errs = Vec::with_capacity(self.url.len());
         let ctx = Arc::new(SchemaRegistryCtx {
             username: self.username.clone(),
             password: self.password.clone(),
@@ -92,8 +93,10 @@ impl Client {
 
         while !fut_req.is_empty() {
             let (result, _index, remaining) = select_all(fut_req).await;
-            if let Ok(Ok(res)) = result {
-                return Ok(res);
+            match result {
+                Ok(Ok(res)) => return Ok(res),
+                Ok(Err(e)) => errs.push(e),
+                Err(e) => errs.push(RwError::from(e)),
             }
             fut_req = remaining;
         }
