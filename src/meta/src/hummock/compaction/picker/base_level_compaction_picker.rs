@@ -137,9 +137,8 @@ impl LevelCompactionPicker {
         let vnode_partition_count = levels.vnode_partition_count;
         let mut partitions =
             vec![SubLevelPartition::default(); levels.vnode_partition_count as usize];
-        if target_level.vnode_partition_count != 0
+        if levels.can_partition_by_vnode()
             && min_sub_level_id > 0
-            && levels.can_partition_by_vnode()
             && partition_level(
                 levels.member_table_ids[0],
                 levels.vnode_partition_count as usize,

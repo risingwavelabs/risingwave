@@ -1357,6 +1357,7 @@ pub(crate) mod tests {
         global_sst_id: Arc<AtomicU64>,
         selector_time: Instant,
         rng: ThreadRng,
+        max_task_size: u64,
     }
 
     impl CompactTest {
@@ -1390,13 +1391,14 @@ pub(crate) mod tests {
                 rng: rand::thread_rng(),
                 throughput_multiplier,
                 selector_time: Instant::now(),
+                max_task_size: 0,
                 test_count,
             }
         }
 
         async fn test_selector_compact_impl<S: SstableInfoGenerator>(&mut self, mut generator: S) {
             const CHECKPOINT_TIMES: u64 = 10;
-            const KV_COUNT: usize = 16;
+            const KV_COUNT: usize = 8;
             const MAX_COMPACT_TASK_COUNT: usize = 8;
             let mut rng = rand::thread_rng();
             let mut finished_task = vec![];
@@ -1465,8 +1467,12 @@ pub(crate) mod tests {
             }
 
             println!(
-                "partition compact task count: {}",
-                self.stats.vnode_partition_task_count
+                "partition compact task count: {}, max task size: {}",
+                self.stats.vnode_partition_task_count, self.max_task_size,
+            );
+
+            assert!(
+                self.max_task_size <= self.group_config.compaction_config().max_compaction_bytes
             );
 
             for (idx, level) in self
@@ -1485,6 +1491,13 @@ pub(crate) mod tests {
                     level.total_file_size,
                 );
             }
+            assert!(
+                self.group.l0.as_ref().unwrap().sub_levels.len()
+                    <= self
+                        .group_config
+                        .compaction_config()
+                        .level0_sub_level_compact_level_count as usize
+            );
 
             for level in &self.group.levels {
                 println!(
@@ -1508,34 +1521,7 @@ pub(crate) mod tests {
                 let mut task: CompactTask = task.into();
                 task.existing_table_ids = vec![1];
                 task.watermark = checkpoint;
-                if self.selector_time.elapsed().as_secs() > 5 {
-                    let level_type = if task.target_level == 0 {
-                        self.group
-                            .l0
-                            .as_ref()
-                            .unwrap()
-                            .sub_levels
-                            .iter()
-                            .find(|level| level.sub_level_id == task.target_sub_level_id)
-                            .unwrap()
-                            .level_type()
-                    } else {
-                        LevelType::Nonoverlapping
-                    };
-                    println!(
-                        "target level: {}, target sub level: {}, {:?} is trivial move: {}",
-                        task.target_level,
-                        task.target_sub_level_id,
-                        level_type,
-                        CompactStatus::is_trivial_move_task(&task)
-                    );
-                    for ssts in &task.input_ssts {
-                        println!(
-                            "ssts: {:?}",
-                            ssts.table_infos.iter().map(|sst| sst.sst_id).collect_vec()
-                        );
-                    }
-                }
+                task.gc_delete_keys = task.target_level + 1 == self.handlers.len() as u32;
                 if CompactStatus::is_trivial_move_task(&task) {
                     task.sorted_output_ssts = task.input_ssts[0].table_infos.clone();
                     task.set_task_status(TaskStatus::Success);
@@ -1556,6 +1542,35 @@ pub(crate) mod tests {
                         .map(|sst| sst.file_size)
                         .sum::<u64>();
                     let compact_speed = 128 * 1024 * 1024;
+                    self.max_task_size = std::cmp::max(self.max_task_size, task_size);
+                    if task_size > self.group_config.compaction_config().max_compaction_bytes {
+                        let level_type = if task.target_level == 0 {
+                            self.group
+                                .l0
+                                .as_ref()
+                                .unwrap()
+                                .sub_levels
+                                .iter()
+                                .find(|level| level.sub_level_id == task.target_sub_level_id)
+                                .unwrap()
+                                .level_type()
+                        } else {
+                            LevelType::Nonoverlapping
+                        };
+                        println!(
+                            "target level: {}, target sub level: {}, {:?}",
+                            task.target_level, task.target_sub_level_id, level_type,
+                        );
+                        for ssts in &task.input_ssts {
+                            println!(
+                                "ssts: {:?}",
+                                ssts.table_infos
+                                    .iter()
+                                    .map(|sst| (sst.sst_id, sst.file_size / 1024 / 1024))
+                                    .collect_vec()
+                            );
+                        }
+                    }
                     self.pending_tasks.insert(
                         self.global_task_id,
                         (
@@ -1604,6 +1619,7 @@ pub(crate) mod tests {
             let opts = SstableBuilderOptions {
                 capacity: (task.target_file_size / self.throughput_multiplier) as usize,
                 block_capacity: 1024,
+                max_sst_size: 256 * 1024 * 1024 / self.throughput_multiplier,
                 ..Default::default()
             };
             let builder_factory = LocalTableBuilderFactory::with_sst_id(
@@ -1760,7 +1776,6 @@ pub(crate) mod tests {
         .await;
     }
 
-
     pub struct SequenceGenerator {
         last_pk: u64,
         rand_range: u64,
@@ -1803,7 +1818,6 @@ pub(crate) mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn test_sequence_compact() {
         let mut test = CompactTest::new(8 * 1024, 2000);
@@ -1836,7 +1850,7 @@ pub(crate) mod tests {
                 let vnode_kv_count = if vnode_idx == hot_vnode_idx {
                     (kv_count - 1) * PARTITION_COUNT
                 } else if vnode_idx == cold_vnode_idx {
-                    continue
+                    continue;
                 } else {
                     1
                 };

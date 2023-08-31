@@ -143,7 +143,8 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        let (switch_builder, vnode_changed) = self.check_table_and_vnode_change(&full_key.user_key);
+        let (switch_builder, _vnode_changed) =
+            self.check_table_and_vnode_change(&full_key.user_key);
 
         // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
         // then call `seal_current` later outside the `if let` instead of calling
@@ -156,16 +157,8 @@ where
         let mut need_seal_current = false;
         let mut last_range_tombstone_epoch = HummockEpoch::MAX;
         if let Some(builder) = self.current_builder.as_mut() {
-            if is_new_user_key {
-                if switch_builder {
-                    need_seal_current = true;
-                } else if builder.reach_capacity() {
-                    if self.partition_count_by_vnode == 0 || builder.reach_max_sst_size() {
-                        need_seal_current = true;
-                    } else {
-                        need_seal_current = vnode_changed;
-                    }
-                }
+            if is_new_user_key && (switch_builder || builder.reach_capacity()) {
+                need_seal_current = true;
             }
             if need_seal_current && let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
                 last_range_tombstone_epoch = event.new_epoch;

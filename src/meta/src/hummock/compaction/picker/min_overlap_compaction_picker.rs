@@ -20,7 +20,6 @@ use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::picker::partition_level;
 use crate::hummock::compaction::SubLevelPartition;
 use crate::hummock::level_handler::LevelHandler;
 pub const MAX_LEVEL_COUNT: usize = 42;
@@ -121,56 +120,6 @@ impl CompactionPicker for MinOverlappingPicker {
     ) -> Option<CompactionInput> {
         assert!(self.level > 0);
         let select_level = levels.get_level(self.level);
-        let mut partitions =
-            vec![SubLevelPartition::default(); select_level.vnode_partition_count as usize];
-        if levels.can_partition_by_vnode()
-            && select_level.vnode_partition_count > 0
-            && partition_level(
-                levels.member_table_ids[0],
-                select_level.vnode_partition_count as usize,
-                select_level,
-                &mut partitions,
-            )
-        {
-            partitions.sort_by_key(|part| {
-                part.sub_levels
-                    .iter()
-                    .map(|info| info.total_file_size)
-                    .sum::<u64>()
-            });
-            partitions.reverse();
-            // select largest partition to compact
-            for part in partitions {
-                let info = &part.sub_levels[0];
-                if info.right_idx > info.left_idx {
-                    let (select_input_ssts, target_input_ssts) = self.pick_tables(
-                        &select_level.table_infos[info.left_idx..info.right_idx],
-                        &levels.get_level(self.target_level).table_infos,
-                        level_handlers,
-                    );
-                    if !select_input_ssts.is_empty() {
-                        return Some(CompactionInput {
-                            input_levels: vec![
-                                InputLevel {
-                                    level_idx: self.level as u32,
-                                    level_type: LevelType::Nonoverlapping as i32,
-                                    table_infos: select_input_ssts,
-                                },
-                                InputLevel {
-                                    level_idx: self.target_level as u32,
-                                    level_type: LevelType::Nonoverlapping as i32,
-                                    table_infos: target_input_ssts,
-                                },
-                            ],
-                            target_level: self.target_level,
-                            target_sub_level_id: 0,
-                            vnode_partition_count: levels.vnode_partition_count,
-                        });
-                    }
-                    stats.skip_by_pending_files += 1;
-                }
-            }
-        }
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
             &select_level.table_infos,
             &levels.get_level(self.target_level).table_infos,
@@ -197,6 +146,82 @@ impl CompactionPicker for MinOverlappingPicker {
             target_sub_level_id: 0,
             vnode_partition_count: levels.vnode_partition_count,
         })
+    }
+}
+
+pub struct PartitionMinOverlappingPicker {
+    inner: MinOverlappingPicker,
+    partitions: Vec<SubLevelPartition>,
+}
+
+impl PartitionMinOverlappingPicker {
+    pub fn new(
+        level: usize,
+        target_level: usize,
+        max_select_bytes: u64,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+        partitions: Vec<SubLevelPartition>,
+    ) -> Self {
+        Self {
+            inner: MinOverlappingPicker {
+                level,
+                target_level,
+                max_select_bytes,
+                split_by_table: false,
+                overlap_strategy,
+            },
+            partitions,
+        }
+    }
+}
+
+impl CompactionPicker for PartitionMinOverlappingPicker {
+    fn pick_compaction(
+        &mut self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        assert!(self.inner.level > 0);
+        let select_level = levels.get_level(self.inner.level);
+        self.partitions.sort_by_key(|part| {
+            part.sub_levels
+                .iter()
+                .map(|info| info.total_file_size)
+                .sum::<u64>()
+        });
+        self.partitions.reverse();
+        for part in &self.partitions {
+            let info = &part.sub_levels[0];
+            if info.right_idx > info.left_idx {
+                let (select_input_ssts, target_input_ssts) = self.inner.pick_tables(
+                    &select_level.table_infos[info.left_idx..info.right_idx],
+                    &levels.get_level(self.inner.target_level).table_infos,
+                    level_handlers,
+                );
+                if !select_input_ssts.is_empty() {
+                    return Some(CompactionInput {
+                        input_levels: vec![
+                            InputLevel {
+                                level_idx: self.inner.level as u32,
+                                level_type: LevelType::Nonoverlapping as i32,
+                                table_infos: select_input_ssts,
+                            },
+                            InputLevel {
+                                level_idx: self.inner.target_level as u32,
+                                level_type: LevelType::Nonoverlapping as i32,
+                                table_infos: target_input_ssts,
+                            },
+                        ],
+                        target_level: self.inner.target_level,
+                        target_sub_level_id: 0,
+                        vnode_partition_count: levels.vnode_partition_count,
+                    });
+                }
+                stats.skip_by_pending_files += 1;
+            }
+        }
+        None
     }
 }
 

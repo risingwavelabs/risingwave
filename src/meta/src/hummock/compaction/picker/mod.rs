@@ -24,7 +24,7 @@ mod ttl_reclaim_compaction_picker;
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use intral_sub_level_picker::*;
 pub use manual_compaction_picker::ManualCompactionPicker;
-pub use min_overlap_compaction_picker::MinOverlappingPicker;
+pub use min_overlap_compaction_picker::{MinOverlappingPicker, PartitionMinOverlappingPicker};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::InputLevel;
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};

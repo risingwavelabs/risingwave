@@ -36,7 +36,7 @@ use super::{
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
     partition_level, partition_sub_levels, CompactionPicker, IntraSubLevelPicker,
-    LocalPickerStatistic, MinOverlappingPicker, SubLevelPartition,
+    LocalPickerStatistic, MinOverlappingPicker, PartitionMinOverlappingPicker, SubLevelPartition,
 };
 use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
@@ -69,7 +69,8 @@ pub enum PickerType {
     L0ToBaseLevel,
     L0SubLevel,
     #[default]
-    LevelCompaction,
+    BottomLevelCompaction,
+    BaseLevelCompaction(Vec<SubLevelPartition>),
 }
 
 #[derive(Default, Debug)]
@@ -123,7 +124,7 @@ impl DynamicLevelSelectorCore {
                 target_level,
                 self.config.clone(),
             )),
-            PickerType::LevelCompaction => {
+            PickerType::BottomLevelCompaction => {
                 assert_eq!(select_level + 1, target_level);
                 Box::new(MinOverlappingPicker::new(
                     select_level,
@@ -131,6 +132,15 @@ impl DynamicLevelSelectorCore {
                     self.config.max_bytes_for_level_base,
                     self.config.split_by_state_table,
                     overlap_strategy,
+                ))
+            }
+            PickerType::BaseLevelCompaction(partitions) => {
+                Box::new(PartitionMinOverlappingPicker::new(
+                    select_level,
+                    target_level,
+                    self.config.max_bytes_for_level_base,
+                    overlap_strategy,
+                    partitions,
                 ))
             }
             PickerType::L0SubLevel => {
@@ -208,6 +218,7 @@ impl DynamicLevelSelectorCore {
             while ctx.base_level > 1 && cur_level_size > base_bytes_max {
                 ctx.base_level -= 1;
                 cur_level_size /= self.config.max_bytes_for_level_multiplier;
+                ctx.target_partitions.clear();
             }
             std::cmp::min(base_bytes_max, cur_level_size)
         };
@@ -276,7 +287,7 @@ impl DynamicLevelSelectorCore {
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
 
             // size limit
-            let non_overlapping_size_score = total_size * SCORE_BASE
+            let non_overlapping_size_score = total_size / 2 * SCORE_BASE
                 / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
 
             // level count limit
@@ -342,15 +353,23 @@ impl DynamicLevelSelectorCore {
                     score,
                     max_size * SCORE_BASE * (level.vnode_partition_count as u64)
                         / ctx.level_max_bytes[level_idx],
-                )
+                );
+                // Reduce the level num of l0 non-overlapping sub_level
+                ctx.score_levels.push(PickerInfo {
+                    score,
+                    select_level: level_idx,
+                    target_level: level_idx + 1,
+                    picker_type: PickerType::BaseLevelCompaction(ctx.target_partitions.clone()),
+                });
+            } else {
+                // Reduce the level num of l0 non-overlapping sub_level
+                ctx.score_levels.push(PickerInfo {
+                    score,
+                    select_level: level_idx,
+                    target_level: level_idx + 1,
+                    picker_type: PickerType::BottomLevelCompaction,
+                });
             }
-            // Reduce the level num of l0 non-overlapping sub_level
-            ctx.score_levels.push(PickerInfo {
-                score,
-                select_level: level_idx,
-                target_level: level_idx + 1,
-                picker_type: PickerType::LevelCompaction,
-            });
         }
 
         // sort reverse to pick the largest one.
