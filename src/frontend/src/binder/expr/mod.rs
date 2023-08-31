@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -97,6 +97,17 @@ impl Binder {
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
                     // allow `session_user()` while we do.
                     self.bind_function(Function::no_arg(ObjectName(vec![ident])))
+                } else if let Some(ref lambda_args) = self.context.lambda_args {
+                    // We don't support capture, so if the expression is in the lambda context,
+                    // we'll not bind it for table columns.
+                    if let Some((arg_idx, arg_type)) = lambda_args.get(&ident.real_value()) {
+                        Ok(InputRef::new(*arg_idx, arg_type.clone()).into())
+                    } else {
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
+                        )
+                    }
                 } else {
                     self.bind_column(&[ident])
                 }

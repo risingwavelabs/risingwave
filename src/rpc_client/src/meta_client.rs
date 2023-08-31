@@ -1307,7 +1307,7 @@ impl GrpcMetaClientCore {
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
-/// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
+/// It is a wrapper of tonic client. See [`crate::rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
     member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
