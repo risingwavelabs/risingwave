@@ -19,7 +19,6 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -80,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let epoch = 100;
     runtime
-        .block_on(hummock_storage.init_for_test((epoch)))
+        .block_on(hummock_storage.init_for_test(epoch))
         .unwrap();
 
     for batch in batches {

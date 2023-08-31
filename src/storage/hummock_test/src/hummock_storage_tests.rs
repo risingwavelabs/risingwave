@@ -21,7 +21,6 @@ use parking_lot::RwLock;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, UserKey, TABLE_PREFIX_LEN};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
@@ -93,10 +92,7 @@ async fn test_storage_basic() {
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
-    hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // Write the first batch.
     hummock_storage
@@ -475,10 +471,7 @@ async fn test_state_store_sync() {
     let read_version = hummock_storage.read_version();
 
     let epoch1 = read_version.read().committed().max_committed_epoch() + 1;
-    hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -796,10 +789,7 @@ async fn test_delete_get() {
 
     let epoch1 = initial_epoch + 1;
 
-    hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_put("111")),
         (Bytes::from("bb"), StorageValue::new_put("222")),
@@ -876,10 +866,7 @@ async fn test_multiple_epoch_sync() {
         .max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
-    hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_put("111")),
         (Bytes::from("bb"), StorageValue::new_put("222")),
@@ -1027,10 +1014,7 @@ async fn test_iter_with_min_epoch() {
         })
         .collect();
 
-    hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     hummock_storage
         .ingest_batch(
@@ -1271,10 +1255,7 @@ async fn test_hummock_version_reader() {
         })
         .collect();
     {
-        hummock_storage
-            .init_for_test((epoch1))
-            .await
-            .unwrap();
+        hummock_storage.init_for_test(epoch1).await.unwrap();
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
@@ -1676,10 +1657,7 @@ async fn test_get_with_min_epoch() {
         .await;
 
     let epoch1 = (31 * 1000) << 16;
-    hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     let gen_key = |index: usize| -> Vec<u8> {
         UserKey::for_test(TEST_TABLE_ID, format!("key_{}", index)).encode()

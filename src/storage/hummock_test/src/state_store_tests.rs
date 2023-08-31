@@ -23,7 +23,6 @@ use futures_async_stream::for_await;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
@@ -116,7 +115,7 @@ async fn test_basic_inner(
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
-    local.init_for_test((epoch1)).await.unwrap();
+    local.init_for_test(epoch1).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
     let size = local
@@ -402,7 +401,7 @@ async fn test_state_store_sync_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
-    local.init_for_test((epoch)).await.unwrap();
+    local.init_for_test(epoch).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -815,7 +814,7 @@ async fn test_write_anytime_inner(
     ];
 
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init_for_test((epoch1)).await.unwrap();
+    local.init_for_test(epoch1).await.unwrap();
 
     local
         .ingest_batch(
@@ -1010,7 +1009,7 @@ async fn test_delete_get_inner(
         (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init_for_test((epoch1)).await.unwrap();
+    local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -1086,7 +1085,7 @@ async fn test_multiple_epoch_sync_inner(
     ];
 
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init_for_test((epoch1)).await.unwrap();
+    local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -1218,10 +1217,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
-    local_hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    local_hummock_storage.init_for_test(epoch1).await.unwrap();
     local_hummock_storage
         .insert(Bytes::from("aa"), Bytes::from("111"), None)
         .unwrap();
@@ -1342,10 +1338,7 @@ async fn test_replicated_local_hummock_storage() {
 
     let epoch1 = epoch0 + 1;
 
-    local_hummock_storage
-        .init_for_test((epoch1))
-        .await
-        .unwrap();
+    local_hummock_storage.init_for_test(epoch1).await.unwrap();
     // ingest 16B batch
     let mut batch1 = vec![
         (
@@ -1415,10 +1408,7 @@ async fn test_replicated_local_hummock_storage() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
 
-    local_hummock_storage_2
-        .init_for_test((epoch2))
-        .await
-        .unwrap();
+    local_hummock_storage_2.init_for_test(epoch2).await.unwrap();
 
     // ingest 16B batch
     let mut batch2 = vec![

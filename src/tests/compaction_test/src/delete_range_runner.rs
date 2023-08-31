@@ -28,7 +28,6 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -53,12 +52,12 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
+use risingwave_storage::store::{
+    LocalStateStore, LocalStateStoreTestExt, NewLocalOptions, PrefetchOptions, ReadOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
-
-use risingwave_storage::store::LocalStateStoreTestExt;
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
@@ -394,10 +393,7 @@ impl NormalState {
     async fn new(hummock: &HummockStorage, table_id: u32, epoch: u64) -> Self {
         let table_id = TableId::new(table_id);
         let mut storage = hummock.new_local(NewLocalOptions::for_test(table_id)).await;
-        storage
-            .init_for_test((epoch))
-            .await
-            .unwrap();
+        storage.init_for_test(epoch).await.unwrap();
         Self { storage, table_id }
     }
 
