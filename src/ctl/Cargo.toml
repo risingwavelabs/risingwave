@@ -23,7 +23,7 @@ etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 inquire = "0.6.2"
 itertools = "0.11"
-regex = "1.9.3"
+regex = "1.9.4"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }

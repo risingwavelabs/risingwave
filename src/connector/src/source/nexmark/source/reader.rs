@@ -88,7 +88,7 @@ impl SplitReader for NexmarkSplitReader {
             .common
             .rw_columns
             .into_iter()
-            .position(|column| column.is_row_id);
+            .position(|column| column.is_row_id());
 
         Ok(NexmarkSplitReader {
             generator,

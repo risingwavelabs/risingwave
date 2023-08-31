@@ -283,10 +283,11 @@ impl<'a> JsonbRef<'a> {
     /// This is part of the `->>` or `#>>` syntax to access a child as string.
     ///
     /// * It is not `as_str`, because there is no runtime error when the jsonb type is not string.
-    /// * It is not same as [`Display`] or [`ToText`] (cast to string) in the following 2 cases:
+    /// * It is not same as [`std::fmt::Display`] or [`super::ToText`] (cast to string) in the
+    ///   following 2 cases:
     ///   * Jsonb null is displayed as 4-letter `null` but treated as sql null here.
     ///       * This function writes nothing and the caller is responsible for checking
-    ///         [`is_jsonb_null`] to differentiate it from an empty string.
+    ///         [`Self::is_jsonb_null`] to differentiate it from an empty string.
     ///   * Jsonb string is displayed with quotes but treated as its inner value here.
     pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
         match self.0 {
