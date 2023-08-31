@@ -14,11 +14,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
+use std::pin::pin;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
-use futures::FutureExt;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
@@ -481,7 +481,7 @@ impl HummockEventHandler {
                     let CacheRefillerEvent {pinned_version, new_pinned_version } = event;
                     self.apply_version_update(pinned_version, new_pinned_version);
                 }
-                event = self.hummock_event_rx.recv().boxed() => {
+                event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
                     if self.handle_hummock_event(event) {
                         break;

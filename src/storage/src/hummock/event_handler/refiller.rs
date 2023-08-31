@@ -117,11 +117,7 @@ pub struct CacheRefiller {
     /// order: old => new
     queue: VecDeque<Item>,
 
-    config: Arc<CacheRefillConfig>,
-
-    concurrency: Arc<Semaphore>,
-
-    sstable_store: SstableStoreRef,
+    context: CacheRefillContext,
 }
 
 impl CacheRefiller {
@@ -130,9 +126,11 @@ impl CacheRefiller {
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
         Self {
             queue: VecDeque::new(),
-            config,
-            concurrency,
-            sstable_store,
+            context: CacheRefillContext {
+                config,
+                concurrency,
+                sstable_store,
+            },
         }
     }
 
@@ -144,18 +142,13 @@ impl CacheRefiller {
     ) {
         let task = CacheRefillTask {
             deltas,
-
-            context: Arc::new(CacheRefillContext {
-                config: self.config.clone(),
-                concurrency: self.concurrency.clone(),
-                sstable_store: self.sstable_store.clone(),
-            }),
+            context: self.context.clone(),
         };
         let event = CacheRefillerEvent {
             pinned_version,
             new_pinned_version,
         };
-        let handle = tokio::spawn(async move { task.run().await });
+        let handle = tokio::spawn(task.run());
         let item = Item { handle, event };
         self.queue.push_back(item);
         GLOBAL_CACHE_REFILL_METRICS.refill_queue_length.add(1);
@@ -195,6 +188,7 @@ pub struct CacheRefillerEvent {
     pub new_pinned_version: PinnedVersion,
 }
 
+#[derive(Clone)]
 struct CacheRefillContext {
     config: Arc<CacheRefillConfig>,
     concurrency: Arc<Semaphore>,
@@ -203,8 +197,7 @@ struct CacheRefillContext {
 
 pub struct CacheRefillTask {
     deltas: Vec<SstDeltaInfo>,
-
-    context: Arc<CacheRefillContext>,
+    context: CacheRefillContext,
 }
 
 impl CacheRefillTask {
@@ -232,7 +225,7 @@ impl CacheRefillTask {
     }
 
     async fn meta_cache_refill(
-        context: &Arc<CacheRefillContext>,
+        context: &CacheRefillContext,
         delta: &SstDeltaInfo,
     ) -> HummockResult<Vec<TableHolder>> {
         let stats = StoreLocalStatistic::default();
@@ -252,7 +245,7 @@ impl CacheRefillTask {
     }
 
     async fn data_cache_refill(
-        context: &Arc<CacheRefillContext>,
+        context: &CacheRefillContext,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
