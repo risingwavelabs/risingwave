@@ -171,7 +171,13 @@ impl JoinStreamChunkBuilder {
         }
     }
 
-    /// Get the mapping from left/right input indices to the output indices.
+    /// Get the mappings from left/right input indices to the output indices. The mappings can be
+    /// used to create [`JoinStreamChunkBuilder`] later.
+    ///
+    /// Please note the semantics of `update` and `matched` when creating the builder: either left
+    /// or right side can be `update` side or `matched` side, the key is to call the corresponding
+    /// append method once you passed `left_to_output`/`right_to_output` to
+    /// `update_to_output`/`matched_to_output`.
     pub fn get_i2o_mapping(
         output_indices: &[usize],
         left_len: usize,

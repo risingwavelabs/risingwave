@@ -257,7 +257,6 @@ impl LogWriter for BoundedInMemLogStoreWriter {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::Op;
-    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
@@ -279,10 +278,10 @@ mod tests {
             assert!(builder
                 .append_row(
                     op,
-                    OwnedRow::new(vec![
+                    [
                         Some(ScalarImpl::Int64(i as i64)),
                         Some(ScalarImpl::Utf8(format!("name_{}", i).into_boxed_str()))
-                    ])
+                    ]
                 )
                 .is_none());
         }
