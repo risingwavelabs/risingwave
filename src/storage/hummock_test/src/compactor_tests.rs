@@ -1336,7 +1336,8 @@ pub(crate) mod tests {
         ));
     }
 
-    const PARTITION_COUNT: usize = 8;
+    const PARTITION_COUNT: usize = 16;
+    const PARTITION_SIZE: usize = VirtualNode::COUNT / PARTITION_COUNT;
 
     pub trait SstableInfoGenerator {
         fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>>;
@@ -1685,11 +1686,6 @@ pub(crate) mod tests {
         }
     }
 
-    pub struct RandomGenerator {
-        max_pk: u64,
-        rng: StdRng,
-    }
-
     pub fn test_table_key_of(idx: u64, vnode: usize) -> TableKey<Vec<u8>> {
         let mut key = VirtualNode::from_index(vnode).to_be_bytes().to_vec();
         key.extend_from_slice(idx.to_be_bytes().as_slice());
@@ -1721,6 +1717,11 @@ pub(crate) mod tests {
         )
     }
 
+    pub struct RandomGenerator {
+        max_pk: u64,
+        rng: StdRng,
+    }
+
     #[async_trait::async_trait]
     impl SstableInfoGenerator for RandomGenerator {
         fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>> {
@@ -1732,48 +1733,6 @@ pub(crate) mod tests {
                     data.push(test_table_key_of(k, vnode));
                 }
             }
-            data.sort();
-            data.dedup();
-            data
-        }
-    }
-
-    pub struct SequenceGenerator {
-        last_pk: u64,
-        rand_range: u64,
-        rng: StdRng,
-    }
-
-    impl SequenceGenerator {
-        pub fn new(rand_range: u64) -> Self {
-            Self {
-                last_pk: 1,
-                rand_range,
-                rng: StdRng::seed_from_u64(0),
-            }
-        }
-    }
-
-    impl SstableInfoGenerator for SequenceGenerator {
-        fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>> {
-            let mut data = Vec::with_capacity(VirtualNode::COUNT / 16 * kv_count);
-            for vnode_idx in 0..VirtualNode::COUNT / 64 {
-                let vnode = vnode_idx * 64;
-                let mut last_pk = self.last_pk;
-                for _ in 0..kv_count {
-                    let k = if self.rng.next_u32() % 10 == 1
-                        && self.last_pk > self.rand_range
-                        && self.rand_range > 0
-                    {
-                        self.last_pk - self.rand_range + self.rng.next_u64() % self.rand_range
-                    } else {
-                        last_pk
-                    };
-                    data.push(test_table_key_of(k, vnode));
-                    last_pk += 1;
-                }
-            }
-            self.last_pk += kv_count as u64;
             data.sort();
             data.dedup();
             data
@@ -1801,13 +1760,101 @@ pub(crate) mod tests {
         .await;
     }
 
+
+    pub struct SequenceGenerator {
+        last_pk: u64,
+        rand_range: u64,
+        rng: StdRng,
+    }
+
+    impl SequenceGenerator {
+        pub fn new(rand_range: u64) -> Self {
+            Self {
+                last_pk: 1,
+                rand_range,
+                rng: StdRng::seed_from_u64(0),
+            }
+        }
+    }
+
+    impl SstableInfoGenerator for SequenceGenerator {
+        fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>> {
+            let mut data = Vec::with_capacity(VirtualNode::COUNT / 16 * kv_count);
+            for vnode_idx in 0..PARTITION_COUNT {
+                let vnode = vnode_idx * 64;
+                let mut last_pk = self.last_pk;
+                for _ in 0..kv_count {
+                    let k = if self.rng.next_u32() % 10 == 1
+                        && self.last_pk > self.rand_range
+                        && self.rand_range > 0
+                    {
+                        self.last_pk - self.rand_range + self.rng.next_u64() % self.rand_range
+                    } else {
+                        last_pk
+                    };
+                    data.push(test_table_key_of(k, vnode));
+                    last_pk += 1;
+                }
+            }
+            self.last_pk += kv_count as u64;
+            data.sort();
+            data.dedup();
+            data
+        }
+    }
+
+
     #[tokio::test]
     async fn test_sequence_compact() {
-        let mut test = CompactTest::new(64 * 1024, 1000);
-        test.test_selector_compact_impl(SequenceGenerator::new(1000))
+        let mut test = CompactTest::new(8 * 1024, 2000);
+        test.test_selector_compact_impl(SequenceGenerator::new(0))
             .await;
-        // let mut test = CompactTest::new(8 * 1024, 2000);
-        // test.test_selector_compact_impl(SequenceGenerator::new(0))
-        //     .await;
+    }
+
+    pub struct HotGenerator {
+        max_pk: u64,
+        rng: StdRng,
+    }
+
+    impl HotGenerator {
+        pub fn new(max_pk: u64) -> Self {
+            Self {
+                max_pk,
+                rng: StdRng::seed_from_u64(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SstableInfoGenerator for HotGenerator {
+        fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>> {
+            let mut data = Vec::with_capacity(VirtualNode::COUNT / 16 * kv_count);
+            let hot_vnode_idx = (self.rng.next_u32() % 4) as usize * 4;
+            let cold_vnode_idx = (self.rng.next_u32() % 4) as usize * 3;
+            for vnode_idx in 0..PARTITION_COUNT {
+                let vnode = vnode_idx * PARTITION_SIZE;
+                let vnode_kv_count = if vnode_idx == hot_vnode_idx {
+                    (kv_count - 1) * PARTITION_COUNT
+                } else if vnode_idx == cold_vnode_idx {
+                    continue
+                } else {
+                    1
+                };
+                for _ in 0..vnode_kv_count {
+                    let k = self.rng.next_u64() % self.max_pk + 1;
+                    data.push(test_table_key_of(k, vnode));
+                }
+            }
+            data.sort();
+            data.dedup();
+            data
+        }
+    }
+
+    #[tokio::test]
+    async fn test_vnode_hot_compact() {
+        let mut test = CompactTest::new(64 * 1024, 4000);
+        test.test_selector_compact_impl(HotGenerator::new(100000))
+            .await;
     }
 }
