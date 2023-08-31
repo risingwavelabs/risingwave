@@ -21,4 +21,3 @@ mod sentinel;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 pub use general::{OverWindowExecutor, OverWindowExecutorArgs};
-pub use over_partition::CachePolicy;

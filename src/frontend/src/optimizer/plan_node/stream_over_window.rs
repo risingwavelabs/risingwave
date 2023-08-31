@@ -120,20 +120,19 @@ impl StreamNode for StreamOverWindow {
             .infer_state_table()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
-        let partition_cache_policy = self
+        let cache_policy = self
             .base
             .ctx
             .session_ctx()
             .config()
-            .get_streaming_over_window_cache_policy()
-            .to_string();
+            .get_streaming_over_window_cache_policy();
 
         PbNodeBody::OverWindow(OverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
-            partition_cache_policy,
+            cache_policy: cache_policy.to_protobuf() as _,
         })
     }
 }

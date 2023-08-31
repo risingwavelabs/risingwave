@@ -23,6 +23,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{RowRef, StreamChunk};
 use risingwave_common::catalog::Field;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{DataType, DefaultOrdered};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
@@ -34,8 +35,8 @@ use risingwave_storage::StateStore;
 
 use super::delta_btree_map::Change;
 use super::over_partition::{
-    new_empty_partition_cache, shrink_partition_cache, CacheKey, CachePolicy, OverPartition,
-    PartitionCache, PartitionDelta,
+    new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
+    PartitionDelta,
 };
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;

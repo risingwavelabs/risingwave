@@ -584,12 +584,20 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
+enum OverWindowCachePolicy {
+  OVER_WINDOW_CACHE_POLICY_UNSPECIFIED = 0;
+  OVER_WINDOW_CACHE_POLICY_FULL = 1;
+  OVER_WINDOW_CACHE_POLICY_RECENT = 2;
+  OVER_WINDOW_CACHE_POLICY_RECENT_FIRST_N = 3;
+  OVER_WINDOW_CACHE_POLICY_RECENT_LAST_N = 4;
+}
+
 message OverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
-  string partition_cache_policy = 5;
+  OverWindowCachePolicy cache_policy = 5;
 }
 
 message StreamNode {

@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::Arc;
 
+use risingwave_common::session_config::OverWindowCachePolicy;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_pb::stream_plan::PbOverWindowNode;
@@ -23,9 +23,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{
-    BoxedExecutor, CachePolicy, Executor, OverWindowExecutor, OverWindowExecutorArgs,
-};
+use crate::executor::{BoxedExecutor, Executor, OverWindowExecutor, OverWindowExecutorArgs};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct OverWindowExecutorBuilder;
@@ -76,8 +74,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             state_table,
             watermark_epoch: stream.get_watermark_epoch(),
             chunk_size: params.env.config().developer.chunk_size,
-            cache_policy: CachePolicy::from_str(node.get_partition_cache_policy().as_str())
-                .unwrap_or(CachePolicy::Full),
+            cache_policy: OverWindowCachePolicy::from_protobuf(node.get_cache_policy()?),
         })
         .boxed())
     }

@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::session_config::OverWindowCachePolicy;
 use risingwave_expr::agg::{AggArgs, AggKind};
 use risingwave_expr::function::window::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
-use risingwave_stream::executor::{CachePolicy, OverWindowExecutor, OverWindowExecutorArgs};
+use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
 
 use crate::prelude::*;
 
@@ -78,7 +79,7 @@ async fn create_executor<S: StateStore>(
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
-        cache_policy: CachePolicy::Recent,
+        cache_policy: OverWindowCachePolicy::Recent,
     });
     (tx, executor.boxed().execute())
 }

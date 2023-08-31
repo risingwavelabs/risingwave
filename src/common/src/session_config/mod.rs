@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod over_window;
 mod query_mode;
 mod search_path;
 mod transaction_isolation_level;
@@ -23,6 +24,7 @@ use std::ops::Deref;
 use chrono_tz::Tz;
 use educe::{self, Educe};
 use itertools::Itertools;
+pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use tracing::info;
@@ -478,11 +480,8 @@ pub struct ConfigMap {
     streaming_rate_limit: StreamingRateLimit,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "recent-first-n" or "recent-last-n".
-    #[educe(Default(
-        expression = "ConfigString::<STREAMING_OVER_WINDOW_CACHE_POLICY>(String::from(\"full\"))"
-    ))]
-    streaming_over_window_cache_policy: StreamingOverWindowCachePolicy,
+    /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
+    streaming_over_window_cache_policy: OverWindowCachePolicy,
 }
 
 impl ConfigMap {
@@ -868,7 +867,7 @@ impl ConfigMap {
             VariableInfo{
                 name: StreamingOverWindowCachePolicy::entry_name().to_lowercase(),
                 setting: self.streaming_over_window_cache_policy.to_string(),
-                description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent-first-n" or "recent-last-n"."#),
+                description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent_first_n" or "recent_last_n"."#),
             },
         ]
     }
@@ -1001,7 +1000,7 @@ impl ConfigMap {
         None
     }
 
-    pub fn get_streaming_over_window_cache_policy(&self) -> &str {
-        &self.streaming_over_window_cache_policy
+    pub fn get_streaming_over_window_cache_policy(&self) -> OverWindowCachePolicy {
+        self.streaming_over_window_cache_policy
     }
 }

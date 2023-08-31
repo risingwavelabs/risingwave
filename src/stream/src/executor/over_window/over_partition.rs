@@ -19,14 +19,13 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
-use enum_as_inner::EnumAsInner;
 use futures::stream::select_all;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
-use parse_display::{Display, FromStr};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DataType;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -41,19 +40,6 @@ use super::sentinel::KeyWithSentinel;
 use crate::executor::over_window::delta_btree_map::DeltaBTreeMap;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::StreamExecutorResult;
-
-#[derive(Debug, Clone, Copy, Display, FromStr, EnumAsInner)]
-#[display(style = "snake_case")]
-pub enum CachePolicy {
-    /// Cache all entries.
-    Full,
-    /// Cache only recently accessed range of entries.
-    Recent,
-    /// Cache only the first N entries in recently accessed range.
-    RecentFirstN,
-    /// Cache only the last N entries in recently accessed range.
-    RecentLastN,
-}
 
 pub(super) type CacheKey = KeyWithSentinel<StateKey>;
 
