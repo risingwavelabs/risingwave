@@ -285,7 +285,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 "SourceExecutor",
                 &self.actor_ctx.id.to_string(),
                 &core.source_id.to_string(),
-            ]);
+            ])
+            .inc_by(1);
         for ele in split_info.iter_mut() {
             if let Some(recover_state) = core
                 .split_state_store
