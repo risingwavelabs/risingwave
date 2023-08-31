@@ -268,7 +268,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
-        split_info: &mut Vec<SplitImpl>,
+        split_info: &mut [SplitImpl],
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
@@ -295,7 +295,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 *ele = recover_state;
             }
         }
-        self.replace_stream_reader_with_target_state(source_desc, stream, split_info.clone())
+        self.replace_stream_reader_with_target_state(source_desc, stream, split_info.to_owned())
             .await
     }
 
