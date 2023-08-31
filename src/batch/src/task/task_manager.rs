@@ -497,6 +497,8 @@ mod tests {
         assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
     }
 
+    /// https://github.com/risingwavelabs/risingwave/issues/11979
+    #[ignore]
     #[tokio::test]
     async fn test_task_abort_for_block() {
         let manager = Arc::new(BatchManager::new(
