@@ -12,7 +12,7 @@ The query engine of RisingWave supports two types of queries: highly concurrent 
 | Result Set	    | Small	         | Small, Medium, Large	 |
 | Use Scenarios	 | Dashboard	     | Adhoc analysis	       |
 
-Our distributed query processing engine is designed for complex adhoc queries, and it can’t meet the latency/QPS
+Our distributed query processing engine is designed for complex adhoc queries, and it can't meet the latency/QPS
 requirement of point queries, and in this article we introduce local execution mode for point queries.
 
 ## Design
@@ -21,7 +21,7 @@ requirement of point queries, and in this article we introduce local execution m
 
 ## Example 1: select a from t where b in (1, 2, 3, 4)
 
-Let’s use the above SQL as an example:
+Let's use the above SQL as an example:
 
 
 ![Example 1](./images/batch-local-execution-mode/example1.svg)

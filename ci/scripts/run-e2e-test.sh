@@ -3,10 +3,13 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-while getopts 'p:' opt; do
+while getopts 'p:m:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
+            ;;
+        m )
+            mode=$OPTARG
             ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
@@ -19,6 +22,26 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+if [[ $mode == "standalone" ]]; then
+  source ci/scripts/standalone-utils.sh
+fi
+
+cluster_start() {
+  if [[ $mode == "standalone" ]]; then
+    start_standalone "$PREFIX_LOG"/standalone.log &
+    cargo make ci-start standalone-minio-etcd-compactor
+  else
+    cargo make ci-start "$mode"
+  fi
+}
+
+cluster_stop() {
+  if [[ $mode == "standalone" ]]; then
+    stop_standalone
+  fi
+  cargo make ci-kill
+}
+
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
@@ -29,60 +52,59 @@ mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/rising
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
-
-echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
+echo "--- e2e, $mode, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
+cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
-echo "--- e2e, ci-3streaming-2serving-3fe, batch"
+echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
+cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
-echo "--- e2e, ci-3streaming-2serving-3fe, Apache Superset"
+echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
-echo "--- e2e, ci-3streaming-2serving-3fe, python udf"
+echo "--- e2e, $mode, python udf"
 python3 e2e_test/udf/test.py &
 sleep 2
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
-echo "--- e2e, ci-3streaming-2serving-3fe, java udf"
+echo "--- e2e, $mode, java udf"
 java -jar risingwave-udf-example.jar &
 sleep 2
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
-echo "--- e2e, ci-3streaming-2serving-3fe, generated"
+echo "--- e2e, $mode, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
+cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
-echo "--- e2e, ci-3streaming-2serving-3fe, extended query"
+echo "--- e2e, $mode, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
+cluster_start
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_mode/**/*.slt'
 RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1 \
   -p 4566 \
   -u root
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cluster_stop
 
 if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     echo "--- e2e, ci-delete-range-test"
@@ -97,7 +119,7 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
-    cargo make ci-kill
+    cluster_stop
 fi
 
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
@@ -136,7 +158,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
-    cargo make ci-kill
+    cluster_stop
 fi
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
@@ -156,4 +178,42 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     bash "${test_root}/run_all.sh"
     echo "--- Kill cluster"
     cargo make kill
+fi
+
+if [[ "$mode" == "standalone" ]]; then
+  run_sql() {
+    psql -h localhost -p 4566 -d dev -U root -c "$@"
+  }
+
+  echo "--- e2e, standalone, cluster-persistence-test"
+  cluster_start
+  run_sql "CREATE TABLE t (v1 int);
+  INSERT INTO t VALUES (1);
+  INSERT INTO t VALUES (2);
+  INSERT INTO t VALUES (3);
+  INSERT INTO t VALUES (4);
+  INSERT INTO t VALUES (5);
+  flush;"
+
+  EXPECTED=$(run_sql "SELECT * FROM t ORDER BY v1;")
+  echo -e "Expected:\n$EXPECTED"
+
+  echo "Restarting standalone"
+  restart_standalone
+
+  ACTUAL=$(run_sql "SELECT * FROM t ORDER BY v1;")
+  echo -e "Actual:\n$ACTUAL"
+
+  if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+    echo "ERROR: Expected did not match Actual."
+    exit 1
+  else
+    echo "PASSED"
+  fi
+
+  echo "--- Kill cluster"
+  cluster_stop
+
+  # Make sure any remaining background task exits.
+  wait
 fi
