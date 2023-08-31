@@ -420,6 +420,9 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
+    #[serde(default = "default::streaming::streaming_metric_level")]
+    pub streaming_metric_level: MetricLevel,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1031,7 +1034,7 @@ pub mod default {
     }
 
     pub mod streaming {
-        use crate::config::AsyncStackTraceOption;
+        use crate::config::{AsyncStackTraceOption, MetricLevel};
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -1045,6 +1048,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn streaming_metric_level() -> MetricLevel {
+            MetricLevel::Info
         }
     }
 

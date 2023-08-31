@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
@@ -22,10 +22,13 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntGauge, Registry,
 };
+use risingwave_common::config::MetricLevel;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct StreamingMetrics {
+    pub level: MetricLevel,
+
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -129,11 +132,16 @@ pub struct StreamingMetrics {
     pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
 }
 
-pub static GLOBAL_STREAMING_METRICS: LazyLock<StreamingMetrics> =
-    LazyLock::new(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY));
+pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
+
+pub fn global_streaming_metrics(streaming_metric_level: MetricLevel) -> StreamingMetrics {
+    GLOBAL_STREAMING_METRICS
+        .get_or_init(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY, streaming_metric_level))
+        .clone()
+}
 
 impl StreamingMetrics {
-    fn new(registry: &Registry) -> Self {
+    fn new(registry: &Registry, level: MetricLevel) -> Self {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
@@ -694,6 +702,7 @@ impl StreamingMetrics {
         .unwrap();
 
         Self {
+            level,
             executor_row_count,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
@@ -769,6 +778,6 @@ impl StreamingMetrics {
 
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        GLOBAL_STREAMING_METRICS.clone()
+        global_streaming_metrics(MetricLevel::Disabled)
     }
 }
