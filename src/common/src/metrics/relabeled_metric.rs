@@ -32,6 +32,7 @@ pub struct RelabeledHistogramVec {
     relabel_threshold: MetricLevel,
     metric_level: MetricLevel,
     metric: HistogramVec,
+    relabel_num: usize,
 }
 
 impl RelabeledHistogramVec {
@@ -44,12 +45,32 @@ impl RelabeledHistogramVec {
             relabel_threshold,
             metric_level,
             metric,
+            relabel_num: usize::MAX,
+        }
+    }
+
+    pub fn with_metric_level_relabel_n(
+        metric_level: MetricLevel,
+        metric: HistogramVec,
+        relabel_threshold: MetricLevel,
+        relabel_num: usize,
+    ) -> Self {
+        Self {
+            relabel_threshold,
+            metric_level,
+            metric,
+            relabel_num,
         }
     }
 
     pub fn with_label_values(&self, vals: &[&str]) -> Histogram {
         if self.metric_level > self.relabel_threshold {
-            return self.metric.with_label_values(&vec![""; vals.len()]);
+            // relabel first n labels to empty string
+            let mut relabeled_vals = vals.to_vec();
+            for label in relabeled_vals.iter_mut().take(self.relabel_num) {
+                *label = "";
+            }
+            self.metric.with_label_values(&relabeled_vals);
         }
         self.metric.with_label_values(vals)
     }
