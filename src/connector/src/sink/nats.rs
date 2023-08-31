@@ -63,9 +63,9 @@ impl NatsConfig {
         let config = serde_json::from_value::<NatsConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
-            return Err(SinkError::Config(anyhow!(
+            Err(SinkError::Config(anyhow!(
                 "Nats sink only support append-only mode"
-            )));
+            )))
         } else {
             Ok(config)
         }

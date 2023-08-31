@@ -19,12 +19,12 @@ pub mod coordinate;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+pub mod nats;
 pub mod redis;
 pub mod remote;
 #[cfg(any(test, madsim))]
 pub mod test_sink;
 pub mod utils;
-pub mod nats;
 
 use std::collections::HashMap;
 
@@ -52,12 +52,12 @@ use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
+use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
 #[cfg(any(test, madsim))]
 use crate::sink::test_sink::{build_test_sink, TEST_SINK_NAME};
 use crate::ConnectorParams;
-use crate::sink::nats::{NatsConfig, NatsSink,NATS_SINK};
 
 pub const DOWNSTREAM_SINK_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
@@ -439,7 +439,11 @@ impl SinkImpl {
                 param.sink_type.is_append_only(),
             )?),
             SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),
-            SinkConfig::Nats(cfg) => SinkImpl::Nats(NatsSink::new(cfg, param.schema(), param.sink_type.is_append_only())),
+            SinkConfig::Nats(cfg) => SinkImpl::Nats(NatsSink::new(
+                cfg,
+                param.schema(),
+                param.sink_type.is_append_only(),
+            )),
             SinkConfig::RemoteIceberg(cfg) => {
                 SinkImpl::RemoteIceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
             }
@@ -470,7 +474,7 @@ pub enum SinkError {
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
     #[error("Nats error: {0}")]
-    Nats(String)
+    Nats(String),
 }
 
 impl From<RpcError> for SinkError {
