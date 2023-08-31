@@ -339,7 +339,6 @@ type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, true>;
-type StreamingOverWindowCachePolicy = ConfigString<STREAMING_OVER_WINDOW_CACHE_POLICY>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -602,7 +601,7 @@ impl ConfigMap {
             self.streaming_rate_limit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
             self.cdc_backfill = val.as_slice().try_into()?
-        } else if key.eq_ignore_ascii_case(StreamingOverWindowCachePolicy::entry_name()) {
+        } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
             self.streaming_over_window_cache_policy = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
@@ -689,7 +688,7 @@ impl ConfigMap {
             Ok(self.streaming_rate_limit.to_string())
         } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
             Ok(self.cdc_backfill.to_string())
-        } else if key.eq_ignore_ascii_case(StreamingOverWindowCachePolicy::entry_name()) {
+        } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
             Ok(self.streaming_over_window_cache_policy.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
@@ -879,7 +878,7 @@ impl ConfigMap {
                 description: String::from("Enable backfill for CDC table to allow lock-free and incremental snapshot"),
             },
             VariableInfo{
-                name: StreamingOverWindowCachePolicy::entry_name().to_lowercase(),
+                name: OverWindowCachePolicy::entry_name().to_lowercase(),
                 setting: self.streaming_over_window_cache_policy.to_string(),
                 description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent_first_n" or "recent_last_n"."#),
             },
