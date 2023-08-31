@@ -7,4 +7,6 @@ INSERT INTO auction VALUES ((BIGINT '300'), 'K3rQUhJGOz', 'tGNE670YSz', (BIGINT 
 
 UPDATE auction SET item_name = '6PKxkG3jSY', description = 'qb3HkCKF5S', initial_bid = (BIGINT '886'), reserve = (BIGINT '583'), date_time = TIMESTAMP '2022-08-24 06:14:42', expires = TIMESTAMP '2022-08-24 06:14:43', seller = (BIGINT '9223372036854775807'), category = (BIGINT '1'), extra = 'VFrx0OCGTo' WHERE id = (BIGINT '701');
 
+-- Works if arrangement backfill disabled.
+-- SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=false;
 CREATE MATERIALIZED VIEW m AS SELECT * FROM auction WHERE auction.id = BIGINT '662';
