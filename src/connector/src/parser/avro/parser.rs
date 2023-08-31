@@ -119,7 +119,7 @@ impl AvroParserConfig {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
         if avro_config.use_schema_registry {
-            let client = Client::new(url, &avro_config.client_config)?;
+            let client = Client::new(vec![url], &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
             let upsert_primary_key_column_name =
                 if enable_upsert && !avro_config.upsert_primary_key.is_empty() {

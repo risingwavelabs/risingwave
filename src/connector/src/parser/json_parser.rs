@@ -155,7 +155,7 @@ pub async fn schema_to_columns(
         .map_err(|e| InternalError(format!("failed to parse url ({}): {}", schema_location, e)))?;
     let schema_content = if use_schema_registry {
         let schema_registry_auth = SchemaRegistryAuth::from(props);
-        let client = Client::new(url, &schema_registry_auth)?;
+        let client = Client::new(vec![url], &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
         let resolver = ConfluentSchemaResolver::new(client);
         resolver

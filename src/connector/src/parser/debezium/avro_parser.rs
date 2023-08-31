@@ -110,7 +110,7 @@ impl DebeziumAvroParserConfig {
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
-        let client = Client::new(url, client_config)?;
+        let client = Client::new(vec![url], client_config)?;
         let raw_schema = client
             .get_schema_by_subject(format!("{}-key", &kafka_topic).as_str())
             .await?;

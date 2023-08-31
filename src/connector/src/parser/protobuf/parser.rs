@@ -96,7 +96,7 @@ impl ProtobufParserConfig {
                 schema_key,
                 schema_value,
             );
-            let client = Client::new(url, &protobuf_config.client_config)?;
+            let client = Client::new(vec![url], &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
             match url.scheme() {
