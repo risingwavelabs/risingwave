@@ -11,8 +11,7 @@ python3 -m pytest
 cd ${REPO_ROOT}
 
 echo "+++ Run unit tests with coverage"
-# use tee to disable progress bar
-NEXTEST_PROFILE=ci cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints,sync_point 2> >(tee);
+NEXTEST_PROFILE=ci cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints,sync_point
 
 echo "--- Codecov upload coverage reports"
 curl -Os https://uploader.codecov.io/latest/linux/codecov && chmod +x codecov
