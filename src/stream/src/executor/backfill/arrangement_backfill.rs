@@ -112,6 +112,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        tracing::info!("vnodes of upstream_table: {:?}", self.upstream_table.vnodes());
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -329,6 +330,8 @@ where
                                         for (op, row) in chunk.rows() {
                                             tracing::info!(
                                                 actor_id = self.actor_id,
+                                                vnode = ?vnode,
+                                                pk = ?pk_indices,
                                                 "rows in snapshot_read: {:?}", row
                                             );
                                         }
@@ -366,10 +369,6 @@ where
                     let ops = vec![Op::Insert; chunk.capacity()];
                     StreamChunk::from_parts(ops, chunk)
                 })) {
-
-                    for (op, row) in chunk.rows() {
-                        tracing::info!("rows in snapshot builder: {:?}", row);
-                    }
                     // Raise the current position.
                     // As snapshot read streams are ordered by pk, so we can
                     // just use the last row to update `current_pos`.
@@ -401,6 +400,10 @@ where
                             &self.output_indices,
                         ));
                     }
+                    tracing::info!(
+                        actor_id = self.actor_id,
+                        "replicated_rows: {:#?}", chunk
+                    );
                     // Replicate
                     upstream_table.write_chunk(chunk);
                 }
