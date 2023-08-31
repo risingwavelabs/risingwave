@@ -260,7 +260,7 @@ impl LogicalAgg {
 /// build the plan like `LogicalAgg - LogicalProject`.
 /// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
 /// having clause.
-struct LogicalAggBuilder {
+pub struct LogicalAggBuilder {
     /// the builder of the input Project
     input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output

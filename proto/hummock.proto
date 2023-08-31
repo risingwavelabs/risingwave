@@ -294,6 +294,7 @@ message CompactTask {
     MANUAL = 3;
     SHARED_BUFFER = 4;
     TTL = 5;
+    TOMBSTONE = 6;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -690,6 +691,7 @@ message CompactionConfig {
 
   // for tier compaction pick overlapping level
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
+  uint32 tombstone_reclaim_ratio = 19;
 }
 
 message TableStats {

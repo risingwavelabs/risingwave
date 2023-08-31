@@ -216,7 +216,7 @@ pub fn trigger_sst_stat(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    if current_time - previous_time > 600
+    if current_time > 600 + previous_time
         && metrics
             .time_after_last_observation
             .compare_exchange(

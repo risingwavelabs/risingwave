@@ -28,6 +28,7 @@ use risingwave_sqlparser::ast::*;
 use self::util::DataChunkToRowSetAdapter;
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
+use crate::handler::cancel_job::handle_cancel;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
@@ -37,6 +38,7 @@ mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
+pub mod cancel_job;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
@@ -284,7 +286,7 @@ pub async fn handle(
         Statement::ShowObjects {
             object: show_object,
             filter,
-        } => show::handle_show_object(handler_args, show_object, filter),
+        } => show::handle_show_object(handler_args, show_object, filter).await,
         Statement::ShowCreateObject { create_type, name } => {
             show::handle_show_create_object(handler_args, create_type, name)
         }
@@ -518,6 +520,7 @@ pub async fn handle(
             snapshot,
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
+        Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

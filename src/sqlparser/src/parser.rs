@@ -133,7 +133,7 @@ impl std::error::Error for ParserError {}
 type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
 
 /// Reference:
-/// https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE
+/// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
@@ -238,6 +238,7 @@ impl Parser {
                         Ok(self.parse_show()?)
                     }
                 }
+                Keyword::CANCEL => Ok(self.parse_cancel_job()?),
                 Keyword::DESCRIBE => Ok(Statement::Describe {
                     name: self.parse_object_name()?,
                 }),
@@ -673,6 +674,15 @@ impl Parser {
                 Ok(Expr::Value(self.parse_value()?))
             }
             Token::Parameter(number) => self.parse_param(number),
+            Token::Pipe => {
+                let args = self.parse_comma_separated(Parser::parse_identifier)?;
+                self.expect_token(&Token::Pipe)?;
+                let body = self.parse_expr()?;
+                Ok(Expr::LambdaFunction {
+                    args,
+                    body: Box::new(body),
+                })
+            }
             Token::LParen => {
                 let expr =
                     if self.parse_keyword(Keyword::SELECT) || self.parse_keyword(Keyword::WITH) {
@@ -1083,7 +1093,7 @@ impl Parser {
         })
     }
 
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     pub fn parse_position_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
 
@@ -1102,7 +1112,7 @@ impl Parser {
         })
     }
 
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
 
@@ -1129,8 +1139,8 @@ impl Parser {
         })
     }
 
-    /// TRIM ([WHERE] ['text'] FROM 'text')\
-    /// TRIM ([WHERE] [FROM] 'text' [, 'text'])
+    /// `TRIM ([WHERE] ['text'] FROM 'text')`\
+    /// `TRIM ([WHERE] [FROM] 'text' [, 'text'])`
     pub fn parse_trim_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
@@ -1530,8 +1540,8 @@ impl Parser {
         }
     }
 
-    /// We parse both array[1,9][1], array[1,9][1:2], array[1,9][:2], array[1,9][1:] and
-    /// array[1,9][:] in this function.
+    /// We parse both `array[1,9][1]`, `array[1,9][1:2]`, `array[1,9][:2]`, `array[1,9][1:]` and
+    /// `array[1,9][:]` in this function.
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         let new_expr = match self.peek_token().token {
             Token::Colon => {
@@ -4020,6 +4030,12 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::JOBS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Jobs,
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 _ => {}
             }
         }
@@ -4027,6 +4043,18 @@ impl Parser {
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })
+    }
+
+    pub fn parse_cancel_job(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::JOBS)?;
+        let mut job_ids = vec![];
+        loop {
+            job_ids.push(self.parse_literal_uint()? as u32);
+            if !self.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(Statement::CancelJobs(JobIdents(job_ids)))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude

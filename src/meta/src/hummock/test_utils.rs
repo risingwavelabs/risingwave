@@ -300,9 +300,23 @@ pub fn get_sorted_committed_object_ids(
         .sorted()
         .collect_vec()
 }
+
 pub async fn setup_compute_env_with_config(
     port: i32,
     config: CompactionConfig,
+) -> (
+    MetaSrvEnv<MemStore>,
+    HummockManagerRef<MemStore>,
+    ClusterManagerRef<MemStore>,
+    WorkerNode,
+) {
+    setup_compute_env_with_metric(port, config, None).await
+}
+
+pub async fn setup_compute_env_with_metric(
+    port: i32,
+    config: CompactionConfig,
+    meta_metric: Option<MetaMetrics>,
 ) -> (
     MetaSrvEnv<MemStore>,
     HummockManagerRef<MemStore>,
@@ -326,7 +340,7 @@ pub async fn setup_compute_env_with_config(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager,
-        Arc::new(MetaMetrics::new()),
+        Arc::new(meta_metric.unwrap_or_default()),
         compactor_manager,
         config,
         compactor_streams_change_tx,
