@@ -204,4 +204,4 @@ SELECT
     1 AS col_0
 FROM
     m19 AS t_0
-        FULL JOIN tumble (auction, auction.date_time, INTERVAL '7') AS tumble_1 ON t_0.col_0 = tumble_1.date_time;
+        JOIN tumble (auction, auction.date_time, INTERVAL '7') AS tumble_1 ON t_0.col_0 = tumble_1.date_time;
