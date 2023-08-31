@@ -134,12 +134,12 @@ pub async fn collect_data_chunk_with_builder<E, S>(
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                builder.append_one_row_no_finish(row.into_owned_row());
+                builder.append_one_row_no_finish(row);
             }
             None => break,
         }

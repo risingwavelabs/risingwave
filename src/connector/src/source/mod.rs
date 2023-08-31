@@ -29,8 +29,11 @@ pub use base::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
+pub mod external;
 mod manager;
-pub use manager::SourceColumnDesc;
+mod mock_external_table;
+pub use manager::{SourceColumnDesc, SourceColumnType};
+pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;

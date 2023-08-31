@@ -18,7 +18,8 @@
 //!
 //! ## Construction
 //!
-//! Expressions can be constructed by [`build()`] function, which returns a [`BoxedExpression`].
+//! Expressions can be constructed by [`build_func()`] function, which returns a
+//! [`BoxedExpression`].
 //!
 //! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost()`]
 //! function.
@@ -33,6 +34,7 @@
 // These modules define concrete expression structures.
 mod expr_array_concat;
 mod expr_array_to_string;
+mod expr_array_transform;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;

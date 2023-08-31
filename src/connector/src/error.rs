@@ -26,6 +26,15 @@ pub enum ConnectorError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
 
+    #[error("Config error: {0}")]
+    Config(anyhow::Error),
+
+    #[error("Connection error: {0}")]
+    Connection(anyhow::Error),
+
+    #[error("MySQL error: {0}")]
+    MySql(#[from] mysql_async::Error),
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
