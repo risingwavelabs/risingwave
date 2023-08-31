@@ -91,7 +91,7 @@ impl Client {
         }
 
         while !fut_req.is_empty() {
-            let (result, index, mut remaining) = select_all(fut_req).await;
+            let (result, _index, remaining) = select_all(fut_req).await;
             if let Ok(Ok(res)) = result {
                 return Ok(res);
             }
