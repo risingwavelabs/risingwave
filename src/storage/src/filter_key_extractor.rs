@@ -418,6 +418,10 @@ impl StaticFilterKeyExtractorManager {
             if let Some(table) = self.id_to_table.get(&table_id) {
                 let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(table));
                 multi_filter_key_extractor.register(table_id, key_extractor);
+            } else {
+                return Err(HummockError::other(format!(
+                    "table {} is absent in id_to_table, need to request rpc list_tables to get the schema", table_id,
+                )));
             }
         }
         Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
