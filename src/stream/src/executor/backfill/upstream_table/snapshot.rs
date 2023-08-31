@@ -130,6 +130,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             for chunk in chunk_stream {
                 yield Some(chunk?);
             }
+            yield None;
         }
     }
 
