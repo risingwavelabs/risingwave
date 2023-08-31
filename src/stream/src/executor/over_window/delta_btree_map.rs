@@ -94,7 +94,7 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
     }
 
     /// Get a [`CursorWithDelta`] pointing to the first element that is above the given bound.
-    pub fn lower_bound(&self, bound: Bound<&K>) -> CursorWithDelta<'_, K, V> {
+    pub fn lower_bound(&self, bound: Bound<&K>) -> CursorWithDelta<'a, K, V> {
         // the implementation is very similar to `CursorWithDelta::peek_next`
         let mut ss_cursor = self.snapshot.lower_bound(bound);
         let mut dt_cursor = self.delta.lower_bound(bound);
@@ -118,7 +118,7 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
     }
 
     /// Get a [`CursorWithDelta`] pointing to the first element that is below the given bound.
-    pub fn upper_bound(&self, bound: Bound<&K>) -> CursorWithDelta<'_, K, V> {
+    pub fn upper_bound(&self, bound: Bound<&K>) -> CursorWithDelta<'a, K, V> {
         // the implementation is very similar to `CursorWithDelta::peek_prev`
         let mut ss_cursor = self.snapshot.upper_bound(bound);
         let mut dt_cursor = self.delta.upper_bound(bound);
