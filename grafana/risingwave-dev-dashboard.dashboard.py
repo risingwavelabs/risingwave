@@ -1443,6 +1443,16 @@ def section_streaming_errors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Source Reader Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
