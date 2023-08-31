@@ -19,8 +19,11 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
-use crate::hummock::compaction::picker::min_overlap_compaction_picker::MAX_LEVEL_COUNT;
+use super::{
+    CompactionInput, CompactionPicker, CompactionTaskOptimizeRule, CompactionTaskValidator,
+    LocalPickerStatistic,
+};
+use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -38,6 +41,8 @@ impl TierCompactionPicker {
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        let validator = CompactionTaskValidator::new(self.config.clone());
+
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Overlapping {
                 continue;
@@ -87,29 +92,19 @@ impl TierCompactionPicker {
             // Limit sstable file count to avoid using too much memory.
             let overlapping_max_compact_file_numer = std::cmp::min(
                 self.config.level0_max_compact_file_number,
-                MAX_LEVEL_COUNT as u64,
+                MAX_COMPACT_LEVEL_COUNT as u64,
             );
-            let mut waiting_enough_files = {
-                if compaction_bytes > max_compaction_bytes {
-                    false
-                } else {
-                    compact_file_count <= overlapping_max_compact_file_numer
-                }
-            };
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes > max_compaction_bytes {
-                    waiting_enough_files = false;
                     break;
                 }
 
                 if compact_file_count > overlapping_max_compact_file_numer {
-                    waiting_enough_files = false;
                     break;
                 }
 
                 if other.level_type() != LevelType::Overlapping {
-                    waiting_enough_files = false;
                     break;
                 }
 
@@ -126,24 +121,19 @@ impl TierCompactionPicker {
                 });
             }
 
-            // If waiting_enough_files is not satisfied, we will raise the priority of the number of
-            // levels to ensure that we can merge as many sub_levels as possible
-            let tier_sub_level_compact_level_count =
-                self.config.level0_overlapping_sub_level_compact_level_count as usize;
-            if select_level_inputs.len() < tier_sub_level_compact_level_count
-                && waiting_enough_files
-            {
-                stats.skip_by_count_limit += 1;
-                continue;
-            }
-
             select_level_inputs.reverse();
 
-            return Some(CompactionInput {
+            let result = CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
-            });
+            };
+
+            if !validator.valid_compact_task(&result, CompactionTaskOptimizeRule::Tier, stats) {
+                continue;
+            }
+
+            return Some(result);
         }
         None
     }
