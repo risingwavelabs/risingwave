@@ -23,7 +23,6 @@ pub(super) mod task_progress;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -47,11 +46,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, CompactorWorkload, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse,
+    CompactTaskProgress, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
-use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -320,9 +317,6 @@ pub fn start_compactor(
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
     let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
-    let mut system =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
-    let pid = sysinfo::get_current_pid().unwrap();
     let running_task_count = compactor_context.running_task_count.clone();
     let pull_task_ack = Arc::new(AtomicBool::new(true));
 
@@ -338,7 +332,6 @@ pub fn start_compactor(
         let shutdown_map = CompactionShutdownMap::default();
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
 
         // This outer loop is to recreate stream.
         'start_stream: loop {
@@ -374,7 +367,6 @@ pub fn start_compactor(
 
             let executor = compactor_context.compaction_executor.clone();
             let sstable_object_id_manager = sstable_object_id_manager.clone();
-            let mut last_workload = CompactorWorkload::default();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -453,31 +445,10 @@ pub fn start_compactor(
                         }
 
                         tracing::info!(
-                            cpu = %last_workload.cpu,
                             running_task_count = %running_task_count.load(Ordering::Relaxed),
                             pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
                             pending_pull_task_count = %pending_pull_task_count
                         );
-
-                        continue;
-                    }
-
-                    _ = workload_collect_interval.tick() => {
-                        let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
-                        debug_assert!(refresh_result);
-                        let cpu = if let Some(process) = system.process(pid) {
-                            process.cpu_usage().div(cpu_core_num as f32) as u32
-                        } else {
-                            tracing::warn!("fail to get process pid {:?}", pid);
-                            0
-                        };
-
-                        tracing::debug!("compactor cpu usage {cpu}");
-                        let workload = CompactorWorkload {
-                            cpu,
-                        };
-
-                        last_workload = workload.clone();
 
                         continue;
                     }
