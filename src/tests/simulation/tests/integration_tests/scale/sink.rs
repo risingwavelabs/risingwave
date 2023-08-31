@@ -16,15 +16,15 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::export::futures::StreamExt;
-use tokio::rand::prelude::SliceRandom;
-use tokio::rand::thread_rng;
-use tokio::time;
-use rdkafka::consumer::{MessageStream, StreamConsumer};
+use futures::StreamExt;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
+use rdkafka::consumer::{Consumer, MessageStream, StreamConsumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use tokio::time;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int) append only;";
 const APPEND_ONLY_SINK_CREATE: &str = "create sink s1 from t with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_append_only', type='append-only');";
@@ -201,7 +201,7 @@ async fn test_sink_debezium() -> Result<()> {
     Ok(())
 }
 
-fn check_payload(msg: &BorrowedMessage, payload: &[u8], i: i64) {
+fn check_payload(msg: &BorrowedMessage<'_>, payload: &[u8], i: i64) {
     match msg.topic() {
         APPEND_ONLY_TOPIC => {
             let data: AppendOnlyPayload = serde_json::from_slice(payload).unwrap();
