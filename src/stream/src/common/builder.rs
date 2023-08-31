@@ -54,6 +54,7 @@ impl StreamChunkBuilder {
         // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
         // until `UpdateInsert` comes. This means that the effective output message size will indeed
         // be at most the original `capacity`
+        assert!(chunk_size >= 1);
         let reduced_capacity = chunk_size - 1;
         assert!(reduced_capacity > 0);
 
@@ -89,10 +90,11 @@ impl StreamChunkBuilder {
 
     /// Append an iterator of output index and datum to the builder, return a chunk if the builder
     /// is full.
-    fn append_with_iter<'a>(
+    /// Note: the caller must ensure that each column occurs exactly once in `iter`.
+    fn append_iter<'a>(
         &mut self,
         op: Op,
-        iter: impl Iterator<Item = (usize, DatumRef<'a>)>,
+        iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
     ) -> Option<StreamChunk> {
         self.ops.push(op);
         for (i, datum) in iter {
@@ -104,7 +106,7 @@ impl StreamChunkBuilder {
     /// Append a row to the builder, return a chunk if the builder is full.
     #[must_use]
     pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
-        self.append_with_iter(op, row.iter().enumerate())
+        self.append_iter(op, row.iter().enumerate())
     }
 
     /// Append a record to the builder, return a chunk if the builder is full.
@@ -204,7 +206,7 @@ impl JoinStreamChunkBuilder {
         row_update: impl Row,
         row_matched: impl Row,
     ) -> Option<StreamChunk> {
-        self.builder.append_with_iter(
+        self.builder.append_iter(
             op,
             self.update_to_output
                 .iter()
@@ -224,7 +226,7 @@ impl JoinStreamChunkBuilder {
     /// A [`StreamChunk`] will be returned when `size == capacity`.
     #[must_use]
     pub fn append_row_update(&mut self, op: Op, row_update: impl Row) -> Option<StreamChunk> {
-        self.builder.append_with_iter(
+        self.builder.append_iter(
             op,
             self.update_to_output
                 .iter()
@@ -242,7 +244,7 @@ impl JoinStreamChunkBuilder {
     /// A [`StreamChunk`] will be returned when `size == capacity`.
     #[must_use]
     pub fn append_row_matched(&mut self, op: Op, row_matched: impl Row) -> Option<StreamChunk> {
-        self.builder.append_with_iter(
+        self.builder.append_iter(
             op,
             self.update_to_output
                 .iter()
