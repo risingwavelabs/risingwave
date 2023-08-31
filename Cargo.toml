@@ -74,7 +74,7 @@ aws-types = "0.55"
 etcd-client = { package = "madsim-etcd-client", version = "0.3" }
 futures-async-stream = "0.2"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "f01e3ca", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = ["cmake-build"] }
 hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.3.1" }
