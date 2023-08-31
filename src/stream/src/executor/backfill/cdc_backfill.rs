@@ -110,6 +110,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
+        tracing::info!("pk_in_output_indices: {:?}", pk_in_output_indices);
+
         let pk_order = self.upstream_table.pk_order_types().to_vec();
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
@@ -254,7 +256,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
 
-            tracing::debug!(
+            tracing::info!(
                 "start the bacfill loop: [initial] binlog offset {:?}",
                 last_binlog_offset,
             );
@@ -383,7 +385,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
-                                    tracing::debug!(
+                                    tracing::info!(
                                         "snapshot read stream ends: last_binlog_offset {:?}, current_pk_pos {:?}",
                                         last_binlog_offset, current_pk_pos
                                     );
