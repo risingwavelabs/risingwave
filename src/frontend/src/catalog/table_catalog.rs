@@ -140,7 +140,7 @@ pub struct TableCatalog {
     pub watermark_columns: FixedBitSet,
 
     /// Optional field specifies the distribution key indices in pk.
-    /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
+    /// See <https://github.com/risingwavelabs/risingwave/issues/8377> for more information.
     pub dist_key_in_pk: Vec<usize>,
 
     pub created_at_epoch: Option<Epoch>,

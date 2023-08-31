@@ -56,7 +56,7 @@ level0_max_compact_file_number = 96
 tombstone_reclaim_ratio = 40
 
 [batch]
-enable_barrier_read = true
+enable_barrier_read = false
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -92,7 +92,7 @@ sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
-max_preload_wait_time_mill = 10
+max_preload_wait_time_mill = 0
 object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000

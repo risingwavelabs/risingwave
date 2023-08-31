@@ -19,6 +19,7 @@ pub mod coordinate;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+pub mod nats;
 pub mod redis;
 pub mod remote;
 #[cfg(any(test, madsim))]
@@ -51,6 +52,7 @@ use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
+use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
 #[cfg(any(test, madsim))]
@@ -270,6 +272,7 @@ pub enum SinkConfig {
     RemoteIceberg(RemoteIcebergConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
+    Nats(NatsConfig),
     #[cfg(any(test, madsim))]
     Test,
 }
@@ -346,6 +349,7 @@ impl SinkConfig {
             ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
                 properties,
             )?)),
+            NATS_SINK => Ok(SinkConfig::Nats(NatsConfig::from_hashmap(properties)?)),
             // Only in test or deterministic test, test sink is enabled.
             #[cfg(any(test, madsim))]
             TEST_SINK_NAME => Ok(SinkConfig::Test),
@@ -368,6 +372,7 @@ pub enum SinkImpl {
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
     Iceberg(IcebergSink),
+    Nats(NatsSink),
     RemoteIceberg(RemoteIcebergSink),
     TestSink(BoxSink),
 }
@@ -382,6 +387,7 @@ impl SinkImpl {
             SinkImpl::Kinesis(_) => "kinesis",
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
+            SinkImpl::Nats(_) => "nats",
             SinkImpl::RemoteIceberg(_) => "iceberg",
             SinkImpl::TestSink(_) => "test",
         }
@@ -401,6 +407,7 @@ macro_rules! dispatch_sink {
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
+            SinkImpl::Nats($sink) => $body,
             SinkImpl::RemoteIceberg($sink) => $body,
             SinkImpl::TestSink($sink) => $body,
         }
@@ -432,6 +439,11 @@ impl SinkImpl {
                 param.sink_type.is_append_only(),
             )?),
             SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),
+            SinkConfig::Nats(cfg) => SinkImpl::Nats(NatsSink::new(
+                cfg,
+                param.schema(),
+                param.sink_type.is_append_only(),
+            )),
             SinkConfig::RemoteIceberg(cfg) => {
                 SinkImpl::RemoteIceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
             }
@@ -461,6 +473,8 @@ pub enum SinkError {
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
+    #[error("Nats error: {0}")]
+    Nats(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

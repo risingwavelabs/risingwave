@@ -37,6 +37,7 @@ impl ExprRewriter for ConstEvalRewriter {
                 ExprImpl::InputRef(inner) => self.rewrite_input_ref(*inner),
                 ExprImpl::Literal(inner) => self.rewrite_literal(*inner),
                 ExprImpl::FunctionCall(inner) => self.rewrite_function_call(*inner),
+                ExprImpl::FunctionCallWithLambda(inner) => self.rewrite_function_call_with_lambda(*inner),
                 ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
                 ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
                 ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),

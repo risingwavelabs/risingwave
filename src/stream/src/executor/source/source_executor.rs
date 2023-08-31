@@ -419,6 +419,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     ..
                 } => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                        tracing::info!(
+                            "source exector: actor {:?} boot with splits: {:?}",
+                            self.actor_ctx.id,
+                            splits
+                        );
                         boot_state = splits.clone();
                     }
                 }
@@ -475,6 +480,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
+
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
