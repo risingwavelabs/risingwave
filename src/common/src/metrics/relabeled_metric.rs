@@ -32,6 +32,12 @@ pub struct RelabeledHistogramVec {
     relabel_threshold: MetricLevel,
     metric_level: MetricLevel,
     metric: HistogramVec,
+
+    /// The first `relabel_num` labels will be relabeled to empty string
+    ///
+    /// For example, if `relabel_num` is 1, and the input labels are `["actor_id",
+    /// "fragment_id", "table_id"]`, when threshold is reached, the label values will be
+    /// `["", "<original_fragment_id>", "<original_table_id>"]`.
     relabel_num: usize,
 }
 
