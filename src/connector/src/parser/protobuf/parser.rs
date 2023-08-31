@@ -25,11 +25,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
 use risingwave_pb::plan_common::ColumnDesc;
-use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
+use crate::parser::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties};
@@ -80,8 +81,7 @@ impl ProtobufParserConfig {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
-        let url = Url::parse(location)
-            .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
+        let url = handle_sr_list(location.as_str())?;
 
         let schema_bytes = if protobuf_config.use_schema_registry {
             let (schema_key, schema_value) = get_subject_by_strategy(
@@ -96,9 +96,10 @@ impl ProtobufParserConfig {
                 schema_key,
                 schema_value,
             );
-            let client = Client::new(vec![url], &protobuf_config.client_config)?;
+            let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
+            let url = url.get(0).unwrap();
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
                 "file" => {
@@ -115,12 +116,12 @@ impl ProtobufParserConfig {
                 }
                 "s3" => {
                     load_file_descriptor_from_s3(
-                        &url,
+                        url,
                         protobuf_config.aws_auth_props.as_ref().unwrap(),
                     )
                     .await
                 }
-                "https" | "http" => load_file_descriptor_from_http(&url).await,
+                "https" | "http" => load_file_descriptor_from_http(url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
                     scheme

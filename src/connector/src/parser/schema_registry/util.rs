@@ -21,7 +21,31 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 use serde_derive::{Deserialize, Serialize};
-use url::Url;
+use url::{ParseError, Url};
+
+pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>> {
+    let segment = addr.split(',').collect::<Vec<&str>>();
+    let mut errs: Vec<ParseError> = Vec::with_capacity(segment.len());
+    let mut urls = Vec::with_capacity(segment.len());
+    for ele in segment {
+        match ele.parse::<Url>() {
+            Ok(url) => urls.push(url),
+            Err(e) => errs.push(e),
+        }
+    }
+    if urls.is_empty() {
+        return Err(RwError::from(ProtocolError(format!(
+            "no valid url provided, got {:?}",
+            errs
+        ))));
+    }
+    tracing::debug!(
+        "schema registry client will use url {:?} to connect, the rest failed because: {:?}",
+        urls,
+        errs
+    );
+    Ok(urls)
+}
 
 /// extract the magic number and `schema_id` at the front of payload
 ///
@@ -164,4 +188,36 @@ struct ErrorResp {
 enum ReqResp<T> {
     Succeed(T),
     Failed(ErrorResp),
+}
+
+#[cfg(test)]
+mod test {
+    use crate::parser::schema_registry::handle_sr_list;
+
+    #[test]
+    fn test_handle_sr_list() {
+        let addr1 = "http://localhost:8081".to_owned();
+        assert_eq!(
+            handle_sr_list(&addr1).unwrap(),
+            vec!["http://localhost:8081".parse().unwrap()]
+        );
+
+        let addr2 = "http://localhost:8081,http://localhost:8082".to_owned();
+        assert_eq!(
+            handle_sr_list(&addr2).unwrap(),
+            vec![
+                "http://localhost:8081".parse().unwrap(),
+                "http://localhost:8082".parse().unwrap()
+            ]
+        );
+
+        let fail_addr = "http://localhost:8081,12345".to_owned();
+        assert_eq!(
+            handle_sr_list(&fail_addr).unwrap(),
+            vec!["http://localhost:8081".parse().unwrap(),]
+        );
+
+        let all_fail_addr = "54321,12345".to_owned();
+        assert!(handle_sr_list(&all_fail_addr).is_err());
+    }
 }
