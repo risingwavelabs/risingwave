@@ -240,6 +240,7 @@ impl StreamTableScan {
             })
             .collect_vec();
 
+        // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
             table_desc: Some(self.logical.table_desc.to_protobuf()),
             column_ids: upstream_column_ids.clone(),
