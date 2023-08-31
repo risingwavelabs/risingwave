@@ -135,7 +135,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    /// Generates a list of [`n`] simple scalar values of a specific [`type`].
+    /// Generates a list of `n` simple scalar values of a specific `type`.
     fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Vec<Expr> {
         (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }

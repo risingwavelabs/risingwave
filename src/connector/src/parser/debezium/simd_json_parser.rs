@@ -90,7 +90,9 @@ mod tests {
     ) -> DebeziumParser {
         let props = SpecificParserConfig {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
             protocol_config: ProtocolProperties::Debezium,
         };
         DebeziumParser::new(props, rw_columns, source_ctx)
@@ -537,6 +539,7 @@ mod tests {
     // postgres-specific data-type mapping tests
     mod test3_postgres {
         use super::*;
+        use crate::source::SourceColumnType;
 
         // schema for temporal-type test
         fn get_temporal_test_columns() -> Vec<SourceColumnDesc> {
@@ -596,8 +599,7 @@ mod tests {
                     ])),
                     column_id: 7.into(),
                     fields: vec![],
-                    is_row_id: false,
-                    is_meta: false,
+                    column_type: SourceColumnType::Normal,
                     is_pk: false,
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),

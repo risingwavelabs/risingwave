@@ -333,7 +333,10 @@ pub enum Expr {
     /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
     AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
-    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
+    UnaryOp {
+        op: UnaryOperator,
+        expr: Box<Expr>,
+    },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
     Cast {
         expr: Box<Expr>,
@@ -351,29 +354,32 @@ pub enum Expr {
         timestamp: Box<Expr>,
         time_zone: String,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
-    Extract { field: String, expr: Box<Expr> },
-    /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
+    /// `EXTRACT(DateTimeField FROM <expr>)`
+    Extract {
+        field: String,
+        expr: Box<Expr>,
+    },
+    /// `SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])`
     Substring {
         expr: Box<Expr>,
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     Position {
         substring: Box<Expr>,
         string: Box<Expr>,
     },
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     Overlay {
         expr: Box<Expr>,
         new_substring: Box<Expr>,
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
+    /// `TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)`\
     /// Or\
-    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
+    /// `TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])`
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
@@ -390,11 +396,16 @@ pub enum Expr {
     /// A literal value, such as string, number, date or NULL
     Value(Value),
     /// Parameter Symbol e.g. `$1`, `$1::int`
-    Parameter { index: u64 },
+    Parameter {
+        index: u64,
+    },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
-    TypedString { data_type: DataType, value: String },
+    TypedString {
+        data_type: DataType,
+        value: String,
+    },
     /// Scalar function call e.g. `LEFT(foo, 5)`
     Function(Function),
     /// `CASE [<operand>] WHEN <condition> THEN <result> ... [ELSE <result>] END`
@@ -427,12 +438,19 @@ pub enum Expr {
     /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
     ArraySubquery(Box<Query>),
     /// A subscript expression `arr[1]`
-    ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
+    ArrayIndex {
+        obj: Box<Expr>,
+        index: Box<Expr>,
+    },
     /// A slice expression `arr[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
+    },
+    LambdaFunction {
+        args: Vec<Ident>,
+        body: Box<Expr>,
     },
 }
 
@@ -666,6 +684,14 @@ impl fmt::Display for Expr {
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
             Expr::ArraySubquery(s) => write!(f, "ARRAY ({})", s),
+            Expr::LambdaFunction { args, body } => {
+                write!(
+                    f,
+                    "|{}| {}",
+                    args.iter().map(ToString::to_string).join(", "),
+                    body
+                )
+            }
         }
     }
 }
@@ -1078,7 +1104,7 @@ pub enum Statement {
     CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
-    /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
     CreateFunction {
         or_replace: bool,
         temporary: bool,
@@ -1160,7 +1186,7 @@ pub enum Statement {
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
-    /// SET <variable>
+    /// `SET <variable>`
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
     /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
@@ -1170,7 +1196,7 @@ pub enum Statement {
         variable: Ident,
         value: Vec<SetVariableValue>,
     },
-    /// SHOW <variable>
+    /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },

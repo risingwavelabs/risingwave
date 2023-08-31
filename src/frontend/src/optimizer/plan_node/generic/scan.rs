@@ -230,7 +230,7 @@ impl Scan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        table_name: String, // explain-only
+        table_name: String,
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,

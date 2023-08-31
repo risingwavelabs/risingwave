@@ -25,7 +25,7 @@ use risingwave_expr_macro::build_function;
 use super::{BoxedExpression, Expression};
 use crate::Result;
 
-/// This is forked from [`BinaryExpression`] for the following reasons:
+/// This is forked from [`crate::expr::template::BinaryExpression`] for the following reasons:
 /// * Optimize for the case when rhs path is const. (not implemented yet)
 /// * It can return null when neither input is null.
 /// * We could `append(RefItem)` directly rather than getting a `OwnedItem` first.

@@ -68,7 +68,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (dev mode)"
-    command: "ci/scripts/e2e-test.sh -p ci-dev"
+    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     depends_on:
       - "build-dev"
       - "build-other"
@@ -89,7 +89,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (release mode)"
-    command: "ci/scripts/e2e-test.sh -p ci-release"
+    command: "ci/scripts/e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
     depends_on:
       - "build-release"
       - "build-other"
@@ -325,6 +325,20 @@ steps:
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end clickhouse sink test (release mode)"
+    command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs

@@ -338,6 +338,8 @@ impl QueryRewriter<'_> {
                 }
             }
 
+            Expr::LambdaFunction { body, args: _ } => self.visit_expr(body),
+
             // No need to visit.
             Expr::Identifier(_)
             | Expr::CompoundIdentifier(_)

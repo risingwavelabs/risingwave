@@ -144,6 +144,9 @@ pub struct ReplaceTableContext {
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
 
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+
     /// The locations of the actors to build in the new table to replace.
     pub building_locations: Locations,
 
@@ -468,6 +471,7 @@ where
         ReplaceTableContext {
             old_table_fragments,
             merge_updates,
+            dispatchers,
             building_locations,
             existing_locations,
             table_properties: _,
@@ -489,6 +493,7 @@ where
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
+                dispatchers,
             })
             .await
         {
@@ -742,7 +747,7 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
             let system_params = env.system_params_manager().get_params().await;
-            let meta_metrics = Arc::new(MetaMetrics::new());
+            let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
