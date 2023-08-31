@@ -2246,12 +2246,12 @@ def section_hummock_tiered_cache(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "refill queue length",
+                    "Refill Queue Length",
                     "",
                     [
                         panels.target(
                             f"sum(refill_queue_length) by (instance)",
-                            "refill {{instance}}",
+                            "refill queue length @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2266,6 +2266,10 @@ def section_hummock_tiered_cache(outer_panels):
                         panels.target(
                             f"sum(rate({metric('data_refill_filtered_count')}[$__rate_interval])) by (instance)",
                             "data file cache refill - filtered @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_refill_latency_count')}[$__rate_interval])) by (op, instance)",
+                            "meta file cache refill - {{op}} @ {{instance}}",
                         ),
                     ],
                 ),
