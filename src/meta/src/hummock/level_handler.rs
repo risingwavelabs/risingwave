@@ -22,8 +22,8 @@ use risingwave_pb::hummock::{Level, SstableInfo};
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
-    compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
-    pending_tasks: Vec<RunningCompactTask>,
+    pub compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
+    pub pending_tasks: Vec<RunningCompactTask>,
 }
 
 impl LevelHandler {

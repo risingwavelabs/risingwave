@@ -780,7 +780,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn LevelSelector>,
-    ) -> Result<Option<CompactTask>> {
+    ) -> Result<(Vec<CompactTask>, Option<CompactTask>)> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
@@ -792,6 +792,54 @@ where
             &mut compaction.compaction_statuses;
 
         let start_time = Instant::now();
+
+        let trace_compact_task = |compact_task: &CompactTask, cost_time: Duration| {
+            let compact_task_statistics = statistics_compact_task(compact_task);
+
+            let level_type_label = format!(
+                "L{}->L{}",
+                compact_task.input_ssts[0].level_idx,
+                compact_task.input_ssts.last().unwrap().level_idx,
+            );
+
+            let level_count = compact_task.input_ssts.len();
+            if compact_task.input_ssts[0].level_idx == 0 {
+                self.metrics
+                    .l0_compact_level_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(level_count as _);
+            }
+
+            self.metrics
+                .compact_task_size
+                .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                .observe(compact_task_statistics.total_file_size as _);
+
+            self.metrics
+                .compact_task_size
+                .with_label_values(&[
+                    &compaction_group_id.to_string(),
+                    &format!("{} uncompressed", level_type_label),
+                ])
+                .observe(compact_task_statistics.total_uncompressed_file_size as _);
+
+            self.metrics
+                .compact_task_file_count
+                .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                .observe(compact_task_statistics.total_file_count as _);
+
+            tracing::trace!(
+                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
+                    compaction_group_id,
+                    level_count,
+                    compact_task.input_ssts[0].level_type().as_str_name(),
+                    compact_task.input_ssts[0].level_idx,
+                    compact_task.target_level,
+                    cost_time,
+                    compact_task_statistics
+                );
+        };
+
         // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
         let task_id = self
             .env
@@ -809,7 +857,7 @@ where
             .try_get_compaction_group_config(compaction_group_id)
         {
             Some(config) => config,
-            None => return Ok(None),
+            None => return Ok((vec![], None)),
         };
         self.precheck_compaction_group(
             compaction_group_id,
@@ -822,7 +870,7 @@ where
         {
             Some(c) => VarTransaction::new(c),
             None => {
-                return Ok(None);
+                return Ok((vec![], None));
             }
         };
         let (current_version, watermark) = {
@@ -838,10 +886,8 @@ where
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
             // compaction group has been deleted.
-            return Ok(None);
+            return Ok((vec![], None));
         }
-
-        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -852,56 +898,46 @@ where
             .filter(|(table_id, _)| member_table_ids.contains(table_id))
             .collect();
 
-        let compact_task = compact_status.get_compact_task(
-            current_version.get_compaction_group_levels(compaction_group_id),
-            task_id as HummockCompactionTaskId,
-            &group_config,
-            &mut stats,
-            selector,
-            table_id_to_option.clone(),
-        );
-        stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
-        let mut compact_task = match compact_task {
-            None => {
-                return Ok(None);
-            }
-            Some(task) => task,
-        };
-        compact_task.watermark = watermark;
-        compact_task.existing_table_ids = current_version
-            .levels
-            .get(&compaction_group_id)
-            .unwrap()
-            .member_table_ids
-            .clone();
-        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
-        let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
+        let mut trivial_task_vec = vec![];
+        let mut normal_task;
+        loop {
+            let compact_task = compact_status.get_compact_task(
+                current_version.get_compaction_group_levels(compaction_group_id),
+                task_id as HummockCompactionTaskId,
+                &group_config,
+                &mut stats,
+                selector,
+                table_id_to_option.clone(),
+            );
 
-        if is_trivial_reclaim {
-            compact_task.set_task_status(TaskStatus::Success);
-            tracing::debug!(
-                "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
-                compaction_group_id,
-                compact_task
-                    .input_ssts
-                    .iter()
-                    .map(|level| level.table_infos.len())
-                    .sum::<usize>(),
-                start_time.elapsed()
-            );
-        } else if is_trivial_move && can_trivial_move {
-            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
-            // this task has been finished and `trivial_move_task` does not need to be schedule.
-            compact_task.set_task_status(TaskStatus::Success);
-            tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
-                compaction_group_id,
-                compact_task.input_ssts[0].table_infos.len(),
-                compact_task.input_ssts[0].level_idx,
-                compact_task.target_level,
-                start_time.elapsed()
-            );
-        } else {
+            stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
+            let mut compact_task = match compact_task {
+                None => {
+                    return Ok((vec![], None));
+                }
+                Some(task) => task,
+            };
+            compact_task.watermark = watermark;
+            compact_task.existing_table_ids = current_version
+                .levels
+                .get(&compaction_group_id)
+                .unwrap()
+                .member_table_ids
+                .clone();
+            let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
+            let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
+
+            if is_trivial_reclaim || is_trivial_move {
+                compact_task.set_task_status(TaskStatus::Success);
+                trivial_task_vec.push(compact_task)
+            } else {
+                normal_task = Some(compact_task);
+                break;
+            }
+        }
+
+        let cost_time = start_time.elapsed();
+        if let Some(compact_task) = normal_task.as_mut() {
             compact_task.table_options = table_id_to_option
                 .into_iter()
                 .filter_map(|(table_id, table_option)| {
@@ -943,57 +979,18 @@ where
             // this task has been finished.
             compact_task.set_task_status(TaskStatus::Pending);
 
-            trigger_sst_stat(
-                &self.metrics,
-                compaction.compaction_statuses.get(&compaction_group_id),
-                &current_version,
-                compaction_group_id,
-            );
+            trace_compact_task(compact_task, cost_time);
+        }
 
-            let compact_task_statistics = statistics_compact_task(&compact_task);
+        trigger_sst_stat(
+            &self.metrics,
+            compaction.compaction_statuses.get(&compaction_group_id),
+            &current_version,
+            compaction_group_id,
+        );
 
-            let level_type_label = format!(
-                "L{}->L{}",
-                compact_task.input_ssts[0].level_idx,
-                compact_task.input_ssts.last().unwrap().level_idx,
-            );
-
-            let level_count = compact_task.input_ssts.len();
-            if compact_task.input_ssts[0].level_idx == 0 {
-                self.metrics
-                    .l0_compact_level_count
-                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                    .observe(level_count as _);
-            }
-
-            self.metrics
-                .compact_task_size
-                .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_statistics.total_file_size as _);
-
-            self.metrics
-                .compact_task_size
-                .with_label_values(&[
-                    &compaction_group_id.to_string(),
-                    &format!("{} uncompressed", level_type_label),
-                ])
-                .observe(compact_task_statistics.total_uncompressed_file_size as _);
-
-            self.metrics
-                .compact_task_file_count
-                .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .observe(compact_task_statistics.total_file_count as _);
-
-            tracing::trace!(
-                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
-                    compaction_group_id,
-                    level_count,
-                    compact_task.input_ssts[0].level_type().as_str_name(),
-                    compact_task.input_ssts[0].level_idx,
-                    compact_task.target_level,
-                    start_time.elapsed(),
-                    compact_task_statistics
-                );
+        for trivial_task in &trivial_task_vec {
+            trace_compact_task(trivial_task, cost_time);
         }
 
         #[cfg(test)]
@@ -1002,7 +999,7 @@ where
             self.check_state_consistency().await;
         }
 
-        Ok(Some(compact_task))
+        Ok((trivial_task_vec, normal_task))
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
@@ -1062,33 +1059,23 @@ where
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        let mut trivial_tasks = vec![];
-
-        while let Some(task) = self
+        let (trivial_task_vec, normal_task) = self
             .get_compact_task_impl(compaction_group_id, selector)
-            .await?
-        {
-            if CompactStatus::is_trivial_move_task(&task)
-                || CompactStatus::is_trivial_reclaim(&task)
-            {
-                println!("task: {:?}", task.task_id);
-                trivial_tasks.push(task);
+            .await?;
 
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            } else {
-                return Ok(Some(task));
-            }
+        println!(
+            "trivial_task_vec {:?} normal_task {:?}",
+            trivial_task_vec.len(),
+            normal_task
+        );
 
-            println!("trivial_tasks len {}", trivial_tasks.len());
-        }
-
-        if !trivial_tasks.is_empty() {
+        if !trivial_task_vec.is_empty() {
             let mut compaction_guard = write_lock!(self, compaction).await;
-            self.report_trivial_task_impl(trivial_tasks, &mut compaction_guard, None)
+            self.report_trivial_task_impl(trivial_task_vec, &mut compaction_guard, None)
                 .await?;
         }
 
-        Ok(None)
+        Ok(normal_task)
     }
 
     pub async fn manual_get_compact_task(
@@ -1213,8 +1200,7 @@ where
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired =
-                    Self::is_compact_task_expired_trx(compact_task, &mut branched_ssts);
+                let is_expired = Self::is_compact_task_expired_trx(compact_task, &branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
@@ -1404,7 +1390,7 @@ where
                 let is_success = if let TaskStatus::Success = compact_task.task_status() {
                     // if member_table_ids changes, the data of sstable may stale.
                     let is_expired =
-                        Self::is_compact_task_expired_trx(&compact_task, &mut branched_ssts);
+                        Self::is_compact_task_expired_trx(&compact_task, &branched_ssts);
                     if is_expired {
                         compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                         false

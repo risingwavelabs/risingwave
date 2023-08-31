@@ -578,18 +578,15 @@ pub(crate) mod tests {
         unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
             .await;
 
-        let manual_compcation_option = ManualCompactionOption {
-            level: 0,
-            ..Default::default()
-        };
         // 2. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .manual_get_compact_task(
+            .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
+                &mut default_level_selector(),
             )
             .await
             .unwrap();
+
         assert!(compact_task.is_none());
 
         // 3. get the latest version and check
@@ -600,17 +597,6 @@ pub(crate) mod tests {
             .last()
             .unwrap();
         assert_eq!(0, output_level_info.total_file_size);
-
-        // 5. get compact task
-        let compact_task = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
-            )
-            .await
-            .unwrap();
-
-        assert!(compact_task.is_none());
     }
 
     #[tokio::test]

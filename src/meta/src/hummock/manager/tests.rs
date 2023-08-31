@@ -1642,12 +1642,12 @@ async fn test_split_compaction_group_trivial_expired() {
         .await
         .unwrap();
     let mut selector: Box<dyn LevelSelector> = Box::<SpaceReclaimCompactionSelector>::default();
-    let reclaim_task = hummock_manager
+    let reclaim_task_vec = hummock_manager
         .get_compact_task_impl(2, &mut selector)
         .await
         .unwrap()
-        .unwrap();
-    assert!(CompactStatus::is_trivial_reclaim(&reclaim_task));
+        .0;
+    assert!(CompactStatus::is_trivial_reclaim(&reclaim_task_vec[0]));
 
     let current_version = hummock_manager.get_current_version().await;
     let new_group_id = current_version.levels.keys().max().cloned().unwrap();
