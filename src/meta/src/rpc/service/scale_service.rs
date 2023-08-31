@@ -22,7 +22,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
-use crate::barrier::{BarrierScheduler, Command};
+use crate::barrier::{BarrierManagerRef, BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -37,6 +37,7 @@ pub struct ScaleServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
+    barrier_manager: BarrierManagerRef<S>,
 }
 
 impl<S> ScaleServiceImpl<S>
@@ -50,6 +51,7 @@ where
         source_manager: SourceManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
     ) -> Self {
         Self {
             barrier_scheduler,
@@ -58,6 +60,7 @@ where
             source_manager,
             catalog_manager,
             stream_manager,
+            barrier_manager,
         }
     }
 }
@@ -137,6 +140,12 @@ where
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
+        if !self.barrier_manager.is_running().await {
+            return Err(Status::unavailable(
+                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
+            ));
+        }
+
         let RescheduleRequest {
             reschedules,
             revision,
@@ -196,6 +205,12 @@ where
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
         let req = request.into_inner();
+
+        if !self.barrier_manager.is_running().await {
+            return Err(Status::unavailable(
+                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
+            ));
+        }
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 

@@ -106,6 +106,8 @@ pub struct HummockStorage {
 
     context: Arc<CompactorContext>,
 
+    sstable_object_id_manager: SstableObjectIdManagerRef,
+
     buffer_tracker: BufferTracker,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
@@ -182,7 +184,6 @@ impl HummockStorage {
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
-            sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
         ));
 
@@ -193,6 +194,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
             options
                 .data_file_cache_refill_levels
@@ -203,6 +205,7 @@ impl HummockStorage {
 
         let instance = Self {
             context: compactor_context,
+            sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch,
@@ -255,7 +258,7 @@ impl HummockStorage {
     }
 
     pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        &self.context.sstable_object_id_manager
+        &self.sstable_object_id_manager
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
