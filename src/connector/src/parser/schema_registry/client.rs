@@ -95,7 +95,6 @@ impl Client {
             if let Ok(Ok(res)) = result {
                 return Ok(res);
             }
-            remaining.remove(index);
             fut_req = remaining;
         }
 
