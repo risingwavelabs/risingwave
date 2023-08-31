@@ -116,7 +116,7 @@ async fn test_basic_inner(
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
-    local.init(EpochPair::new_test_epoch(epoch1)).await.unwrap();
+    local.init_for_test((epoch1)).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
     let size = local
@@ -402,7 +402,7 @@ async fn test_state_store_sync_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
-    local.init(EpochPair::new_test_epoch(epoch)).await.unwrap();
+    local.init_for_test((epoch)).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -815,7 +815,7 @@ async fn test_write_anytime_inner(
     ];
 
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init(EpochPair::new_test_epoch(epoch1)).await.unwrap();
+    local.init_for_test((epoch1)).await.unwrap();
 
     local
         .ingest_batch(
@@ -1010,7 +1010,7 @@ async fn test_delete_get_inner(
         (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init(EpochPair::new_test_epoch(epoch1)).await.unwrap();
+    local.init_for_test((epoch1)).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -1086,7 +1086,7 @@ async fn test_multiple_epoch_sync_inner(
     ];
 
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init(EpochPair::new_test_epoch(epoch1)).await.unwrap();
+    local.init_for_test((epoch1)).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -1219,7 +1219,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     local_hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
     local_hummock_storage
@@ -1343,7 +1343,7 @@ async fn test_replicated_local_hummock_storage() {
     let epoch1 = epoch0 + 1;
 
     local_hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
     // ingest 16B batch
@@ -1416,7 +1416,7 @@ async fn test_replicated_local_hummock_storage() {
         .await;
 
     local_hummock_storage_2
-        .init(EpochPair::new_test_epoch(epoch2))
+        .init_for_test((epoch2))
         .await
         .unwrap();
 

@@ -25,7 +25,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+    LocalStateStoreTestExt, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
 
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
@@ -107,7 +107,7 @@ async fn test_snapshot_inner(
         .await;
 
     let epoch1: u64 = 1;
-    local.init(EpochPair::new_test_epoch(epoch1));
+    local.init_for_test((epoch1)).await.unwrap();
     local
         .ingest_batch(
             vec![
@@ -228,7 +228,7 @@ async fn test_snapshot_range_scan_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
-    local.init(EpochPair::new_test_epoch(epoch));
+    local.init_for_test((epoch)).await.unwrap();
 
     local
         .ingest_batch(

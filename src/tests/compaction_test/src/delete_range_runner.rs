@@ -58,6 +58,7 @@ use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
 
+use risingwave_storage::store::LocalStateStoreTestExt;
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
@@ -394,7 +395,7 @@ impl NormalState {
         let table_id = TableId::new(table_id);
         let mut storage = hummock.new_local(NewLocalOptions::for_test(table_id)).await;
         storage
-            .init(EpochPair::new_test_epoch(epoch))
+            .init_for_test((epoch))
             .await
             .unwrap();
         Self { storage, table_id }

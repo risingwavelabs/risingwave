@@ -94,7 +94,7 @@ async fn test_storage_basic() {
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
     hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
 
@@ -476,7 +476,7 @@ async fn test_state_store_sync() {
 
     let epoch1 = read_version.read().committed().max_committed_epoch() + 1;
     hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
 
@@ -797,7 +797,7 @@ async fn test_delete_get() {
     let epoch1 = initial_epoch + 1;
 
     hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
     let batch1 = vec![
@@ -877,7 +877,7 @@ async fn test_multiple_epoch_sync() {
 
     let epoch1 = initial_epoch + 1;
     hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
     let batch1 = vec![
@@ -1028,7 +1028,7 @@ async fn test_iter_with_min_epoch() {
         .collect();
 
     hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
 
@@ -1272,7 +1272,7 @@ async fn test_hummock_version_reader() {
         .collect();
     {
         hummock_storage
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init_for_test((epoch1))
             .await
             .unwrap();
         hummock_storage
@@ -1677,7 +1677,7 @@ async fn test_get_with_min_epoch() {
 
     let epoch1 = (31 * 1000) << 16;
     hummock_storage
-        .init(EpochPair::new_test_epoch(epoch1))
+        .init_for_test((epoch1))
         .await
         .unwrap();
 

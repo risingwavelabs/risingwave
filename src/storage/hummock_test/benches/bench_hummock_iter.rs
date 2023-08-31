@@ -80,7 +80,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let epoch = 100;
     runtime
-        .block_on(hummock_storage.init(EpochPair::new_test_epoch(epoch)))
+        .block_on(hummock_storage.init_for_test((epoch)))
         .unwrap();
 
     for batch in batches {
