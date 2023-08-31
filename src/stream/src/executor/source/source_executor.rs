@@ -288,17 +288,27 @@ impl<S: StateStore> SourceExecutor<S> {
                 &core.source_id.to_string(),
             ])
             .inc_by(1);
-        // fetch the newest offset
-        for ele in split_info.iter_mut() {
-            if let Some(recover_state) = core
-                .split_state_store
-                .try_recover_from_state_store(ele)
-                .await?
-            {
-                *ele = recover_state;
+        // fetch the newest offset, either it's in cache (before barrier)
+        // or in state table (just after barrier)
+        let target_state = if core.state_cache.is_empty() {
+            for ele in split_info.iter_mut() {
+                if let Some(recover_state) = core
+                    .split_state_store
+                    .try_recover_from_state_store(ele)
+                    .await?
+                {
+                    *ele = recover_state;
+                }
             }
-        }
-        self.replace_stream_reader_with_target_state(source_desc, stream, split_info.to_owned())
+            split_info.to_owned()
+        } else {
+            core.state_cache
+                .values()
+                .map(|split_impl| split_impl.to_owned())
+                .collect_vec()
+        };
+
+        self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
             .await
     }
 
