@@ -113,6 +113,13 @@ impl Vacuum {
         unfiltered_size: u64,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> bool {
+        tracing::info!("Try to report full scan task",);
+        tracing::info!(
+            "filtered_object_ids length =  {}, unfiltered_count = {}, unfiltered_size = {}",
+            filtered_object_ids.len(),
+            unfiltered_count,
+            unfiltered_size
+        );
         match hummock_meta_client
             .report_full_scan_task(filtered_object_ids, unfiltered_count, unfiltered_size)
             .await
