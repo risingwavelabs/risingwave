@@ -141,7 +141,7 @@ impl StreamChunkBuilder {
             .collect::<Vec<_>>();
 
         Some(StreamChunk::new(
-            std::mem::take(&mut self.ops),
+            std::mem::replace(&mut self.ops, Vec::with_capacity(self.capacity)),
             new_columns,
             None,
         ))
