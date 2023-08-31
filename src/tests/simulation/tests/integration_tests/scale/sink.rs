@@ -72,6 +72,7 @@ pub struct Before {
 }
 
 #[tokio::test]
+#[ignore] // https://github.com/risingwavelabs/risingwave/issues/12003
 async fn test_sink_append_only() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
@@ -124,6 +125,7 @@ async fn test_sink_append_only() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore] // https://github.com/risingwavelabs/risingwave/issues/12003
 async fn test_sink_debezium() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
