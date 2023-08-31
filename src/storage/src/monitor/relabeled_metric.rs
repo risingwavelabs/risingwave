@@ -14,7 +14,7 @@
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{Histogram, HistogramVec};
-use risingwave_common::config::StorageMetricLevel;
+use risingwave_common::config::MetricLevel;
 
 /// For all `Relabeled*Vec` below,
 /// - when `metric_level` <= `relabel_threshold`, they behaves exactly the same as their inner
@@ -29,16 +29,16 @@ use risingwave_common::config::StorageMetricLevel;
 
 #[derive(Clone, Debug)]
 pub struct RelabeledHistogramVec {
-    relabel_threshold: StorageMetricLevel,
-    metric_level: StorageMetricLevel,
+    relabel_threshold: MetricLevel,
+    metric_level: MetricLevel,
     metric: HistogramVec,
 }
 
 impl RelabeledHistogramVec {
     pub fn with_metric_level(
-        metric_level: StorageMetricLevel,
+        metric_level: MetricLevel,
         metric: HistogramVec,
-        relabel_threshold: StorageMetricLevel,
+        relabel_threshold: MetricLevel,
     ) -> Self {
         Self {
             relabel_threshold,
@@ -57,16 +57,16 @@ impl RelabeledHistogramVec {
 
 #[derive(Clone, Debug)]
 pub struct RelabeledCounterVec {
-    relabel_threshold: StorageMetricLevel,
-    metric_level: StorageMetricLevel,
+    relabel_threshold: MetricLevel,
+    metric_level: MetricLevel,
     metric: GenericCounterVec<AtomicU64>,
 }
 
 impl RelabeledCounterVec {
     pub fn with_metric_level(
-        metric_level: StorageMetricLevel,
+        metric_level: MetricLevel,
         metric: GenericCounterVec<AtomicU64>,
-        relabel_threshold: StorageMetricLevel,
+        relabel_threshold: MetricLevel,
     ) -> Self {
         Self {
             relabel_threshold,
