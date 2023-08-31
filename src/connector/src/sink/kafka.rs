@@ -466,6 +466,7 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
+    #[expect(clippy::unused_async)]
     async fn write_json_objects(
         &mut self,
         event_key_object: Option<Value>,
