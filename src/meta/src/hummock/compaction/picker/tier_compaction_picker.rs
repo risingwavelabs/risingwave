@@ -117,10 +117,6 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if other.level_type() != LevelType::Overlapping {
-                    break;
-                }
-
                 if level_handler.is_level_pending_compact(other) {
                     break;
                 }
