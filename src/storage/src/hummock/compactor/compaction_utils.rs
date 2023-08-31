@@ -110,7 +110,7 @@ impl CompactionStatistics {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,

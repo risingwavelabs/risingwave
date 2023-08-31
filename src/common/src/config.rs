@@ -846,7 +846,7 @@ pub mod default {
         }
 
         pub fn partition_vnode_count() -> u32 {
-            64
+            16
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
@@ -1199,7 +1199,7 @@ pub mod default {
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
-        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 4;
+        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 8;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
 
         use crate::catalog::hummock::CompactionFilterFlag;

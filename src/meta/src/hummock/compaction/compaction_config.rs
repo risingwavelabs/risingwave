@@ -52,7 +52,7 @@ impl CompactionConfigBuilder {
                 max_sub_compaction: compaction_config::max_sub_compaction(),
                 max_space_reclaim_bytes: compaction_config::max_space_reclaim_bytes(),
                 split_by_state_table: false,
-                split_weight_by_vnode: 0,
+                split_weight_by_vnode: 8,
                 level0_stop_write_threshold_sub_level_number:
                     compaction_config::level0_stop_write_threshold_sub_level_number(),
                 // This configure variable shall be larger than level0_tier_compact_file_number, and

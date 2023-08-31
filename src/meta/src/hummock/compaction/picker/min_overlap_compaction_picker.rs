@@ -21,6 +21,7 @@ use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::partition_level;
+use crate::hummock::compaction::SubLevelPartition;
 use crate::hummock::level_handler::LevelHandler;
 pub const MAX_LEVEL_COUNT: usize = 42;
 
@@ -120,8 +121,9 @@ impl CompactionPicker for MinOverlappingPicker {
     ) -> Option<CompactionInput> {
         assert!(self.level > 0);
         let select_level = levels.get_level(self.level);
-        let mut partitions = Vec::with_capacity(select_level.vnode_partition_count as usize);
-        if levels.member_table_ids.len() == 1
+        let mut partitions =
+            vec![SubLevelPartition::default(); select_level.vnode_partition_count as usize];
+        if levels.can_partition_by_vnode()
             && select_level.vnode_partition_count > 0
             && partition_level(
                 levels.member_table_ids[0],

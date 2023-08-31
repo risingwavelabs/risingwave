@@ -37,6 +37,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
     writeln!(
         s,
+        "Compaction # vnode partition count: {:?} ",
+        compact_task.split_weight_by_vnode
+    )
+    .unwrap();
+    writeln!(
+        s,
         "Compaction task status: {:?} ",
         compact_task.task_status()
     )

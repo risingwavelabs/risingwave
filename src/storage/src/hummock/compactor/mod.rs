@@ -68,13 +68,14 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::hummock::builder::SplitTableOutput;
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
-use crate::hummock::compactor::compactor_runner::CompactorRunner;
+pub use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
+use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
@@ -871,6 +872,10 @@ impl Compactor {
             }
             let earliest_range_delete_which_can_see_iter_key =
                 del_iter.earliest_delete_since(epoch);
+            assert_eq!(
+                earliest_range_delete_which_can_see_iter_key,
+                HummockEpoch::MAX
+            );
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
@@ -1097,16 +1102,54 @@ impl Compactor {
 
         for SplitTableOutput {
             sst_info,
-            upload_join_handle,
+            writer_output,
+            bloom_filter_size,
+            avg_key_size,
+            avg_value_size,
+            epoch_count,
         } in split_table_outputs
         {
+            if bloom_filter_size != 0 {
+                self.context
+                    .compactor_metrics
+                    .sstable_bloom_filter_size
+                    .observe(bloom_filter_size as _);
+            }
+
+            if sst_info.file_size() != 0 {
+                self.context
+                    .compactor_metrics
+                    .sstable_file_size
+                    .observe(sst_info.file_size() as _);
+            }
+
+            if avg_key_size != 0 {
+                self.context
+                    .compactor_metrics
+                    .sstable_avg_key_size
+                    .observe(avg_key_size as _);
+            }
+
+            if avg_value_size != 0 {
+                self.context
+                    .compactor_metrics
+                    .sstable_avg_value_size
+                    .observe(avg_value_size as _);
+            }
+
+            if epoch_count != 0 {
+                self.context
+                    .compactor_metrics
+                    .sstable_distinct_epoch_count
+                    .observe(epoch_count as _);
+            }
             let sst_size = sst_info.file_size();
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress.clone();
             let context_cloned = self.context.clone();
             upload_join_handles.push(async move {
-                upload_join_handle
+                writer_output
                     .verbose_instrument_await("upload")
                     .await
                     .map_err(HummockError::sstable_upload_error)??;
@@ -1178,7 +1221,6 @@ impl Compactor {
 
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
-            self.context.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.split_by_table,
             self.task_config.split_weight_by_vnode,

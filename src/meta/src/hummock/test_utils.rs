@@ -16,8 +16,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::key::{key_with_epoch, FullKey, TableKey};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
@@ -272,6 +274,18 @@ pub fn iterator_test_key_of_epoch(
             .to_vec(),
         ts,
     )
+}
+
+/// Generate keys like `001_key_test_00002` with timestamp `epoch`.
+pub fn generate_key_of_vnode_epoch(
+    table: u32,
+    vnode: usize,
+    idx: usize,
+    ts: HummockEpoch,
+) -> Vec<u8> {
+    let mut k = VirtualNode::from_index(vnode).to_be_bytes().to_vec();
+    k.extend_from_slice(idx.to_be_bytes().as_slice());
+    FullKey::new(TableId::new(table), TableKey(k), ts).encode()
 }
 
 pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObjectId> {

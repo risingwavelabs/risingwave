@@ -88,6 +88,8 @@ pub struct SstableBuilderOutput<WO> {
     pub epoch_count: usize,
 }
 
+pub type SplitTableOutput = SstableBuilderOutput<tokio::task::JoinHandle<HummockResult<()>>>;
+
 pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// Options.
     options: SstableBuilderOptions,

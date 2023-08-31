@@ -26,10 +26,10 @@ pub mod model;
 pub mod test_utils;
 mod utils;
 mod vacuum;
-
 use std::time::Duration;
 
 pub use compactor_manager::*;
+pub use level_handler::LevelHandler;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;

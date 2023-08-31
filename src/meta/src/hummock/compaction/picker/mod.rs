@@ -40,6 +40,7 @@ pub struct LocalPickerStatistic {
     pub skip_by_count_limit: u64,
     pub skip_by_pending_files: u64,
     pub skip_by_overlapping: u64,
+    pub use_vnode_partition: bool,
 }
 pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,

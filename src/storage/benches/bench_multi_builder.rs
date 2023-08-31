@@ -113,7 +113,7 @@ async fn build_tables<F: SstableWriterFactory>(
     let split_table_outputs = builder.finish().await.unwrap();
     let join_handles = split_table_outputs
         .into_iter()
-        .map(|o| o.upload_join_handle)
+        .map(|o| o.writer_output)
         .collect_vec();
     try_join_all(join_handles).await.unwrap();
 }

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::HummockEpoch;
 use tokio::task::JoinHandle;
 
 use super::MonotonicDeleteEvent;
@@ -28,10 +28,9 @@ use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
+    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SplitTableOutput, SstableBuilder,
     SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
-use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
@@ -40,11 +39,6 @@ pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
     type Filter: FilterBuilder;
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
-}
-
-pub struct SplitTableOutput {
-    pub sst_info: LocalSstableInfo,
-    pub upload_join_handle: UploadJoinHandle,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -61,9 +55,6 @@ where
     sst_outputs: Vec<SplitTableOutput>,
 
     current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
-
-    /// Statistics.
-    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
@@ -85,7 +76,6 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         builder_factory: F,
-        compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         mut split_by_table: bool,
         partition_count_by_vnode: u32,
@@ -98,7 +88,6 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            compactor_metrics,
             task_progress,
             last_table_id: 0,
             split_by_table,
@@ -113,7 +102,6 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_table_id: 0,
             split_by_table: false,
@@ -303,41 +291,8 @@ where
                 if let Some(progress) = &self.task_progress {
                     progress.inc_ssts_sealed();
                 }
-
-                if builder_output.bloom_filter_size != 0 {
-                    self.compactor_metrics
-                        .sstable_bloom_filter_size
-                        .observe(builder_output.bloom_filter_size as _);
-                }
-
-                if builder_output.sst_info.file_size() != 0 {
-                    self.compactor_metrics
-                        .sstable_file_size
-                        .observe(builder_output.sst_info.file_size() as _);
-                }
-
-                if builder_output.avg_key_size != 0 {
-                    self.compactor_metrics
-                        .sstable_avg_key_size
-                        .observe(builder_output.avg_key_size as _);
-                }
-
-                if builder_output.avg_value_size != 0 {
-                    self.compactor_metrics
-                        .sstable_avg_value_size
-                        .observe(builder_output.avg_value_size as _);
-                }
-
-                if builder_output.epoch_count != 0 {
-                    self.compactor_metrics
-                        .sstable_distinct_epoch_count
-                        .observe(builder_output.epoch_count as _);
-                }
             }
-            self.sst_outputs.push(SplitTableOutput {
-                upload_join_handle: builder_output.writer_output,
-                sst_info: builder_output.sst_info,
-            });
+            self.sst_outputs.push(builder_output);
         }
         Ok(())
     }
@@ -351,7 +306,7 @@ where
 
 /// Used for unit tests and benchmarks.
 pub struct LocalTableBuilderFactory {
-    next_id: AtomicU64,
+    next_id: Arc<AtomicU64>,
     sstable_store: SstableStoreRef,
     options: SstableBuilderOptions,
     policy: CachePolicy,
@@ -365,7 +320,21 @@ impl LocalTableBuilderFactory {
         options: SstableBuilderOptions,
     ) -> Self {
         Self {
-            next_id: AtomicU64::new(next_id),
+            next_id: Arc::new(AtomicU64::new(next_id)),
+            sstable_store,
+            options,
+            policy: CachePolicy::NotFill,
+            limiter: MemoryLimiter::new(1000000),
+        }
+    }
+
+    pub fn with_sst_id(
+        next_id: Arc<AtomicU64>,
+        sstable_store: SstableStoreRef,
+        options: SstableBuilderOptions,
+    ) -> Self {
+        Self {
+            next_id,
             sstable_store,
             options,
             policy: CachePolicy::NotFill,
@@ -558,7 +527,6 @@ mod tests {
         let mut del_iter = agg.iter();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(CompactorMetrics::unused()),
             None,
             false,
             0,
@@ -644,7 +612,6 @@ mod tests {
         let mut del_iter = agg.iter();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(CompactorMetrics::unused()),
             None,
             false,
             0,
@@ -680,7 +647,6 @@ mod tests {
         let table_id = TableId::new(1);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(CompactorMetrics::unused()),
             None,
             false,
             0,

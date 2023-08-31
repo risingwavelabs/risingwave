@@ -6713,6 +6713,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
+ "hex",
  "itertools 0.11.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
