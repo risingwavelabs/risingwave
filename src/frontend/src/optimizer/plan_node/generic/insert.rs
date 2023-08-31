@@ -114,7 +114,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
 }
 
 impl<PlanRef: Eq + Hash> Insert<PlanRef> {
-    /// Create a [`LogicalInsert`] node. Used internally by optimizer.
+    /// Create a [`Insert`] node. Used internally by optimizer.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: PlanRef,

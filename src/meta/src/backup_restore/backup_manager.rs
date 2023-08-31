@@ -149,7 +149,7 @@ impl<S: MetaStore> BackupManager<S> {
             hummock_manager,
             backup_store: ArcSwap::from_pointee(backup_store),
             running_backup_job: tokio::sync::Mutex::new(None),
-            metrics: BackupManagerMetrics::new(meta_metrics.registry.clone()),
+            metrics: BackupManagerMetrics::default(),
             meta_metrics,
         }
     }
@@ -171,7 +171,7 @@ impl<S: MetaStore> BackupManager<S> {
         Self::with_store(
             env,
             hummock_manager,
-            Arc::new(MetaMetrics::new()),
+            Arc::new(MetaMetrics::default()),
             (
                 Box::<risingwave_backup::storage::DummyMetaSnapshotStorage>::default(),
                 StoreConfig::default(),

@@ -34,7 +34,7 @@ use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, get_second, Distribution};
+use risingwave_storage::table::{collect_data_chunk, Distribution};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::executor::{
@@ -416,8 +416,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 ordered,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
-            .await?
-            .map(get_second);
+            .await?;
 
         pin_mut!(iter);
         loop {

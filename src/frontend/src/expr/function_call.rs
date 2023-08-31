@@ -25,9 +25,9 @@ use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
-    func_type: ExprType,
-    return_type: DataType,
-    inputs: Vec<ExprImpl>,
+    pub(super) func_type: ExprType,
+    pub(super) return_type: DataType,
+    pub(super) inputs: Vec<ExprImpl>,
 }
 
 fn debug_binary_op(
@@ -102,11 +102,7 @@ impl FunctionCall {
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> RwResult<Self> {
         let return_type = infer_type(func_type, &mut inputs)?;
-        Ok(Self {
-            func_type,
-            return_type,
-            inputs,
-        })
+        Ok(Self::new_unchecked(func_type, inputs, return_type))
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
@@ -153,12 +149,7 @@ impl FunctionCall {
         } else if child.is_untyped() || cast_ok(&source, &target, allows) {
             // Always Ok below. Safe to mutate `child`.
             let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
-            *child = Self {
-                func_type: ExprType::Cast,
-                return_type: target,
-                inputs: vec![owned],
-            }
-            .into();
+            *child = Self::new_unchecked(ExprType::Cast, vec![owned], target).into();
             Ok(())
         } else {
             Err(CastError(format!(
@@ -170,7 +161,7 @@ impl FunctionCall {
 
     /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbitrary
     /// expressions, like `ROW(1)::STRUCT<i INTEGER>` to `STRUCT<VARCHAR>`, although an integer
-    /// is castible to VARCHAR. It's to simply the casting rules.
+    /// is castable to VARCHAR. It's to simply the casting rules.
     fn cast_row_expr(
         func: &mut FunctionCall,
         target_type: DataType,
