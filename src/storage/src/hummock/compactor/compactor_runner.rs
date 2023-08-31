@@ -238,32 +238,9 @@ pub async fn compact(
     compactor_context: Arc<CompactorContext>,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
+    sstable_object_id_manager: Box<dyn GetObjectId>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
-    // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
-    // write op. The watermark is invalidated when this method exits.
-    let tracker_id = match context
-        .sstable_object_id_manager
-        .add_watermark_object_id(None)
-        .await
-    {
-        Ok(tracker_id) => tracker_id,
-        Err(err) => {
-            tracing::warn!("Failed to track pending SST object id. {:#?}", err);
-
-            // return TaskStatus::TrackSstObjectIdFailed;
-            compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
-            return (compact_task, HashMap::default());
-        }
-    };
-    let sstable_object_id_manager_clone = context.sstable_object_id_manager.clone();
-    let _guard = scopeguard::guard(
-        (tracker_id, sstable_object_id_manager_clone),
-        |(tracker_id, sstable_object_id_manager)| {
-            sstable_object_id_manager.remove_watermark_object_id(tracker_id);
-        },
-    );
-
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
     let select_table_infos = compact_task
@@ -467,7 +444,7 @@ pub async fn compact(
             split_index,
             compactor_context.clone(),
             compact_task.clone(),
-            Box::new(context.sstable_object_id_manager.clone()),
+            sstable_object_id_manager.clone(),
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
