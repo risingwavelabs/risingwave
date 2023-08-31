@@ -277,6 +277,7 @@ pub trait LocalStateStoreTestExt: LocalStateStore {
         self.init(EpochPair::new_test_epoch(epoch))
     }
 }
+impl<T: LocalStateStore> LocalStateStoreTestExt for T {}
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.

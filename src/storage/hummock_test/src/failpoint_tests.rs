@@ -18,7 +18,6 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -29,7 +28,7 @@ use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_tes
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
+    LocalStateStore, LocalStateStoreTestExt, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
 };
 use risingwave_storage::StateStore;
 

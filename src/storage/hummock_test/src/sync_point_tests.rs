@@ -40,7 +40,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::store::{LocalStateStore, LocalStateStoreTestExt, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use serial_test::serial;
 
@@ -296,7 +296,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
-    local.init(100);
+    local.init_for_test(100).await.unwrap();
     let mut start_key = b"\0\0aaa".to_vec();
     for _ in 0..10 {
         local
