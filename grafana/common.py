@@ -96,16 +96,12 @@ class Layout:
 
 
 class Panels:
-    base_common_options = {
-        "interval": "1s",
-        "maxDataPoints": 1000,
-    }
-
-    # Common options for all timeseries panels
+    # Common options for timeseries panels
     common_options = {
         "fillOpacity": 10,
+        "interval": "1s",
+        "maxDataPoints": 1000,
         "legendDisplayMode": "table",
-        **base_common_options,
     }
 
     def __init__(self, datasource):
@@ -516,29 +512,6 @@ class Panels:
             showHeader=True,
             filterable=True,
             transformations=transformations
-        )
-
-    def stat_sec(self, title, description, targets, threshold_value):
-        gridPos = self.layout.next_half_width_graph()
-        return Stat(
-            title=title,
-            dataSource=self.datasource,
-            description=description,
-            targets=targets,
-            gridPos=gridPos,
-            format="s",
-            reduceCalc="last",
-            thresholds=[
-                {
-                    "color": "green",
-                    "value": None,
-                },
-                {
-                    "value": threshold_value,
-                    "color": "#EAB839" # yellow
-                }
-            ],
-            **self.base_common_options,
         )
 
     def sub_panel(self):

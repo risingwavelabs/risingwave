@@ -105,7 +105,7 @@ pub struct StreamingMetrics {
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
-    /// The progress made by the earliest in-flight barrier in the local barrier manager.
+    /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
@@ -608,7 +608,7 @@ impl StreamingMetrics {
 
         let barrier_manager_progress = register_int_counter_with_registry!(
             "stream_barrier_manager_progress",
-            "The progress made by the earliest in-flight barrier in the local barrier manager",
+            "The number of actors that have processed the earliest in-flight barriers",
             registry
         )
         .unwrap();

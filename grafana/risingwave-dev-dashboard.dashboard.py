@@ -839,17 +839,16 @@ def section_streaming(panels):
                 ),
             ],
         ),
-        panels.stat_sec(
-            "Earliest In-Flight Barrier Congestion Time",
-            "The time that the earliest in-flight barrier has not made any progress on each compute node. "
+        panels.timeseries_ops(
+            "Earliest In-Flight Barrier Progress",
+            "The number of actors that have processed the earliest in-flight barriers per second. "
             "This metric helps users to detect potential congestion or stuck in the system.",
             [
                 panels.target(
-                    f"time() - max_over_time(timestamp(changes({metric('stream_barrier_manager_progress')}[$__interval]) > 0)[1h:$__interval])",
+                    f"rate({metric('stream_barrier_manager_progress')}[$__rate_interval])",
                     "{{instance}}",
                 ),
             ],
-            threshold_value=60,
         ),
     ]
 
