@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, get_second};
+use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -58,8 +58,7 @@ where
                 false,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
-            .await?
-            .map(get_second);
+            .await?;
         pin_mut!(iter);
 
         while let Some(data_chunk) =

@@ -21,7 +21,9 @@ use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::ChangeEventOperation;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{
+    ByteStreamSourceParser, JsonProperties, SourceStreamChunkRowWriter, WriteGuard,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";
@@ -32,13 +34,19 @@ const IS_DDL: &str = "isDdl";
 pub struct CanalJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+    payload_start_idx: usize,
 }
 
 impl CanalJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+        config: &JsonProperties,
+    ) -> Result<Self> {
         Ok(Self {
             rw_columns,
             source_ctx,
+            payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
         })
     }
 
@@ -48,8 +56,9 @@ impl CanalJsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let mut event: BorrowedValue<'_> =
+            simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
             RwError::from(ProtocolError(
@@ -151,7 +160,12 @@ mod tests {
             SourceColumnDesc::simple("binary", DataType::Bytea, 6.into()),
             SourceColumnDesc::simple("json", DataType::Jsonb, 7.into()),
         ];
-        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = CanalJsonParser::new(
+            descs.clone(),
+            Default::default(),
+            &JsonProperties::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
 
@@ -217,7 +231,12 @@ mod tests {
             SourceColumnDesc::simple("win_rate", DataType::Float64, 5.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = CanalJsonParser::new(
+            descs.clone(),
+            Default::default(),
+            &JsonProperties::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -266,7 +285,12 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int32, 1.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = CanalJsonParser::new(
+            descs.clone(),
+            Default::default(),
+            &JsonProperties::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 

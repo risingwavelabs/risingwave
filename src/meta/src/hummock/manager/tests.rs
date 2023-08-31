@@ -2044,10 +2044,18 @@ async fn test_move_tables_between_compaction_group() {
     assert_eq!(branched_ssts.len(), 2);
 }
 
+// TODO: re-enable this test after solving global metric issue when running test in multi-thread.
+#[ignore]
 #[tokio::test]
 async fn test_gc_stats() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
+    hummock_manager.metrics.stale_object_size.set(0);
+    hummock_manager.metrics.stale_object_count.set(0);
+    hummock_manager.metrics.old_version_object_size.set(0);
+    hummock_manager.metrics.old_version_object_count.set(0);
+    hummock_manager.metrics.current_version_object_count.set(0);
+    hummock_manager.metrics.current_version_object_size.set(0);
     let assert_eq_gc_stats = |stale_object_size,
                               stale_object_count,
                               old_version_object_size,

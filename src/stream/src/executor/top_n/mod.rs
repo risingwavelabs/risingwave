@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
+/// Wrapper and helper functions to help implement [`crate::executor::Executor`] for `TopN` variants
 mod utils;
 use utils::*;
 
