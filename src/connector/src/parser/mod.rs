@@ -505,8 +505,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
                 Err(error) => {
                     tracing::warn!(%error, "message parsing failed, skipping");
-                    // This will throw an error for batch
-                    parser.source_ctx().report_user_source_error(error)?;
+                    // Skip for batch
+                    parser.source_ctx().report_user_source_error(error);
                     continue;
                 }
             }

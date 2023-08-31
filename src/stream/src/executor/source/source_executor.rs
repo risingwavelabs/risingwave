@@ -264,6 +264,7 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(split_changed.then_some(target_state))
     }
 
+    /// Rebuild stream if there is a err in stream
     async fn rebuild_stream_reader_from_error<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
@@ -287,6 +288,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 &core.source_id.to_string(),
             ])
             .inc_by(1);
+        // fetch the newest offset
         for ele in split_info.iter_mut() {
             if let Some(recover_state) = core
                 .split_state_store
