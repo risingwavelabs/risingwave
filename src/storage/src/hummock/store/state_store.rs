@@ -153,12 +153,6 @@ impl LocalHummockStorage {
                 }
                 Ok(Ok(_)) => {
                     let max_committed_epoch = *receiver.borrow();
-                    tracing::warn!(
-                        "wait_epoch {:?} OK, max_committed_epoch {:?}, wait_epoch {:?}",
-                        wait_epoch,
-                        max_committed_epoch,
-                        wait_epoch
-                    );
                     if max_committed_epoch >= wait_epoch {
                         return Ok(());
                     }
