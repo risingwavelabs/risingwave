@@ -204,10 +204,4 @@ SELECT
     1 AS col_0
 FROM
     m19 AS t_0
-        FULL JOIN tumble (auction, auction.date_time, INTERVAL '7') AS tumble_1 ON t_0.col_0 = tumble_1.date_time
-        AND TRUE
-        AND t_0.col_0 = tumble_1.expires
-GROUP BY
-    tumble_1.expires
-HAVING
-    FALSE;
+        FULL JOIN tumble (auction, auction.date_time, INTERVAL '7') AS tumble_1 ON t_0.col_0 = tumble_1.date_time;
