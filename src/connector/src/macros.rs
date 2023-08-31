@@ -237,7 +237,11 @@ macro_rules! impl_common_split_reader_logic {
                         Err(e) => {
                             metrics_2.
                                 reader_fail_count
-                                .with_label_values(&[&actor_id_2, &source_id_2])
+                                .with_label_values(&[
+                                    "SourceReaderError",
+                                    &e.to_string(),
+                                    "SourceExecutor",
+                                    &actor_id_2, &source_id_2])
                                 .inc_by(1);
                             tracing::warn!(%e, "reader error");
                         }

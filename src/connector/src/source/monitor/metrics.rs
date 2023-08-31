@@ -107,7 +107,13 @@ impl SourceMetrics {
         let reader_fail_count = register_int_counter_vec_with_registry!(
             "reader_fail_count",
             "Total number of failures of source reader",
-            &["actor_id", "source_id"],
+            &[
+                "error_type",
+                "error_msg",
+                "executor_name",
+                "actor_id",
+                "source_id"
+            ],
             registry
         )
         .unwrap();
