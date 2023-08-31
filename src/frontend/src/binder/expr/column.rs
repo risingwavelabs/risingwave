@@ -75,7 +75,32 @@ impl Binder {
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
-        for (i, (context, _)) in self.upper_subquery_contexts.iter().rev().enumerate() {
+
+        for (i, lateral_context) in self.lateral_contexts.iter().rev().enumerate() {
+            if lateral_context.is_visible {
+                let context = &lateral_context.context;
+                // input ref from lateral context `depth` starts from 1.
+                let depth = i + 1;
+                match context.get_column_binding_index(&table_name, &column_name) {
+                    Ok(index) => {
+                        let column = &context.columns[index];
+                        return Ok(CorrelatedInputRef::new(
+                            column.index,
+                            column.field.data_type.clone(),
+                            depth,
+                        )
+                        .into());
+                    }
+                    Err(e) => {
+                        err = e;
+                    }
+                }
+            }
+        }
+
+        for (i, (context, lateral_contexts)) in
+            self.upper_subquery_contexts.iter().rev().enumerate()
+        {
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
@@ -90,6 +115,28 @@ impl Binder {
                 }
                 Err(e) => {
                     err = e;
+                }
+            }
+
+            for (i, lateral_context) in lateral_contexts.iter().rev().enumerate() {
+                if lateral_context.is_visible {
+                    let context = &lateral_context.context;
+                    // correlated input ref from lateral context `depth` starts from 1.
+                    let depth = i + 1;
+                    match context.get_column_binding_index(&table_name, &column_name) {
+                        Ok(index) => {
+                            let column = &context.columns[index];
+                            return Ok(CorrelatedInputRef::new(
+                                column.index,
+                                column.field.data_type.clone(),
+                                depth,
+                            )
+                            .into());
+                        }
+                        Err(e) => {
+                            err = e;
+                        }
+                    }
                 }
             }
         }

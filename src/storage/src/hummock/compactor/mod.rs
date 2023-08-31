@@ -523,20 +523,28 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                         }
                                     }
                                     ResponseEvent::VacuumTask(vacuum_task) => {
-                                        let vacuum_task = Vacuum::handle_vacuum_task(
-                                            vacuum_task,
+                                        match Vacuum::handle_vacuum_task(
                                             context.sstable_store.clone(),
+                                            &vacuum_task.sstable_object_ids,
                                         )
-                                        .await.unwrap();
-                                        Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
+                                        .await{
+                                            Ok(_) => {
+                                                Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to vacuum task: {:#?}", e)
+                                            }
+                                        }
                                     }
                                     ResponseEvent::FullScanTask(full_scan_task) => {
-                                        Vacuum::full_scan(
-                                            full_scan_task,
-                                            context.sstable_store.clone(),
-                                            meta_client,
-                                        )
-                                        .await;
+                                        match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone()).await {
+                                            Ok((object_ids, total_object_count, total_object_size)) => {
+                                                Vacuum::report_full_scan_task(object_ids, total_object_count, total_object_size, meta_client).await;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to iter object: {:#?}", e);
+                                            }
+                                        }
                                     }
                                     ResponseEvent::ValidationTask(validation_task) => {
                                         validate_ssts(

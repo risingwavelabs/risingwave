@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::{try_join_all, BoxFuture};
+use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
@@ -25,7 +25,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -78,7 +78,8 @@ impl CreateStreamingJobContext {
 
 pub enum CreatingState {
     Failed { reason: MetaError },
-    Canceling,
+    // sender is used to notify the canceling result.
+    Canceling { finish_tx: oneshot::Sender<()> },
     Created,
 }
 
@@ -112,20 +113,22 @@ impl CreatingStreamingJobInfo {
         jobs.remove(&job_id);
     }
 
-    async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
+    async fn cancel_jobs(&self, job_ids: Vec<TableId>) -> HashMap<TableId, oneshot::Receiver<()>> {
         let mut jobs = self.streaming_jobs.lock().await;
+        let mut receivers = HashMap::new();
         for job_id in job_ids {
             if let Some(job) = jobs.get_mut(&job_id)
                 && let Some(shutdown_tx) = job.shutdown_tx.take()
             {
-                let _ = shutdown_tx
-                    .send(CreatingState::Canceling)
-                    .await
-                    .inspect_err(|_| {
-                        tracing::warn!("failed to send canceling state");
-                    });
+                let (tx, rx) = oneshot::channel();
+                if shutdown_tx.send(CreatingState::Canceling{finish_tx: tx}).await.is_ok() {
+                    receivers.insert(job_id, rx);
+                } else {
+                    tracing::warn!("failed to send canceling state");
+                }
             }
         }
+        receivers
     }
 }
 
@@ -140,6 +143,9 @@ pub struct ReplaceTableContext {
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
+
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 
     /// The locations of the actors to build in the new table to replace.
     pub building_locations: Locations,
@@ -255,7 +261,7 @@ where
                     CreatingState::Failed { reason } => {
                         return Err(reason);
                     }
-                    CreatingState::Canceling => {
+                    CreatingState::Canceling { finish_tx } => {
                         if let Ok(table_fragments) = self
                             .fragment_manager
                             .select_table_fragments_by_table_id(&table_id)
@@ -301,7 +307,6 @@ where
                                         table_id,
                                     )))
                                     .await?;
-                                return Err(MetaError::cancelled("create".into()));
                             }
                             if !table_fragments.is_created() {
                                 tracing::debug!(
@@ -310,8 +315,11 @@ where
                                 self.barrier_scheduler
                                     .run_command(Command::CancelStreamingJob(table_fragments))
                                     .await?;
-                                return Err(MetaError::cancelled("create".into()));
                             }
+                            let _ = finish_tx.send(()).inspect_err(|_| {
+                                tracing::warn!("failed to notify cancelled: {table_id}")
+                            });
+                            return Err(MetaError::cancelled("create".into()));
                         }
                     }
                     CreatingState::Created => return Ok(()),
@@ -463,6 +471,7 @@ where
         ReplaceTableContext {
             old_table_fragments,
             merge_updates,
+            dispatchers,
             building_locations,
             existing_locations,
             table_properties: _,
@@ -484,6 +493,7 @@ where
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
+                dispatchers,
             })
             .await
         {
@@ -540,9 +550,25 @@ where
         Ok(())
     }
 
-    pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) {
+    /// Cancel streaming jobs and return the canceled table ids.
+    pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) -> Vec<TableId> {
+        if table_ids.is_empty() {
+            return vec![];
+        }
+
         let _reschedule_job_lock = self.reschedule_lock.read().await;
-        self.creating_job_info.cancel_jobs(table_ids).await;
+        let receivers = self.creating_job_info.cancel_jobs(table_ids).await;
+
+        let futures = receivers.into_iter().map(|(id, receiver)| async move {
+            if receiver.await.is_ok() {
+                tracing::info!("canceled streaming job {id}");
+                Some(id)
+            } else {
+                tracing::warn!("failed to cancel streaming job {id}");
+                None
+            }
+        });
+        join_all(futures).await.into_iter().flatten().collect_vec()
     }
 }
 
@@ -721,7 +747,7 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
             let system_params = env.system_params_manager().get_params().await;
-            let meta_metrics = Arc::new(MetaMetrics::new());
+            let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {

@@ -103,6 +103,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::BitLength
             | expr_node::Type::Overlay
             | expr_node::Type::RegexpMatch
+            | expr_node::Type::RegexpReplace
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -167,6 +168,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::IsJson
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
@@ -188,7 +190,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
-            | expr_node::Type::Format =>
+            | expr_node::Type::Format
+            | expr_node::Type::ArrayTransform =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call

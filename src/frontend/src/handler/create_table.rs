@@ -19,17 +19,20 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
-    USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
+    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Encode, Format, ObjectName, SourceSchemaV2,
+    ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
     SourceWatermark, TableConstraint,
 };
 
@@ -434,7 +437,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) =
+    let (columns_from_resolve_source, pk_names, mut source_info) =
         try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
@@ -467,6 +470,51 @@ pub(crate) async fn gen_create_table_plan_with_source(
             "Generated columns are only allowed in an append only source.".to_string(),
         )
         .into());
+    }
+
+    let table_type = ExternalTableType::from_properties(&properties);
+    if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+        // Add a column for storing the event offset
+        let offset_column = ColumnCatalog::offset_column();
+        let _offset_index = columns.len();
+        columns.push(offset_column);
+
+        const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+        // debezium connector will only consume changelogs from latest offset on this mode
+        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), "rw_cdc_backfill".into());
+
+        let pk_column_indices = {
+            let mut id_to_idx = HashMap::new();
+            columns.iter().enumerate().for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+            // pk column id must exist in table columns.
+            pk_column_ids
+                .iter()
+                .map(|c| id_to_idx.get(c).copied().unwrap())
+                .collect_vec()
+        };
+        let table_pk = pk_column_indices
+            .iter()
+            .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+            .collect();
+
+        let upstream_table_desc = TableDesc {
+            table_id: TableId::placeholder(),
+            pk: table_pk,
+            columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+            distribution_key: pk_column_indices.clone(),
+            stream_key: pk_column_indices,
+            append_only,
+            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+            value_indices: (0..columns.len()).collect_vec(),
+            read_prefix_len_hint: 0,
+            watermark_columns: Default::default(),
+            versioned: false,
+        };
+        tracing::debug!("upstream table desc: {:?}", upstream_table_desc);
+        // save external table info to `source_info`
+        source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
     }
 
     gen_table_plan_inner(
@@ -609,6 +657,7 @@ fn gen_table_plan_inner(
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
+        version: INITIAL_SOURCE_VERSION_ID,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
@@ -695,12 +744,6 @@ pub async fn handle_create_table(
         Err(e) => return Err(e.into()),
         Ok(_) => {}
     };
-
-    if let Some(s) = &source_schema && s.row_encode == Encode::Json && columns.is_empty() {
-        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "schema definition is required for ENCODE JSON".to_owned(),
-        )));
-    }
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);

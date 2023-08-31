@@ -30,8 +30,7 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
-use aws_smithy_client::conns::NativeTls;
-use aws_smithy_client::http_connector::ConnectorSettings;
+use aws_smithy_client::http_connector::{ConnectorSettings, HttpConnector};
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
@@ -41,6 +40,7 @@ use futures::{stream, Stream};
 use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
+use risingwave_common::monitor::connection::monitor_connector;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -543,13 +543,9 @@ impl S3ObjectStore {
         Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
     }
 
-    pub async fn new_with_config(
-        bucket: String,
-        metrics: Arc<ObjectStoreMetrics>,
-        config: S3ObjectStoreConfig,
-    ) -> Self {
+    pub fn new_http_connector(config: &S3ObjectStoreConfig) -> impl Into<HttpConnector> {
         // Customize http connector to set keepalive.
-        let native_tls = || -> NativeTls {
+        let native_tls = {
             let mut tls = hyper_tls::native_tls::TlsConnector::builder();
             let tls = tls
                 .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
@@ -577,13 +573,21 @@ impl S3ObjectStore {
             http.enforce_http(false);
             hyper_tls::HttpsConnector::from((http, tls.into()))
         };
-        let hyper_adapter = aws_smithy_client::hyper_ext::Adapter::builder()
+
+        aws_smithy_client::hyper_ext::Adapter::builder()
             .hyper_builder(hyper::client::Builder::default())
             .connector_settings(ConnectorSettings::builder().build())
-            .build(native_tls());
+            .build(monitor_connector(native_tls, "S3"))
+    }
+
+    pub async fn new_with_config(
+        bucket: String,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: S3ObjectStoreConfig,
+    ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .http_connector(hyper_adapter);
+            .http_connector(Self::new_http_connector(&config));
 
         // Retry 3 times if we get server-side errors or throttling errors
         let client = match std::env::var("RW_S3_ENDPOINT") {
@@ -635,7 +639,8 @@ impl S3ObjectStore {
         #[cfg(not(madsim))]
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
-                .force_path_style(true);
+                .force_path_style(true)
+                .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
 
         let config = builder
             .region(Region::new("custom"))

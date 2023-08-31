@@ -17,6 +17,7 @@ mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
+mod tombstone_reclaim_compaction_picker;
 mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
@@ -27,6 +28,9 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::InputLevel;
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
 pub use tier_compaction_picker::TierCompactionPicker;
+pub use tombstone_reclaim_compaction_picker::{
+    TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
+};
 pub use trivial_move_compaction_picker::TrivialMovePicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
 

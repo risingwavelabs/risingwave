@@ -29,14 +29,13 @@ use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk,
+    iter_chunks, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -45,7 +44,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
+/// An implementation of the [RFC: Use Backfill To Let Mv On Mv Stream Again](https://github.com/risingwavelabs/rfcs/pull/13).
 /// `BackfillExecutor` is used to create a materialized view on another materialized view.
 ///
 /// It can only buffer chunks between two barriers instead of unbundled memory usage of
@@ -505,13 +504,13 @@ where
                 ordered,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
-            .await?
-            .map(get_second);
+            .await?;
 
-        pin_mut!(iter);
+        let row_iter = owned_row_iter(iter);
+        pin_mut!(row_iter);
 
         #[for_await]
-        for chunk in iter_chunks(iter, chunk_size, builder) {
+        for chunk in iter_chunks(row_iter, chunk_size, builder) {
             yield chunk?;
         }
     }

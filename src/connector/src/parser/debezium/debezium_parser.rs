@@ -80,7 +80,9 @@ impl DebeziumParser {
     pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
         let props = SpecificParserConfig {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
             protocol_config: ProtocolProperties::Debezium,
         };
         Self::new(props, rw_columns, Default::default()).await
