@@ -23,9 +23,7 @@ use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
-use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
@@ -36,6 +34,7 @@ use risingwave_connector::sink::{
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
@@ -59,17 +58,14 @@ struct SinkMetrics {
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
 fn force_append_only(chunk: StreamChunk, data_types: Vec<DataType>) -> Option<StreamChunk> {
-    let mut builder = DataChunkBuilder::new(data_types, chunk.cardinality() + 1);
+    let mut builder = StreamChunkBuilder::new(chunk.cardinality() + 1, data_types);
     for (op, row_ref) in chunk.rows() {
         if op == Op::Insert || op == Op::UpdateInsert {
-            let finished = builder.append_one_row(row_ref.into_owned_row());
-            assert!(finished.is_none());
+            let none = builder.append_row(Op::Insert, row_ref);
+            assert!(none.is_none());
         }
     }
-    builder.consume_all().map(|data_chunk| {
-        let ops = vec![Op::Insert; data_chunk.capacity()];
-        StreamChunk::from_parts(ops, data_chunk)
-    })
+    builder.take()
 }
 
 impl<F: LogStoreFactory> SinkExecutor<F> {

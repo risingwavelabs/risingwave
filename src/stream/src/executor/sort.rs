@@ -18,13 +18,13 @@ use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 use risingwave_storage::StateStore;
 
-use super::aggregation::ChunkBuilder;
 use super::sort_buffer::SortBuffer;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
+use crate::common::StreamChunkBuilder;
 
 pub struct SortExecutor<S: StateStore> {
     input: BoxedExecutor,
@@ -122,7 +122,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if col_idx == this.sort_column_index =>
                 {
                     let mut chunk_builder =
-                        ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
+                        StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
                     #[for_await]
                     for row in vars

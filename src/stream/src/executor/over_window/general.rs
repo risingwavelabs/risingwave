@@ -37,7 +37,7 @@ use self::private::Partition;
 use super::delta_btree_map::{Change, DeltaBTreeMap};
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::executor::aggregation::ChunkBuilder;
+use crate::common::StreamChunkBuilder;
 use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
@@ -394,7 +394,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // `input pk` => `Record`
         let mut key_change_update_buffer = BTreeMap::new();
-        let mut chunk_builder = ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
+        let mut chunk_builder =
+            StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
         // Build final changes partition by partition.
         for (part_key, delta) in deltas {
