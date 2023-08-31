@@ -25,7 +25,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::types::Datum;
+use risingwave_common::row::{Row, RowExt};
+use risingwave_common::types::{Datum, Scalar};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
@@ -298,6 +299,11 @@ where
                                         // Consume with the renaming stream buffer chunk without
                                         // mark.
                                         for chunk in upstream_chunk_buffer.drain(..) {
+
+                                            for (op, row) in chunk.rows() {
+                                                tracing::info!("row: {:?}", row);
+                                            }
+
                                             let chunk_cardinality = chunk.cardinality() as u64;
                                             cur_barrier_snapshot_processed_rows +=
                                                 chunk_cardinality;
@@ -324,6 +330,11 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
+
+                                        for (op, row) in chunk.rows() {
+                                            tracing::info!("row: {:?}", row);
+                                        }
+
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
@@ -357,6 +368,10 @@ where
                     let ops = vec![Op::Insert; chunk.capacity()];
                     StreamChunk::from_parts(ops, chunk)
                 })) {
+
+                    for (op, row) in chunk.rows() {
+                        tracing::info!("row: {:?}", row);
+                    }
                     // Raise the current position.
                     // As snapshot read streams are ordered by pk, so we can
                     // just use the last row to update `current_pos`.
