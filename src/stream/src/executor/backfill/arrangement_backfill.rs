@@ -25,8 +25,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{Datum, Scalar};
+use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
@@ -112,7 +111,10 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        tracing::info!("vnodes of upstream_table: {:?}", self.upstream_table.vnodes());
+        tracing::info!(
+            "vnodes of upstream_table: {:?}",
+            self.upstream_table.vnodes()
+        );
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();

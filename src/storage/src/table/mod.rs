@@ -21,7 +21,6 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use rand::{RngCore, thread_rng};
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -133,7 +132,7 @@ pub async fn collect_data_chunk_with_builder<E, S, R>(
     stream: &mut S,
     chunk_size: Option<usize>,
     builder: &mut DataChunkBuilder,
-    uid: u64,
+    _uid: u64,
 ) -> Result<Option<DataChunk>, E>
 where
     R: Row,
@@ -144,7 +143,9 @@ where
             Some(row) => {
                 builder.append_one_row_no_finish(row);
             }
-            None => { break; }
+            None => {
+                break;
+            }
         }
     }
 

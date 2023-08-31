@@ -21,7 +21,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use rand::{RngCore, thread_rng};
+use rand::{thread_rng, RngCore};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
