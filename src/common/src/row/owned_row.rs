@@ -45,7 +45,7 @@ impl AsRef<OwnedRow> for OwnedRow {
 impl OwnedRow {
     /// Returns an empty row.
     ///
-    /// Note: use [`empty`](super::empty) if possible.
+    /// Note: use [`empty`](super::empty()) if possible.
     pub fn empty() -> Self {
         Self(Box::new([]))
     }

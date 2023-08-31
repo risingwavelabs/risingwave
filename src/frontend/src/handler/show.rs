@@ -81,13 +81,12 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(
+pub async fn handle_show_object(
     handler_args: HandlerArgs,
     command: ShowObject,
     filter: Option<ShowStatementFilter>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let catalog_reader = session.env().catalog_reader().read_guard();
 
     if let Some(ShowStatementFilter::Where(..)) = filter {
         return Err(ErrorCode::NotImplemented(
@@ -97,37 +96,47 @@ pub fn handle_show_object(
         .into());
     }
 
+    let catalog_reader = session.env().catalog_reader();
+
     let names = match command {
         // If not include schema name, use default schema name
         ShowObject::Table { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_table()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::InternalTable { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_internal_table()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Database => catalog_reader.get_all_database_names(),
-        ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
+        ShowObject::Database => catalog_reader.read_guard().get_all_database_names(),
+        ShowObject::Schema => catalog_reader
+            .read_guard()
+            .get_all_schema_names(session.database())?,
         ShowObject::View { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_view()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .filter(|t| t.associated_table_id.is_none())
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_sink()
             .map(|t| t.name.clone())
@@ -192,8 +201,9 @@ pub fn handle_show_object(
                 .into());
         }
         ShowObject::Connection { schema } => {
-            let schema = catalog_reader
-                .get_schema_by_name(session.database(), &schema_or_default(&schema))?;
+            let reader = catalog_reader.read_guard();
+            let schema =
+                reader.get_schema_by_name(session.database(), &schema_or_default(&schema))?;
             let rows = schema
                 .iter_connections()
                 .map(|c| {
@@ -260,6 +270,7 @@ pub fn handle_show_object(
         }
         ShowObject::Function { schema } => {
             let rows = catalog_reader
+                .read_guard()
                 .get_schema_by_name(session.database(), &schema_or_default(&schema))?
                 .iter_function()
                 .map(|t| {
@@ -360,6 +371,41 @@ pub fn handle_show_object(
                         ),
                         PgFieldDescriptor::new(
                             "Is Unschedulable".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
+        }
+        ShowObject::Jobs => {
+            let resp = session.env().meta_client().list_ddl_progress().await?;
+            let rows = resp
+                .into_iter()
+                .map(|job| {
+                    Row::new(vec![
+                        Some(job.id.to_string().into()),
+                        Some(job.statement.into()),
+                        Some(job.progress.into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Id".to_owned(),
+                            DataType::Int64.to_oid(),
+                            DataType::Int64.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Statement".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Progress".to_owned(),
                             DataType::Varchar.to_oid(),
                             DataType::Varchar.type_len(),
                         ),

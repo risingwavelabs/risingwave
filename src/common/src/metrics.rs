@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+use std::sync::LazyLock;
+
 use hytra::TrAdder;
 use prometheus::core::{Atomic, AtomicU64, GenericCounter, GenericGauge};
-use prometheus::{register_int_counter_with_registry, Registry};
+use prometheus::register_int_counter_with_registry;
 use tracing::Subscriber;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
+
+use crate::monitor::GLOBAL_METRICS_REGISTRY;
+
 #[derive(Debug)]
 pub struct TrAdderAtomic(TrAdder<i64>);
 
@@ -70,16 +76,20 @@ where
 }
 
 impl MetricsLayer {
-    pub fn new(registry: Registry) -> Self {
-        let aws_sdk_retry_counts = register_int_counter_with_registry!(
-            "aws_sdk_retry_counts",
-            "Total number of aws sdk retry happens",
-            registry
-        )
-        .unwrap();
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        static AWS_SDK_RETRY_COUNTS: LazyLock<GenericCounter<AtomicU64>> = LazyLock::new(|| {
+            let registry = GLOBAL_METRICS_REGISTRY.deref();
+            register_int_counter_with_registry!(
+                "aws_sdk_retry_counts",
+                "Total number of aws sdk retry happens",
+                registry
+            )
+            .unwrap()
+        });
 
         Self {
-            aws_sdk_retry_counts,
+            aws_sdk_retry_counts: AWS_SDK_RETRY_COUNTS.deref().clone(),
         }
     }
 }

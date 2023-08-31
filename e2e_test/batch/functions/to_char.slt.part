@@ -37,3 +37,32 @@ query T
 SELECT to_char(timestamp '2006-01-02 15:04:05.3', 'yyyy-mm-dd hh24:mi:ss.us');
 ----
 2006-01-02 15:04:05.300000
+
+statement ok
+create table t (tsz timestamptz);
+
+statement ok
+insert into t values (to_timestamp(1617235200)), ('2022-04-08 07:30:00 -07:00'), ('2023-07-12 03:01:00Z');
+
+statement ok
+set timezone to 'US/Pacific';
+
+query T
+select to_char(tsz, 'Mon DD, YYYY HH12:MI:SS am TZH:TZM') from t order by tsz;
+----
+Mar 31, 2021 05:00:00 pm -07:00
+Apr 08, 2022 07:30:00 am -07:00
+Jul 11, 2023 08:01:00 pm -07:00
+
+statement ok
+set timezone to 'UTC';
+
+query T
+select to_char(tsz, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') from t order by tsz;
+----
+2021-04-01 00:00:00 +00:00
+2022-04-08 14:30:00 +00:00
+2023-07-12 03:01:00 +00:00
+
+statement ok
+drop table t;

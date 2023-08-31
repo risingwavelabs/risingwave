@@ -285,6 +285,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+                periodic_tombstone_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_tombstone_reclaim_compaction_interval_sec,
                 periodic_split_compact_group_interval_sec: config
                     .meta
                     .periodic_split_compact_group_interval_sec,

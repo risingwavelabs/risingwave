@@ -45,6 +45,7 @@ message StreamSourceInfo {
   plan_common.EncodeType row_encode = 9;
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
+  plan_common.StorageTableDesc upstream_table = 12;
 }
 
 message Source {
@@ -78,6 +79,9 @@ message Source {
 
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
+
+  // Per-source catalog version, used by schema change.
+  uint64 version = 100;
 }
 
 enum SinkType {

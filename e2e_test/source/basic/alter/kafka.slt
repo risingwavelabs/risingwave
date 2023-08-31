@@ -1,0 +1,113 @@
+statement ok
+CREATE SOURCE s1 (v1 int) with (
+  connector = 'kafka',
+  topic = 'kafka_alter',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE s2 (v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_alter',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view mv1 as select * from s1;
+
+statement ok
+create materialized view mv2 as select * from s2;
+
+sleep 10s
+
+statement ok
+flush;
+
+query I
+select * from s1;
+----
+1
+
+query T
+select * from s2;
+----
+11
+
+# alter source
+statement ok
+alter source s1 add column v2 varchar;
+
+# alter source with null column
+statement ok
+alter source s2 add column v4 int;
+
+statement ok
+create materialized view mv3 as select * from s1;
+
+statement ok
+create materialized view mv4 as select * from s2;
+
+sleep 10s
+
+statement ok
+flush;
+
+query IT
+select * from s1
+----
+1 11
+
+query TI
+select * from s2
+----
+11 NULL
+
+query I
+select * from mv1
+----
+1
+
+query T
+select * from mv2
+----
+11
+
+query IT
+select * from mv3
+----
+1 11
+
+query TI
+select * from mv4
+----
+11 NULL
+
+# alter source again
+statement ok
+alter source s1 add column v3 int;
+
+statement ok
+create materialized view mv5 as select * from s1;
+
+sleep 10s
+
+statement ok
+flush;
+
+query ITI
+select * from s1
+----
+1 11 111
+
+query ITI
+select * from mv5
+----
+1 11 111
+
+# check definition after altering
+query TT
+show create source s1;
+----
+public.s1 CREATE SOURCE s1 (v1 INT, v2 CHARACTER VARYING, v3 INT) WITH (connector = 'kafka', topic = 'kafka_alter', properties.bootstrap.server = 'message_queue:29092', scan.startup.mode = 'earliest') FORMAT PLAIN ENCODE JSON

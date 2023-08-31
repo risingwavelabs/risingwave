@@ -37,4 +37,9 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name:  Common sub expression shouldn't extract partial expression of `some`/`all`. See 11766
+  sql: |
+    with t(v, arr) as (select 1, array[2, 3]) select v < all(arr), v < some(arr) from t;
+  expected_outputs:
+    - batch_plan
 

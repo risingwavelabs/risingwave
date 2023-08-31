@@ -18,13 +18,13 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
-    TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
+    Query, StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -97,6 +97,17 @@ impl Binder {
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
                     // allow `session_user()` while we do.
                     self.bind_function(Function::no_arg(ObjectName(vec![ident])))
+                } else if let Some(ref lambda_args) = self.context.lambda_args {
+                    // We don't support capture, so if the expression is in the lambda context,
+                    // we'll not bind it for table columns.
+                    if let Some((arg_idx, arg_type)) = lambda_args.get(&ident.real_value()) {
+                        Ok(InputRef::new(*arg_idx, arg_type.clone()).into())
+                    } else {
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
+                        )
+                    }
                 } else {
                     self.bind_column(&[ident])
                 }
@@ -134,6 +145,12 @@ impl Binder {
             Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, *expr),
             Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
             Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
+            Expr::IsJson {
+                expr,
+                negated,
+                item_type,
+                unique_keys: false,
+            } => self.bind_is_json(*expr, negated, item_type),
             Expr::Case {
                 operand,
                 conditions,
@@ -259,6 +276,32 @@ impl Binder {
             )
         } else {
             Ok(bound_subquery)
+        }
+    }
+
+    pub(super) fn bind_is_json(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        item_type: JsonPredicateType,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![self.bind_expr_inner(expr)?];
+        // Avoid `JsonPredicateType::to_string` so that we decouple sqlparser from expr execution
+        let type_symbol = match item_type {
+            JsonPredicateType::Value => None,
+            JsonPredicateType::Array => Some("ARRAY"),
+            JsonPredicateType::Object => Some("OBJECT"),
+            JsonPredicateType::Scalar => Some("SCALAR"),
+        };
+        if let Some(s) = type_symbol {
+            args.push(ExprImpl::literal_varchar(s.into()));
+        }
+
+        let is_json = FunctionCall::new(ExprType::IsJson, args)?.into();
+        if negated {
+            Ok(FunctionCall::new(ExprType::Not, vec![is_json])?.into())
+        } else {
+            Ok(is_json)
         }
     }
 
@@ -436,6 +479,11 @@ impl Binder {
         }
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
+        }
+        if inputs.iter().any(ExprImpl::has_table_function) {
+            return Err(
+                ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
+            );
         }
         Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }

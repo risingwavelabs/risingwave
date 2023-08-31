@@ -181,10 +181,7 @@ async fn test_sink_basic() -> Result<()> {
 #[madsim::test]
 async fn test_sink_decouple_basic() -> Result<()> {
     let config_path = {
-        let mut file = tempfile::NamedTempFile::new().expect(
-            "failed to create temp config
-file",
-        );
+        let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
         file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
             .expect("failed to write config file");
         file.into_temp_path()

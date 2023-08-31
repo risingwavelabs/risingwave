@@ -648,8 +648,11 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDateValue<
                 <&JClass<'_>>::from(class_ref.as_obj()),
                 *constructor,
                 ReturnType::Object,
-                &[jvalue { l: string_value.into_raw() }],
-            )? else {
+                &[jvalue {
+                    l: string_value.into_raw(),
+                }],
+            )?
+            else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
                     name: "valueOf".to_string(),
                     sig: "(Ljava/lang/String;)Ljava/sql/Date;".into(),
