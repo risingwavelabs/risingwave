@@ -216,7 +216,7 @@ impl GetObjectId for SharedComapctorObjectIdManager {
         if let Some(first_element) = self.output_object_ids.pop_front() {
             Ok(first_element)
         } else {
-            return Err(HummockError::meta_error("Output object id runs out"));
+            return Err(HummockError::other("Output object id runs out"));
         }
     }
 }
