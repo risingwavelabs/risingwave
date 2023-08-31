@@ -219,7 +219,13 @@ async fn compaction_test(
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();
-    let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
+    let filter_key_extractor_manager = match store.filter_key_extractor_manager().clone() {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
+
     filter_key_extractor_manager.update(
         1,
         Arc::new(FilterKeyExtractorImpl::FullKey(

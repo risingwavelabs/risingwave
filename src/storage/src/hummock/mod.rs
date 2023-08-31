@@ -74,7 +74,7 @@ use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
-use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
@@ -259,13 +259,8 @@ impl HummockStorage {
         &self.context.sstable_object_id_manager
     }
 
-    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
-        match &self.context.filter_key_extractor_manager {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                filter_key_extractor_manager,
-            ) => filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => todo!(),
-        }
+    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
+        &self.context.filter_key_extractor_manager
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {

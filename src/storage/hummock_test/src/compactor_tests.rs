@@ -229,10 +229,18 @@ pub(crate) mod tests {
             Default::default(),
         )
         .await;
+
+        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
+        {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_extractor_manager,
+            ) => rpc_filter_key_extractor_manager,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+        };
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
-            storage.filter_key_extractor_manager().clone(),
+            rpc_filter_key_extractor_manager,
         );
         let worker_node2 = hummock_manager_ref
             .cluster_manager
@@ -373,10 +381,18 @@ pub(crate) mod tests {
             Default::default(),
         )
         .await;
+
+        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
+        {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_extractor_manager,
+            ) => rpc_filter_key_extractor_manager,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+        };
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
-            storage.filter_key_extractor_manager().clone(),
+            rpc_filter_key_extractor_manager,
         );
 
         // 1. add sstables with 1MB value
@@ -537,8 +553,14 @@ pub(crate) mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         existing_table_id: u32,
     ) -> CompactorContext {
-        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
-        filter_key_extractor_manager.update(
+        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
+        {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_extractor_manager,
+            ) => rpc_filter_key_extractor_manager,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+        };
+        rpc_filter_key_extractor_manager.update(
             existing_table_id,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
@@ -546,7 +568,7 @@ pub(crate) mod tests {
         get_compactor_context_with_filter_key_extractor_manager(
             storage,
             hummock_meta_client,
-            filter_key_extractor_manager,
+            rpc_filter_key_extractor_manager,
         )
     }
 
@@ -638,13 +660,20 @@ pub(crate) mod tests {
             .new_local(NewLocalOptions::for_test(TableId::from(2)))
             .await;
 
-        let filter_key_extractor_manager = global_storage.filter_key_extractor_manager().clone();
-        filter_key_extractor_manager.update(
+        let rpc_filter_key_extractor_manager =
+            match global_storage.filter_key_extractor_manager().clone() {
+                FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                    rpc_filter_key_extractor_manager,
+                ) => rpc_filter_key_extractor_manager,
+                FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+            };
+
+        rpc_filter_key_extractor_manager.update(
             1,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
-        filter_key_extractor_manager.update(
+        rpc_filter_key_extractor_manager.update(
             2,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
@@ -653,7 +682,7 @@ pub(crate) mod tests {
             global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
             &hummock_meta_client,
-            filter_key_extractor_manager.clone(),
+            rpc_filter_key_extractor_manager,
         );
 
         // 1. add sstables
@@ -817,13 +846,21 @@ pub(crate) mod tests {
             TableId::from(existing_table_id),
         )
         .await;
-        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
+
+        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
+        {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_extractor_manager,
+            ) => rpc_filter_key_extractor_manager,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+        };
+
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
-            filter_key_extractor_manager.clone(),
+            rpc_filter_key_extractor_manager.clone(),
         );
-        filter_key_extractor_manager.update(
+        rpc_filter_key_extractor_manager.update(
             2,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
@@ -992,18 +1029,24 @@ pub(crate) mod tests {
         )
         .await;
 
-        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
-        filter_key_extractor_manager.update(
+        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
+        {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_extractor_manager,
+            ) => rpc_filter_key_extractor_manager,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+        };
+
+        rpc_filter_key_extractor_manager.update(
             existing_table_id,
             Arc::new(FilterKeyExtractorImpl::FixedLength(
                 FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
             )),
         );
-
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
-            filter_key_extractor_manager.clone(),
+            rpc_filter_key_extractor_manager,
         );
 
         // 1. add sstables

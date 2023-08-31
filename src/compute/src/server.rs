@@ -48,7 +48,6 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -224,10 +223,7 @@ pub async fn compute_node_serve(
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager:
-                    FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                        storage.filter_key_extractor_manager().clone(),
-                    ),
+                filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
