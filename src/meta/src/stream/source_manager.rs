@@ -105,7 +105,7 @@ impl ConnectorSourceWorker {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
         if properties.is_cdc_connector() {
             let table_schema = Self::extract_source_schema(source);
-            properties.init_cdc_properties(Some(table_schema));
+            properties.init_cdc_properties(table_schema);
         }
         let enumerator = SplitEnumeratorImpl::create(
             properties.clone(),

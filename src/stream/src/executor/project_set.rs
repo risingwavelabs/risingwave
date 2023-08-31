@@ -17,15 +17,15 @@ use std::fmt::{Debug, Formatter};
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, DatumRef};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef};
+use crate::common::StreamChunkBuilder;
 
 impl ProjectSetExecutor {
     pub fn new(
@@ -100,15 +100,12 @@ impl ProjectSetExecutor {
 
         // First column will be `projected_row_id`, which represents the index in the
         // output table
-        let mut ops_builder = Vec::with_capacity(self.chunk_size);
-        let mut builder = DataChunkBuilder::new(
-            std::iter::once(DataType::Int64)
-                .chain(self.select_list.iter().map(|i| i.return_type()))
-                .collect(),
-            self.chunk_size,
-        );
+        let data_types: Vec<_> = std::iter::once(DataType::Int64)
+            .chain(self.select_list.iter().map(|i| i.return_type()))
+            .collect();
         // a temporary row buffer
-        let mut row = vec![None as DatumRef<'_>; builder.num_columns()];
+        let mut row = vec![DatumRef::None; data_types.len()];
+        let mut builder = StreamChunkBuilder::new(self.chunk_size, data_types);
 
         #[for_await]
         for msg in self.input.execute() {
@@ -159,13 +156,8 @@ impl ProjectSetExecutor {
                                 // no more output rows for the input row
                                 break;
                             }
-                            ops_builder.push(op);
-                            if let Some(chunk) = builder.append_one_row(&*row) {
-                                let ops = std::mem::replace(
-                                    &mut ops_builder,
-                                    Vec::with_capacity(self.chunk_size),
-                                );
-                                yield StreamChunk::from_parts(ops, chunk).into();
+                            if let Some(chunk) = builder.append_row(op, &*row) {
+                                yield Message::Chunk(chunk);
                             }
                             // move to the next row
                             for item in &mut results {
@@ -175,12 +167,8 @@ impl ProjectSetExecutor {
                             }
                         }
                     }
-                    if let Some(chunk) = builder.consume_all() {
-                        let ops = std::mem::replace(
-                            &mut ops_builder,
-                            Vec::with_capacity(self.chunk_size),
-                        );
-                        yield StreamChunk::from_parts(ops, chunk).into();
+                    if let Some(chunk) = builder.take() {
+                        yield Message::Chunk(chunk);
                     }
                 }
             }
