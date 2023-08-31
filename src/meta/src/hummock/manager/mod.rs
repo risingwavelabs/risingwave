@@ -879,8 +879,6 @@ where
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
-                .await?;
             tracing::debug!(
                 "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
                 compaction_group_id,
@@ -895,8 +893,6 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
-                .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
@@ -1056,6 +1052,7 @@ where
         Ok(())
     }
 
+    #[named]
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -1065,17 +1062,30 @@ where
             anyhow::anyhow!("failpoint metastore error")
         )));
 
+        let mut trivial_tasks = vec![];
+
         while let Some(task) = self
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
-            if let TaskStatus::Pending = task.task_status() {
+            if CompactStatus::is_trivial_move_task(&task)
+                || CompactStatus::is_trivial_reclaim(&task)
+            {
+                println!("task: {:?}", task.task_id);
+                trivial_tasks.push(task);
+
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            } else {
                 return Ok(Some(task));
             }
-            assert!(
-                CompactStatus::is_trivial_move_task(&task)
-                    || CompactStatus::is_trivial_reclaim(&task)
-            );
+
+            println!("trivial_tasks len {}", trivial_tasks.len());
+        }
+
+        if !trivial_tasks.is_empty() {
+            let mut compaction_guard = write_lock!(self, compaction).await;
+            self.report_trivial_task_impl(trivial_tasks, &mut compaction_guard, None)
+                .await?;
         }
 
         Ok(None)
@@ -1095,25 +1105,6 @@ where
     fn is_compact_task_expired_trx(
         compact_task: &CompactTask,
         branched_ssts: &BTreeMapTransaction<'_, HummockSstableObjectId, BranchedSstInfo>,
-    ) -> bool {
-        for input_level in compact_task.get_input_ssts() {
-            for table_info in input_level.get_table_infos() {
-                if let Some(mp) = branched_ssts.get(&table_info.object_id) {
-                    if mp
-                        .get(&compact_task.compaction_group_id)
-                        .map_or(true, |sst_id| *sst_id != table_info.sst_id)
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    fn is_compact_task_expired(
-        compact_task: &CompactTask,
-        branched_ssts: &BTreeMap<HummockSstableObjectId, BranchedSstInfo>,
     ) -> bool {
         for input_level in compact_task.get_input_ssts() {
             for table_info in input_level.get_table_infos() {

@@ -48,7 +48,7 @@ pub trait LevelSelector: Sync + Send {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
+        compaction_group: &CompactionGroup,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,

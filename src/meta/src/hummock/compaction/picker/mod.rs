@@ -81,13 +81,4 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
-
-    // return (trivial-task, normal-task)
-    fn batch_pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-        task_count: usize,
-    ) -> (Option<Vec<CompactionInput>>, Option<Vec<CompactionInput>>);
 }

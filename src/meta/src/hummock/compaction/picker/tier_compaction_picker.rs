@@ -156,35 +156,12 @@ impl CompactionPicker for TierCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        if let (_, Some(mut normal_task_vec)) =
-            self.batch_pick_compaction(levels, level_handlers, stats, 1)
-        {
-            return Some(normal_task_vec.pop().unwrap());
-        }
-
-        return None;
-    }
-
-    fn batch_pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-        _task_count: usize,
-    ) -> (Option<Vec<CompactionInput>>, Option<Vec<CompactionInput>>) {
         let l0 = levels.l0.as_ref().unwrap();
         if l0.sub_levels.is_empty() {
-            return (None, None);
+            return None;
         }
 
-        let mut result = Vec::with_capacity(1);
-
-        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
-            result.push(ret);
-            return (None, Some(result));
-        }
-
-        return (None, None);
+        self.pick_overlapping_level(l0, &level_handlers[0], stats)
     }
 }
 

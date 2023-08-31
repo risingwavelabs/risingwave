@@ -317,16 +317,6 @@ impl CompactionPicker for ManualCompactionPicker {
             target_sub_level_id: 0,
         })
     }
-
-    fn batch_pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-        task_count: usize,
-    ) -> (Option<Vec<CompactionInput>>, Option<Vec<CompactionInput>>) {
-        todo!()
-    }
 }
 
 #[cfg(test)]
