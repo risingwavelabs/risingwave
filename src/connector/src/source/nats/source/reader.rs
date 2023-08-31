@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 
 use crate::impl_common_split_reader_logic;
@@ -26,6 +27,8 @@ use crate::source::{
 impl_common_split_reader_logic!(NatsSplitReader, NatsProperties);
 
 pub struct NatsSplitReader {
+    subscriber: async_nats::Subscriber,
+    properties: NatsProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
@@ -36,12 +39,16 @@ impl SplitReader for NatsSplitReader {
 
     async fn new(
         properties: NatsProperties,
-        state: Vec<SplitImpl>,
+        splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
-        columns: Option<Vec<Column>>,
+        _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        assert!(splits.len() == 1);
+        let subscriber = properties.common.build_subscriber().await?;
         Ok(Self {
+            subscriber,
+            properties,
             parser_config,
             source_ctx,
         })
@@ -54,5 +61,12 @@ impl SplitReader for NatsSplitReader {
 
 impl NatsSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn into_data_stream(self) {}
+    async fn into_data_stream(self) {
+        let mut subscriber = self.subscriber;
+        while let Some(message) = subscriber.next().await {
+            // let mut msgs = Vec::with_capacity(1024);
+            // msgs.push(SourceMessage::from_nats_message(message));
+            yield vec![SourceMessage::from_nats_message(message)];
+        }
+    }
 }

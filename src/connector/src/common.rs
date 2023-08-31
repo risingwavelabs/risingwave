@@ -365,6 +365,16 @@ impl NatsCommon {
         Ok(jetstream)
     }
 
+    pub(crate) async fn build_subscriber(&self) -> anyhow::Result<async_nats::Subscriber> {
+        let mut connect_options = async_nats::ConnectOptions::new();
+        if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
+            connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
+        }
+        let client = connect_options.connect(self.server_url.clone()).await?;
+        let subscription = client.subscribe(self.subject.clone()).await?;
+        Ok(subscription)
+    }
+
     pub(crate) async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,

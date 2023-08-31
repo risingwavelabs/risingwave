@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Ok};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -45,5 +45,9 @@ impl SplitMetaData for NatsSplit {
 impl NatsSplit {
     pub fn new(subject: String, split_num: i32) -> Self {
         Self { subject, split_num }
+    }
+
+    pub fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+        Ok(())
     }
 }

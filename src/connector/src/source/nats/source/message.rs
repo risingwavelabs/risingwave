@@ -16,15 +16,14 @@ use std::sync::Arc;
 
 use async_nats;
 
-use crate::source::{base::SourceMessage, SourceMeta};
+use crate::source::base::SourceMessage;
+use crate::source::SourceMeta;
 
 impl SourceMessage {
-    pub fn fromt_nats_jetstream_message(
-        message: &async_nats::jetstream::message::Message,
-    ) -> Self {
+    pub fn from_nats_message(message: async_nats::Message) -> Self {
         SourceMessage {
             key: None,
-            payload: Some(message.message.payload.to_vec()),
+            payload: Some(message.payload.to_vec()),
             offset: "".to_string(),
             split_id: Arc::from(""),
             meta: SourceMeta::Empty,

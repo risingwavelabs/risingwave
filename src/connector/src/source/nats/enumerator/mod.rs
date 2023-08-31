@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow;
 use async_trait::async_trait;
 
 use super::source::NatsSplit;
 use super::NatsProperties;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NatsSplitEnumerator {
     subject: String,
     split_num: i32,
@@ -32,7 +32,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
 
     async fn new(
         properties: Self::Properties,
-        context: SourceEnumeratorContextRef,
+        _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<NatsSplitEnumerator> {
         Ok(Self {
             subject: properties.common.subject.clone(),
@@ -46,8 +46,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
             subject: self.subject.clone(),
             split_num: 1,
         };
-        let mut splits = vec![];
 
-        Ok(splits)
+        Ok(vec![nats_split])
     }
 }

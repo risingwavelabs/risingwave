@@ -18,7 +18,6 @@ pub mod split;
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
 use risingwave_pb::connector_service::TableSchema;
 use serde::Deserialize;
 
