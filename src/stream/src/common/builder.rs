@@ -50,13 +50,7 @@ impl Drop for StreamChunkBuilder {
 
 impl StreamChunkBuilder {
     pub fn new(chunk_size: usize, data_types: Vec<DataType>) -> Self {
-        // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
-        // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
-        // until `UpdateInsert` comes. This means that the effective output message size will indeed
-        // be at most the original `capacity`
-        assert!(chunk_size >= 1);
-        let reduced_capacity = chunk_size - 1;
-        assert!(reduced_capacity > 0);
+        assert!(chunk_size > 0);
 
         let ops = Vec::with_capacity(chunk_size);
         let column_builders = data_types
@@ -67,7 +61,7 @@ impl StreamChunkBuilder {
             ops,
             column_builders,
             data_types,
-            capacity: reduced_capacity,
+            capacity: chunk_size,
             size: 0,
         }
     }
@@ -79,8 +73,10 @@ impl StreamChunkBuilder {
     fn inc_size(&mut self) -> Option<StreamChunk> {
         self.size += 1;
 
-        // Take a chunk when capacity is exceeded, but splitting `UpdateDelete` and `UpdateInsert`
-        // should be avoided
+        // Take a chunk when capacity is exceeded. Splitting `UpdateDelete` and `UpdateInsert`
+        // should be avoided, so when the last one is `UpdateDelete`, we delay the chunk until
+        // `UpdateInsert` comes. This means the output chunk size may exceed the given `chunk_size`,
+        // and theoretically at most `chunk_size + 1` if inputs are consistent.
         if self.size >= self.capacity && self.ops[self.ops.len() - 1] != Op::UpdateDelete {
             self.take()
         } else {
