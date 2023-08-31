@@ -199,6 +199,13 @@ CREATE MATERIALIZED VIEW stream_query AS SELECT DATE '2022-08-23' AS col_0, TIME
 DROP MATERIALIZED VIEW IF EXISTS stream_query;
 SET RW_ENABLE_TWO_PHASE_AGG = true;
 
+EXPLAIN (verbose) CREATE MATERIALIZED VIEW stream_query AS
+SELECT
+    1 AS col_0
+FROM
+    m19 AS t_0
+        JOIN tumble (auction, auction.date_time, INTERVAL '7') AS tumble_1 ON t_0.col_0 = tumble_1.date_time;
+
 CREATE MATERIALIZED VIEW stream_query AS
 SELECT
     1 AS col_0

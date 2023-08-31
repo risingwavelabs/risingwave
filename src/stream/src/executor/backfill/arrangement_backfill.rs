@@ -299,11 +299,6 @@ where
                                         // Consume with the renaming stream buffer chunk without
                                         // mark.
                                         for chunk in upstream_chunk_buffer.drain(..) {
-
-                                            for (op, row) in chunk.rows() {
-                                                tracing::info!("row: {:?}", row);
-                                            }
-
                                             let chunk_cardinality = chunk.cardinality() as u64;
                                             cur_barrier_snapshot_processed_rows +=
                                                 chunk_cardinality;
@@ -332,7 +327,10 @@ where
                                         total_snapshot_processed_rows += chunk_cardinality;
 
                                         for (op, row) in chunk.rows() {
-                                            tracing::info!("row: {:?}", row);
+                                            tracing::info!(
+                                                actor_id = self.actor_id,
+                                                "rows in snapshot_read: {:?}", row
+                                            );
                                         }
 
                                         yield Message::Chunk(mapping_chunk(
@@ -370,7 +368,7 @@ where
                 })) {
 
                     for (op, row) in chunk.rows() {
-                        tracing::info!("row: {:?}", row);
+                        tracing::info!("rows in snapshot builder: {:?}", row);
                     }
                     // Raise the current position.
                     // As snapshot read streams are ordered by pk, so we can
