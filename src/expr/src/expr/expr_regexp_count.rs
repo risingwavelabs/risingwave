@@ -34,8 +34,6 @@ pub struct RegexpCountExpression {
     pub source: Box<dyn Expression>,
     /// Relevant regex context, contains `flags` option
     pub ctx: RegexpContext,
-    /// The return type
-    pub return_type: DataType,
     /// The start position to begin the counting process
     pub start: Option<u32>,
 }
@@ -49,9 +47,6 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpCountExpression {
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         // Sanity check first
         ensure!(prost.get_function_type().unwrap() == Type::RegexpCount);
-
-        // Get the return type
-        let return_type = DataType::from(prost.get_return_type().unwrap());
 
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
@@ -149,11 +144,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpCountExpression {
             bail!("syntax error in `regexp_count`");
         }
 
-        let flags = if let Some(f) = flags {
-            f
-        } else {
-            "".to_string()
-        };
+        let flags = flags.unwrap_or_default();
 
         if flags.contains('g') {
             bail!("`regexp_count` does not support global flag option");
@@ -161,12 +152,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpCountExpression {
 
         let ctx = RegexpContext::new(&pattern, &flags)?;
 
-        Ok(Self {
-            source,
-            ctx,
-            return_type,
-            start,
-        })
+        Ok(Self { source, ctx, start })
     }
 }
 
@@ -179,9 +165,8 @@ impl RegexpCountExpression {
             // For unicode purpose
             let mut start = match text.char_indices().nth(start as usize) {
                 Some((idx, _)) => idx,
-                // The start is out of bound or just invalid
-                // FIXME: What to return?
-                None => return None,
+                // The `start` is out of bound
+                None => return Some(0),
             };
 
             let mut count = 0;
@@ -193,8 +178,7 @@ impl RegexpCountExpression {
 
             Some(count)
         } else {
-            // Input string is None
-            // FIXME: Return None or Some(0)?
+            // Input string is None, the return value should be NULL
             None
         }
     }
@@ -203,7 +187,7 @@ impl RegexpCountExpression {
 #[async_trait::async_trait]
 impl Expression for RegexpCountExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Int32
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -216,23 +200,12 @@ impl Expression for RegexpCountExpression {
 
         for row_idx in 0..row_len {
             if !vis.is_set(row_idx) {
-                builder.append_n(1, None);
+                builder.append(None);
                 continue;
             }
 
-            let source = match source_column.value_at(row_idx) {
-                Some(s) => s,
-                None => {
-                    builder.append_n(1, None);
-                    continue;
-                }
-            };
-
-            if let Some(ret) = self.match_row(Some(source)) {
-                builder.append_n(1, Some(ret));
-            } else {
-                builder.append_n(1, None);
-            }
+            let source = source_column.value_at(row_idx);
+            builder.append(self.match_row(source));
         }
 
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
@@ -240,9 +213,13 @@ impl Expression for RegexpCountExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let source = self.source.eval_row(input).await?;
+        // Will panic if the input text is not a String
         let source = match source {
             Some(ScalarImpl::Utf8(s)) => s,
-            _ => return Ok(None),
+            None => return Ok(None),
+            // Other than the above cases
+            // The input is invalid and we should panic here
+            _ => bail!("source should be a String"),
         };
 
         Ok(self
