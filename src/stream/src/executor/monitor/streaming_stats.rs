@@ -106,6 +106,8 @@ pub struct StreamingMetrics {
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
 
+    pub barrier_something: IntCounter,
+
     pub sink_commit_duration: HistogramVec,
 
     // Memory management
@@ -603,6 +605,14 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let barrier_something = register_int_counter_with_registry!(
+            "stream_barrier_something",
+            "barrier_something",
+            registry
+        )
+        .unwrap();
+
         let sink_commit_duration = register_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
@@ -752,6 +762,7 @@ impl StreamingMetrics {
             arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
+            barrier_something,
             sink_commit_duration,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,

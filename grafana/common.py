@@ -513,6 +513,29 @@ class Panels:
             transformations=transformations
         )
 
+    def stat_sec(self, title, description, targets, threshold_value):
+        gridPos = self.layout.next_half_width_graph()
+        return Stat(
+            title=title,
+            dataSource=self.datasource,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            format="s",
+            reduceCalc="last",
+            thresholds=[
+                {
+                    "color": "green",
+                    "value": None,
+                },
+                {
+                    "value": threshold_value,
+                    "color": "#EAB839"
+                }
+            ],
+            # **self.common_options,
+        )
+
     def sub_panel(self):
         return Panels(self.datasource)
 

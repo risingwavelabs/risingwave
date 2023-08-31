@@ -839,6 +839,17 @@ def section_streaming(panels):
                 ),
             ],
         ),
+        panels.stat_sec(
+            "Barrier Something",
+            "TODO",
+            [
+                panels.target(
+                    f"time() - max_over_time(timestamp(changes({metric('stream_barrier_something')}[$__interval]) > 0)[1h:$__interval])",
+                    "{{instance}}",
+                ),
+            ],
+            threshold_value=60,
+        ),
     ]
 
 
