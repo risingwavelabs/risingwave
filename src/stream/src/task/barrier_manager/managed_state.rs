@@ -85,25 +85,10 @@ impl ManagedBarrierState {
 
     /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
     fn may_notify(&mut self, curr_epoch: u64) {
+        // Report if there's progress on the earliest in-flight barrier.
         if self.epoch_barrier_state_map.keys().next() == Some(&curr_epoch) {
-            GLOBAL_STREAMING_METRICS.barrier_something.inc();
+            GLOBAL_STREAMING_METRICS.barrier_manager_progress.inc();
         }
-
-        // match self.epoch_barrier_state_map.get(&curr_epoch) {
-        //     Some(BarrierState {
-        //         inner:
-        //             ManagedBarrierStateInner::Issued {
-        //                 remaining_actors, ..
-        //             },
-        //         ..
-        //     }) => {
-        //         GLOBAL_STREAMING_METRICS
-        //             .barrier_something
-        //             .with_label_values(&[&curr_epoch.to_string()])
-        //             .set(remaining_actors.len() as i64);
-        //     }
-        //     _ => unreachable!(),
-        // };
 
         while let Some(entry) = self.epoch_barrier_state_map.first_entry() {
             let to_notify = matches!(
@@ -166,30 +151,7 @@ impl ManagedBarrierState {
                 }
                 _ => unreachable!(),
             }
-
-            // GLOBAL_STREAMING_METRICS
-            //     .barrier_something
-            //     .remove_label_values(&[&epoch.to_string()])
-            //     .unwrap();
         }
-
-        // if let Some((
-        //     _,
-        //     BarrierState {
-        //         prev_epoch,
-        //         inner:
-        //             ManagedBarrierStateInner::Issued {
-        //                 remaining_actors, ..
-        //             },
-        //         ..
-        //     },
-        // )) = self.epoch_barrier_state_map.first_key_value()
-        // {
-        //     let m = &GLOBAL_STREAMING_METRICS.barrier_something;
-        //     m.reset();
-        //     m.with_label_values(&[&prev_epoch.to_string()])
-        //         .set(remaining_actors.len() as i64);
-        // }
     }
 
     /// Clear and reset all states.

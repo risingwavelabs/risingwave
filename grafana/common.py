@@ -96,11 +96,16 @@ class Layout:
 
 
 class Panels:
-    common_options = {
-        "fillOpacity": 10,
+    base_common_options = {
         "interval": "1s",
         "maxDataPoints": 1000,
+    }
+
+    # Common options for all timeseries panels
+    common_options = {
+        "fillOpacity": 10,
         "legendDisplayMode": "table",
+        **base_common_options,
     }
 
     def __init__(self, datasource):
@@ -530,10 +535,10 @@ class Panels:
                 },
                 {
                     "value": threshold_value,
-                    "color": "#EAB839"
+                    "color": "#EAB839" # yellow
                 }
             ],
-            # **self.common_options,
+            **self.base_common_options,
         )
 
     def sub_panel(self):

@@ -840,11 +840,12 @@ def section_streaming(panels):
             ],
         ),
         panels.stat_sec(
-            "Barrier Something",
-            "TODO",
+            "Earliest In-Flight Barrier Congestion Time",
+            "The time that the earliest in-flight barrier has not made any progress on each compute node. "
+            "This metric helps users to detect potential congestion or stuck in the system.",
             [
                 panels.target(
-                    f"time() - max_over_time(timestamp(changes({metric('stream_barrier_something')}[$__interval]) > 0)[1h:$__interval])",
+                    f"time() - max_over_time(timestamp(changes({metric('stream_barrier_manager_progress')}[$__interval]) > 0)[1h:$__interval])",
                     "{{instance}}",
                 ),
             ],
