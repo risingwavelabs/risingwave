@@ -17,6 +17,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
+use prometheus::Registry;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
@@ -37,6 +38,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::add_worker_node_request::Property;
 
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::{
     default_level_selector, CompactStatus, LevelSelector, ManualCompactionOption,
     SpaceReclaimCompactionSelector,
@@ -46,6 +48,7 @@ use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
@@ -2070,18 +2073,18 @@ async fn test_move_tables_between_compaction_group() {
     assert_eq!(branched_ssts.len(), 2);
 }
 
-// TODO: re-enable this test after solving global metric issue when running test in multi-thread.
-#[ignore]
 #[tokio::test]
 async fn test_gc_stats() {
-    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let registry = Registry::new();
+    let (_env, hummock_manager, _, worker_node) =
+        setup_compute_env_with_metric(80, config, Some(MetaMetrics::for_test(&registry))).await;
     let context_id = worker_node.id;
-    hummock_manager.metrics.stale_object_size.set(0);
-    hummock_manager.metrics.stale_object_count.set(0);
-    hummock_manager.metrics.old_version_object_size.set(0);
-    hummock_manager.metrics.old_version_object_count.set(0);
-    hummock_manager.metrics.current_version_object_count.set(0);
-    hummock_manager.metrics.current_version_object_size.set(0);
     let assert_eq_gc_stats = |stale_object_size,
                               stale_object_count,
                               old_version_object_size,
