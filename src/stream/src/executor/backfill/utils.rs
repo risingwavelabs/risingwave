@@ -21,6 +21,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use rand::{RngCore, thread_rng};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -490,8 +491,9 @@ pub(crate) async fn iter_chunks<'a, S, E, R>(
     R: Row,
     S: Stream<Item = Result<R, E>> + Unpin + 'a,
 {
+    let uid = thread_rng().next_u64();
     while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
+        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder, uid)
             .instrument_await("backfill_snapshot_read")
             .await?
     {

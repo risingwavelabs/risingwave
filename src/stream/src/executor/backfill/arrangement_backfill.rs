@@ -177,6 +177,7 @@ where
                     next.is_none()
                 };
                 let builder_is_empty = builders.iter().all(|b| b.is_empty());
+                builders.iter_mut().for_each(|b| b.clear());
                 snapshot_is_empty && builder_is_empty
             }
         };
@@ -271,6 +272,11 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
+                                        tracing::trace!(
+                                            actor = self.actor_id,
+                                            barrier = ?barrier,
+                                            "barrier received"
+                                        );
                                         // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
@@ -326,15 +332,12 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
-
-                                        for (op, row) in chunk.rows() {
-                                            tracing::info!(
-                                                actor_id = self.actor_id,
-                                                vnode = ?vnode,
-                                                pk = ?pk_indices,
-                                                "rows in snapshot_read: {:?}", row
-                                            );
-                                        }
+                                        tracing::info!(
+                                            actor_id = self.actor_id,
+                                            vnode = ?vnode,
+                                            pk = ?pk_indices,
+                                            "chunk in snapshot_read: {:#?}", chunk
+                                        );
 
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,

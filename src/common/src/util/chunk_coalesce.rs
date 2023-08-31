@@ -142,6 +142,15 @@ impl DataChunkBuilder {
         }
     }
 
+    /// Clears the buffer and returns all data in current buffer.
+    #[must_use]
+    pub fn clear(&mut self) {
+        if self.buffered_count > 0 {
+            self.array_builders.clear()
+        }
+        self.buffered_count = 0;
+    }
+
     fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) {
         self.do_append_one_row_from_datums(data_chunk.row_at(row_idx).0.iter());
     }
