@@ -19,7 +19,8 @@ use anyhow::Result;
 use futures::StreamExt;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
-use rdkafka::consumer::{Consumer, MessageStream, StreamConsumer};
+use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::error::KafkaResult;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use risingwave_simulation::cluster::{Cluster, Configuration};
@@ -228,7 +229,7 @@ fn check_payload(msg: &BorrowedMessage<'_>, payload: &[u8], i: i64) {
 
 async fn check_kafka_after_insert(
     cluster: &mut Cluster,
-    stream: &mut MessageStream<'_>,
+    stream: &mut (impl futures::Stream<Item = KafkaResult<BorrowedMessage<'_>>> + Unpin),
     input: &[i64],
 ) -> Result<()> {
     for i in input {
