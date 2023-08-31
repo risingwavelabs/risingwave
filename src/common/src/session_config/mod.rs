@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 35] = [
+const CONFIG_KEYS: [&str; 36] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -70,6 +70,7 @@ const CONFIG_KEYS: [&str; 35] = [
     "ROW_SECURITY",
     "STANDARD_CONFORMING_STRINGS",
     "RW_STREAMING_RATE_LIMIT",
+    "CDC_BACKFILL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -109,6 +110,7 @@ const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
 const STANDARD_CONFORMING_STRINGS: usize = 33;
 const RW_STREAMING_RATE_LIMIT: usize = 34;
+const CDC_BACKFILL: usize = 35;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -332,6 +334,7 @@ type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
+type CdcBackfill = ConfigBool<CDC_BACKFILL, true>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -473,6 +476,8 @@ pub struct ConfigMap {
     standard_conforming_strings: StandardConformingStrings,
 
     streaming_rate_limit: StreamingRateLimit,
+
+    cdc_backfill: CdcBackfill,
 }
 
 impl ConfigMap {
@@ -586,6 +591,8 @@ impl ConfigMap {
             self.standard_conforming_strings = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
             self.streaming_rate_limit = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
+            self.cdc_backfill = val.as_slice().try_into()?
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -669,6 +676,8 @@ impl ConfigMap {
             Ok(self.standard_conforming_strings.to_string())
         } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
             Ok(self.streaming_rate_limit.to_string())
+        } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
+            Ok(self.cdc_backfill.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -850,6 +859,11 @@ impl ConfigMap {
                 name: StreamingRateLimit::entry_name().to_lowercase(),
                 setting: self.streaming_rate_limit.to_string(),
                 description: String::from("Set streaming rate limit (rows per second) for each parallelism for mv backfilling"),
+            },
+            VariableInfo{
+                name: CdcBackfill::entry_name().to_lowercase(),
+                setting: self.cdc_backfill.to_string(),
+                description: String::from("Enable backfill for CDC table to allow lock-free and incremental snapshot"),
             }
         ]
     }
@@ -980,5 +994,9 @@ impl ConfigMap {
             return Some(self.streaming_rate_limit.0 as u32);
         }
         None
+    }
+
+    pub fn get_cdc_backfill(&self) -> bool {
+        self.cdc_backfill.0
     }
 }

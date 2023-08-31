@@ -97,6 +97,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
+        .type_attribute("plan_common.StorageTableDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
+        .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])
