@@ -383,7 +383,7 @@ impl RpcFilterKeyExtractorManager {
 #[derive(Clone)]
 pub enum FilterKeyExtractorManager {
     RpcFilterKeyExtractorManager(Arc<RpcFilterKeyExtractorManager>),
-    StaticFilterKeyExtractorManager(StaticFilterKeyExtractorManager),
+    StaticFilterKeyExtractorManager(Arc<StaticFilterKeyExtractorManager>),
 }
 
 impl FilterKeyExtractorManager {

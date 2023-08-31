@@ -503,7 +503,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats)=  compactor_runner::compact(context.clone(), compact_task, rx).await;
+                                        let (compact_task, table_stats) = compactor_runner::compact(context.clone(), compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
                                         running_task_count.fetch_sub(1, Ordering::SeqCst);
 
