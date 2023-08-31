@@ -142,13 +142,9 @@ where
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                println!("uid: {:?}, appending row: {:?}", uid, row);
                 builder.append_one_row_no_finish(row);
             }
-            None => {
-                println!("uid: {:?} break", uid);
-                break;
-            }
+            None => { break; }
         }
     }
 

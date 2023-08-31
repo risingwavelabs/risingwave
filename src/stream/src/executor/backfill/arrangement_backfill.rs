@@ -272,11 +272,6 @@ where
                             Either::Left(msg) => {
                                 match msg? {
                                     Message::Barrier(barrier) => {
-                                        tracing::trace!(
-                                            actor = self.actor_id,
-                                            barrier = ?barrier,
-                                            "barrier received"
-                                        );
                                         // We have to process the barrier outside of the loop.
                                         // This is because our state_table reference is still live
                                         // here, we have to break the loop to drop it,
@@ -332,13 +327,6 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
-                                        tracing::info!(
-                                            actor_id = self.actor_id,
-                                            vnode = ?vnode,
-                                            pk = ?pk_indices,
-                                            "chunk in snapshot_read: {:#?}", chunk
-                                        );
-
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
@@ -403,10 +391,7 @@ where
                             &self.output_indices,
                         ));
                     }
-                    tracing::info!(
-                        actor_id = self.actor_id,
-                        "replicated_rows: {:#?}", chunk
-                    );
+
                     // Replicate
                     upstream_table.write_chunk(chunk);
                 }
