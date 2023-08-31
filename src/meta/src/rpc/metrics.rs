@@ -679,6 +679,11 @@ impl MetaMetrics {
             compaction_event_loop_iteration_latency,
         }
     }
+
+    #[cfg(test)]
+    pub fn for_test(registry: &Registry) -> Self {
+        Self::new(registry)
+    }
 }
 impl Default for MetaMetrics {
     fn default() -> Self {
