@@ -101,7 +101,7 @@ pub struct CompactionTaskValidator {
 }
 
 impl CompactionTaskValidator {
-    fn new(config: Arc<CompactionConfig>) -> Self {
+    pub fn new(config: Arc<CompactionConfig>) -> Self {
         CompactionTaskValidator {
             config,
             optimize_rules: BTreeSet::from_iter(

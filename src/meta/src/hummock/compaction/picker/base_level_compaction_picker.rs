@@ -31,6 +31,7 @@ use crate::hummock::level_handler::LevelHandler;
 pub struct LevelCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl CompactionPicker for LevelCompactionPicker {
@@ -87,10 +88,24 @@ impl CompactionPicker for LevelCompactionPicker {
 }
 
 impl LevelCompactionPicker {
+    #[cfg(test)]
     pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
             config,
+        }
+    }
+
+    pub fn new_with_validator(
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> LevelCompactionPicker {
+        LevelCompactionPicker {
+            target_level,
+            config,
+            compaction_task_validator,
         }
     }
 
@@ -145,8 +160,6 @@ impl LevelCompactionPicker {
 
         let mut skip_by_pending = false;
         let mut input_levels = vec![];
-
-        let validator = CompactionTaskValidator::new(self.config.clone());
 
         for input in l0_select_tables_vec {
             let l0_select_tables = input
@@ -207,7 +220,11 @@ impl LevelCompactionPicker {
                 target_sub_level_id: 0,
             };
 
-            if !validator.valid_compact_task(&result, CompactionTaskOptimizeRule::ToBase, stats) {
+            if !self.compaction_task_validator.valid_compact_task(
+                &result,
+                CompactionTaskOptimizeRule::ToBase,
+                stats,
+            ) {
                 continue;
             }
 

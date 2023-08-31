@@ -28,11 +28,26 @@ use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl TierCompactionPicker {
+    #[cfg(test)]
     pub fn new(config: Arc<CompactionConfig>) -> TierCompactionPicker {
-        TierCompactionPicker { config }
+        TierCompactionPicker {
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
+            config,
+        }
+    }
+
+    pub fn new_with_validator(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> TierCompactionPicker {
+        TierCompactionPicker {
+            config,
+            compaction_task_validator,
+        }
     }
 
     fn pick_overlapping_level(
@@ -41,8 +56,6 @@ impl TierCompactionPicker {
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let validator = CompactionTaskValidator::new(self.config.clone());
-
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Overlapping {
                 continue;
@@ -129,7 +142,11 @@ impl TierCompactionPicker {
                 target_sub_level_id: level.sub_level_id,
             };
 
-            if !validator.valid_compact_task(&result, CompactionTaskOptimizeRule::Tier, stats) {
+            if !self.compaction_task_validator.valid_compact_task(
+                &result,
+                CompactionTaskOptimizeRule::Tier,
+                stats,
+            ) {
                 continue;
             }
 
