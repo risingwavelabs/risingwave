@@ -32,8 +32,8 @@ use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-    FullKeyFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
+    RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockEvent;
@@ -66,7 +66,7 @@ pub async fn prepare_first_valid_version(
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             backup_manager,
             tx.clone(),
             write_limiter,

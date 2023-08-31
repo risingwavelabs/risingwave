@@ -32,7 +32,7 @@ use tracing::log::error;
 mod block_cache;
 pub use block_cache::*;
 
-use crate::filter_key_extractor::FilterKeyExtractorManagerFactory;
+use crate::filter_key_extractor::RpcFilterKeyExtractorManager;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::opts::StorageOpts;
 
@@ -137,7 +137,7 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+        filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
@@ -184,7 +184,7 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
-            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
                 filter_key_extractor_manager.clone(),
             ),
         ));
@@ -261,10 +261,10 @@ impl HummockStorage {
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
         match &self.context.filter_key_extractor_manager {
-            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
                 filter_key_extractor_manager,
             ) => filter_key_extractor_manager,
-            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(_) => todo!(),
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => todo!(),
         }
     }
 
@@ -335,7 +335,7 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             notification_client,
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
         )

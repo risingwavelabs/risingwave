@@ -40,8 +40,8 @@ use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerFactory,
-    FullKeyFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+    RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
@@ -213,7 +213,7 @@ async fn compaction_test(
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
-        Arc::new(FilterKeyExtractorManager::default()),
+        Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -561,7 +561,7 @@ fn run_compactor_thread(
     storage_opts: Arc<StorageOpts>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
     compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
@@ -575,10 +575,9 @@ fn run_compactor_thread(
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager:
-            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
-                filter_key_extractor_manager,
-            ),
+        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager,
+        ),
         memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
