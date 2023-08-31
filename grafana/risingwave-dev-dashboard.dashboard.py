@@ -2245,8 +2245,18 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "refill queue length",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(refill_queue_length) by (instance)",
+                            "refill {{instance}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_ops(
-                    "Refill",
+                    "Refill Ops",
                     "",
                     [
                         panels.target(
@@ -2266,26 +2276,18 @@ def section_hummock_tiered_cache(outer_panels):
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('data_refill_latency_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - data file cache refill - {{op}} @ {{instance}}",
+                                f"p{legend} - " +
+                                "data file cache refill - {{op}} @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('meta_refill_latency_bucket')}[$__rate_interval])) by (le, instance))",
-                                f"p{legend} - meta cache refill @ {{instance}}",
+                                f"p{legend} - " +
+                                "meta cache refill @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "refill queue length",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(refill_queue_length) by (instance)",
-                            "refill {{instance}}",
                         ),
                     ],
                 ),
