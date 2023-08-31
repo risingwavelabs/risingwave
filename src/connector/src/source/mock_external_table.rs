@@ -80,6 +80,10 @@ impl MockExternalTableReader {
         ];
 
         let snapshots = vec![snap0, snap1];
+        if snap_idx >= snapshots.len() {
+            return Ok(());
+        }
+
         for row in &snapshots[snap_idx] {
             yield row.clone();
         }
@@ -97,7 +101,14 @@ impl ExternalTableReader for MockExternalTableReader {
         static IDX: AtomicUsize = AtomicUsize::new(0);
         async move {
             let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
+            if idx < self.binlog_watermarks.len() {
+                Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
+            } else {
+                Ok(CdcOffset::MySql(MySqlOffset {
+                    filename: "1.binlog".to_string(),
+                    position: u64::MAX,
+                }))
+            }
         }
     }
 
