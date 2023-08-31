@@ -93,14 +93,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                             (Included(range_start), Excluded(range_end)),
                             u64::MAX,
                             ReadOptions {
-                                prefix_hint: None,
-                                ignore_range_tombstone: false,
                                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                                 cache_policy: CachePolicy::Fill(CachePriority::Low),
-                                retention_seconds: None,
                                 table_id,
-                                read_version_from_backup: false,
-                                read_epoch: None,
+                                ..Default::default()
                             },
                         )
                         .await
@@ -171,15 +167,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             (Included(range_start), Included(range_end)),
                                             u64::MAX,
                                             ReadOptions {
-                                                prefix_hint: None,
-                                                ignore_range_tombstone: false,
                                                 prefetch_options:
                                                     PrefetchOptions::new_for_exhaust_iter(),
                                                 cache_policy: CachePolicy::Fill(CachePriority::Low),
-                                                retention_seconds: None,
                                                 table_id,
-                                                read_version_from_backup: false,
-                                                read_epoch: None,
+                                                ..Default::default()
                                             },
                                         )
                                         .await?,

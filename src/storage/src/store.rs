@@ -346,10 +346,6 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
-
-    /// If None -> read from state store current epoch.
-    /// If Some(epoch) -> read from this epoch instead.
-    pub read_epoch: Option<u64>,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -362,7 +358,6 @@ impl From<TracedReadOptions> for ReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
-            ..Default::default()
         }
     }
 }

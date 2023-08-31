@@ -1293,13 +1293,9 @@ where
 
         let read_options = ReadOptions {
             prefix_hint,
-            ignore_range_tombstone: false,
-            retention_seconds: None,
             table_id: self.table_id,
-            read_version_from_backup: false,
-            prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
-            read_epoch: None,
+            ..Default::default()
         };
 
         self.local_store

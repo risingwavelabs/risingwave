@@ -167,13 +167,6 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let epoch = if self.is_replicated && let Some(read_epoch) = read_options.read_epoch {
-            self.wait_for_epoch(read_epoch).await?;
-            read_epoch
-        } else {
-            epoch
-        };
-
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
