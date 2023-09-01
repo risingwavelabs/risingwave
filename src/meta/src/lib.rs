@@ -105,9 +105,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
     dashboard_ui_path: Option<String>,
 
-    #[clap(long, env = "RW_BINARY_PATH")]
-    binary_path: Option<String>,
-
     /// For dashboard service to fetch cluster info.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
@@ -128,6 +125,10 @@ pub struct MetaNodeOpts {
     /// If empty, default configuration values will be used.
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
+
+    /// The path of `risingwave` binary file.
+    #[clap(long, env = "RW_BINARY_PATH")]
+    binary_path: Option<String>,
 
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]

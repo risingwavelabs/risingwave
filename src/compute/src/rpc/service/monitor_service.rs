@@ -152,7 +152,7 @@ impl MonitorService for MonitorServiceImpl {
         let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
             CStr::from_bytes_with_nul(file_path_bytes).unwrap(),
         ) {
-            tracing::warn!("Risectl Jemalloc dump heap file failed! {:?}", e);
+            tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
             Err(Status::internal(e.to_string()))
         } else {
             Ok(Response::new(HeapProfilingResponse {}))

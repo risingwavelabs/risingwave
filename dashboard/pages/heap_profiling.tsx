@@ -35,7 +35,7 @@ import { ListHeapProfilingResponse } from "../proto/gen/monitor_service"
 import api from "./api/api"
 import { getClusterInfoComputeNode } from "./api/cluster"
 import useFetch from "./api/fetch"
-import { Label } from "recharts"
+import base64url from "base64url"
 import path from "path"
 
 const SIDEBAR_WIDTH = 200
@@ -58,21 +58,32 @@ export default function HeapProfiling() {
 
   useEffect(() => {
     if (computeNodes && computeNodeId && computeNodes.length > 0) {
-      let response = useFetch(getProfileList)
-      setProfileList(response.response)
+      const getProfileList = async () => {
+        try {
+          let list: ListHeapProfilingResponse = ListHeapProfilingResponse.fromJSON(await api.get(`/api/monitor/list_heap_profile/${computeNodeId}`))
+          setProfileList(list)
+        } catch (e: any) {
+          console.error(e)
+          let result = `Getting Profiling File List\n$Error: ${e.message}]`
+          setProfileCollapsed(result)
+        }
+      }
+      getProfileList()
     }
-  }, [computeNodeId])
-
-  async function getProfileList() {
-    const response: ListHeapProfilingResponse = (await api.get(`/api/list_heap_profile/${computeNodeId}`)).map(
-      ListHeapProfilingResponse.fromJSON
-    )
-    return response
-  }
+  }, [computeNodes, computeNodeId])
 
   async function dumpProfile() {
-    let callDump = () => { return api.get(`/api/heap_profile/${computeNodeId}`)}
-    useFetch(callDump)
+    const title = `Dumping Profiling at Compute Node ${computeNodeId}`
+
+    let result
+    try {
+      api.get(`/api/monitor/dump_heap_profile/${computeNodeId}`)
+      result = `${title}\n\nSucceed!`
+    } catch (e: any) {
+      console.error(e)
+      result = `${title}\n\nError: ${e.message}`
+    }
+    setProfileCollapsed(result)
   }
 
   async function analyzeHeapFile() {
@@ -81,8 +92,19 @@ export default function HeapProfiling() {
     }
 
     let analyzeFilePath = path.join(profileList.dir, analyzeTargetFileName)
-    let callAnalyze = () => { return api.get(`/api/analyze/${analyzeFilePath}`)}
-    useFetch(callAnalyze)
+
+    const title = `Collapsed Profiling of Compute Node ${computeNodeId} for ${analyzeTargetFileName}`
+
+    let result
+    try {
+      let analyzeFilePathBase64 = base64url(analyzeFilePath)
+      const response: string = await api.get(`/api/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`)
+      result = `${title}\n\n${response}`
+    } catch (e: any) {
+      result = `${title}\n\nError: ${e.message}`
+    }
+
+    setProfileCollapsed(result)
   }
 
   const retVal = (
@@ -129,11 +151,11 @@ export default function HeapProfiling() {
                 {profileList &&
                   profileList.name.map((n) => (
                     <option value={n} key={n}>
-                      n
+                      {n}
                     </option>
                   ))}
               </Select>
-              <Button onClick={(_) => dumpProfile()} width="full">
+              <Button onClick={(_) => analyzeHeapFile()} width="full">
                 Analyze
               </Button>
             </VStack>
@@ -157,8 +179,8 @@ export default function HeapProfiling() {
                 renderWhitespace: "boundary",
                 wordWrap: "on",
               }}
-              defaultValue='Select a compute node and click "Dump"...'
-              value={dump}
+              defaultValue='Select a compute node and target profiling result file and click "Analyze"...'
+              value={profileCollapsed}
             ></Editor>
           )}
         </Box>

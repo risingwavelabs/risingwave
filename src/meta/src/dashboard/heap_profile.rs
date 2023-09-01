@@ -12,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::process::Command;
+use std::{process::Command, path::Path};
 
 use anyhow::anyhow;
 
 use super::handlers::{err, DashboardError};
 
-pub async fn run_jeprof(profile_path: String, binary_path: String) -> Result<(), DashboardError> {
-    let collapsed_path = format!("{}.collapsed", profile_path);
+pub async fn run_jeprof(profile_path: String, collapsed_path: String, binary_path: String) -> Result<(), DashboardError> {
     let prof_cmd = move || {
-        Command::new("jeprof")
-            .arg("--collapsed")
-            .arg(binary_path)
-            .arg(profile_path)
-            .arg(">")
-            .arg(collapsed_path)
-            .output()
+        let mut cmd = Command::new("jeprof");
+         let cmd =  cmd.arg("--collapsed")
+            .arg(Path::new(&binary_path))
+            .arg(Path::new(&profile_path));
+            // .arg(">")
+            // .arg(Path::new(&collapsed_path));
+
+        dbg!(&cmd);
+             cmd.output()
+        
     };
-    match tokio::task::spawn_blocking(prof_cmd).await.unwrap() {
+    match prof_cmd() {
         Ok(output) => {
             if output.status.success() {
                 Ok(())
