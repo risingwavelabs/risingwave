@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.risingwave.java</groupId>
-    <artifactId>java-parent</artifactId>
+    <groupId>com.risingwave</groupId>
+    <artifactId>risingwave-java-root</artifactId>
     <version>1.0-SNAPSHOT</version>
     <modules>
         <module>proto</module>
@@ -176,57 +177,57 @@
                 <scope>test</scope>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>proto</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>java-binding</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>common-utils</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>connector-api</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>s3-common</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-source-cdc</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-iceberg</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-connector-service</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-deltalake</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-es-7</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-jdbc</artifactId>
                 <version>${module.version}</version>
             </dependency>
@@ -293,7 +294,7 @@
                             <style>AOSP</style>
                         </googleJavaFormat>
 
-                        <removeUnusedImports/>
+                        <removeUnusedImports />
                     </java>
                 </configuration>
                 <executions>

@@ -41,7 +41,7 @@ Configure your `pom.xml` file as follows:
 
     <dependencies>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-udf</artifactId>
             <version>0.0.1</version>
         </dependency>
