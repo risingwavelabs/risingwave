@@ -16,10 +16,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use madsim::rand::thread_rng;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::rngs::SmallRng;
-use rand::{RngCore, SeedableRng};
+use rand::{thread_rng, RngCore, SeedableRng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 
@@ -27,7 +26,7 @@ const NUM_ROWS: usize = 500;
 const NUM_OVERWRITES: usize = 5000;
 const MAX_STRING_LEN: usize = 150;
 
-#[madsim::test]
+#[tokio::test]
 async fn test_storage_with_random_writes() -> Result<()> {
     // TODO: Use backfill configuration for now
     let mut cluster = Cluster::start(Configuration::for_backfill()).await?;

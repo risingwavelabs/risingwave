@@ -438,10 +438,13 @@ impl KafkaSinkWriter {
                 Err((e, rec)) => {
                     err = e;
                     record = rec;
-                    // FIXME: Will there possibly exist other errors?
-                    assert!(err == KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
-                    tokio::time::sleep(self.config.retry_interval).await;
-                    continue;
+                    match err {
+                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                            tokio::time::sleep(self.config.retry_interval).await;
+                            continue;
+                        }
+                        _ => break,
+                    }
                 }
             }
         }

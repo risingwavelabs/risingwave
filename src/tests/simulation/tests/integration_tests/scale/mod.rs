@@ -21,5 +21,6 @@ mod no_shuffle;
 mod plan;
 mod schedulability;
 mod singleton_migration;
+mod sink;
 mod streaming_parallelism;
 mod table;
