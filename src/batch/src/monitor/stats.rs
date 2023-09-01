@@ -26,7 +26,6 @@ use prometheus::{
     IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::metrics::TrAdderGauge;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 use crate::task::TaskId;
 
@@ -58,7 +57,7 @@ macro_rules! def_task_metrics {
 for_all_task_metrics!(def_task_metrics);
 
 pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
-    LazyLock::new(|| BatchTaskMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| BatchTaskMetrics::new(prometheus::default_registry()));
 
 impl BatchTaskMetrics {
     /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
@@ -230,7 +229,7 @@ macro_rules! def_executor_metrics {
 for_all_executor_metrics!(def_executor_metrics);
 
 pub static GLOBAL_BATCH_EXECUTOR_METRICS: LazyLock<BatchExecutorMetrics> =
-    LazyLock::new(|| BatchExecutorMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| BatchExecutorMetrics::new(prometheus::default_registry()));
 
 impl BatchExecutorMetrics {
     fn new(register: &Registry) -> Self {
@@ -425,7 +424,7 @@ pub struct BatchManagerMetrics {
 }
 
 pub static GLOBAL_BATCH_MANAGER_METRICS: LazyLock<BatchManagerMetrics> =
-    LazyLock::new(|| BatchManagerMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| BatchManagerMetrics::new(prometheus::default_registry()));
 
 impl BatchManagerMetrics {
     fn new(registry: &Registry) -> Self {

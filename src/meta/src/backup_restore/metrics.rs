@@ -18,10 +18,9 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_int_counter_with_registry, Histogram, IntCounter, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 pub static GLOBAL_BACKUP_MANAGER_METRICS: LazyLock<BackupManagerMetrics> =
-    LazyLock::new(|| BackupManagerMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| BackupManagerMetrics::new(prometheus::default_registry()));
 
 #[derive(Clone)]
 pub struct BackupManagerMetrics {

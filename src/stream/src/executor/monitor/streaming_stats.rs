@@ -22,7 +22,6 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntGauge, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct StreamingMetrics {
@@ -130,7 +129,7 @@ pub struct StreamingMetrics {
 }
 
 pub static GLOBAL_STREAMING_METRICS: LazyLock<StreamingMetrics> =
-    LazyLock::new(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| StreamingMetrics::new(prometheus::default_registry()));
 
 impl StreamingMetrics {
     fn new(registry: &Registry) -> Self {

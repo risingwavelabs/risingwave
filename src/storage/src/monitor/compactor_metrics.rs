@@ -21,7 +21,6 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Debug, Clone)]
 pub struct CompactorMetrics {
@@ -54,7 +53,7 @@ pub struct CompactorMetrics {
 }
 
 pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
-    LazyLock::new(|| CompactorMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| CompactorMetrics::new(prometheus::default_registry()));
 
 impl CompactorMetrics {
     fn new(registry: &Registry) -> Self {

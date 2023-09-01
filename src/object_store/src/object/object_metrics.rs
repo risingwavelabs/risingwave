@@ -20,10 +20,9 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
     Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 pub static GLOBAL_OBJECT_STORE_METRICS: LazyLock<ObjectStoreMetrics> =
-    LazyLock::new(|| ObjectStoreMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| ObjectStoreMetrics::new(prometheus::default_registry()));
 
 #[derive(Clone)]
 pub struct ObjectStoreMetrics {

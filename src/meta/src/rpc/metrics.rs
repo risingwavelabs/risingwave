@@ -25,7 +25,6 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
@@ -174,7 +173,7 @@ pub struct MetaMetrics {
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
-    LazyLock::new(|| MetaMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| MetaMetrics::new(prometheus::default_registry()));
 
 impl MetaMetrics {
     fn new(registry: &Registry) -> Self {

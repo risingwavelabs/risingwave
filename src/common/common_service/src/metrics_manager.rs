@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::ops::Deref;
 use std::sync::OnceLock;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -40,7 +38,7 @@ impl MetricsManager {
                 let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
                 let service = ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(
-                        GLOBAL_METRICS_REGISTRY.deref().clone(),
+                        prometheus::default_registry().clone(),
                     ))
                     .service_fn(Self::metrics_service);
                 let serve_future =

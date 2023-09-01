@@ -23,8 +23,6 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
-use crate::monitor::GLOBAL_METRICS_REGISTRY;
-
 #[derive(Debug)]
 pub struct TrAdderAtomic(TrAdder<i64>);
 
@@ -79,7 +77,7 @@ impl MetricsLayer {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         static AWS_SDK_RETRY_COUNTS: LazyLock<GenericCounter<AtomicU64>> = LazyLock::new(|| {
-            let registry = GLOBAL_METRICS_REGISTRY.deref();
+            let registry = prometheus::default_registry();
             register_int_counter_with_registry!(
                 "aws_sdk_retry_counts",
                 "Total number of aws sdk retry happens",

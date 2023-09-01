@@ -19,7 +19,6 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
     register_int_counter_with_registry, Histogram, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 /// [`HummockMetrics`] stores the performance and IO metrics of hummock storage.
 #[derive(Debug, Clone)]
@@ -31,7 +30,7 @@ pub struct HummockMetrics {
 }
 
 pub static GLOBAL_HUMMOCK_METRICS: LazyLock<HummockMetrics> =
-    LazyLock::new(|| HummockMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| HummockMetrics::new(prometheus::default_registry()));
 
 impl HummockMetrics {
     fn new(registry: &Registry) -> Self {

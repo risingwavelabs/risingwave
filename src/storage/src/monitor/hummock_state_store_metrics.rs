@@ -21,7 +21,6 @@ use prometheus::{
     Opts, Registry,
 };
 use risingwave_common::config::StorageMetricLevel;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tracing::warn;
 
 use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
@@ -77,7 +76,7 @@ pub fn global_hummock_state_store_metrics(
 ) -> HummockStateStoreMetrics {
     GLOBAL_HUMMOCK_STATE_STORE_METRICS
         .get_or_init(|| {
-            HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
+            HummockStateStoreMetrics::new(prometheus::default_registry(), storage_metric_level)
         })
         .clone()
 }
@@ -488,7 +487,7 @@ impl Collector for StateStoreCollector {
 
 pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
     let collector = Box::new(StateStoreCollector::new(memory_collector));
-    if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
+    if let Err(e) = prometheus::default_registry().register(collector) {
         warn!(
             "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
             e

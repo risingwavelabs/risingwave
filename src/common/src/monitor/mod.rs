@@ -14,26 +14,14 @@
 
 pub mod connection;
 pub mod my_stats;
-pub mod process_linux;
 pub mod rwlock;
-
-use std::sync::LazyLock;
 
 use prometheus::core::{
     AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
 };
-use prometheus::{Histogram, HistogramVec, Registry};
+use prometheus::{Histogram, HistogramVec};
 
 use crate::monitor::my_stats::MyHistogram;
-use crate::monitor::process_linux::monitor_process;
-
-#[cfg(target_os = "linux")]
-static PAGESIZE: std::sync::LazyLock<i64> =
-    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) });
-
-#[cfg(target_os = "linux")]
-pub static CLOCK_TICK: std::sync::LazyLock<u64> =
-    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 });
 
 /// Define extension method `print` used in `print_statistics`.
 pub trait Print {
@@ -85,9 +73,3 @@ impl Print for GenericCounterVec<AtomicU64> {
         println!("{desc} {:?}", self);
     }
 }
-
-pub static GLOBAL_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
-    let registry = Registry::new();
-    monitor_process(&registry);
-    registry
-});

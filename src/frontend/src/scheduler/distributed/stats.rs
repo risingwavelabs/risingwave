@@ -19,7 +19,6 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
     register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct DistributedQueryMetrics {
@@ -30,7 +29,7 @@ pub struct DistributedQueryMetrics {
 }
 
 pub static GLOBAL_DISTRIBUTED_QUERY_METRICS: LazyLock<DistributedQueryMetrics> =
-    LazyLock::new(|| DistributedQueryMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| DistributedQueryMetrics::new(prometheus::default_registry()));
 
 impl DistributedQueryMetrics {
     fn new(registry: &Registry) -> Self {

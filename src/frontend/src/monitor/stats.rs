@@ -20,7 +20,6 @@ use prometheus::{
     register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, IntGauge,
     Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct FrontendMetrics {
@@ -30,7 +29,7 @@ pub struct FrontendMetrics {
 }
 
 pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> =
-    LazyLock::new(|| FrontendMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| FrontendMetrics::new(prometheus::default_registry()));
 
 impl FrontendMetrics {
     fn new(registry: &Registry) -> Self {

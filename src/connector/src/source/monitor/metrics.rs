@@ -18,7 +18,6 @@ use prometheus::core::{AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec}
 use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 use crate::source::kafka::stats::RdKafkaStats;
 
@@ -28,7 +27,7 @@ pub struct EnumeratorMetrics {
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
-    LazyLock::new(|| EnumeratorMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| EnumeratorMetrics::new(prometheus::default_registry()));
 
 impl EnumeratorMetrics {
     fn new(registry: &Registry) -> Self {
@@ -65,7 +64,7 @@ pub struct SourceMetrics {
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
-    LazyLock::new(|| SourceMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| SourceMetrics::new(prometheus::default_registry()));
 
 impl SourceMetrics {
     fn new(registry: &Registry) -> Self {

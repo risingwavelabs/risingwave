@@ -37,8 +37,6 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tracing::{info, warn};
 
-use crate::monitor::GLOBAL_METRICS_REGISTRY;
-
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}
     fn on_eof(&mut self) {}
@@ -288,7 +286,7 @@ pub struct ConnectionMetrics {
 }
 
 pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
-    LazyLock::new(|| ConnectionMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| ConnectionMetrics::new(prometheus::default_registry()));
 
 impl ConnectionMetrics {
     pub fn new(registry: &Registry) -> Self {

@@ -16,7 +16,6 @@ use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{register_int_counter_vec_with_registry, Registry};
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct ExchangeServiceMetrics {
@@ -25,7 +24,7 @@ pub struct ExchangeServiceMetrics {
 }
 
 pub static GLOBAL_EXCHANGE_SERVICE_METRICS: LazyLock<ExchangeServiceMetrics> =
-    LazyLock::new(|| ExchangeServiceMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| ExchangeServiceMetrics::new(prometheus::default_registry()));
 
 impl ExchangeServiceMetrics {
     fn new(registry: &Registry) -> Self {

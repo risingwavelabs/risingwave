@@ -19,7 +19,6 @@ use prometheus::{
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
 use risingwave_common::config::StorageMetricLevel;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
@@ -47,7 +46,7 @@ pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock:
 pub fn global_storage_metrics(storage_metric_level: StorageMetricLevel) -> MonitoredStorageMetrics {
     GLOBAL_STORAGE_METRICS
         .get_or_init(|| {
-            MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
+            MonitoredStorageMetrics::new(prometheus::default_registry(), storage_metric_level)
         })
         .clone()
 }
