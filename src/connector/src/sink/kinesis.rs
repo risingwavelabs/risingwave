@@ -30,6 +30,7 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
+use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
@@ -53,21 +54,14 @@ pub struct KinesisSink {
 }
 
 impl KinesisSink {
-    pub fn new(
-        config: KinesisSinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-        db_name: String,
-        sink_from_name: String,
-    ) -> Self {
+    pub fn new(config: KinesisSinkConfig, param: SinkParam) -> Self {
         Self {
             config,
-            schema,
-            pk_indices,
-            is_append_only,
-            db_name,
-            sink_from_name,
+            schema: param.schema(),
+            pk_indices: param.pk_indices,
+            is_append_only: param.sink_type.is_append_only(),
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
         }
     }
 }

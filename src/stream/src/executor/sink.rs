@@ -369,7 +369,11 @@ mod test {
         let sink_param = SinkParam {
             sink_id: 0.into(),
             properties,
-            columns: columns.clone(),
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
             pk_indices: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
             db_name: "test".into(),
@@ -462,7 +466,11 @@ mod test {
         let sink_param = SinkParam {
             sink_id: 0.into(),
             properties,
-            columns: columns.clone(),
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
             pk_indices: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
             db_name: "test".into(),

@@ -426,22 +426,8 @@ impl SinkImpl {
     pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
-                *cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-                param.db_name,
-                param.sink_from_name,
-            )),
-            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
-                *cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-                param.db_name,
-                param.sink_from_name,
-            )),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(*cfg, param)),
+            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(*cfg, param)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
