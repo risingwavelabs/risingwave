@@ -19,7 +19,6 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
@@ -31,9 +30,9 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
-use super::task_progress::{TaskProgress, TaskProgressManagerRef};
+use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManagerFactory};
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
@@ -49,7 +48,6 @@ use crate::hummock::{
     GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-use crate::opts::StorageOpts;
 
 pub struct CompactorRunner {
     compact_task: CompactTask,
@@ -62,7 +60,7 @@ pub struct CompactorRunner {
 impl CompactorRunner {
     pub fn new(
         split_index: usize,
-        context: Arc<CompactorContext>,
+        context: CompactorContext,
         task: CompactTask,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
@@ -73,7 +71,7 @@ impl CompactorRunner {
             _ => CompressionAlgorithm::Zstd,
         };
 
-        options.capacity = estimate_task_output_capacity(storage_opts.sstable_size_mb, &task);
+        options.capacity = estimate_task_output_capacity(context.clone(), &task);
         let kv_count = task
             .input_ssts
             .iter()
@@ -90,6 +88,7 @@ impl CompactorRunner {
         };
 
         let compactor = Compactor::new(
+            context.clone(),
             options,
             TaskConfig {
                 key_range: key_range.clone(),
@@ -110,7 +109,7 @@ impl CompactorRunner {
         Self {
             compactor,
             compact_task: task,
-            sstable_store,
+            sstable_store: context.sstable_store,
             key_range,
             split_index,
         }
@@ -171,7 +170,11 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
-        let compact_io_retry_time = self.compactor.compact_iter_recreate_timeout_ms;
+        let compact_io_retry_time = self
+            .compactor
+            .context
+            .storage_opts
+            .compact_iter_recreate_timeout_ms;
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -232,8 +235,7 @@ impl CompactorRunner {
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact(
-    compactor_context: Arc<CompactorContext>,
-    sstable_object_id_manager_dyn: Box<dyn GetObjectId>,
+    compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
@@ -541,7 +543,7 @@ pub async fn compact(
 /// Fills in the compact task and tries to report the task result to meta node.
 fn compact_done(
     mut compact_task: CompactTask,
-    compactor_metrics: Arc<CompactorMetrics>,
+    context: CompactorContext,
     output_ssts: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
@@ -568,15 +570,18 @@ fn compact_done(
 
     let group_label = compact_task.compaction_group_id.to_string();
     let level_label = compact_task.target_level.to_string();
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_write_bytes
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compaction_write_bytes);
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_write_bytes
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compaction_write_bytes);
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_write_sstn
         .with_label_values(&[&group_label, level_label.as_str()])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
@@ -813,47 +818,20 @@ where
 /// Always return `Ok` and let hummock manager handle errors.
 #[allow(clippy::too_many_arguments)]
 pub async fn shared_compact(
-    compactor_metrics: Arc<CompactorMetrics>,
+    context: CompactorContext,
     compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
-    sstable_store: SstableStoreRef,
-    storage_opts: Arc<StorageOpts>,
-    filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
-    worker_num: u32,
-    memory_limiter: Arc<MemoryLimiter>,
-    sstable_object_id_manager: Box<dyn GetObjectId>,
-    task_progress_manager: TaskProgressManagerRef,
-    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    object_id_getter: Box<dyn GetObjectId>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
-    compact_inner(
-        compactor_metrics,
-        compact_task,
-        shutdown_rx,
-        sstable_store,
-        storage_opts,
-        filter_key_extractor_manager,
-        worker_num,
-        memory_limiter,
-        sstable_object_id_manager,
-        task_progress_manager,
-        await_tree_reg,
-    )
-    .await
+    compact_inner(context, compact_task, shutdown_rx, object_id_getter).await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn compact_inner(
-    compactor_metrics: Arc<CompactorMetrics>,
+    context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    sstable_store: SstableStoreRef,
-    storage_opts: Arc<StorageOpts>,
-    filter_key_extractor_manager: FilterKeyExtractorManagerFactory,
-    worker_num: u32,
-    memory_limiter: Arc<MemoryLimiter>,
-    sstable_object_id_manager: Box<dyn GetObjectId>,
-    task_progress_manager: TaskProgressManagerRef,
-    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    object_id_getter: Box<dyn GetObjectId>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -873,27 +851,32 @@ async fn compact_inner(
         .iter()
         .map(|table| table.file_size)
         .sum::<u64>();
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_read_current_level
         .with_label_values(&[&group_label, &cur_level_label])
         .inc_by(select_size);
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_read_sstn_current_level
         .with_label_values(&[&group_label, &cur_level_label])
         .inc_by(select_table_infos.len() as u64);
 
     let target_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
     let next_level_label = compact_task.target_level.to_string();
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_read_next_level
         .with_label_values(&[&group_label, next_level_label.as_str()])
         .inc_by(target_level_read_bytes);
-    compactor_metrics
+    context
+        .compactor_metrics
         .compact_read_sstn_next_level
         .with_label_values(&[&group_label, next_level_label.as_str()])
         .inc_by(target_table_infos.len() as u64);
 
-    let timer = compactor_metrics
+    let timer = context
+        .compactor_metrics
         .compact_task_duration
         .with_label_values(&[
             &group_label,
@@ -919,14 +902,15 @@ async fn compact_inner(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match filter_key_extractor_manager
+    let multi_filter_key_extractor = match context
+        .filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await
     {
         Err(e) => {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
             let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
         Ok(extractor) => extractor,
     };
@@ -940,7 +924,7 @@ async fn compact_inner(
         if !removed_tables.is_empty() {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
             let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
     }
 
@@ -965,16 +949,7 @@ async fn compact_inner(
         .iter()
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
-    match generate_splits(
-        &sstable_infos,
-        compaction_size,
-        storage_opts.parallel_compact_size_mb,
-        worker_num,
-        storage_opts.max_sub_compaction,
-        sstable_store.clone(),
-    )
-    .await
-    {
+    match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
         Ok(splits) => {
             if !splits.is_empty() {
                 compact_task.splits = splits;
@@ -984,7 +959,7 @@ async fn compact_inner(
         Err(e) => {
             tracing::warn!("Failed to generate_splits {:#?}", e);
             task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
     }
 
@@ -995,10 +970,10 @@ async fn compact_inner(
     let mut output_ssts = Vec::with_capacity(parallelism);
 
     let task_progress_guard =
-        TaskProgressGuard::new(compact_task.task_id, task_progress_manager.clone());
+        TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
     let delete_range_agg = match CompactorRunner::build_delete_range_iter(
         &sstable_infos,
-        &sstable_store,
+        &context.sstable_store,
         &mut multi_filter,
     )
     .await
@@ -1007,20 +982,21 @@ async fn compact_inner(
         Err(err) => {
             tracing::warn!("Failed to build delete range aggregator {:#?}", err);
             task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, compactor_metrics.clone(), vec![], task_status);
+            return compact_done(compact_task, context.clone(), vec![], task_status);
         }
     };
 
-    let capacity = estimate_task_output_capacity(storage_opts.sstable_size_mb, &compact_task);
+    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
 
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
-        (storage_opts.block_size_kb as u64) * (1 << 10),
-        storage_opts
+        (context.storage_opts.block_size_kb as u64) * (1 << 10),
+        context
+            .storage_opts
             .object_store_recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
-        sstable_store.store().support_streaming_upload(),
+        context.sstable_store.store().support_streaming_upload(),
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
@@ -1037,37 +1013,30 @@ async fn compact_inner(
 
     // If the task does not have enough memory, it should cancel the task and let the meta
     // reschedule it, so that it does not occupy the compactor's resources.
-    let memory_detector = memory_limiter.try_require_memory(task_memory_capacity_with_parallelism);
+    let memory_detector = context
+        .memory_limiter
+        .try_require_memory(task_memory_capacity_with_parallelism);
     if memory_detector.is_none() {
         tracing::warn!(
                 "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
                 compact_task.task_id,
                 task_memory_capacity_with_parallelism,
-                memory_limiter.get_memory_usage(),
-                memory_limiter.quota()
+                context.memory_limiter.get_memory_usage(),
+                context.memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailResourceCanceled;
-        return compact_done(
-            compact_task,
-            compactor_metrics.clone(),
-            output_ssts,
-            task_status,
-        );
+        return compact_done(compact_task, context.clone(), output_ssts, task_status);
     }
 
-    compactor_metrics.compact_task_pending_num.inc();
+    context.compactor_metrics.compact_task_pending_num.inc();
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
         let compactor_runner = CompactorRunner::new(
             split_index,
-            compactor_metrics.clone(),
-            false,
-            sstable_store.clone(),
-            memory_limiter.clone(),
-            sstable_object_id_manager.clone(),
+            context.clone(),
             compact_task.clone(),
-            storage_opts.clone(),
+            object_id_getter.clone(),
         );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
@@ -1076,7 +1045,7 @@ async fn compact_inner(
                 .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                 .await
         };
-        let traced = match await_tree_reg.as_ref() {
+        let traced = match context.await_tree_reg.as_ref() {
             None => runner.right_future(),
             Some(await_tree_reg) => await_tree_reg
                 .write()
@@ -1146,12 +1115,8 @@ async fn compact_inner(
     }
 
     // After a compaction is done, mutate the compaction task.
-    let (compact_task, table_stats) = compact_done(
-        compact_task,
-        compactor_metrics.clone(),
-        output_ssts,
-        task_status,
-    );
+    let (compact_task, table_stats) =
+        compact_done(compact_task, context.clone(), output_ssts, task_status);
 
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
@@ -1159,10 +1124,10 @@ async fn compact_inner(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    compactor_metrics.compact_task_pending_num.dec();
+    context.compactor_metrics.compact_task_pending_num.dec();
     for level in &compact_task.input_ssts {
         for table in &level.table_infos {
-            sstable_store.delete_cache(table.get_object_id());
+            context.sstable_store.delete_cache(table.get_object_id());
         }
     }
     (compact_task, table_stats)

@@ -48,7 +48,6 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_storage::filter_key_extractor::FilterKeyExtractorManagerFactory;
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -217,26 +216,23 @@ pub async fn compute_node_serve(
             let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            let compactor_context = Arc::new(CompactorContext {
+            let compactor_context = CompactorContext {
                 storage_opts,
-                hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager:
-                    FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
-                        storage.filter_key_extractor_manager().clone(),
-                    ),
+                filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
                 running_task_count: Arc::new(AtomicU32::new(0)),
-            });
+            };
 
             let (handle, shutdown_sender) = start_compactor(
                 compactor_context,
+                hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));

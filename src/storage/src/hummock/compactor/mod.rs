@@ -15,24 +15,24 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
-use parking_lot::RwLock;
-use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
-use risingwave_pb::hummock::report_compaction_task_request::ReportTask as ReportSharedTask;
+use risingwave_pb::hummock::report_compaction_task_request::{
+    Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
+    ReportTask as ReportSharedTask,
+};
 use risingwave_pb::hummock::{
     dispatch_compaction_task_request, ReportFullScanTaskRequest, ReportVacuumTaskRequest,
 };
 pub mod compactor_runner;
 mod context;
 mod iterator;
-use std::collections::VecDeque;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Div;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -58,6 +58,7 @@ use risingwave_pb::hummock::{
     CompactTaskProgress, CompactorWorkload, ReportCompactionTaskRequest,
     SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
+use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::Sender;
@@ -66,14 +67,13 @@ use tokio::time::Instant;
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 pub use self::task_progress::TaskProgress;
-use self::task_progress::TaskProgressManagerRef;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompactionDeleteRanges, GetObjectId, HummockResult, SstableBuilderOptions,
     SstableObjectIdManager, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
-use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
+use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, shared_compact};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
@@ -81,12 +81,11 @@ use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
     HummockError, SstableWriterFactory, StreamingSstableWriterFactory,
 };
-use crate::monitor::CompactorMetrics;
-use crate::opts::StorageOpts;
+
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     object_id_getter: Box<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
@@ -98,17 +97,13 @@ pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
 impl Compactor {
     /// Create a new compactor.
     pub fn new(
+        context: CompactorContext,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
         Self {
-            compactor_metrics,
-            is_share_buffer_compact,
-            sstable_store,
-            memory_limiter,
-
-            sstable_object_id_manager,
+            context,
             options,
             task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
@@ -131,12 +126,16 @@ impl Compactor {
         split_index: Option<usize>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
-        let compact_timer = if self.is_share_buffer_compact {
-            self.compactor_metrics
+        let compact_timer = if self.context.is_share_buffer_compact {
+            self.context
+                .compactor_metrics
                 .write_build_l0_sst_duration
                 .start_timer()
         } else {
-            self.compactor_metrics.compact_sst_duration.start_timer()
+            self.context
+                .compactor_metrics
+                .compact_sst_duration
+                .start_timer()
         };
 
         let (split_table_outputs, table_stats_map) = if self
@@ -214,8 +213,8 @@ impl Compactor {
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress.clone();
-            let compactor_metrics_cloned = self.compactor_metrics.clone();
-            let is_share_buffer_compact = self.is_share_buffer_compact;
+            let compactor_metrics_cloned = self.context.compactor_metrics.clone();
+            let is_share_buffer_compact = self.context.is_share_buffer_compact;
             upload_join_handles.push(async move {
                 upload_join_handle
                     .verbose_instrument_await("upload")
@@ -242,7 +241,8 @@ impl Compactor {
         try_join_all(upload_join_handles)
             .verbose_instrument_await("join")
             .await?;
-        self.compactor_metrics
+        self.context
+            .compactor_metrics
             .get_table_id_total_time_duration
             .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
@@ -285,7 +285,7 @@ impl Compactor {
 
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
-            self.compactor_metrics.clone(),
+            self.context.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.is_target_l0_or_lbase,
             self.task_config.split_by_table,
@@ -295,7 +295,7 @@ impl Compactor {
             &mut sst_builder,
             del_agg,
             &self.task_config,
-            self.compactor_metrics.clone(),
+            self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
             task_progress,
@@ -316,10 +316,10 @@ impl Compactor {
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
 pub fn start_compactor(
-    compactor_context: Arc<CompactorContext>,
+    compactor_context: CompactorContext,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let hummock_meta_client = compactor_context.hummock_meta_client.clone();
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
@@ -645,19 +645,11 @@ pub fn start_compactor(
 pub fn start_shared_compactor(
     mut client: HummockManagerServiceClient<tonic::transport::Channel>,
     dispatch_task: dispatch_compaction_task_request::Task,
-    id_to_table: HashMap<u32, Table>,
-    output_ids: Vec<u64>,
-    running_task_count: Arc<AtomicU32>,
-    compactor_metrics: Arc<CompactorMetrics>,
-    sstable_store: SstableStoreRef,
-    storage_opts: Arc<StorageOpts>,
-    worker_num: u32,
-    memory_limiter: Arc<MemoryLimiter>,
-    task_progress_manager: TaskProgressManagerRef,
-    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    context: CompactorContext,
+    object_id_getter: Box<dyn GetObjectId>,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
-    let task_progress = task_progress_manager.clone();
+    let task_progress = context.task_progress_manager.clone();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let periodic_event_update_interval = Duration::from_millis(1000);
 
@@ -703,34 +695,15 @@ pub fn start_shared_compactor(
 
         match dispatch_task {
             dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
-                running_task_count.fetch_add(1, Ordering::SeqCst);
+                context.running_task_count.fetch_add(1, Ordering::SeqCst);
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 let task_id = compact_task.task_id;
                 shutdown.lock().unwrap().insert(task_id, tx);
-                let mut output_object_ids: VecDeque<_> = VecDeque::new();
-                output_object_ids.extend(output_ids);
-                let sstable_object_id_manager =
-                    SharedComapctorObjectIdManager::new(output_object_ids);
-                let filter_key_extractor_manager =
-                    FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
-                        FilterKeyExtractorBuilder::new(id_to_table),
-                    );
-                let (compact_task, table_stats) = shared_compact(
-                    compactor_metrics,
-                    compact_task,
-                    rx,
-                    sstable_store,
-                    storage_opts,
-                    filter_key_extractor_manager,
-                    worker_num,
-                    memory_limiter,
-                    Box::new(sstable_object_id_manager.clone()),
-                    task_progress_manager,
-                    await_tree_reg,
-                )
-                .await;
+
+                let (compact_task, table_stats) =
+                    shared_compact(context.clone(), compact_task, rx, object_id_getter).await;
                 shutdown.lock().unwrap().remove(&task_id);
-                running_task_count.fetch_sub(1, Ordering::SeqCst);
+                context.running_task_count.fetch_sub(1, Ordering::SeqCst);
                 let report_compaction_task_request = ReportCompactionTaskRequest {
                     event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                         compact_task: Some(compact_task),
@@ -748,7 +721,7 @@ pub fn start_shared_compactor(
             }
             dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
                 match Vacuum::handle_vacuum_task(
-                    sstable_store.clone(),
+                    context.sstable_store.clone(),
                     &vacuum_task.sstable_object_ids,
                 )
                 .await
@@ -768,7 +741,9 @@ pub fn start_shared_compactor(
                 }
             }
             dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
-                match Vacuum::handle_full_scan_task(full_scan_task, sstable_store.clone()).await {
+                match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
+                    .await
+                {
                     Ok((object_ids, total_object_count, total_object_size)) => {
                         let report_full_scan_task_request = ReportFullScanTaskRequest {
                             object_ids,
@@ -789,7 +764,7 @@ pub fn start_shared_compactor(
                 }
             }
             dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
-                validate_ssts(validation_task, sstable_store.clone()).await;
+                validate_ssts(validation_task, context.sstable_store.clone()).await;
             }
             dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
                 if let Some(tx) = shutdown
