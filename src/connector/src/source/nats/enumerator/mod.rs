@@ -41,7 +41,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<NatsSplit>> {
-        // To simplify the logic, just return 1 split for first version
+        // TODO: to simplify the logic, return 1 split for first version
         let nats_split = NatsSplit {
             subject: self.subject.clone(),
             split_num: 1,

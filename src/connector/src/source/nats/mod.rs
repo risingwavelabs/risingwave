@@ -27,7 +27,7 @@ pub const NATS_CONNECTOR: &str = "nats";
 #[derive(Clone, Debug, Deserialize)]
 pub struct NatsProperties {
     /// Properties specified in the WITH clause by user
-    pub props: HashMap<String, String>,
+    pub props: Option<HashMap<String, String>>,
 
     /// Schema of the source specified by users
     pub table_schema: Option<TableSchema>,

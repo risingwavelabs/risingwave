@@ -24,6 +24,7 @@ impl SourceMessage {
         SourceMessage {
             key: None,
             payload: Some(message.payload.to_vec()),
+            // Nats message doesn't have offset
             offset: "".to_string(),
             split_id: Arc::from(""),
             meta: SourceMeta::Empty,

@@ -22,7 +22,8 @@ use crate::source::{SplitId, SplitMetaData};
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct NatsSplit {
     pub(crate) subject: String,
-    // To simplify the logic, just return 1 split for first version. May use parallelism in future.
+    // TODO: to simplify the logic, return 1 split for first version. May use parallelism in
+    // future.
     pub(crate) split_num: i32,
     // nats does not provide offset
 }
