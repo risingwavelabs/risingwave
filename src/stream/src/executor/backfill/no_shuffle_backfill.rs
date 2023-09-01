@@ -163,16 +163,18 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(
-                    &self.upstream_table,
-                    init_epoch,
-                    None,
-                    false,
-                    self.chunk_size,
-                    &mut builder,
-                );
-                pin_mut!(snapshot);
-                let snapshot_is_empty = snapshot.try_next().await?.unwrap().is_none();
+                let snapshot_is_empty = {
+                    let snapshot = Self::snapshot_read(
+                        &self.upstream_table,
+                        init_epoch,
+                        None,
+                        false,
+                        self.chunk_size,
+                        &mut builder,
+                    );
+                    pin_mut!(snapshot);
+                    snapshot.try_next().await?.unwrap().is_none()
+                };
                 let snapshot_buffer_is_empty = builder.is_empty();
                 builder.clear();
                 snapshot_is_empty && snapshot_buffer_is_empty
