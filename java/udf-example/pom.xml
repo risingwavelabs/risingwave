@@ -9,7 +9,7 @@
   <parent>
     <groupId>com.risingwave</groupId>
     <artifactId>risingwave-java-root</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -30,7 +30,7 @@
     <dependency>
       <groupId>com.risingwave</groupId>
       <artifactId>risingwave-udf</artifactId>
-      <version>0.1.0</version>
+      <version>0.1.0-SNAPSHOT</version>
     </dependency>
     <dependency>
       <groupId>com.google.code.gson</groupId>
