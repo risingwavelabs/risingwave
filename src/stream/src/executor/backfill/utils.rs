@@ -218,30 +218,27 @@ fn mark_cdc_chunk_inner(
 
     // `_rw_offset` must be placed at the last column right now
     let offset_col_idx = data.dimension() - 1;
-    for v in data.rows_with_holes().map(|row| {
+    for v in data.rows().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
         let event_offset = table_reader.parse_binlog_offset(offset_datum.into_utf8())?;
-        let visible = match row {
-            None => false,
-            Some(row) => {
-                // filter changelog events with binlog range
-                let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
-                    binlog_low <= &event_offset
-                } else {
-                    true
-                };
+        let visible = {
+            // filter changelog events with binlog range
+            let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
+                binlog_low <= &event_offset
+            } else {
+                true
+            };
 
-                if in_binlog_range {
-                    let lhs = row.project(pk_in_output_indices);
-                    let rhs = current_pos.project(pk_in_output_indices);
-                    let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                    match order {
-                        Ordering::Less | Ordering::Equal => true,
-                        Ordering::Greater => false,
-                    }
-                } else {
-                    false
+            if in_binlog_range {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos.project(pk_in_output_indices);
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
                 }
+            } else {
+                false
             }
         };
         Ok::<_, ConnectorError>(visible)
