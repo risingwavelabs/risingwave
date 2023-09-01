@@ -502,10 +502,6 @@ where
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
     ///
-    /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
-    /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
-    /// vnode.
-    ///
     /// We will return chunks based on the `BackfillProgressPerVnode`.
     /// 1. Completed(vnode): Current iterator is complete, in that case we need to handle it
     ///    in arrangement backfill. We should not buffer updates for this vnode,
@@ -513,6 +509,17 @@ where
     /// 2. InProgress(CHUNK): Current iterator is not complete, in that case we
     ///    need to buffer updates for this vnode.
     /// 3. Finished: All iterators finished.
+    ///
+    /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
+    /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
+    /// vnode.
+    ///
+    /// NOTE(kwannoel):
+    /// The rows from upstream snapshot read will be buffered inside the `builder`.
+    /// If snapshot is dropped before its rows are consumed,
+    /// remaining data in `builder` must be flushed manually.
+    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be present,
+    /// Then when we flush we contain duplicate rows.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S>,
