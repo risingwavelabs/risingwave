@@ -297,7 +297,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // In that case we can just ignore the upstream buffer chunk.
                                     if let Some(current_pos) = &current_pk_pos {
                                         tracing::debug!(
-                                            ?current_pk_pos,
+                                            ?current_pos,
                                             ?last_binlog_offset,
                                             "consume upstream chunk"
                                         );
