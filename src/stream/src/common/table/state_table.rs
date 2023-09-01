@@ -852,7 +852,7 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        assert!(self.epoch()< new_epoch.prev);
+        assert!(self.epoch() < new_epoch.prev);
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
@@ -928,9 +928,7 @@ where
         self.local_store.seal_current_epoch(new_epoch.curr);
     }
 
-    async fn get_delete_range(
-        &mut self,
-    ) -> StreamExecutorResult<Vec<(Bound<Bytes>, Bound<Bytes>)>> {
+    fn get_delete_range(&mut self) -> StreamExecutorResult<Vec<(Bound<Bytes>, Bound<Bytes>)>> {
         let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1029,7 +1027,7 @@ where
 
     /// Write to state store.
     async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
-        let delete_ranges = self.get_delete_range().await?;
+        let delete_ranges = self.get_delete_range()?;
 
         self.local_store.flush(delete_ranges).await?;
         self.local_store.seal_current_epoch(next_epoch);
@@ -1037,7 +1035,7 @@ where
     }
 
     pub async fn try_flush(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
-        let delete_ranges = self.get_delete_range().await?;
+        let delete_ranges = self.get_delete_range()?;
         self.local_store
             .try_flush(delete_ranges, next_epoch)
             .await?;

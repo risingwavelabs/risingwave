@@ -1834,7 +1834,6 @@ async fn test_state_table_watermark_cache_refill() {
     )
 }
 
-
 #[tokio::test]
 async fn test_mem_table_spill() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
@@ -1848,7 +1847,7 @@ async fn test_mem_table_spill() {
     let mut text = String::with_capacity(size);
 
     for _ in 0..size {
-        text.push_str("a");
+        text.push('a');
     }
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
@@ -1875,26 +1874,50 @@ async fn test_mem_table_spill() {
     ]));
 
     state_table.try_flush(10).await.unwrap();
+    assert_eq!(state_table.epoch(), 1);
 
     state_table.insert(OwnedRow::new(vec![
         Some(2_i32.into()),
         Some(text.clone().into()),
     ]));
 
-state_table.try_flush(10).await.unwrap();
+    state_table.try_flush(10).await.unwrap();
+
+    // spill occurs, the epoch has changed.
+    assert_eq!(state_table.epoch(), 2);
     state_table.insert(OwnedRow::new(vec![
         Some(3_i32.into()),
         Some(text.clone().into()),
     ]));
 
     state_table.try_flush(10).await.unwrap();
+
+    // spill not occurs, the epoch has not changed.
+    assert_eq!(state_table.epoch(), 2);
+
     state_table.insert(OwnedRow::new(vec![
         Some(4_i32.into()),
         Some(text.clone().into()),
     ]));
 
+    state_table.try_flush(10).await.unwrap();
+
+    // spill occurs, the epoch has changed.
+    assert_eq!(state_table.epoch(), 3);
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(5_i32.into()),
+        Some(text.clone().into()),
+    ]));
+
+    state_table.try_flush(10).await.unwrap();
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(6_i32.into()),
+        Some(text.clone().into()),
+    ]));
+
+    assert_eq!(state_table.epoch(), 3);
     let flush_epoch = EpochPair::new_test_epoch(10);
     state_table.commit(flush_epoch).await.unwrap();
-
-     
 }
