@@ -18,10 +18,9 @@ use anyhow::anyhow;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
+use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::ConnectorClient;
 use serde::ser::{SerializeSeq, SerializeStruct};
@@ -132,9 +131,7 @@ impl ClickHouseSink {
             }
             risingwave_common::types::DataType::Float32 => Ok(ck_column.r#type.contains("Float32")),
             risingwave_common::types::DataType::Float64 => Ok(ck_column.r#type.contains("Float64")),
-            risingwave_common::types::DataType::Decimal => {
-                Err(SinkError::ClickHouse("can not support Decimal".to_string()))
-            }
+            risingwave_common::types::DataType::Decimal => Ok(ck_column.r#type.contains("Decimal")),
             risingwave_common::types::DataType::Date => Ok(ck_column.r#type.contains("Date32")),
             risingwave_common::types::DataType::Varchar => Ok(ck_column.r#type.contains("String")),
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
@@ -166,7 +163,7 @@ impl ClickHouseSink {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
             risingwave_common::types::DataType::Int256 => Err(SinkError::ClickHouse(
-                "clickhouse can not support Interval".to_string(),
+                "clickhouse can not support Int256".to_string(),
             )),
         };
         if !is_match? {
@@ -234,6 +231,8 @@ struct ClickHouseSchemaFeature {
     can_null: bool,
     // Time accuracy in clickhouse for rw and ck conversions
     accuracy_time: u8,
+
+    accuracy_decimal: (u8, u8),
 }
 
 impl ClickHouseSinkWriter {
@@ -290,9 +289,42 @@ impl ClickHouseSinkWriter {
         } else {
             0_u8
         };
+        let accuracy_decimal = if ck_column.r#type.contains("Decimal(") {
+            let decimal_all = ck_column
+                .r#type
+                .split("Decimal(")
+                .last()
+                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                .split(')')
+                .next()
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                .split(", ")
+                .collect_vec();
+            let length = decimal_all
+                .first()
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                .parse::<u8>()
+                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?;
+
+            if length > 38 {
+                return Err(SinkError::ClickHouse(
+                    "RW don't support Decimal256".to_string(),
+                ));
+            }
+
+            let scale = decimal_all
+                .last()
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                .parse::<u8>()
+                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?;
+            (length, scale)
+        } else {
+            (0_u8, 0_u8)
+        };
         Ok(ClickHouseSchemaFeature {
             can_null,
             accuracy_time,
+            accuracy_decimal,
         })
     }
 
@@ -455,6 +487,25 @@ enum ClickHouseField {
     Bool(bool),
     List(Vec<ClickHouseFieldWithNull>),
     Int8(i8),
+    Decimal(ClickHouseDecimal),
+}
+#[derive(Debug)]
+enum ClickHouseDecimal {
+    Decimal32(i32),
+    Decimal64(i64),
+    Decimal128(i128),
+}
+impl Serialize for ClickHouseDecimal {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            ClickHouseDecimal::Decimal32(v) => serializer.serialize_i32(*v),
+            ClickHouseDecimal::Decimal64(v) => serializer.serialize_i64(*v),
+            ClickHouseDecimal::Decimal128(v) => serializer.serialize_i128(*v),
+        }
+    }
 }
 
 /// Enum that support clickhouse nullable
@@ -497,8 +548,29 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Float64(v) => ClickHouseField::Float64(v.into_inner()),
             ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_string()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
-            ScalarRefImpl::Decimal(_) => {
-                return Err(SinkError::ClickHouse("can not support Decimal".to_string()))
+            ScalarRefImpl::Decimal(d) => {
+                if let Decimal::Normalized(d) = d {
+                    let scale =
+                        clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
+
+                    let scale = if scale < 0 {
+                        d.mantissa() / 10_i128.pow(scale.unsigned_abs())
+                    } else {
+                        d.mantissa() * 10_i128.pow(scale as u32)
+                    };
+
+                    if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
+                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(scale as i32))
+                    } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
+                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(scale as i64))
+                    } else {
+                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(scale))
+                    }
+                } else {
+                    return Err(SinkError::ClickHouse(
+                        "clickhouse can not support Decimal NAN,-INF and INF".to_string(),
+                    ));
+                }
             }
             ScalarRefImpl::Interval(_) => {
                 return Err(SinkError::ClickHouse(
@@ -594,6 +666,7 @@ impl Serialize for ClickHouseField {
                 }
                 s.end()
             }
+            ClickHouseField::Decimal(v) => v.serialize(serializer),
             ClickHouseField::Int8(v) => serializer.serialize_i8(*v),
         }
     }
