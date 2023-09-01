@@ -1,7 +1,21 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::time::Duration;
 
 use anyhow::Result;
-use risingwave_simulation::cluster::{Configuration, KillOpts};
+use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::NexmarkCluster;
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::{sleep, timeout};
@@ -24,7 +38,16 @@ enum ResumeBy {
 }
 
 async fn test_impl(resume_by: ResumeBy) -> Result<()> {
-    let mut cluster = NexmarkCluster::new(Configuration::for_scale(), 6, None, false).await?;
+    let mut cluster = NexmarkCluster::new(
+        Configuration {
+            meta_nodes: 1,
+            ..Configuration::for_scale()
+        },
+        6,
+        None,
+        false,
+    )
+    .await?;
 
     cluster.run(SET_PARAMETER).await?;
     cluster.run(CREATE).await?;
@@ -33,8 +56,8 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     // Run for a while.
     sleep(Duration::from_secs(10)).await;
 
-    // Kill all nodes and wait for the service to recover.
-    cluster.kill_node(&KillOpts::ALL).await;
+    // Kill the meta node and wait for the service to recover.
+    cluster.kill_nodes(["meta-1"], 0).await;
     sleep(Duration::from_secs(10)).await;
 
     // The source should be paused.
@@ -64,7 +87,7 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
 
     match resume_by {
         ResumeBy::Risectl => cluster.resume().await?,
-        ResumeBy::Restart => cluster.kill_node(&KillOpts::ALL).await,
+        ResumeBy::Restart => cluster.kill_nodes(["meta-1"], 0).await,
     }
     sleep(Duration::from_secs(10)).await;
 
@@ -72,12 +95,20 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     let new_count = cluster.run(SELECT).await?;
     assert_ne!(count, new_count);
 
-    // DML on tables should be allowed.
+    // DML on tables should be allowed. However, we're uncertain whether the previous blocked DML is
+    // executed or not. So we just check the count difference.
     {
         let mut session = cluster.start_session();
+
+        session.run("FLUSH").await?;
+        let count: i64 = session.run(SELECT_COUNT_TABLE).await?.parse().unwrap();
+
         session.run(INSERT_INTO_TABLE).await?;
         session.run("FLUSH").await?;
-        session.run(SELECT_COUNT_TABLE).await?.assert_result_eq("1");
+        session
+            .run(SELECT_COUNT_TABLE)
+            .await?
+            .assert_result_eq(format!("{}", count + 1));
     }
 
     Ok(())
