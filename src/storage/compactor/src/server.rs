@@ -207,7 +207,7 @@ pub async fn compactor_serve(
             filter_key_extractor_manager.clone(),
         ),
         memory_limiter,
-        sstable_object_id_manager: sstable_object_id_manager.clone(),
+
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
         running_task_count: Arc::new(AtomicU32::new(0)),
@@ -216,9 +216,12 @@ pub async fn compactor_serve(
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            vec![sstable_object_id_manager],
+            vec![sstable_object_id_manager.clone()],
         ),
-        risingwave_storage::hummock::compactor::start_compactor(compactor_context.clone()),
+        risingwave_storage::hummock::compactor::start_compactor(
+            compactor_context.clone(),
+            sstable_object_id_manager.clone(),
+        ),
     ];
 
     let telemetry_manager = TelemetryManager::new(

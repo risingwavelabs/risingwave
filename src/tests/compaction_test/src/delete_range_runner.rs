@@ -585,12 +585,11 @@ fn run_compactor_thread(
             filter_key_extractor_manager,
         ),
         memory_limiter: MemoryLimiter::unlimit(),
-        sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     });
-    start_compactor(compactor_context)
+    start_compactor(compactor_context, sstable_object_id_manager)
 }
 
 #[cfg(test)]
