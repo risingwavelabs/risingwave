@@ -99,7 +99,7 @@ tracing-opentelemetry = "0.20"
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
-uuid = "1.4.1"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

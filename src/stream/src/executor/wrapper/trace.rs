@@ -61,7 +61,7 @@ pub async fn trace(
                         target: "events::stream::message::chunk",
                         cardinality = chunk.cardinality(),
                         capacity = chunk.capacity(),
-                        "\n{}\n", chunk.to_pretty_string_with_schema(&info.schema),
+                        "\n{}\n", chunk.to_pretty_with_schema(&info.schema),
                     );
                 }
             }
@@ -82,7 +82,7 @@ pub async fn trace(
             }
         });
 
-        // Yield the messgae and update the span.
+        // Yield the message and update the span.
         match &message {
             Message::Chunk(_) | Message::Watermark(_) => yield message,
             Message::Barrier(_) => {

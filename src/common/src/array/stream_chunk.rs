@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, mem};
 
+use either::Either;
 use itertools::Itertools;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -201,23 +203,25 @@ impl StreamChunk {
     }
 
     /// Returns a table-like text representation of the `StreamChunk`.
-    pub fn to_pretty_string(&self) -> String {
-        self.to_pretty_string_inner(None)
+    pub fn to_pretty(&self) -> impl Display {
+        self.to_pretty_inner(None)
     }
 
-    pub fn to_pretty_string_with_schema(&self, schema: &Schema) -> String {
-        self.to_pretty_string_inner(Some(schema))
+    /// Returns a table-like text representation of the `StreamChunk` with a header of column names
+    /// from the given `schema`.
+    pub fn to_pretty_with_schema(&self, schema: &Schema) -> impl Display {
+        self.to_pretty_inner(Some(schema))
     }
 
-    fn to_pretty_string_inner(&self, schema: Option<&Schema>) -> String {
+    fn to_pretty_inner(&self, schema: Option<&Schema>) -> impl Display {
         use comfy_table::{Cell, CellAlignment, Table};
 
         if self.cardinality() == 0 {
-            return "(empty)".to_owned();
+            return Either::Left("(empty)");
         }
 
         let mut table = Table::new();
-        table.load_preset("||--+-++|    ++++++");
+        table.load_preset(DataChunk::PRETTY_TABLE_PRESET);
 
         if let Some(schema) = schema {
             assert_eq!(self.dimension(), schema.len());
@@ -246,7 +250,8 @@ impl StreamChunk {
             }
             table.add_row(cells);
         }
-        table.to_string()
+
+        Either::Right(table)
     }
 
     /// Reorder (and possibly remove) columns.
@@ -307,7 +312,7 @@ impl fmt::Debug for StreamChunk {
                 "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
                 self.cardinality(),
                 self.capacity(),
-                self.to_pretty_string()
+                self.to_pretty()
             )
         } else {
             f.debug_struct("StreamChunk")
@@ -653,7 +658,7 @@ mod tests {
             U+ 4 .",
         );
         assert_eq!(
-            chunk.to_pretty_string(),
+            chunk.to_pretty().to_string(),
             "\
 +----+---+---+
 |  + | 1 | 6 |
