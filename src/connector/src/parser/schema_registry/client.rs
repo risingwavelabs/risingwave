@@ -101,9 +101,9 @@ impl Client {
             fut_req = remaining;
         }
 
-        Err(RwError::from(ErrorCode::ProtocolError(format!(
-            "all request confluent registry all timeout, req path {:?}, urls {:?}",
-            path, self.url
+        Err(RwError::from(ProtocolError(format!(
+            "all request confluent registry all timeout, req path {:?}, urls {:?}, err: {:?}",
+            path, self.url, errs
         ))))
     }
 
