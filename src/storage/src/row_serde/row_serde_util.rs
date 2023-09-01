@@ -42,9 +42,3 @@ pub fn deserialize_pk_with_vnode(
     let pk = deserializer.deserialize(&key[VirtualNode::SIZE..])?;
     Ok((vnode, pk))
 }
-
-pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
-    let (vnode_bytes, key_bytes) = raw_key.split_at(VirtualNode::SIZE);
-    let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
-    (vnode, key_bytes)
-}

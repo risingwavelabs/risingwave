@@ -119,27 +119,28 @@ pub fn add_hummock_backend(
         ([], [], [opendal]) => {
             if opendal.engine == "hdfs"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
+                .arg(format!("hummock+hdfs://{}", opendal.namenode));
             }
             else if opendal.engine == "gcs"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+gcs://{}@{}", opendal.bucket, opendal.root));
+                .arg(format!("hummock+gcs://{}", opendal.bucket));
             }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+oss://{}@{}", opendal.bucket, opendal.root));
+                .arg(format!("hummock+oss://{}", opendal.bucket));
             }
             else if opendal.engine == "webhdfs"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+webhdfs://{}@{}", opendal.namenode, opendal.root));
+                .arg(format!("hummock+webhdfs://{}", opendal.namenode));
             }
             else if opendal.engine == "azblob"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+azblob://{}@{}", opendal.bucket, opendal.root));
+                .arg(format!("hummock+azblob://{}", opendal.bucket));
             }
             else if opendal.engine == "fs"{
+                println!("using fs engine xxxx");
                 cmd.arg("--state-store")
-                .arg(format!("hummock+fs://{}@{}", opendal.namenode, opendal.root));
+                .arg("hummock+fs://");
             }
             else{
                 unimplemented!()

@@ -26,7 +26,7 @@ use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-/// `BatchUpdate` implements [`LogicalUpdate`]
+/// `BatchUpdate` implements [`super::LogicalUpdate`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
     pub base: PlanBase,

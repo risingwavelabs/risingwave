@@ -17,6 +17,7 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -423,6 +424,27 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+pub enum StorageMetricLevel {
+    #[default]
+    Disabled = 0,
+    Critical = 1,
+    Info = 2,
+    Debug = 3,
+}
+
+impl PartialEq<Self> for StorageMetricLevel {
+    fn eq(&self, other: &Self) -> bool {
+        (*self as u8).eq(&(*other as u8))
+    }
+}
+
+impl PartialOrd for StorageMetricLevel {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (*self as u8).partial_cmp(&(*other as u8))
+    }
+}
+
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StorageConfig {
@@ -538,17 +560,19 @@ pub struct StorageConfig {
     pub compactor_max_sst_key_count: u64,
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
-
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+
+    #[serde(default = "default::storage::storage_metric_level")]
+    pub storage_metric_level: StorageMetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
 
-/// The subsection `[storage.file_cache]` in `risingwave.toml`.
+/// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
-/// It's put at [`StorageConfig::file_cache`].
+/// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
@@ -899,6 +923,7 @@ pub mod default {
     }
 
     pub mod storage {
+        use crate::config::StorageMetricLevel;
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -974,7 +999,7 @@ pub mod default {
         }
 
         pub fn max_preload_wait_time_mill() -> u64 {
-            10
+            0
         }
 
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
@@ -1003,6 +1028,10 @@ pub mod default {
 
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
+        }
+
+        pub fn storage_metric_level() -> StorageMetricLevel {
+            StorageMetricLevel::Info
         }
     }
 
@@ -1146,7 +1175,7 @@ pub mod default {
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
-            true
+            false
         }
     }
 

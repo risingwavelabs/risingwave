@@ -60,6 +60,8 @@ public class DbzConnectorConfig {
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
+    private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
         // retain only debezium properties if any
@@ -113,12 +115,16 @@ public class DbzConnectorConfig {
             // reading from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
                 // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
-                // specified.
-                // It only snapshots the schemas, not the data, and continue binlog reading from the
-                // specified offset
+                // specified. It only snapshots the schemas, not the data, and continue binlog
+                // reading from the specified offset
                 mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
                 mysqlProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            } else if (mysqlProps.getProperty("snapshot.mode").equals(SNAPSHOT_MODE_BACKFILL)) {
+                // only snapshot table schemas which is not required by the source parser
+                mysqlProps.setProperty("snapshot.mode", "schema_only");
+                // disable snapshot locking at all
+                mysqlProps.setProperty("snapshot.locking.mode", "none");
             }
 
             dbzProps.putAll(mysqlProps);
@@ -151,7 +157,9 @@ public class DbzConnectorConfig {
         }
 
         var otherProps = extractDebeziumProperties(userProps);
-        dbzProps.putAll(otherProps);
+        for (var entry : otherProps.entrySet()) {
+            dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
+        }
 
         this.sourceId = sourceId;
         this.sourceType = source;

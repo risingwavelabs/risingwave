@@ -149,7 +149,7 @@ impl fmt::Display for BinaryOperator {
 }
 
 /// Qualified custom operator
-/// https://www.postgresql.org/docs/15/sql-expressions.html#SQL-EXPRESSIONS-OPERATOR-CALLS
+/// <https://www.postgresql.org/docs/15/sql-expressions.html#SQL-EXPRESSIONS-OPERATOR-CALLS>
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct QualifiedOperator {

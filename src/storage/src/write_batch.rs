@@ -22,7 +22,7 @@ use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::{StateStoreWrite, WriteOptions};
 
-/// [`WriteBatch`] wraps a list of key-value pairs and an associated [`StateStore`].
+/// [`WriteBatch`] wraps a list of key-value pairs and an associated [`crate::StateStore`].
 pub struct WriteBatch<'a, S: StateStoreWrite> {
     store: &'a S,
 
