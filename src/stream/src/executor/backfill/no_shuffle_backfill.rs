@@ -172,7 +172,10 @@ where
                     &mut builder,
                 );
                 pin_mut!(snapshot);
-                snapshot.try_next().await?.unwrap().is_none()
+                let snapshot_is_empty = snapshot.try_next().await?.unwrap().is_none();
+                let snapshot_buffer_is_empty = builder.is_empty();
+                builder.clear();
+                snapshot_is_empty && snapshot_buffer_is_empty
             }
         };
 
