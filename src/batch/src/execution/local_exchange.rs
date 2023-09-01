@@ -165,13 +165,9 @@ mod tests {
             ..Default::default()
         };
 
-        println!("xxxxxxxxxx");
-
         let mut src = GrpcExchangeSource::create(client, task_output_id, None)
             .await
             .unwrap();
-
-        println!("xxxxxxxxxx");
 
         for _ in 0..3 {
             assert!(src.take_data().await.unwrap().is_some());
