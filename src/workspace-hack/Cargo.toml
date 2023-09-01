@@ -47,6 +47,7 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itertools = { version = "0.10" }
+jni = { version = "0.21", features = ["invocation"] }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -140,6 +141,7 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itertools = { version = "0.10" }
+jni = { version = "0.21", features = ["invocation"] }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }

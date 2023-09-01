@@ -50,8 +50,8 @@ glob = "0.3"
 google-cloud-pubsub = "0.19"
 icelake = { workspace = true }
 itertools = "0.11"
-jsonschema-transpiler = "1.10.0"
 jni = { version = "0.21.1", features = ["invocation"] }
+jsonschema-transpiler = "1.10.0"
 maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }
 mysql_async = { version = "0.31", default-features = false, features = ["default"] }
@@ -80,6 +80,7 @@ rdkafka = { workspace = true, features = [
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
+risingwave_java_binding = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"

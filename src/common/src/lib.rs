@@ -69,7 +69,6 @@ pub mod telemetry;
 pub mod transaction;
 
 pub mod format;
-pub mod jvm_runtime;
 pub mod metrics;
 pub mod test_utils;
 pub mod types;

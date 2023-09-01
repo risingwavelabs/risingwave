@@ -19,16 +19,14 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
 use jni::{InitArgsBuilder, JNIVersion, JavaVM};
-use risingwave_pb::connector_service::GetEventStreamResponse;
-use tokio::sync::mpsc::Sender;
 
 pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
-    let dir_path = ".risingwave/bin/connector-node/libs/";
+    let libs_path = ".risingwave/bin/connector-node/libs/";
 
-    let dir = Path::new(dir_path);
+    let dir = Path::new(libs_path);
 
     if !dir.is_dir() {
-        panic!("{} is not a directory", dir_path);
+        panic!("{} is not a directory", libs_path);
     }
 
     let mut class_vec = vec![];
@@ -36,12 +34,11 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.path().file_name() {
-                println!("{:?}", name);
-                class_vec.push(dir_path.to_owned() + name.to_str().to_owned().unwrap());
+                class_vec.push(libs_path.to_owned() + name.to_str().to_owned().unwrap());
             }
         }
     } else {
-        println!("failed to read directory {}", dir_path);
+        panic!("failed to read directory {}", libs_path);
     }
 
     // Build the VM properties
@@ -66,7 +63,6 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
         Ok(jvm) => jvm,
     };
 
+    tracing::info!("initialize JVM successfully");
     Arc::new(jvm)
 });
-
-pub type MyJniSender = Sender<GetEventStreamResponse>;

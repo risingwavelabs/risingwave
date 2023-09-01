@@ -20,6 +20,7 @@
 #![feature(result_option_inspect)]
 
 pub mod hummock_iterator;
+pub mod jvm_runtime;
 pub mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
@@ -41,7 +42,6 @@ use jni::JNIEnv;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::jvm_runtime::MyJniSender;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::ScalarRefImpl;
@@ -50,8 +50,10 @@ use risingwave_pb::connector_service::GetEventStreamResponse;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::Sender;
 
 use crate::stream_chunk_iterator::{StreamChunkIterator, StreamChunkRow};
+pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
@@ -827,10 +829,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
 #[inline(never)]
 pub fn run_this_func_to_get_valid_ptr_from_java_binding() {}
 
+/// Send messages to the channel received by `CdcSplitReader`.
+/// If msg is null, just check whether the channel is closed.
+/// Return true if sending is successful, otherwise, return false so that caller can stop
+/// gracefully.
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel<'a>(
     env: EnvParam<'a>,
-    channel: Pointer<'a, MyJniSender>,
+    channel: Pointer<'a, GetEventStreamJniSender>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -845,17 +851,18 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendMsgToChannel
             }
         }
 
-        let get_event_stream_response: GetEventStreamResponse = Message::decode(to_guarded_slice(&msg, env)?.deref())?;
+        let get_event_stream_response: GetEventStreamResponse =
+            Message::decode(to_guarded_slice(&msg, env)?.deref())?;
 
-        println!("before send");
+        tracing::debug!("before send");
         match channel.as_ref().blocking_send(get_event_stream_response) {
             Ok(_) => {
-                println!("send successfully");
+                tracing::debug!("send successfully");
                 Ok(JNI_TRUE)
             }
             Err(e) => {
                 channel.drop();
-                eprintln!("send error.  {:?}", e);
+                tracing::debug!("send error.  {:?}", e);
                 Ok(JNI_FALSE)
             }
         }

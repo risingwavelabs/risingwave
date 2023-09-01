@@ -19,8 +19,9 @@ use async_trait::async_trait;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use jni::objects::{JObject, JValue};
-use risingwave_common::jvm_runtime::{MyJniSender, JVM};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_java_binding::jvm_runtime::JVM;
+use risingwave_java_binding::GetEventStreamJniSender;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 use tokio::sync::mpsc;
 
@@ -179,29 +180,29 @@ impl CdcSplitReader {
 
         let (tx, mut rx) = mpsc::channel(1024);
 
-        let tx: Box<MyJniSender> = Box::new(tx);
+        let tx: Box<GetEventStreamJniSender> = Box::new(tx);
 
         let source_type = self.conn_props.get_source_type_pb()?;
 
-        tokio::task::spawn_blocking(move || {
+        std::thread::spawn(move || {
             let mut env = JVM.attach_current_thread_as_daemon().unwrap();
 
-            env.find_class("com/risingwave/proto/ConnectorServiceProto$SourceType")
-                .inspect_err(|e| eprintln!("{:?}", e))
-                .unwrap();
-            let source_type_arg = JValue::from(source_type as i32);
             let st = env
                 .call_static_method(
                     "com/risingwave/proto/ConnectorServiceProto$SourceType",
                     "forNumber",
                     "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;",
-                    &[source_type_arg],
+                    &[JValue::from(source_type as i32)],
                 )
-                .inspect_err(|e| eprintln!("{:?}", e))
+                .inspect_err(|e| tracing::error!("{:?}", e))
                 .unwrap();
-            let st = env.call_static_method("com/risingwave/connector/api/source/SourceTypeE", "valueOf", "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;", &[(&st).into()]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
 
-            let source_id_arg = JValue::from(self.source_id as i64);
+            let st = env.call_static_method(
+                "com/risingwave/connector/api/source/SourceTypeE",
+                "valueOf",
+                "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;",
+                &[(&st).into()]
+            ).inspect_err(|e| tracing::error!("{:?}", e)).unwrap();
 
             let start_offset = match self.start_offset {
                 Some(start_offset) => {
@@ -212,36 +213,35 @@ impl CdcSplitReader {
                 None => jni::objects::JValueGen::Object(JObject::null()),
             };
 
-            let hashmap_class = "java/util/HashMap";
-            let hashmap_constructor_signature = "()V";
-            let hashmap_put_signature = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
+            let java_map = env.new_object("java/util/HashMap", "()V", &[]).unwrap();
 
-            let java_map = env
-                .new_object(hashmap_class, hashmap_constructor_signature, &[])
-                .unwrap();
             for (key, value) in &properties {
                 let key = env.new_string(key.to_string()).unwrap();
                 let value = env.new_string(value.to_string()).unwrap();
                 let args = [JValue::Object(&key), JValue::Object(&value)];
-                env.call_method(&java_map, "put", hashmap_put_signature, &args)
-                    .unwrap();
+                env.call_method(
+                    &java_map,
+                    "put",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    &args,
+                )
+                .inspect_err(|e| tracing::error!("{:?}", e))
+                .unwrap();
             }
 
-            let snapshot_done = JValue::from(self.snapshot_done);
-
             let channel_ptr = Box::into_raw(tx) as i64;
-            println!("channel_ptr = {}", channel_ptr);
             let channel_ptr = JValue::from(channel_ptr);
 
             let _ = env.call_static_method(
                 "com/risingwave/connector/source/core/SourceHandlerFactory",
                 "startJniSourceHandler",
                 "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZJ)V",
-                &[(&st).into(), source_id_arg, (&start_offset).into(), JValue::Object(&java_map), snapshot_done, channel_ptr]).inspect_err(|e| eprintln!("{:?}", e)).unwrap();
+                &[(&st).into(), JValue::from(self.source_id as i64), (&start_offset).into(), JValue::Object(&java_map), JValue::from(self.snapshot_done), channel_ptr]
+            ).inspect_err(|e| tracing::error!("{:?}", e)).unwrap();
         });
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
-            println!("receive events {:?}", events.len());
+            tracing::debug!("receive events {:?}", events.len());
             if events.is_empty() {
                 continue;
             }

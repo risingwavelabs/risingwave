@@ -41,9 +41,9 @@ use jni::objects::{JObject, JValue};
 use jni::strings::JNIString;
 use jni::NativeMethod;
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
-use risingwave_common::jvm_runtime::JVM;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+use risingwave_java_binding::jvm_runtime::JVM;
 use risingwave_java_binding::run_this_func_to_get_valid_ptr_from_java_binding;
 use serde::{Deserialize, Serialize};
 
@@ -222,7 +222,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts).await;
 
-        tokio::task::spawn_blocking(move || {
+        std::thread::spawn(move || {
             run_jvm();
         });
 
@@ -444,6 +444,7 @@ fn run_jvm() {
         .new_object_array(0, string_class, JObject::null())
         .unwrap();
 
+    // FIXME: if we finish rewriting all RPCs to JNI calls, we don't need to run main anymore.
     let _ = env
         .call_static_method(
             "com/risingwave/connector/ConnectorService",
@@ -451,7 +452,8 @@ fn run_jvm() {
             "([Ljava/lang/String;)V",
             &[JValue::Object(&jarray)],
         )
-        .inspect_err(|e| eprintln!("{:?}", e));
+        .inspect_err(|e| eprintln!("{:?}", e))
+        .unwrap();
 }
 
 fn default_total_memory_bytes() -> usize {
