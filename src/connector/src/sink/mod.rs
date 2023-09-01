@@ -73,6 +73,8 @@ pub struct SinkParam {
     pub columns: Vec<ColumnDesc>,
     pub pk_indices: Vec<usize>,
     pub sink_type: SinkType,
+    pub db_name: String,
+    pub sink_from_name: String,
 }
 
 impl SinkParam {
@@ -90,6 +92,8 @@ impl SinkParam {
             sink_type: SinkType::from_proto(
                 PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
             ),
+            db_name: pb_param.db_name,
+            sink_from_name: pb_param.sink_from_name,
         }
     }
 
@@ -102,6 +106,8 @@ impl SinkParam {
                 pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 
@@ -423,6 +429,8 @@ impl SinkImpl {
                 param.schema(),
                 param.pk_indices,
                 param.sink_type.is_append_only(),
+                param.db_name,
+                param.sink_from_name,
             )),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
                 *cfg,

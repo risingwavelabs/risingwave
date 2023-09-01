@@ -27,6 +27,8 @@ use tracing::warn;
 
 use crate::sink::{Result, SinkError};
 
+const DEBEZIUM_NAME_FIELD_PREFIX: &str = "Risingwave";
+
 pub struct DebeziumAdapterOpts {
     gen_tombstone: bool,
 }
@@ -39,6 +41,10 @@ impl Default for DebeziumAdapterOpts {
     }
 }
 
+fn concat_debezium_name_field(db_name: &str, sink_from_name: &str, value: &str) -> String {
+    DEBEZIUM_NAME_FIELD_PREFIX.to_owned() + "." + db_name + "." + sink_from_name + "." + value
+}
+
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_debezium_message_stream<'a>(
     schema: &'a Schema,
@@ -46,6 +52,8 @@ pub async fn gen_debezium_message_stream<'a>(
     chunk: StreamChunk,
     ts_ms: u64,
     opts: DebeziumAdapterOpts,
+    db_name: &'a str,
+    sink_from_name: &'a str,
 ) {
     let source_field = json!({
         "db": "RisingWave",
@@ -60,13 +68,13 @@ pub async fn gen_debezium_message_stream<'a>(
                 "type": "struct",
                 "fields": fields_pk_to_json(&schema.fields, pk_indices),
                 "optional": false,
-                "name": "RisingWave.RisingWave.RisingWave.Key",
+                "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
             }),
             "payload": pk_to_json(row, &schema.fields, pk_indices)?,
         }));
         let event_object: Option<Value> = match op {
             Op::Insert => Some(json!({
-                "schema": schema_to_json(schema),
+                "schema": schema_to_json(schema, db_name, sink_from_name),
                 "payload": {
                     "before": null,
                     "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
@@ -77,7 +85,7 @@ pub async fn gen_debezium_message_stream<'a>(
             })),
             Op::Delete => {
                 let value_obj = Some(json!({
-                    "schema": schema_to_json(schema),
+                    "schema": schema_to_json(schema, db_name, sink_from_name),
                     "payload": {
                         "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                         "after": null,
@@ -107,7 +115,7 @@ pub async fn gen_debezium_message_stream<'a>(
             Op::UpdateInsert => {
                 if let Some(before) = update_cache.take() {
                     Some(json!({
-                        "schema": schema_to_json(schema),
+                        "schema": schema_to_json(schema, db_name, sink_from_name),
                         "payload": {
                             "before": before,
                             "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
@@ -129,27 +137,27 @@ pub async fn gen_debezium_message_stream<'a>(
     }
 }
 
-pub(crate) fn schema_to_json(schema: &Schema) -> Value {
+pub(crate) fn schema_to_json(schema: &Schema, db_name: &str, sink_from_name: &str) -> Value {
     let mut schema_fields = Vec::new();
     schema_fields.push(json!({
         "type": "struct",
         "fields": fields_to_json(&schema.fields),
         "optional": true,
         "field": "before",
-        "name": "RisingWave.RisingWave.RisingWave.Key",
+        "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
     }));
     schema_fields.push(json!({
         "type": "struct",
         "fields": fields_to_json(&schema.fields),
         "optional": true,
         "field": "after",
-        "name": "RisingWave.RisingWave.RisingWave.Key",
+        "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
     }));
 
     schema_fields.push(json!({
         "type": "struct",
         "optional": false,
-        "name": "RisingWave.RisingWave.RisingWave.Source",
+        "name": concat_debezium_name_field(db_name, sink_from_name, "Source"),
         "fields": vec![
             json!({
                 "type": "string",
@@ -178,7 +186,7 @@ pub(crate) fn schema_to_json(schema: &Schema) -> Value {
         "type": "struct",
         "fields": schema_fields,
         "optional": false,
-        "name": "RisingWave.RisingWave.RisingWave.Envelope",
+        "name": concat_debezium_name_field(db_name, sink_from_name, "Envelope"),
     })
 }
 

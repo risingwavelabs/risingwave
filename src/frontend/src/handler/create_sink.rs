@@ -73,9 +73,17 @@ pub fn gen_sink_plan(
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
 
+    // Used for debezium's table name
+    let sink_from_table_name;
     let query = match stmt.sink_from {
-        CreateSink::From(from_name) => Box::new(gen_sink_query_from_name(from_name)?),
-        CreateSink::AsQuery(query) => query,
+        CreateSink::From(from_name) => {
+            sink_from_table_name = from_name.0.last().unwrap().real_value()
+            Box::new(gen_sink_query_from_name(from_name)?)
+        }
+        CreateSink::AsQuery(query) => {
+            sink_from_table_name = sink_table_name.clone();
+            query
+        }
     };
 
     let (sink_database_id, sink_schema_id) =
@@ -117,6 +125,8 @@ pub fn gen_sink_plan(
         definition,
         with_options,
         emit_on_window_close,
+        db_name.clone(),
+        sink_from_table_name,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();

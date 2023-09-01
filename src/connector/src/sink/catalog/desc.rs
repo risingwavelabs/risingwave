@@ -31,6 +31,13 @@ pub struct SinkDesc {
     /// Name of the sink. For debug now.
     pub name: String,
 
+    /// Name of the database
+    pub db_name: String,
+
+    /// Name of the "table" field for Debezium. If the sink is from table or mv,
+    /// it is the name of table/mv. Otherwise, it is the name of the sink.
+    pub sink_from_name: String,
+
     /// Full SQL definition of the sink. For debug now.
     pub definition: String,
 
@@ -100,6 +107,8 @@ impl SinkDesc {
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 }

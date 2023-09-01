@@ -550,6 +550,8 @@ impl PlanRoot {
     pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
+        db_name: String,
+        sink_from_table_name: String,
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
@@ -559,6 +561,8 @@ impl PlanRoot {
         StreamSink::create(
             stream_plan,
             sink_name,
+            db_name,
+            sink_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
