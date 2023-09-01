@@ -241,7 +241,6 @@ impl DataChunkBuilder {
         self.buffered_count == 0
     }
 
-    /// Clears the buffer and returns all data in current buffer.
     pub fn clear(&mut self) {
         if !self.is_empty() {
             self.array_builders.clear()
