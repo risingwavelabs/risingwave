@@ -212,7 +212,6 @@ fn mark_cdc_chunk_inner(
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
-    tracing::info!("mark_cdc_chunk_inner: {:#?}", chunk);
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
 
@@ -230,8 +229,10 @@ fn mark_cdc_chunk_inner(
             };
 
             if in_binlog_range {
+                tracing::info!(row = ?row, current_pos = ?current_pos, "mark_cdc_chunk_inner");
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos.project(pk_in_output_indices);
+
                 let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
                 match order {
                     Ordering::Less | Ordering::Equal => true,
