@@ -53,7 +53,7 @@ pub async fn trace(
                     .executor_row_count
                     .with_label_values(&[&actor_id_string, &span_name])
                     .inc_by(chunk.cardinality() as u64);
-                tracing::trace!(?chunk, "chunk");
+                tracing::error!(chunk = chunk.to_pretty_string(), "chunk");
             }
         }
 
