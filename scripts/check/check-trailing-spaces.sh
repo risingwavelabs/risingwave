@@ -55,7 +55,8 @@ while [ $# -gt 0 ]; do
         fix=true
         ;;
     -j | --parallel)
-        parallel=$2
+        shift
+        parallel=$1
         ;;
     -h | --help)
         print_help
@@ -89,7 +90,7 @@ done
 
 n_found=0
 for pid in "${pids[@]}"; do
-    if ! wait $pids; then
+    if ! wait $pid; then
         ((n_found++))
     fi
 done
