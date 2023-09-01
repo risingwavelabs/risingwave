@@ -518,8 +518,8 @@ where
     /// The rows from upstream snapshot read will be buffered inside the `builder`.
     /// If snapshot is dropped before its rows are consumed,
     /// remaining data in `builder` must be flushed manually.
-    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be present,
-    /// Then when we flush we contain duplicate rows.
+    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
+    /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S>,
