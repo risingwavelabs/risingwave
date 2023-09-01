@@ -248,7 +248,6 @@ impl DataChunkBuilder {
         }
         self.buffered_count = 0;
     }
-
 }
 
 impl Drop for DataChunkBuilder {
