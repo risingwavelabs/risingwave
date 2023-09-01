@@ -237,9 +237,14 @@ impl DataChunkBuilder {
         self.data_types.clone()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.buffered_count == 0
+    }
+
+    /// Clears the buffer and returns all data in current buffer.
     pub fn clear(&mut self) {
-        if !self.array_builders.is_empty() {
-            self.array_builders.clear();
+        if !self.is_empty() {
+            self.array_builders.clear()
         }
         self.buffered_count = 0;
     }
