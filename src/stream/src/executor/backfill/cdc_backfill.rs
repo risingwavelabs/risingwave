@@ -115,7 +115,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let upstream_table_id = self.upstream_table.table_id().table_id;
         let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
 
-        let upstream_identity = self.upstream.identity().to_string();
         let mut upstream = self.upstream.execute().peekable();
 
         // Current position of the upstream_table storage primary key.
@@ -175,11 +174,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             return Ok(());
         }
 
-        tracing::debug!(
-            "start cdc backfill: actor {:?}, upstream {}",
-            self.actor_ctx.id,
-            upstream_identity
-        );
+        tracing::debug!("start cdc backfill: actor {:?}", self.actor_ctx.id);
 
         self.source_state_handler.init_epoch(first_barrier.epoch);
 
@@ -296,11 +291,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // If no current_pos, means we did not process any snapshot yet.
                                     // In that case we can just ignore the upstream buffer chunk.
                                     if let Some(current_pos) = &current_pk_pos {
-                                        tracing::debug!(
-                                            ?current_pos,
-                                            ?last_binlog_offset,
-                                            "consume upstream chunk"
-                                        );
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
