@@ -10108,7 +10108,7 @@ dependencies = [
  "miniz_oxide",
  "mio",
  "multimap",
- "nix 0.27.1",
+ "nix 0.26.4",
  "nom",
  "num-bigint",
  "num-integer",
