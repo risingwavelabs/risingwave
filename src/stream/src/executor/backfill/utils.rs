@@ -212,6 +212,7 @@ fn mark_cdc_chunk_inner(
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
+    tracing::info!("mark_cdc_chunk_inner: {:#?}", chunk);
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
 
