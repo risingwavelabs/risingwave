@@ -35,7 +35,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
         _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<NatsSplitEnumerator> {
         Ok(Self {
-            subject: properties.common.subject.clone(),
+            subject: properties.common.subject,
             split_num: 0,
         })
     }
