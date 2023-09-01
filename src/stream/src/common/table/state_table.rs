@@ -852,7 +852,7 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        assert!(self.epoch() < new_epoch.prev);
+        assert!(self.epoch() < new_epoch.curr);
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
