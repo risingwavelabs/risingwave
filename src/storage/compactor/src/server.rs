@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, AsyncStackTraceOption,
+    extract_storage_memory_config, load_config, AsyncStackTraceOption, RwConfig,
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -31,7 +31,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
+use risingwave_object_store::object::object_metrics::{self, GLOBAL_OBJECT_STORE_METRICS};
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
@@ -64,56 +64,16 @@ use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
-/// Fetches and runs compaction tasks.
-pub async fn compactor_serve(
-    listen_addr: SocketAddr,
-    advertise_addr: HostAddr,
-    opts: CompactorOpts,
-) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    type CompactorMemoryCollector = HummockMemoryCollector;
-
-    let config = load_config(&opts.config_path, &opts);
-    info!("Starting compactor node",);
-    info!("> config: {:?}", config);
-    info!(
-        "> debug assertions: {}",
-        if cfg!(debug_assertions) { "on" } else { "off" }
-    );
-    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-
-    // Register to the cluster.
-    let (meta_client, system_params_reader) = MetaClient::register_new(
-        &opts.meta_address,
-        WorkerType::Compactor,
-        &advertise_addr,
-        Default::default(),
-        &config.meta,
-    )
-    .await
-    .unwrap();
-
-    info!("Assigned compactor id {}", meta_client.worker_id());
-    meta_client.activate(&advertise_addr).await.unwrap();
-
-    // Boot compactor
-    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
-
-    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
-        meta_client.clone(),
-        hummock_metrics.clone(),
-    ));
-
-    let state_store_url = system_params_reader.state_store();
-
-    let storage_memory_config = extract_storage_memory_config(&config);
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
-        &config,
-        &system_params_reader,
-        &storage_memory_config,
-    )));
-
+pub async fn prepare_start_parameters(
+    config: RwConfig,
+    storage_opts: Arc<StorageOpts>,
+    object_metrics: Arc<object_metrics::ObjectStoreMetrics>,
+    state_store_url: &str,
+) -> (
+    Arc<SstableStore>,
+    Arc<MemoryLimiter>,
+    Option<Arc<RwLock<await_tree::Registry<String>>>>,
+) {
     let total_memory_available_bytes =
         (resource_util::memory::total_memory_available_bytes() as f64
             * config.storage.compactor_memory_available_proportion) as usize;
@@ -163,6 +123,85 @@ pub async fn compactor_serve(
         meta_cache_capacity_bytes,
     ));
 
+    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let memory_collector: Arc<HummockMemoryCollector> = Arc::new(HummockMemoryCollector::new(
+        sstable_store.clone(),
+        memory_limiter.clone(),
+        storage_memory_config,
+    ));
+
+    monitor_cache(memory_collector);
+
+    let await_tree_config = match &config.streaming.async_stack_trace {
+        AsyncStackTraceOption::Off => None,
+        c => await_tree::ConfigBuilder::default()
+            .verbose(c.is_verbose().unwrap())
+            .build()
+            .ok(),
+    };
+    let await_tree_reg: Option<
+        Arc<parking_lot::lock_api::RwLock<parking_lot::RawRwLock, await_tree::Registry<_>>>,
+    > = await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
+    (sstable_store, memory_limiter, await_tree_reg)
+}
+
+/// Fetches and runs compaction tasks.
+pub async fn compactor_serve(
+    listen_addr: SocketAddr,
+    advertise_addr: HostAddr,
+    opts: CompactorOpts,
+) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
+    let config = load_config(&opts.config_path, &opts);
+    info!("Starting compactor node",);
+    info!("> config: {:?}", config);
+    info!(
+        "> debug assertions: {}",
+        if cfg!(debug_assertions) { "on" } else { "off" }
+    );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
+    // Register to the cluster.
+    let (meta_client, system_params_reader) = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::Compactor,
+        &advertise_addr,
+        Default::default(),
+        &config.meta,
+    )
+    .await
+    .unwrap();
+
+    info!("Assigned compactor id {}", meta_client.worker_id());
+    meta_client.activate(&advertise_addr).await.unwrap();
+
+    // Boot compactor
+    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
+
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
+        meta_client.clone(),
+        hummock_metrics.clone(),
+    ));
+
+    let state_store_url = system_params_reader.state_store();
+
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
+        &config,
+        &system_params_reader,
+        &storage_memory_config,
+    )));
+
+    let (sstable_store, memory_limiter, await_tree_reg) = prepare_start_parameters(
+        config.clone(),
+        storage_opts.clone(),
+        object_metrics,
+        state_store_url,
+    )
+    .await;
+
     let telemetry_enabled = system_params_reader.telemetry_enabled();
 
     let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
@@ -180,27 +219,10 @@ pub async fn compactor_serve(
     // limited at first.
     let observer_join_handle = observer_manager.start().await;
 
-    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
-    let memory_collector = Arc::new(CompactorMemoryCollector::new(
-        sstable_store.clone(),
-        memory_limiter.clone(),
-        storage_memory_config,
-    ));
-
-    monitor_cache(memory_collector);
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
-    let await_tree_config = match &config.streaming.async_stack_trace {
-        AsyncStackTraceOption::Off => None,
-        c => await_tree::ConfigBuilder::default()
-            .verbose(c.is_verbose().unwrap())
-            .build()
-            .ok(),
-    };
-    let await_tree_reg =
-        await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store: sstable_store.clone(),
@@ -340,73 +362,13 @@ pub async fn _shared_compactor_serve(
         state_store_url,
     ));
 
-    let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64
-            * config.storage.compactor_memory_available_proportion) as usize;
-    let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
-    let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
-        Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => (total_memory_available_bytes - meta_cache_capacity_bytes) as u64,
-    };
-
-    tracing::info!(
-        "Compactor total_memory_available_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
-        total_memory_available_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
-        storage_opts.sstable_size_mb * (1 << 20),
-        storage_opts.block_size_kb * (1 << 10),
-    );
-
-    // check memory config
-    {
-        // This is a similar logic to SstableBuilder memory detection, to ensure that we can find
-        // configuration problems as quickly as possible
-        let min_compactor_memory_limit_bytes = (storage_opts.sstable_size_mb * (1 << 20)
-            + storage_opts.block_size_kb * (1 << 10))
-            as u64;
-
-        assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
-    }
-
-    let mut object_store = parse_remote_object_store(
-        state_store_url
-            .strip_prefix("hummock+")
-            .expect("object store must be hummock for compactor server"),
+    let (sstable_store, memory_limiter, await_tree_reg) = prepare_start_parameters(
+        config.clone(),
+        storage_opts.clone(),
         object_metrics,
-        "Hummock",
+        state_store_url,
     )
     .await;
-    object_store.set_opts(
-        storage_opts.object_store_streaming_read_timeout_ms,
-        storage_opts.object_store_streaming_upload_timeout_ms,
-        storage_opts.object_store_read_timeout_ms,
-        storage_opts.object_store_upload_timeout_ms,
-    );
-    let object_store = Arc::new(object_store);
-    let sstable_store = Arc::new(SstableStore::for_compactor(
-        object_store,
-        data_directory.to_string(),
-        1 << 20, // set 1MB memory to avoid panic.
-        meta_cache_capacity_bytes,
-    ));
-
-    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
-    let memory_collector = Arc::new(CompactorMemoryCollector::new(
-        sstable_store.clone(),
-        memory_limiter.clone(),
-        storage_memory_config,
-    ));
-
-    monitor_cache(memory_collector);
-
-    let await_tree_config = match &config.streaming.async_stack_trace {
-        AsyncStackTraceOption::Off => None,
-        c => await_tree::ConfigBuilder::default()
-            .verbose(c.is_verbose().unwrap())
-            .build()
-            .ok(),
-    };
-    let await_tree_reg =
-        await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
 
     let DispatchCompactionTaskRequest {
         tables,
