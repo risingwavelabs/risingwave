@@ -520,9 +520,7 @@ pub fn start_compactor(
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats) = match sstable_object_id_manager
-                                        .add_watermark_object_id(None)
-                                        .await
+                                        let (compact_task, table_stats) = match sstable_object_id_manager.add_watermark_object_id(None).await
                                         {
                                             Ok(tracker_id) => {
                                                 let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
