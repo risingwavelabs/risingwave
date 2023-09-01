@@ -17,12 +17,8 @@
 
 use std::path::PathBuf;
 
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
-
-#[cfg(not(madsim))]
-fn main() {
-    println!("This binary is only available in simulation.");
-}
 
 /// Deterministic simulation end-to-end test runner.
 ///
@@ -145,8 +141,8 @@ pub struct Args {
     e2e_extended_test: bool,
 }
 
-#[cfg(madsim)]
-#[madsim::main]
+#[tokio::main]
+#[cfg_or_panic(madsim)]
 async fn main() {
     use std::sync::Arc;
 

@@ -16,14 +16,14 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 const SELECT: &str = "select * from mv1 order by v1;";
 
-#[madsim::test]
+#[tokio::test]
 async fn test_dynamic_filter() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();

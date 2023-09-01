@@ -671,7 +671,7 @@ script = """
 set -e
 
 export CARGO_TARGET_DIR=target/coverage
-cargo llvm-cov nextest --html
+cargo llvm-cov nextest --html --workspace --exclude risingwave_simulation
 """
 description = "Run unit tests and report coverage"
 
@@ -682,7 +682,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
 description = "🌟 Run unit tests"
 

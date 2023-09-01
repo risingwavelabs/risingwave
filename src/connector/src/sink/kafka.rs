@@ -357,8 +357,12 @@ impl KafkaSinkWriter {
             config.use_transaction = false;
 
             // Create the producer context, will be used to create the producer
-            let producer_ctx =
-                PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
+            let producer_ctx = PrivateLinkProducerContext::new(
+                config.common.broker_rewrite_map.clone(),
+                // fixme: enable kafka native metrics for sink
+                None,
+                None,
+            )?;
 
             // Generate the producer
             c.create_with_context(producer_ctx).await?
@@ -426,10 +430,13 @@ impl KafkaSinkWriter {
                 Err((e, rec)) => {
                     err = e;
                     record = rec;
-                    // FIXME: Will there possibly exist other errors?
-                    assert!(err == KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
-                    tokio::time::sleep(self.config.retry_interval).await;
-                    continue;
+                    match err {
+                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                            tokio::time::sleep(self.config.retry_interval).await;
+                            continue;
+                        }
+                        _ => break,
+                    }
                 }
             }
         }

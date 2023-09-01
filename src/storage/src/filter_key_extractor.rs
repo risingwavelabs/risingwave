@@ -333,19 +333,19 @@ impl FilterKeyExtractorManagerInner {
     }
 }
 
-/// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
+/// `RpcFilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
-pub struct FilterKeyExtractorManager {
+pub struct RpcFilterKeyExtractorManager {
     inner: FilterKeyExtractorManagerInner,
 }
 
-impl Default for FilterKeyExtractorManager {
+impl Default for RpcFilterKeyExtractorManager {
     fn default() -> Self {
         Self::new(Box::<FakeRemoteTableAccessor>::default())
     }
 }
 
-impl FilterKeyExtractorManager {
+impl RpcFilterKeyExtractorManager {
     pub fn new(table_accessor: Box<dyn StateTableAccessor>) -> Self {
         Self {
             inner: FilterKeyExtractorManagerInner {
@@ -375,42 +375,39 @@ impl FilterKeyExtractorManager {
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// `table_id` does not util version update (notify), and retry to get
-    pub async fn acquire(
-        &self,
-        table_id_set: HashSet<u32>,
-    ) -> HummockResult<FilterKeyExtractorImpl> {
+    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
         self.inner.acquire(table_id_set).await
     }
 }
 
 #[derive(Clone)]
-pub enum FilterKeyExtractorManagerFactory {
-    FilterKeyExtractorManagerRef(Arc<FilterKeyExtractorManager>),
-    ServerlessFilterKeyExtractorManager(FilterKeyExtractorBuilder),
+pub enum FilterKeyExtractorManager {
+    RpcFilterKeyExtractorManager(Arc<RpcFilterKeyExtractorManager>),
+    StaticFilterKeyExtractorManager(Arc<StaticFilterKeyExtractorManager>),
 }
 
-impl FilterKeyExtractorManagerFactory {
+impl FilterKeyExtractorManager {
     pub async fn acquire(
         &self,
         table_id_set: HashSet<u32>,
     ) -> HummockResult<FilterKeyExtractorImpl> {
         match self {
-            FilterKeyExtractorManagerFactory::FilterKeyExtractorManagerRef(
-                filter_key_exactor_manager,
-            ) => filter_key_exactor_manager.acquire(table_id_set).await,
-            FilterKeyExtractorManagerFactory::ServerlessFilterKeyExtractorManager(
-                shared_key_exactor,
-            ) => shared_key_exactor.acquire(table_id_set),
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_exactor_manager,
+            ) => rpc_filter_key_exactor_manager.acquire(table_id_set).await,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
+                static_filter_key_extractor_manager,
+            ) => static_filter_key_extractor_manager.acquire(table_id_set),
         }
     }
 }
 
 #[derive(Clone)]
-pub struct FilterKeyExtractorBuilder {
+pub struct StaticFilterKeyExtractorManager {
     id_to_table: HashMap<u32, Table>,
 }
 
-impl FilterKeyExtractorBuilder {
+impl StaticFilterKeyExtractorManager {
     pub fn new(id_to_table: HashMap<u32, Table>) -> Self {
         Self { id_to_table }
     }
@@ -421,13 +418,17 @@ impl FilterKeyExtractorBuilder {
             if let Some(table) = self.id_to_table.get(&table_id) {
                 let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(table));
                 multi_filter_key_extractor.register(table_id, key_extractor);
+            } else {
+                return Err(HummockError::other(format!(
+                    "table {} is absent in id_to_table, need to request rpc list_tables to get the schema", table_id,
+                )));
             }
         }
         Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
     }
 }
 
-pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
+pub type FilterKeyExtractorManagerRef = Arc<RpcFilterKeyExtractorManager>;
 
 #[cfg(test)]
 mod tests {
@@ -453,10 +454,9 @@ mod tests {
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-        MultiFilterKeyExtractor,
+        FilterKeyExtractorImpl, FullKeyFilterKeyExtractor, MultiFilterKeyExtractor,
+        RpcFilterKeyExtractorManager,
     };
-
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
         VirtualNode::from_index(233).to_be_bytes()
     }
@@ -661,7 +661,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_key_extractor_manager() {
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::default());
 
         filter_key_extractor_manager.update(
             1,

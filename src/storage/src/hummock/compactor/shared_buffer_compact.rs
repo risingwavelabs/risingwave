@@ -47,6 +47,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     create_monotonic_events_from_compaction_delete_events, BlockedXor16FilterBuilder, CachePolicy,
     CompactionDeleteRanges, GetObjectId, HummockError, HummockResult, SstableBuilderOptions,
+    SstableObjectIdManagerRef,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -55,6 +56,7 @@ const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
     context: Arc<CompactorContext>,
+    sstable_object_id_manager: SstableObjectIdManagerRef,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
@@ -81,7 +83,12 @@ pub async fn compact(
     for (id, group_payload) in grouped_payload {
         let id_copy = id;
         futures.push(
-            compact_shared_buffer(context.clone(), group_payload).map_ok(move |results| {
+            compact_shared_buffer(
+                context.clone(),
+                sstable_object_id_manager.clone(),
+                group_payload,
+            )
+            .map_ok(move |results| {
                 results
                     .into_iter()
                     .map(move |mut result| {
@@ -104,6 +111,7 @@ pub async fn compact(
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
     context: Arc<CompactorContext>,
+    sstable_object_id_manager: SstableObjectIdManagerRef,
     mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
@@ -230,7 +238,7 @@ async fn compact_shared_buffer(
             sub_compaction_sstable_size as usize,
             split_weight_by_vnode as u32,
             use_block_based_filter,
-            Box::new(context.sstable_object_id_manager.clone()),
+            Box::new(sstable_object_id_manager.clone()),
         );
         let iter = OrderedMergeIteratorInner::new(
             payload.iter().map(|imm| imm.clone().into_forward_iter()),
@@ -449,7 +457,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         split_weight_by_vnode: u32,
         use_block_based_filter: bool,
-        sstable_object_id_manager: Box<dyn GetObjectId>,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -467,12 +475,7 @@ impl SharedBufferCompactRunner {
                 split_weight_by_vnode,
                 use_block_based_filter,
             },
-            context.compactor_metrics.clone(),
-            context.is_share_buffer_compact,
-            context.sstable_store.clone(),
-            context.memory_limiter.clone(),
-            sstable_object_id_manager,
-            context.storage_opts.compact_iter_recreate_timeout_ms,
+            object_id_getter,
         );
         Self {
             compactor,

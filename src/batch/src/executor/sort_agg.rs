@@ -20,7 +20,7 @@ use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, St
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -38,7 +38,7 @@ use crate::task::{BatchTaskContext, ShutdownToken};
 /// As a special case, simple aggregate without groups satisfies the requirement
 /// automatically because all tuples should be aggregated together.
 pub struct SortAggExecutor {
-    agg_states: Vec<BoxedAggState>,
+    aggs: Vec<BoxedAggregateFunction>,
     group_key: Vec<BoxedExpression>,
     child: BoxedExecutor,
     schema: Schema,
@@ -60,7 +60,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             NodeBody::SortAgg
         )?;
 
-        let agg_states: Vec<_> = sort_agg_node
+        let aggs: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
             .map(|agg| AggCall::from_protobuf(agg).and_then(|agg| build_agg(&agg)))
@@ -75,12 +75,12 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let fields = group_key
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
-            agg_states,
+            aggs,
             group_key,
             child,
             schema: Schema { fields },
@@ -109,8 +109,9 @@ impl SortAggExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut left_capacity = self.output_size_limit;
+        let mut agg_states = self.aggs.iter().map(|agg| agg.create_state()).collect_vec();
         let (mut group_builders, mut agg_builders) =
-            Self::create_builders(&self.group_key, &self.agg_states);
+            Self::create_builders(&self.group_key, &self.aggs);
         let mut curr_group = if self.group_key.is_empty() {
             Some(Vec::new())
         } else {
@@ -152,7 +153,8 @@ impl SortAggExecutor {
                             .for_each(|(builder, datum)| {
                                 builder.append(datum);
                             });
-                        Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
+                        Self::output_agg_states(&self.aggs, &mut agg_states, &mut agg_builders)
+                            .await?;
                         left_capacity -= 1;
 
                         if left_capacity == 0 {
@@ -167,13 +169,13 @@ impl SortAggExecutor {
                             yield output;
 
                             (group_builders, agg_builders) =
-                                Self::create_builders(&self.group_key, &self.agg_states);
+                                Self::create_builders(&self.group_key, &self.aggs);
                             left_capacity = self.output_size_limit;
                         }
                     }
                 }
 
-                Self::update_agg_states(&mut self.agg_states, &child_chunk, range).await?;
+                Self::update_agg_states(&self.aggs, &mut agg_states, &child_chunk, range).await?;
             }
         }
 
@@ -184,7 +186,7 @@ impl SortAggExecutor {
                 .for_each(|(builder, datum)| {
                     builder.append(datum);
                 });
-            Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
+            Self::output_agg_states(&self.aggs, &mut agg_states, &mut agg_builders).await?;
             left_capacity -= 1;
 
             let output = DataChunk::new(
@@ -200,36 +202,44 @@ impl SortAggExecutor {
     }
 
     async fn update_agg_states(
-        agg_states: &mut [BoxedAggState],
+        aggs: &[BoxedAggregateFunction],
+        agg_states: &mut [AggregateState],
         child_chunk: &StreamChunk,
         range: Range<usize>,
     ) -> Result<()> {
-        for state in agg_states.iter_mut() {
-            state.update_range(child_chunk, range.clone()).await?;
+        for (agg, state) in aggs.iter().zip_eq_fast(agg_states.iter_mut()) {
+            agg.update_range(state, child_chunk, range.clone()).await?;
         }
         Ok(())
     }
 
-    fn output_agg_states(
-        agg_states: &mut [BoxedAggState],
+    async fn output_agg_states(
+        aggs: &[BoxedAggregateFunction],
+        agg_states: &mut [AggregateState],
         agg_builders: &mut [ArrayBuilderImpl],
     ) -> Result<()> {
-        for (aggregator, builder) in agg_states.iter_mut().zip_eq_fast(agg_builders) {
-            builder.append(aggregator.output()?);
+        for ((agg, state), builder) in aggs
+            .iter()
+            .zip_eq_fast(agg_states.iter_mut())
+            .zip_eq_fast(agg_builders)
+        {
+            let result = agg.get_result(state).await?;
+            builder.append(result);
+            *state = agg.create_state();
         }
         Ok(())
     }
 
     fn create_builders(
         group_key: &[BoxedExpression],
-        agg_states: &[BoxedAggState],
+        aggs: &[BoxedAggregateFunction],
     ) -> (Vec<ArrayBuilderImpl>, Vec<ArrayBuilderImpl>) {
         let group_builders = group_key
             .iter()
             .map(|e| e.return_type().create_array_builder(1))
             .collect();
 
-        let agg_builders = agg_states
+        let agg_builders = aggs
             .iter()
             .map(|e| e.return_type().create_array_builder(1))
             .collect();
@@ -394,18 +404,18 @@ mod tests {
 
         let count_star = build_agg(&AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<BoxedExpression> = vec![];
-        let agg_states = vec![count_star];
+        let aggs = vec![count_star];
 
         // chain group key fields and agg state schema to get output schema for sort agg
         let fields = group_exprs
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let executor = Box::new(SortAggExecutor {
-            agg_states,
+            aggs,
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
@@ -478,18 +488,18 @@ mod tests {
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
-        let agg_states = vec![count_star];
+        let aggs = vec![count_star];
 
         // chain group key fields and agg state schema to get output schema for sort agg
         let fields = group_exprs
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let executor = Box::new(SortAggExecutor {
-            agg_states,
+            aggs,
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
@@ -573,15 +583,15 @@ mod tests {
         let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
-        let agg_states = vec![sum_agg];
+        let aggs = vec![sum_agg];
         let fields = group_exprs
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
         let executor = Box::new(SortAggExecutor {
-            agg_states,
+            aggs,
             group_key: vec![],
             child: Box::new(child),
             schema: Schema { fields },
@@ -641,19 +651,19 @@ mod tests {
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
-        let agg_states = vec![sum_agg];
+        let aggs = vec![sum_agg];
 
         // chain group key fields and agg state schema to get output schema for sort agg
         let fields = group_exprs
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let output_size_limit = 4;
         let executor = Box::new(SortAggExecutor {
-            agg_states,
+            aggs,
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
@@ -733,18 +743,18 @@ mod tests {
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
-        let agg_states = vec![sum_agg];
+        let aggs = vec![sum_agg];
 
         // chain group key fields and agg state schema to get output schema for sort agg
         let fields = group_exprs
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let executor = Box::new(SortAggExecutor {
-            agg_states,
+            aggs,
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
@@ -826,20 +836,20 @@ mod tests {
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
 
-        let agg_states = vec![sum_agg];
+        let aggs = vec![sum_agg];
 
         // chain group key fields and agg state schema to get output schema for sort agg
         let fields = group_exprs
             .iter()
             .map(|e| e.return_type())
-            .chain(agg_states.iter().map(|e| e.return_type()))
+            .chain(aggs.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let output_size_limit = 4;
         let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
         let executor = Box::new(SortAggExecutor {
-            agg_states,
+            aggs,
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },

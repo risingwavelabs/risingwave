@@ -1,3 +1,5 @@
+set cdc_backfill='true';
+
 CREATE TABLE lineitem_rw (
    L_ORDERKEY BIGINT,
    L_PARTKEY BIGINT,

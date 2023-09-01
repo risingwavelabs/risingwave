@@ -27,7 +27,7 @@ struct MemoryContextInner {
 #[derive(Clone)]
 pub struct MemoryContext {
     /// Add None op mem context, so that we don't need to return [`Option`] in
-    /// [`BatchTaskContext`]. This helps with later `Allocator` implementation.
+    /// `BatchTaskContext`. This helps with later `Allocator` implementation.
     inner: Option<Arc<MemoryContextInner>>,
 }
 
