@@ -477,18 +477,14 @@ where
 }
 
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E>(
-    mut iter: S,
-    chunk_size: usize,
-    builder: &'a mut DataChunkBuilder,
-) where
+pub(crate) async fn iter_chunks<'a, S, E>(mut iter: S, builder: &'a mut DataChunkBuilder)
+where
     StreamExecutorError: From<E>,
     S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
-    while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
-            .instrument_await("backfill_snapshot_read")
-            .await?
+    while let Some(data_chunk) = collect_data_chunk_with_builder(&mut iter, builder)
+        .instrument_await("backfill_snapshot_read")
+        .await?
     {
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];

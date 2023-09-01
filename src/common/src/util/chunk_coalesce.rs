@@ -165,14 +165,7 @@ impl DataChunkBuilder {
         }
     }
 
-    /// Append one row from the given [`Row`].
-    /// The caller is responsible to build the data chunk,
-    /// i.e. call the `build_data_chunk` function.
-    /// Used when caller wants to decide when to `build_data_chunk`.
-    /// For instance, in backfill, we want to build data chunk when:
-    /// 1. Buffer is full (typical case)
-    /// 2. On barrier, to flush the remaining data in `data_chunk_builder`.
-    pub fn append_one_row_no_finish(&mut self, row: impl Row) {
+    fn append_one_row_no_finish(&mut self, row: impl Row) {
         assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
         self.do_append_one_row_from_datums(row.iter());
@@ -212,7 +205,7 @@ impl DataChunkBuilder {
         }
     }
 
-    pub fn build_data_chunk(&mut self) -> DataChunk {
+    fn build_data_chunk(&mut self) -> DataChunk {
         let mut finished_array_builders = vec![];
         swap(&mut finished_array_builders, &mut self.array_builders);
         let cardinality = self.buffered_count;
