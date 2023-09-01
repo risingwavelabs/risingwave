@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_object_store::object::parse_remote_object_store;
 
@@ -547,6 +546,7 @@ impl StateStoreImpl {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
@@ -562,8 +562,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("data".to_string()),
                 enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
@@ -581,6 +579,7 @@ impl StateStoreImpl {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
@@ -596,8 +595,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("meta".to_string()),
                 enable_filter: false,
             };
             let config = FoyerRuntimeConfig {

@@ -2833,7 +2833,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=d2282c2#d2282c2d91a5dbea85e5ea84394634a58d324046"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2847,7 +2847,7 @@ dependencies = [
  "itertools 0.11.0",
  "libc",
  "memoffset 0.9.0",
- "nix",
+ "nix 0.27.1",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -2861,7 +2861,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=d2282c2#d2282c2d91a5dbea85e5ea84394634a58d324046"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=d2282c2#d2282c2d91a5dbea85e5ea84394634a58d324046"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2893,7 +2893,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=d2282c2#d2282c2d91a5dbea85e5ea84394634a58d324046"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2909,7 +2909,7 @@ dependencies = [
  "itertools 0.11.0",
  "libc",
  "memoffset 0.9.0",
- "nix",
+ "nix 0.27.1",
  "parking_lot 0.12.1",
  "paste",
  "pin-project",
@@ -2924,7 +2924,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=d2282c2#d2282c2d91a5dbea85e5ea84394634a58d324046"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",
@@ -2933,6 +2933,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "itertools 0.10.5",
+ "nix 0.27.1",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
  "proc-macro2",
@@ -4696,6 +4697,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.4.0",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "nkeys"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5713,7 +5725,7 @@ dependencies = [
  "inferno",
  "libc",
  "log",
- "nix",
+ "nix 0.26.2",
  "once_cell",
  "parking_lot 0.12.1",
  "smallvec",
@@ -6562,7 +6574,7 @@ dependencies = [
  "itertools 0.11.0",
  "libc",
  "madsim-tokio",
- "nix",
+ "nix 0.26.2",
  "opentelemetry",
  "parking_lot 0.12.1",
  "prometheus",
@@ -7549,7 +7561,7 @@ dependencies = [
  "memcomparable",
  "moka",
  "more-asserts",
- "nix",
+ "nix 0.26.2",
  "num-integer",
  "parking_lot 0.12.1",
  "procfs 0.15.1",
@@ -10098,7 +10110,6 @@ dependencies = [
  "miniz_oxide",
  "mio",
  "multimap",
- "nix",
  "nom",
  "num-bigint",
  "num-integer",
