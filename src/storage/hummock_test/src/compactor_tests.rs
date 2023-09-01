@@ -1742,8 +1742,8 @@ pub(crate) mod tests {
     impl SstableInfoGenerator for RandomGenerator {
         fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>> {
             let mut data = Vec::with_capacity(VirtualNode::COUNT / 16 * kv_count);
-            for vnode_idx in 0..VirtualNode::COUNT / PARTITION_COUNT {
-                let vnode = vnode_idx * PARTITION_COUNT;
+            for vnode_idx in 0..PARTITION_COUNT {
+                let vnode = vnode_idx * PARTITION_SIZE;
                 for _ in 0..kv_count {
                     let k = self.rng.next_u64() % self.max_pk + 1;
                     data.push(test_table_key_of(k, vnode));
