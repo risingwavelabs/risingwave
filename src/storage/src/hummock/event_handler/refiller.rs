@@ -41,61 +41,61 @@ pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
     LazyLock::new(|| CacheRefillMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 pub struct CacheRefillMetrics {
-    pub data_refill_latency: HistogramVec,
+    pub data_refill_duration: HistogramVec,
 
-    pub data_refill_latency_admitted: Histogram,
-    pub data_refill_latency_rejected: Histogram,
-    pub data_refill_filtered_count: GenericCounter<AtomicU64>,
+    pub data_refill_duration_admitted: Histogram,
+    pub data_refill_duration_rejected: Histogram,
+    pub data_refill_filtered_total: GenericCounter<AtomicU64>,
 
-    pub meta_refill_latency: Histogram,
+    pub meta_refill_duration: Histogram,
 
-    pub refill_queue_length: IntGauge,
+    pub refill_queue_total: IntGauge,
 }
 
 impl CacheRefillMetrics {
     pub fn new(registry: &Registry) -> Self {
-        let data_refill_latency = register_histogram_vec_with_registry!(
-            "data_refill_latency",
-            "data refill latency",
+        let data_refill_duration = register_histogram_vec_with_registry!(
+            "data_refill_duration",
+            "data refill duration",
             &["op"],
             registry,
         )
         .unwrap();
-        let data_refill_latency_admitted = data_refill_latency
+        let data_refill_duration_admitted = data_refill_duration
             .get_metric_with_label_values(&["admitted"])
             .unwrap();
-        let data_refill_latency_rejected = data_refill_latency
+        let data_refill_duration_rejected = data_refill_duration
             .get_metric_with_label_values(&["rejected"])
             .unwrap();
 
-        let data_refill_filtered_count = register_int_counter_with_registry!(
-            "data_refill_filtered_count",
-            "data refill filtered count",
+        let data_refill_filtered_total = register_int_counter_with_registry!(
+            "data_refill_filtered_total",
+            "data refill filtered total",
             registry,
         )
         .unwrap();
 
-        let meta_refill_latency = register_histogram_with_registry!(
-            "meta_refill_latency",
-            "meta refill latency",
+        let meta_refill_duration = register_histogram_with_registry!(
+            "meta_refill_duration",
+            "meta refill duration",
             registry,
         )
         .unwrap();
 
-        let refill_queue_length = register_int_gauge_with_registry!(
-            "refill_queue_length",
-            "refill queue length",
+        let refill_queue_total = register_int_gauge_with_registry!(
+            "refill_queue_total",
+            "refill queue total",
             registry,
         )
         .unwrap();
 
         Self {
-            data_refill_latency,
-            data_refill_latency_admitted,
-            data_refill_latency_rejected,
-            data_refill_filtered_count,
-            meta_refill_latency,
-            refill_queue_length,
+            data_refill_duration,
+            data_refill_duration_admitted,
+            data_refill_duration_rejected,
+            data_refill_filtered_total,
+            meta_refill_duration,
+            refill_queue_total,
         }
     }
 }
@@ -151,7 +151,7 @@ impl CacheRefiller {
         let handle = tokio::spawn(task.run());
         let item = Item { handle, event };
         self.queue.push_back(item);
-        GLOBAL_CACHE_REFILL_METRICS.refill_queue_length.add(1);
+        GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.add(1);
     }
 
     pub fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
@@ -176,7 +176,7 @@ impl<'a> Future for NextCacheRefillerEvent<'a> {
         if let Some(item) = refiller.queue.front_mut() {
             ready!(item.handle.poll_unpin(cx)).unwrap();
             let item = refiller.queue.pop_front().unwrap();
-            GLOBAL_CACHE_REFILL_METRICS.refill_queue_length.sub(1);
+            GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
             return Poll::Ready(item.event);
         }
         Poll::Pending
@@ -234,7 +234,7 @@ impl CacheRefillTask {
             .iter()
             .map(|info| async {
                 let _timer = GLOBAL_CACHE_REFILL_METRICS
-                    .meta_refill_latency
+                    .meta_refill_duration
                     .start_timer();
                 context.sstable_store.sstable_syncable(info, &stats).await
             })
@@ -276,7 +276,7 @@ impl CacheRefillTask {
                 .map(|meta| meta.value().block_count() as u64)
                 .sum();
             GLOBAL_CACHE_REFILL_METRICS
-                .data_refill_filtered_count
+                .data_refill_filtered_total
                 .inc_by(blocks);
             return;
         }
@@ -294,10 +294,10 @@ impl CacheRefillTask {
                         .await
                     {
                         Ok(true) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_latency_admitted
+                            .data_refill_duration_admitted
                             .observe(now.elapsed().as_secs_f64()),
                         Ok(false) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_latency_rejected
+                            .data_refill_duration_rejected
                             .observe(now.elapsed().as_secs_f64()),
                         Err(e) => {
                             tracing::warn!("data cache refill error: {:?}", e);
