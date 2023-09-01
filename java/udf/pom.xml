@@ -6,16 +6,16 @@
   <groupId>com.risingwave</groupId>
   <artifactId>risingwave-udf</artifactId>
   <packaging>jar</packaging>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0</version>
 
   <parent>
     <artifactId>risingwave-java-root</artifactId>
     <groupId>com.risingwave</groupId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
-  <name>risingwave-udf</name>
+  <name>RisingWave Java UDF SDK</name>
   <url>https://docs.risingwave.com/docs/current/udf-java</url>
 
   <dependencies>
