@@ -77,7 +77,7 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
         let mut session = cluster.start_session();
         session.run(INSERT_INTO_TABLE).await?;
         session.run("FLUSH").await?;
-        cluster.run(SELECT_COUNT_TABLE).await?.assert_result_eq("1");
+        session.run(SELECT_COUNT_TABLE).await?.assert_result_eq("1");
     }
 
     Ok(())
