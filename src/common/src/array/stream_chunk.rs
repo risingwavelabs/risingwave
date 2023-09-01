@@ -26,6 +26,7 @@ use super::vis::VisMut;
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::catalog::Schema;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
@@ -199,8 +200,16 @@ impl StreamChunk {
         &self.ops
     }
 
-    /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
+    /// Returns a table-like text representation of the `StreamChunk`.
     pub fn to_pretty_string(&self) -> String {
+        self.to_pretty_string_inner(None)
+    }
+
+    pub fn to_pretty_string_with_schema(&self, schema: &Schema) -> String {
+        self.to_pretty_string_inner(Some(schema))
+    }
+
+    fn to_pretty_string_inner(&self, schema: Option<&Schema>) -> String {
         use comfy_table::{Cell, CellAlignment, Table};
 
         if self.cardinality() == 0 {
@@ -209,6 +218,14 @@ impl StreamChunk {
 
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
+
+        if let Some(schema) = schema {
+            assert_eq!(self.dimension(), schema.len());
+            let cells = std::iter::once(String::new())
+                .chain(schema.fields().iter().map(|f| f.name.clone()));
+            table.set_header(cells);
+        }
+
         for (op, row_ref) in self.rows() {
             let mut cells = Vec::with_capacity(row_ref.len() + 1);
             cells.push(
