@@ -24,6 +24,9 @@ message AddMutation {
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
+  // We may embed a pause mutation here.
+  // TODO: we may allow multiple mutations in a single barrier.
+  bool pause = 4;
 }
 
 message StopMutation {
