@@ -8,12 +8,12 @@
     <parent>
         <artifactId>risingwave-java-root</artifactId>
         <groupId>com.risingwave</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>java-binding-benchmark</artifactId>
     <packaging>jar</packaging>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
     <name>java-binding-benchmark</name>
     <url>http://maven.apache.org</url>
     <dependencies>

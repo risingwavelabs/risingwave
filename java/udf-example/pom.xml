@@ -7,7 +7,7 @@
 
   <groupId>com.example</groupId>
   <artifactId>risingwave-udf-example</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <version>0.1.0-SNAPSHOT</version>
 
   <name>udf-example</name>
   <url>https://docs.risingwave.com/docs/current/udf-java</url>

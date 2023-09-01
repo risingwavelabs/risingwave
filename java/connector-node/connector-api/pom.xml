@@ -6,12 +6,12 @@
     <parent>
         <artifactId>risingwave-java-root</artifactId>
         <groupId>com.risingwave</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>connector-api</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
 
     <name>connector-api</name>
 
