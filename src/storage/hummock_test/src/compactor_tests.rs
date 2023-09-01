@@ -256,6 +256,7 @@ pub(crate) mod tests {
             (1..SST_COUNT + 1).map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
+
         // 2. get compact task
         while let Some(mut compact_task) = hummock_manager_ref
             .get_compact_task(

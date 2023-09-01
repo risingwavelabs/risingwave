@@ -54,7 +54,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SubscribeCompactionEventRequest, TableOption,
+    IntraLevelDelta, LevelType, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -785,11 +785,12 @@ where
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
         let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+        let mut trivial_task_vec = Vec::default();
+        let mut normal_task = None;
 
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
-        let compaction_statuses: &mut BTreeMap<u64, CompactStatus> =
-            &mut compaction.compaction_statuses;
+        let compaction_statuses = &mut compaction.compaction_statuses;
 
         let start_time = Instant::now();
 
@@ -840,13 +841,6 @@ where
                 );
         };
 
-        // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
-        let task_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::HummockCompactionTask }>()
-            .await?;
-
         // When the last table of a compaction group is deleted, the compaction group (and its
         // config) is destroyed as well. Then a compaction task for this group may come later and
         // cannot find its config.
@@ -884,6 +878,7 @@ where
 
             (versioning_guard.current_version.clone(), watermark)
         };
+
         if current_version.levels.get(&compaction_group_id).is_none() {
             // compaction group has been deleted.
             return Ok((vec![], None));
@@ -898,9 +893,14 @@ where
             .filter(|(table_id, _)| member_table_ids.contains(table_id))
             .collect();
 
-        let mut trivial_task_vec = vec![];
-        let mut normal_task;
         loop {
+            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
+            let task_id = self
+                .env
+                .id_gen_manager()
+                .generate::<{ IdCategory::HummockCompactionTask }>()
+                .await?;
+
             let compact_task = compact_status.get_compact_task(
                 current_version.get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
@@ -913,7 +913,11 @@ where
             stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
             let mut compact_task = match compact_task {
                 None => {
-                    return Ok((vec![], None));
+                    if trivial_task_vec.is_empty() {
+                        return Ok((vec![], None));
+                    } else {
+                        break;
+                    }
                 }
                 Some(task) => task,
             };
@@ -927,9 +931,13 @@ where
             let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
             let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
+            if is_trivial_move {
+                compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            }
+
             if is_trivial_reclaim || is_trivial_move {
                 compact_task.set_task_status(TaskStatus::Success);
-                trivial_task_vec.push(compact_task)
+                trivial_task_vec.push(compact_task);
             } else {
                 normal_task = Some(compact_task);
                 break;
@@ -1059,23 +1067,27 @@ where
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        let (trivial_task_vec, normal_task) = self
-            .get_compact_task_impl(compaction_group_id, selector)
-            .await?;
-
-        println!(
-            "trivial_task_vec {:?} normal_task {:?}",
-            trivial_task_vec.len(),
-            normal_task
-        );
-
-        if !trivial_task_vec.is_empty() {
-            let mut compaction_guard = write_lock!(self, compaction).await;
-            self.report_trivial_task_impl(trivial_task_vec, &mut compaction_guard, None)
+        loop {
+            let (trivial_task_vec, normal_task) = self
+                .get_compact_task_impl(compaction_group_id, selector)
                 .await?;
-        }
 
-        Ok(normal_task)
+            let is_trivial_move_empty = trivial_task_vec.is_empty();
+
+            if !trivial_task_vec.is_empty() {
+                let mut compaction_guard = write_lock!(self, compaction).await;
+                self.report_trivial_task_impl(trivial_task_vec, &mut compaction_guard, None)
+                    .await?;
+            }
+
+            if normal_task.is_some() {
+                return Ok(normal_task);
+            }
+
+            if is_trivial_move_empty && normal_task.is_none() {
+                return Ok(None);
+            }
+        }
     }
 
     pub async fn manual_get_compact_task(
@@ -1226,8 +1238,12 @@ where
             if is_success {
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-                let version_delta =
-                    gen_version_delta(&mut branched_ssts, &current_version, compact_task);
+                let version_delta = gen_version_delta(
+                    &mut branched_ssts,
+                    &current_version,
+                    compact_task,
+                    current_version.id + 1,
+                );
 
                 // Don't persist version delta generated by compaction to meta store in
                 // deterministic mode. Because it will override existing version
@@ -1337,7 +1353,7 @@ where
     #[named]
     pub async fn report_trivial_task_impl(
         &self,
-        compact_tasks: Vec<CompactTask>,
+        mut compact_tasks: Vec<CompactTask>,
         compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
@@ -1362,9 +1378,10 @@ where
                 BTreeMapTransaction::new(branched_ssts_in_memory);
             let mut version_delta_ids = Vec::with_capacity(compact_tasks.len());
 
-            for mut compact_task in compact_tasks {
-                let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
-                let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
+            let mut version_delta_id = current_version.id + 1;
+            for compact_task in &mut compact_tasks {
+                let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(compact_task);
+                let is_trivial_move = CompactStatus::is_trivial_move_task(compact_task);
 
                 assert!(is_trivial_reclaim || is_trivial_move);
 
@@ -1419,10 +1436,16 @@ where
                     // deterministic mode. Because it will override existing version
                     // delta that has same ID generated in the data ingestion phase.
                     if !deterministic_mode {
-                        let version_delta =
-                            gen_version_delta(&mut branched_ssts, &current_version, &compact_task);
+                        let version_delta = gen_version_delta(
+                            &mut branched_ssts,
+                            &current_version,
+                            &compact_task,
+                            version_delta_id,
+                        );
                         version_delta_ids.push(version_delta.id);
+
                         hummock_version_deltas.insert(version_delta.id, version_delta.clone());
+                        version_delta_id += 1;
                     }
 
                     if let Some(table_stats_change) = &table_stats_change {
@@ -2920,11 +2943,12 @@ fn gen_version_delta(
     branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableObjectId, BranchedSstInfo>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
+    new_id: u64,
 ) -> HummockVersionDelta {
     let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
 
     let mut version_delta = HummockVersionDelta {
-        id: old_version.id + 1,
+        id: new_id,
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
         trivial_move,
@@ -2978,6 +3002,74 @@ fn gen_version_delta(
 
     version_delta
 }
+
+// fn gen_trivial_version_delta(
+// branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableObjectId, BranchedSstInfo>,
+// old_version: &HummockVersion,
+// trivial_tasks: &Vec<CompactTask>,
+// ) -> HummockVersionDelta {
+// let mut version_delta = HummockVersionDelta {
+// id: old_version.id + 1,
+// prev_id: old_version.id,
+// max_committed_epoch: old_version.max_committed_epoch,
+// trivial_move: true,
+// ..Default::default()
+// };
+//
+// let compaction_group_id = trivial_tasks[0].compaction_group_id;
+//
+// fix me
+// let target_level = trivial_tasks[0].target_level;
+//
+// let group_deltas = &mut version_delta
+// .group_deltas
+// .entry(compaction_group_id)
+// .or_default()
+// .group_deltas;
+// let mut gc_object_ids = vec![];
+//
+// let mut watermark = u64::MAX;
+//
+// for trivial_task in trivial_tasks {
+// for level in &trivial_task.input_ssts {
+// let group_delta = GroupDelta {
+// delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+// level_idx: level.level_idx,
+// removed_table_ids: level
+// .table_infos
+// .iter()
+// .map(|sst| {
+// let object_id = sst.get_object_id();
+// let sst_id = sst.get_sst_id();
+// sst_id
+// })
+// .collect_vec(),
+// ..Default::default()
+// })),
+// };
+// group_deltas.push(group_delta);
+// }
+//
+// let group_delta = GroupDelta {
+// delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+// level_idx: trivial_task.target_level,
+// inserted_table_infos: trivial_task.sorted_output_ssts.clone(),
+// l0_sub_level_id: trivial_task.target_sub_level_id,
+// ..Default::default()
+// })),
+// };
+//
+// group_deltas.push(group_delta);
+//
+// watermark = std::cmp::min(watermark, trivial_task.watermark)
+// }
+//
+// version_delta.gc_object_ids.append(&mut gc_object_ids);
+// version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, watermark);
+//
+// version_delta
+// }
+//
 
 async fn write_exclusive_cluster_id(
     state_store_dir: &str,

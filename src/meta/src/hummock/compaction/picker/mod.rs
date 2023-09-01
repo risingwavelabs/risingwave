@@ -53,7 +53,6 @@ impl CompactionInput {
     pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
         let mut has_l0 = false;
         for level in &self.input_levels {
-            // println!("add_pending_task {} {:?}", task_id, &level.table_infos);
             if level.level_idx != 0 {
                 level_handlers[level.level_idx as usize].add_pending_task(
                     task_id,

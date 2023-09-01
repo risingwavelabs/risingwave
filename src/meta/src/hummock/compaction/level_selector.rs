@@ -180,7 +180,6 @@ impl DynamicLevelSelectorCore {
 
     fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
-
         let idle_file_count = levels
             .l0
             .as_ref()
