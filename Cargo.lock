@@ -326,7 +326,7 @@ dependencies = [
  "arrow-cast",
  "arrow-ipc",
  "arrow-schema",
- "base64 0.21.2",
+ "base64 0.21.3",
  "bytes",
  "futures",
  "paste",
@@ -448,7 +448,7 @@ version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8257238e2a3629ee5618502a75d1b91f8017c24638c75349fc8d2d80cf1f7c4c"
 dependencies = [
- "base64 0.21.2",
+ "base64 0.21.3",
  "bytes",
  "futures",
  "http",
@@ -1082,9 +1082,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.21.2"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "604178f6c5c21f02dc555784810edfb88d34ac2c73b2eae109655649ee73ce3d"
+checksum = "414dcefbc63d77c526a76b3afcf6fbb9b5e2791c19c3aa2297733208750c6e53"
 
 [[package]]
 name = "base64-simd"
@@ -1483,6 +1483,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg-or-panic"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf85d5384815558275789d91d1895d1d9919a6e2534d6144650f036ac65691a6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.29",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1577,33 +1588,31 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.1"
+version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c8d502cbaec4595d2e7d5f61e318f05417bd2b66fdc3809498f0d3fdf0bea27"
+checksum = "6a13b88d2c62ff462f88e4a121f17a82c1af05693a2f192b5c38d14de73c19f6"
 dependencies = [
  "clap_builder",
  "clap_derive",
- "once_cell",
 ]
 
 [[package]]
 name = "clap_builder"
-version = "4.4.1"
+version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5891c7bc0edb3e1c2204fc5e94009affabeb1821c9e5fdc3959536c5c0bb984d"
+checksum = "2bb9faaa7c2ef94b2743a21f5a29e6f0010dff4caa69ac8e9d6cf8b6fa74da08"
 dependencies = [
  "anstream",
  "anstyle",
  "clap_lex",
- "once_cell",
  "strsim 0.10.0",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "4.4.0"
+version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9fd1a5729c4548118d7d70ff234a44868d00489a4b6597b0b020918a0e91a1a"
+checksum = "0862016ff20d69b84ef8247369fabf5c008a7417002411897d40ee1f4532b873"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -1914,7 +1923,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.1",
+ "clap 4.4.2",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -3224,7 +3233,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "931bedb2264cb00f914b0a6a5c304e34865c34306632d3932e0951a073e4a67d"
 dependencies = [
  "async-trait",
- "base64 0.21.2",
+ "base64 0.21.3",
  "google-cloud-metadata",
  "google-cloud-token",
  "home",
@@ -3905,7 +3914,7 @@ version = "8.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6971da4d9c3aa03c3d8f3ff0f4155b534aad021292003895a469716b2a230378"
 dependencies = [
- "base64 0.21.2",
+ "base64 0.21.3",
  "pem",
  "ring",
  "serde",
@@ -4058,7 +4067,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
 dependencies = [
- "clap 4.4.1",
+ "clap 4.4.2",
  "termcolor",
  "threadpool",
 ]
@@ -4966,7 +4975,7 @@ dependencies = [
  "async-compat",
  "async-trait",
  "backon",
- "base64 0.21.2",
+ "base64 0.21.3",
  "bytes",
  "chrono",
  "flagset",
@@ -5018,11 +5027,11 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.56"
+version = "0.10.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "729b745ad4a5575dd06a3e1af1414bd330ee561c01b3899eb584baeaa8def17e"
+checksum = "bac25ee399abb46215765b1cb35bc0212377e58a061560d8b29b024fd0430e7c"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.4.0",
  "cfg-if",
  "foreign-types",
  "libc",
@@ -5292,7 +5301,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "arrow-select",
- "base64 0.21.2",
+ "base64 0.21.3",
  "brotli",
  "bytes",
  "chrono",
@@ -5665,7 +5674,7 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78b7fa9f396f51dffd61546fd8573ee20592287996568e6175ceb0f8699ad75d"
 dependencies = [
- "base64 0.21.2",
+ "base64 0.21.3",
  "byteorder",
  "bytes",
  "fallible-iterator",
@@ -6326,7 +6335,7 @@ checksum = "3228e570df74d69d3d3236a71371f1edd748a3e4eb728ea1f29d403bc10fc727"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.21.2",
+ "base64 0.21.3",
  "chrono",
  "form_urlencoded",
  "hex",
@@ -6355,7 +6364,7 @@ version = "0.11.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cde824a14b7c14f85caff81225f411faacc04a2013f41670f41443742b1c1c55"
 dependencies = [
- "base64 0.21.2",
+ "base64 0.21.3",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -6424,7 +6433,7 @@ version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.4.1",
+ "clap 4.4.2",
  "console",
  "fs-err",
  "glob",
@@ -6452,7 +6461,7 @@ name = "risedev-config"
 version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.4.1",
+ "clap 4.4.2",
  "console",
  "dialoguer",
  "enum-iterator",
@@ -6484,7 +6493,7 @@ dependencies = [
 name = "risingwave_backup_cmd"
 version = "1.1.0-alpha"
 dependencies = [
- "clap 4.4.1",
+ "clap 4.4.2",
  "madsim-tokio",
  "prometheus",
  "risingwave_backup",
@@ -6547,7 +6556,7 @@ dependencies = [
  "bcc",
  "bytes",
  "bytesize",
- "clap 4.4.1",
+ "clap 4.4.2",
  "futures",
  "hdrhistogram",
  "itertools 0.11.0",
@@ -6573,7 +6582,7 @@ dependencies = [
 name = "risingwave_cmd"
 version = "1.1.0-alpha"
 dependencies = [
- "clap 4.4.1",
+ "clap 4.4.2",
  "madsim-tokio",
  "prometheus",
  "risingwave_common",
@@ -6594,7 +6603,7 @@ name = "risingwave_cmd_all"
 version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.4.1",
+ "clap 4.4.2",
  "console",
  "const-str",
  "expect-test",
@@ -6636,7 +6645,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz",
- "clap 4.4.1",
+ "clap 4.4.2",
  "comfy-table",
  "crc32fast",
  "criterion",
@@ -6749,7 +6758,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "clap 4.4.1",
+ "clap 4.4.2",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -6775,7 +6784,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "await-tree",
- "clap 4.4.1",
+ "clap 4.4.2",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -6800,7 +6809,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "chrono",
- "clap 4.4.1",
+ "clap 4.4.2",
  "either",
  "futures",
  "futures-async-stream",
@@ -6850,7 +6859,7 @@ dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
  "aws-types",
- "base64 0.21.2",
+ "base64 0.21.3",
  "bincode 1.3.3",
  "byteorder",
  "bytes",
@@ -6912,7 +6921,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
- "clap 4.4.1",
+ "clap 4.4.2",
  "comfy-table",
  "futures",
  "inquire",
@@ -6945,7 +6954,7 @@ version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.4.1",
+ "clap 4.4.2",
  "madsim-tokio",
  "pg_interval",
  "rust_decimal",
@@ -7024,7 +7033,7 @@ dependencies = [
  "auto_enums",
  "bk-tree",
  "bytes",
- "clap 4.4.1",
+ "clap 4.4.2",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
@@ -7097,7 +7106,7 @@ version = "1.1.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
- "clap 4.4.1",
+ "clap 4.4.2",
  "criterion",
  "expect-test",
  "fail",
@@ -7179,7 +7188,7 @@ dependencies = [
  "aws-sdk-ec2",
  "axum",
  "bytes",
- "clap 4.4.1",
+ "clap 4.4.2",
  "crepe",
  "easy-ext",
  "either",
@@ -7302,7 +7311,7 @@ name = "risingwave_regress_test"
 version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.4.1",
+ "clap 4.4.2",
  "madsim-tokio",
  "path-absolutize",
  "similar",
@@ -7373,7 +7382,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.4.1",
+ "cfg-or-panic",
+ "clap 4.4.2",
  "console",
  "futures",
  "glob",
@@ -7468,7 +7478,7 @@ version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.4.1",
+ "clap 4.4.2",
  "expect-test",
  "itertools 0.11.0",
  "libtest-mimic",
@@ -7493,7 +7503,7 @@ name = "risingwave_state_cleaning_test"
 version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.4.1",
+ "clap 4.4.2",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -7854,7 +7864,7 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d3987094b1d07b653b7dfdc3f70ce9a1da9c51ac18c1b06b662e4f9a0e9f4b2"
 dependencies = [
- "base64 0.21.2",
+ "base64 0.21.3",
 ]
 
 [[package]]
@@ -8202,7 +8212,7 @@ version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ca3b16a3d82c4088f343b7480a93550b3eabe1a358569c2dfe38bbcead07237"
 dependencies = [
- "base64 0.21.2",
+ "base64 0.21.3",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -9239,7 +9249,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum",
- "base64 0.21.2",
+ "base64 0.21.3",
  "bytes",
  "flate2",
  "futures-core",
@@ -9571,9 +9581,9 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "url"
-version = "2.4.0"
+version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50bff7831e19200a85b17131d085c25d7811bc4e186efdaf54bbd132994a88cb"
+checksum = "143b538f18257fac9cad154828a57c6bf5157e1aa604d4816b5995bf6de87ae5"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -10052,7 +10062,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
- "clap 4.4.1",
+ "clap 4.4.2",
  "clap_builder",
  "combine",
  "crossbeam-epoch",

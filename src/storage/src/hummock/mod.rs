@@ -33,6 +33,7 @@ use tracing::log::error;
 mod block_cache;
 pub use block_cache::*;
 
+use crate::filter_key_extractor::RpcFilterKeyExtractorManager;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::opts::StorageOpts;
 
@@ -75,7 +76,7 @@ use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
-use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
@@ -108,6 +109,8 @@ pub struct HummockStorage {
 
     context: Arc<CompactorContext>,
 
+    sstable_object_id_manager: SstableObjectIdManagerRef,
+
     buffer_tracker: BufferTracker,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
@@ -138,7 +141,7 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+        filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
@@ -184,8 +187,9 @@ impl HummockStorage {
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
-            sstable_object_id_manager.clone(),
-            filter_key_extractor_manager.clone(),
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                filter_key_extractor_manager.clone(),
+            ),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -195,6 +199,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
             CacheRefillConfig {
                 timeout: Duration::from_millis(options.cache_refill_timeout_ms),
@@ -209,6 +214,7 @@ impl HummockStorage {
 
         let instance = Self {
             context: compactor_context,
+            sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch,
@@ -259,10 +265,10 @@ impl HummockStorage {
     }
 
     pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        &self.context.sstable_object_id_manager
+        &self.sstable_object_id_manager
     }
 
-    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
         &self.context.filter_key_extractor_manager
     }
 
@@ -333,7 +339,7 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             notification_client,
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
         )
