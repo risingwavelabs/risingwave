@@ -130,6 +130,8 @@ impl From<SinkCatalog> for SinkParam {
             columns,
             pk_indices: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            db_name: sink_catalog.db_name,
+            sink_from_name: sink_catalog.sink_from_name,
         }
     }
 }
@@ -437,6 +439,8 @@ impl SinkImpl {
                 param.schema(),
                 param.pk_indices,
                 param.sink_type.is_append_only(),
+                param.db_name,
+                param.sink_from_name,
             )),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),

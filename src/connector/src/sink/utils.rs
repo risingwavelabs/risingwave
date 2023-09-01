@@ -27,7 +27,7 @@ use tracing::warn;
 
 use crate::sink::{Result, SinkError};
 
-const DEBEZIUM_NAME_FIELD_PREFIX: &str = "Risingwave";
+const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
 
 pub struct DebeziumAdapterOpts {
     gen_tombstone: bool,
@@ -56,8 +56,8 @@ pub async fn gen_debezium_message_stream<'a>(
     sink_from_name: &'a str,
 ) {
     let source_field = json!({
-        "db": "RisingWave",
-        "table": "RisingWave",
+        "db": db_name,
+        "table": sink_from_name,
     });
 
     let mut update_cache: Option<Map<String, Value>> = None;

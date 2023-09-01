@@ -48,6 +48,8 @@ pub struct KinesisSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KinesisSink {
@@ -56,12 +58,16 @@ impl KinesisSink {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        db_name: String,
+        sink_from_name: String,
     ) -> Self {
         Self {
             config,
             schema,
             pk_indices,
             is_append_only,
+            db_name,
+            sink_from_name,
         }
     }
 }
@@ -100,6 +106,8 @@ impl Sink for KinesisSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
         )
         .await
     }
@@ -142,6 +150,8 @@ pub struct KinesisSinkWriter {
     pk_indices: Vec<usize>,
     client: KinesisClient,
     is_append_only: bool,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KinesisSinkWriter {
@@ -150,6 +160,8 @@ impl KinesisSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        db_name: String,
+        sink_from_name: String,
     ) -> Result<Self> {
         let client = config
             .common
@@ -162,6 +174,8 @@ impl KinesisSinkWriter {
             pk_indices,
             client,
             is_append_only,
+            db_name,
+            sink_from_name,
         })
     }
 
@@ -225,6 +239,8 @@ impl KinesisSinkWriter {
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
+            &self.db_name,
+            &self.sink_from_name,
         );
 
         crate::impl_load_stream_write_record!(dbz_stream, self.put_record);

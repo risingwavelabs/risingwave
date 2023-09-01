@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,7 +24,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::{
     build_sink, Sink, SinkImpl, SinkParam, SinkWriter, SinkWriterParam,
 };

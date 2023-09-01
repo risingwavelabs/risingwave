@@ -77,7 +77,7 @@ pub fn gen_sink_plan(
     let sink_from_table_name;
     let query = match stmt.sink_from {
         CreateSink::From(from_name) => {
-            sink_from_table_name = from_name.0.last().unwrap().real_value()
+            sink_from_table_name = from_name.0.last().unwrap().real_value();
             Box::new(gen_sink_query_from_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
@@ -125,7 +125,7 @@ pub fn gen_sink_plan(
         definition,
         with_options,
         emit_on_window_close,
-        db_name.clone(),
+        db_name.to_owned(),
         sink_from_table_name,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();

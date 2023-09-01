@@ -31,13 +31,6 @@ pub struct SinkDesc {
     /// Name of the sink. For debug now.
     pub name: String,
 
-    /// Name of the database
-    pub db_name: String,
-
-    /// Name of the "table" field for Debezium. If the sink is from table or mv,
-    /// it is the name of table/mv. Otherwise, it is the name of the sink.
-    pub sink_from_name: String,
-
     /// Full SQL definition of the sink. For debug now.
     pub definition: String,
 
@@ -61,6 +54,13 @@ pub struct SinkDesc {
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+
+    /// Name of the database
+    pub db_name: String,
+
+    /// Name of the "table" field for Debezium. If the sink is from table or mv,
+    /// it is the name of table/mv. Otherwise, it is the name of the sink.
+    pub sink_from_name: String,
 }
 
 impl SinkDesc {
@@ -89,6 +89,8 @@ impl SinkDesc {
             connection_id,
             created_at_epoch: None,
             initialized_at_epoch: None,
+            db_name: self.db_name,
+            sink_from_name: self.sink_from_name,
         }
     }
 

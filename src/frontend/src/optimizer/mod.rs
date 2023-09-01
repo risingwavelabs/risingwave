@@ -550,11 +550,11 @@ impl PlanRoot {
     pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
-        db_name: String,
-        sink_from_table_name: String,
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
+        db_name: String,
+        sink_from_table_name: String,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
