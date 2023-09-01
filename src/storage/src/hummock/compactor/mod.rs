@@ -73,7 +73,7 @@ use super::{
     SstableObjectIdManager, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
-use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, shared_compact};
+use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
@@ -701,7 +701,8 @@ pub fn start_shared_compactor(
                 shutdown.lock().unwrap().insert(task_id, tx);
 
                 let (compact_task, table_stats) =
-                    shared_compact(context.clone(), compact_task, rx, object_id_getter).await;
+                    compactor_runner::compact(context.clone(), compact_task, rx, object_id_getter)
+                        .await;
                 shutdown.lock().unwrap().remove(&task_id);
                 context.running_task_count.fetch_sub(1, Ordering::SeqCst);
                 let report_compaction_task_request = ReportCompactionTaskRequest {
