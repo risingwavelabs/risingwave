@@ -49,6 +49,7 @@ mod expr_literal;
 mod expr_nested_construct;
 mod expr_proctime;
 pub mod expr_regexp;
+pub mod expr_regexp_count;
 mod expr_some_all;
 mod expr_timestamp_to_char_const_tmpl;
 mod expr_timestamptz_to_char_const_tmpl;

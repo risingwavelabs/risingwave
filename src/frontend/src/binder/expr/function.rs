@@ -760,6 +760,7 @@ impl Binder {
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
                 ("regexp_replace", raw_call(ExprType::RegexpReplace)),
+                ("regexp_count", raw_call(ExprType::RegexpCount)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),

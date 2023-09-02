@@ -103,6 +103,7 @@ message ExprNode {
     OVERLAY = 231;
     REGEXP_MATCH = 232;
     REGEXP_REPLACE = 280;
+    REGEXP_COUNT = 281;
     POW = 233;
     EXP = 234;
     CHR = 235;
