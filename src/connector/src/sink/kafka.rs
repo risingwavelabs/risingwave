@@ -333,8 +333,8 @@ pub struct KafkaSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    /// The buffer that stores <event_key_object, event_object>
-    future_record_buffer: Vec<(Option<Value>, Option<Value>)>,
+    future_delivery_buffer: Vec<DeliveryFuture>,
+    max_limit: Option<usize>,
 }
 
 impl KafkaSinkWriter {
@@ -344,6 +344,7 @@ impl KafkaSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
         identifier: String,
+        // max_limit: Option<usize>,
     ) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
@@ -378,7 +379,9 @@ impl KafkaSinkWriter {
             schema,
             pk_indices,
             is_append_only,
-            future_record_buffer: Vec::new(),
+            future_delivery_buffer: Vec::new(),
+            // FIXME: Where to accept the input?
+            max_limit: Some(10),
         })
     }
 
@@ -398,7 +401,10 @@ impl KafkaSinkWriter {
 
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
-    async fn send_result<'a, K, P>(&'a self, mut record: FutureRecord<'a, K, P>) -> KafkaResult<()>
+    async fn send_result<'a, K, P>(
+        &'a mut self,
+        mut record: FutureRecord<'a, K, P>,
+    ) -> KafkaResult<()>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
@@ -406,28 +412,40 @@ impl KafkaSinkWriter {
         // The error to be returned
         let mut err = KafkaError::Canceled;
 
+        // First take the ownership of the exist buffer
+        let mut future_buffer = std::mem::take(&mut self.future_delivery_buffer);
+
+        // Sanity check
+        debug_assert!(
+            self.future_delivery_buffer.is_empty(),
+            "future delivery buffer must be empty"
+        );
+
+        // The flag represents whether to commit
+        // This will happen when the size of buffering futures
+        // is greater than preset limit
+        let mut commit_flag = false;
+
+        // To make borrow checker happy :)
+        let mut push_flag = false;
+
         for _ in 0..self.config.max_retry_num {
             match self.send_result_inner(record).await {
-                Ok(delivery_future) => match delivery_future.await {
-                    Ok(delivery_future_result) => match delivery_future_result {
-                        // Successfully sent the record
-                        // Will return the partition and offset of the message (i32, i64)
-                        Ok(_) => return Ok(()),
-                        // If the message failed to be delivered. (i.e., flush)
-                        // The error & the copy of the original message will be returned
-                        // i.e., (KafkaError, OwnedMessage)
-                        // We will just stop the loop, and return the error
-                        // The sink executor will back to the latest checkpoint
-                        Err((k_err, _msg)) => {
-                            err = k_err;
+                // Add the future to the buffer
+                Ok(delivery_future) => {
+                    // Push the future into the buffer
+                    future_buffer.push(delivery_future);
+                    push_flag = true;
+
+                    // First see if the size is greater than the limit
+                    if let Some(max_limit) = self.max_limit {
+                        if future_buffer.len() > max_limit {
+                            commit_flag = true;
                             break;
                         }
-                    },
-                    // Nothing to do here, since the err has already been set to
-                    // KafkaError::Canceled. This represents the producer is dropped
-                    // before the delivery status is received
-                    Err(_) => break,
-                },
+                    }
+                    break;
+                }
                 // The enqueue buffer is full, `send_result` will immediately return
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
@@ -444,48 +462,92 @@ impl KafkaSinkWriter {
             }
         }
 
+        if commit_flag {
+            // Give the buffer back to the origin
+            std::mem::swap(&mut future_buffer, &mut self.future_delivery_buffer);
+
+            // Sanity check
+            debug_assert!(
+                future_buffer.is_empty(),
+                "future buffer must be empty after swapping"
+            );
+
+            match self.commit().await {
+                // FIXME: Is this error handling enough?
+                Ok(_) => return Ok(()),
+                Err(_) => return Err(err),
+            }
+        }
+
+        if push_flag {
+            // Indicates success
+            std::mem::swap(&mut future_buffer, &mut self.future_delivery_buffer);
+
+            // Sanity check
+            debug_assert!(
+                future_buffer.is_empty(),
+                "future buffer must be empty after swapping"
+            );
+
+            return Ok(());
+        }
+
         Err(err)
     }
 
-    async fn write_json_objects_inner(
-        &self,
-        event_key_object: Option<Value>,
-        event_object: Option<Value>,
-    ) -> Result<()> {
-        // here we assume the key part always exists and value part is optional.
-        // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap().to_string();
-        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-            .key(key_str.as_bytes());
-        let payload;
-        if let Some(value) = event_object {
-            payload = value.to_string();
-            record = record.payload(payload.as_bytes());
-        }
-        self.send_result(record).await?;
-        Ok(())
-    }
-
-    #[expect(clippy::unused_async)]
     async fn write_json_objects(
         &mut self,
         event_key_object: Option<Value>,
         event_object: Option<Value>,
     ) -> Result<()> {
-        self.future_record_buffer
-            .push((event_key_object, event_object));
+        let topic = self.config.common.topic.clone();
+        // here we assume the key part always exists and value part is optional.
+        // if value is None, we will skip the payload part.
+        let key_str = event_key_object.unwrap().to_string();
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(key_str.as_bytes());
+        let payload;
+        if let Some(value) = event_object {
+            payload = value.to_string();
+            record = record.payload(payload.as_bytes());
+        }
+        // Send the data but not wait it to finish sinking
+        // Will join all `DeliveryFuture` during commit
+        self.send_result(record).await?;
         Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
-        // Commit all together
-        for (key, value) in &self.future_record_buffer {
-            self.write_json_objects_inner(key.clone(), value.clone())
-                .await?;
-        }
+        // Get the ownership first
+        // The buffer will automatically become an empty vector
+        let delivery_futures = std::mem::take(&mut self.future_delivery_buffer);
 
-        // Clear the buffer
-        self.future_record_buffer.clear();
+        // Sanity check
+        debug_assert!(
+            self.future_delivery_buffer.is_empty(),
+            "The buffer must be empty"
+        );
+
+        // Commit all together
+        // FIXME: At present we could not retry, do we actually need to?
+        for delivery_future in delivery_futures {
+            match delivery_future.await {
+                Ok(delivery_future_result) => match delivery_future_result {
+                    // Successfully sent the record
+                    // Will return the partition and offset of the message (i32, i64)
+                    Ok(_) => continue,
+                    // If the message failed to be delivered. (i.e., flush)
+                    // The error & the copy of the original message will be returned
+                    // i.e., (KafkaError, OwnedMessage)
+                    // We will just stop the loop, and return the error
+                    // The sink executor will back to the latest checkpoint
+                    Err((k_err, _msg)) => return Err(SinkError::Kafka(k_err)),
+                },
+                // This represents the producer is dropped
+                // before the delivery status is received
+                // Return `KafkaError::Canceled`
+                Err(_) => return Err(SinkError::Kafka(KafkaError::Canceled)),
+            }
+        }
 
         Ok(())
     }
