@@ -50,9 +50,13 @@ impl FunctionAttr {
     /// Generate a descriptor of the function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    pub fn generate_descriptor(
+        &self,
+        user_fn: &UserFunctionAttr,
+        build_fn: bool,
+    ) -> Result<TokenStream2> {
         if self.is_table_function {
-            return self.generate_table_function_descriptor(build_fn);
+            return self.generate_table_function_descriptor(user_fn, build_fn);
         }
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
@@ -65,10 +69,10 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", self.user_fn.name);
+            let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_fn()?
+            self.generate_build_fn(user_fn)?
         };
         let deprecated = self.deprecated;
         Ok(quote! {
@@ -86,9 +90,9 @@ impl FunctionAttr {
         })
     }
 
-    fn generate_build_fn(&self) -> Result<TokenStream2> {
+    fn generate_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
         let num_args = self.args.len();
-        let fn_name = format_ident!("{}", self.user_fn.name);
+        let fn_name = format_ident!("{}", user_fn.name);
         let arg_arrays = self
             .args
             .iter()
@@ -108,7 +112,7 @@ impl FunctionAttr {
         )]
         let exprs0 = exprs.clone();
 
-        let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {
+        let build_expr = if self.ret == "varchar" && user_fn.is_writer_style() {
             let template_struct = match num_args {
                 1 => format_ident!("UnaryBytesExpression"),
                 2 => format_ident!("BinaryBytesExpression"),
@@ -118,7 +122,7 @@ impl FunctionAttr {
             };
             let args = (0..=num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = match self.user_fn.return_type {
+            let func = match user_fn.return_type {
                 ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
                 ReturnType::Result => quote! { #fn_name(#(#args1),*) },
                 _ => todo!("returning Option is not supported yet"),
@@ -132,7 +136,7 @@ impl FunctionAttr {
             }
         } else if self.args.iter().all(|t| t == "boolean")
             && self.ret == "boolean"
-            && !self.user_fn.return_type.contains_result()
+            && !user_fn.return_type.contains_result()
             && self.batch_fn.is_some()
         {
             let template_struct = match num_args {
@@ -143,10 +147,9 @@ impl FunctionAttr {
             let batch_fn = format_ident!("{}", self.batch_fn.as_ref().unwrap());
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = if self.user_fn.arg_option && self.user_fn.return_type == ReturnType::Option
-            {
+            let func = if user_fn.arg_option && user_fn.return_type == ReturnType::Option {
                 quote! { #fn_name(#(#args1),*) }
-            } else if self.user_fn.arg_option {
+            } else if user_fn.arg_option {
                 quote! { Some(#fn_name(#(#args1),*)) }
             } else {
                 let args2 = args.clone();
@@ -165,13 +168,13 @@ impl FunctionAttr {
                     |#(#args),*| #func,
                 )))
             }
-        } else if self.args.len() == 2 && self.ret == "boolean" && self.user_fn.is_pure() {
+        } else if self.args.len() == 2 && self.ret == "boolean" && user_fn.is_pure() {
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let generic = if self.user_fn.generic == 3 {
+            let generic = if user_fn.generic == 3 {
                 // XXX: for generic compare functions, we need to specify the compatible type
                 quote! { ::<_, _, #compatible_type> }
             } else {
@@ -183,7 +186,7 @@ impl FunctionAttr {
                     |#(#args),*| #fn_name #generic(#(#args1),*),
                 )))
             }
-        } else if self.args.iter().all(|t| types::is_primitive(t)) && self.user_fn.is_pure() {
+        } else if self.args.iter().all(|t| types::is_primitive(t)) && user_fn.is_pure() {
             let template_struct = match num_args {
                 0 => format_ident!("NullaryExpression"),
                 1 => format_ident!("UnaryExpression"),
@@ -197,7 +200,7 @@ impl FunctionAttr {
                     #fn_name,
                 )))
             }
-        } else if self.user_fn.arg_option || self.user_fn.return_type.contains_option() {
+        } else if user_fn.arg_option || user_fn.return_type.contains_option() {
             let template_struct = match num_args {
                 1 => format_ident!("UnaryNullableExpression"),
                 2 => format_ident!("BinaryNullableExpression"),
@@ -206,7 +209,7 @@ impl FunctionAttr {
             };
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let generic = if self.user_fn.generic == 3 {
+            let generic = if user_fn.generic == 3 {
                 // XXX: for generic compare functions, we need to specify the compatible type
                 let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                     .parse::<TokenStream2>()
@@ -216,13 +219,13 @@ impl FunctionAttr {
                 quote! {}
             };
             let mut func = quote! { #fn_name #generic(#(#args1),*) };
-            func = match self.user_fn.return_type {
+            func = match user_fn.return_type {
                 ReturnType::T => quote! { Ok(Some(#func)) },
                 ReturnType::Option => quote! { Ok(#func) },
                 ReturnType::Result => quote! { #func.map(Some) },
                 ReturnType::ResultOption => quote! { #func },
             };
-            if !self.user_fn.arg_option {
+            if !user_fn.arg_option {
                 let args2 = args.clone();
                 let args3 = args.clone();
                 func = quote! {
@@ -249,7 +252,7 @@ impl FunctionAttr {
             };
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = match self.user_fn.return_type {
+            let func = match user_fn.return_type {
                 ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
                 ReturnType::Result => quote! { #fn_name(#(#args1),*) },
                 _ => panic!("return type should not contain Option"),
@@ -279,7 +282,11 @@ impl FunctionAttr {
     /// Generate a descriptor of the aggregate function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_agg_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    pub fn generate_agg_descriptor(
+        &self,
+        user_fn: &UserFunctionAttr,
+        build_fn: bool,
+    ) -> Result<TokenStream2> {
         let name = self.name.clone();
 
         let mut args = Vec::with_capacity(self.args.len());
@@ -292,10 +299,10 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", self.user_fn.name);
+            let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_agg_build_fn()?
+            self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
             #[ctor::ctor]
@@ -312,9 +319,9 @@ impl FunctionAttr {
     }
 
     /// Generate build function for aggregate function.
-    fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
-        let ret_owned: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
+    fn generate_agg_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
         let state_type: TokenStream2 = match &self.state {
+            Some(state) if state == "ref" => types::ref_type(&self.ret).parse().unwrap(),
             Some(state) if state != "ref" => state.parse().unwrap(),
             _ => types::owned_type(&self.ret).parse().unwrap(),
         };
@@ -340,25 +347,31 @@ impl FunctionAttr {
             })
             .collect_vec();
         let let_state = match &self.state {
-            Some(s) if s == "ref" => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
-            _ => quote! { self.state.take() },
+            Some(s) if s == "ref" => {
+                quote! { state0.as_ref().map(|x| x.as_scalar_ref_impl().try_into().unwrap()) }
+            }
+            _ => quote! { state0.take().map(|s| s.try_into().unwrap()) },
         };
         let assign_state = match &self.state {
-            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar()) },
-            _ => quote! { state },
+            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar().into()) },
+            _ => quote! { state.map(|s| s.into()) },
         };
-        let init_state = match &self.init_state {
-            Some(s) => format!("Some({s})").parse().unwrap(),
-            _ => quote! { None },
-        };
-        let fn_name = format_ident!("{}", self.user_fn.name);
+        let create_state = self.init_state.as_ref().map(|state| {
+            let state: TokenStream2 = state.parse().unwrap();
+            quote! {
+                fn create_state(&self) -> AggregateState {
+                    AggregateState::Datum(Some(#state.into()))
+                }
+            }
+        });
+        let fn_name = format_ident!("{}", user_fn.name);
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
         let args = quote! { #(#args,)* };
-        let retract = match self.user_fn.retract {
+        let retract = match user_fn.retract {
             true => quote! { matches!(op, Op::Delete | Op::UpdateDelete) },
             false => quote! {},
         };
-        let check_retract = match self.user_fn.retract {
+        let check_retract = match user_fn.retract {
             true => quote! {},
             false => {
                 let msg = format!("aggregate function {} only supports append", self.name);
@@ -366,13 +379,13 @@ impl FunctionAttr {
             }
         };
         let mut next_state = quote! { #fn_name(state, #args #retract) };
-        next_state = match self.user_fn.return_type {
+        next_state = match user_fn.return_type {
             ReturnType::T => quote! { Some(#next_state) },
             ReturnType::Option => next_state,
             ReturnType::Result => quote! { Some(#next_state?) },
             ReturnType::ResultOption => quote! { #next_state? },
         };
-        if !self.user_fn.arg_option {
+        if !user_fn.arg_option {
             match self.args.len() {
                 0 => {
                     next_state = quote! {
@@ -410,21 +423,25 @@ impl FunctionAttr {
                 use risingwave_common::estimate_size::EstimateSize;
 
                 use crate::Result;
+                use crate::agg::AggregateState;
 
-                #[derive(Clone, EstimateSize)]
+                #[derive(Clone)]
                 struct Agg {
                     return_type: DataType,
-                    state: Option<#state_type>,
                 }
 
                 #[async_trait::async_trait]
-                impl crate::agg::Aggregator for Agg {
+                impl crate::agg::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
-                    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+
+                    #create_state
+
+                    async fn update(&self, state0: &mut AggregateState, input: &StreamChunk) -> Result<()> {
                         #(#let_arrays)*
-                        let mut state = #let_state;
+                        let state0 = state0.as_datum_mut();
+                        let mut state: Option<#state_type> = #let_state;
                         match input.vis() {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
@@ -443,13 +460,15 @@ impl FunctionAttr {
                                 }
                             }
                         }
-                        self.state = #assign_state;
+                        *state0 = #assign_state;
                         Ok(())
                     }
-                    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+
+                    async fn update_range(&self, state0: &mut AggregateState, input: &StreamChunk, range: Range<usize>) -> Result<()> {
                         assert!(range.end <= input.capacity());
                         #(#let_arrays)*
-                        let mut state = #let_state;
+                        let state0 = state0.as_datum_mut();
+                        let mut state: Option<#state_type> = #let_state;
                         match input.vis() {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
@@ -473,35 +492,17 @@ impl FunctionAttr {
                                 }
                             }
                         }
-                        self.state = #assign_state;
+                        *state0 = #assign_state;
                         Ok(())
                     }
-                    fn reset(&mut self) {
-                        self.state = #init_state;
-                    }
-                    fn get_state(&self) -> Datum {
-                        self.state.clone().map(|s| s.into())
-                    }
-                    fn set_state(&mut self, state: Datum) {
-                        self.state = state.map(|s| s.try_into().unwrap());
-                    }
-                    fn get_output(&self) -> Result<Datum> {
-                        // FIXME: avoid copy state
-                        Ok(self.state.clone().map(|s| <#ret_owned>::from(s).into()))
-                    }
-                    fn output(&mut self) -> Result<Datum> {
-                        #[allow(clippy::mem_replace_option_with_none)]
-                        let state = std::mem::replace(&mut self.state, #init_state);
-                        Ok(state.map(|s| <#ret_owned>::from(s).into()))
-                    }
-                    fn estimated_size(&self) -> usize {
-                        EstimateSize::estimated_size(self)
+
+                    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+                        Ok(state.as_datum().clone())
                     }
                 }
 
                 Ok(Box::new(Agg {
                     return_type: agg.return_type.clone(),
-                    state: #init_state,
                 }))
             }
         })
@@ -510,7 +511,11 @@ impl FunctionAttr {
     /// Generate a descriptor of the table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    fn generate_table_function_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    fn generate_table_function_descriptor(
+        &self,
+        user_fn: &UserFunctionAttr,
+        build_fn: bool,
+    ) -> Result<TokenStream2> {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
@@ -522,10 +527,10 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::table_function::FuncSign };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", self.user_fn.name);
+            let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_table_function()?
+            self.generate_build_table_function(user_fn)?
         };
         let type_infer_fn = if let Some(func) = &self.type_infer {
             func.parse().unwrap()
@@ -554,10 +559,10 @@ impl FunctionAttr {
         })
     }
 
-    fn generate_build_table_function(&self) -> Result<TokenStream2> {
+    fn generate_build_table_function(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
         let num_args = self.args.len();
         let return_types = output_types(&self.ret);
-        let fn_name = format_ident!("{}", self.user_fn.name);
+        let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = format_ident!("{}", self.ident_name());
         let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
@@ -623,15 +628,15 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match self.user_fn.return_type {
+        let iter = match user_fn.return_type {
             ReturnType::T => quote! { iter },
             ReturnType::Option => quote! { iter.flatten() },
             ReturnType::Result => quote! { iter? },
             ReturnType::ResultOption => quote! { value?.flatten() },
         };
-        let iterator_item_type = self.user_fn.iterator_item_type.clone().ok_or_else(|| {
+        let iterator_item_type = user_fn.iterator_item_type.clone().ok_or_else(|| {
             Error::new(
-                self.user_fn.return_type_span,
+                user_fn.return_type_span,
                 "expect `impl Iterator` in return type",
             )
         })?;

@@ -53,7 +53,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(view.owner as i32)),
                         Some(ScalarImpl::Utf8(view.create_sql().into())),
                         Some(ScalarImpl::Utf8(
-                            get_acl_items(&Object::ViewId(view.id), &users, username_map).into(),
+                            get_acl_items(&Object::ViewId(view.id), false, &users, username_map)
+                                .into(),
                         )),
                     ])
                 })

@@ -16,7 +16,7 @@ use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
@@ -1016,7 +1016,10 @@ where
                     let upstream_worker_id = ctx
                         .actor_id_to_parallel_unit(upstream_actor_id)?
                         .worker_node_id;
-                    let upstream_worker = ctx.worker_nodes.get(&upstream_worker_id).unwrap();
+                    let upstream_worker =
+                        ctx.worker_nodes.get(&upstream_worker_id).with_context(|| {
+                            format!("upstream worker {} not found", upstream_worker_id)
+                        })?;
 
                     // Force broadcast upstream actor info, because the actor information of the new
                     // node may not have been synchronized yet
@@ -1040,8 +1043,12 @@ where
                         let downstream_worker_id = ctx
                             .actor_id_to_parallel_unit(downstream_actor_id)?
                             .worker_node_id;
-                        let downstream_worker =
-                            ctx.worker_nodes.get(&downstream_worker_id).unwrap();
+                        let downstream_worker = ctx
+                            .worker_nodes
+                            .get(&downstream_worker_id)
+                            .with_context(|| {
+                                format!("downstream worker {} not found", downstream_worker_id)
+                            })?;
 
                         actor_infos_to_broadcast.insert(
                             *downstream_actor_id,
@@ -1102,7 +1109,7 @@ where
 
                 let actor_splits = self
                     .source_manager
-                    .reallocate_splits(&prev_actor_ids, &curr_actor_ids)
+                    .reallocate_splits(*fragment_id, &prev_actor_ids, &curr_actor_ids)
                     .await?;
 
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
@@ -1271,7 +1278,8 @@ where
                 let worker_id = ctx
                     .parallel_unit_id_to_worker_id
                     .get(parallel_unit_id)
-                    .unwrap();
+                    .with_context(|| format!("parallel unit {} not found", parallel_unit_id))?;
+
                 created_actors.insert(
                     *actor_id,
                     (
@@ -1308,7 +1316,7 @@ where
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_command_with_paused(Command::RescheduleFragment {
+            .run_config_change_command_with_pause(Command::RescheduleFragment {
                 reschedules: reschedule_fragment,
             })
             .await?;

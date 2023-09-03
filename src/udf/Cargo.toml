@@ -11,11 +11,11 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-arrow-array = "44"
-arrow-flight = "44"
-arrow-schema = "44"
-arrow-select = "44"
-futures-util = "0.3.25"
+arrow-array = { workspace = true }
+arrow-flight = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-select = { workspace = true }
+futures-util = "0.3.28"
 static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }

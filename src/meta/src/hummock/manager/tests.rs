@@ -17,6 +17,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
+use prometheus::Registry;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
@@ -37,6 +38,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::add_worker_node_request::Property;
 
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::{
     default_level_selector, CompactStatus, LevelSelector, ManualCompactionOption,
     SpaceReclaimCompactionSelector,
@@ -46,6 +48,7 @@ use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
@@ -2020,12 +2023,7 @@ async fn test_move_tables_between_compaction_group() {
     let info = branched_ssts.get(&12).unwrap();
     let groups = info.keys().sorted().cloned().collect_vec();
     assert_eq!(groups, vec![2, new_group_id]);
-    let ret = hummock_manager
-        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false, 0)
-        .await;
-    // we can not move table-101 since sst-12 has been moved to new-group. If we move sst-12 to
-    // new-group, some of its data may be expired and it would return error result.
-    assert!(ret.is_err());
+
     let mut selector: Box<dyn LevelSelector> = Box::<SpaceReclaimCompactionSelector>::default();
 
     let mut compaction_task = hummock_manager
@@ -2047,38 +2045,19 @@ async fn test_move_tables_between_compaction_group() {
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
     // there is still left one sst for object-12 in branched-sst.
     assert_eq!(branched_ssts.len(), 2);
-
-    hummock_manager
-        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false, 0)
-        .await
-        .unwrap();
-    let current_version = hummock_manager.get_current_version().await;
-    assert_eq!(
-        current_version
-            .get_compaction_group_levels(new_group_id)
-            .levels[base_level - 1]
-            .table_infos
-            .len(),
-        4
-    );
-    assert_eq!(
-        current_version.get_compaction_group_levels(2).levels[base_level - 1]
-            .table_infos
-            .len(),
-        2
-    );
-    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
-    assert_eq!(branched_ssts.len(), 5);
-    let info = branched_ssts.get(&14).unwrap();
-    assert_eq!(
-        info.keys().cloned().sorted().collect_vec(),
-        vec![2, new_group_id]
-    );
 }
 
 #[tokio::test]
 async fn test_gc_stats() {
-    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let registry = Registry::new();
+    let (_env, hummock_manager, _, worker_node) =
+        setup_compute_env_with_metric(80, config, Some(MetaMetrics::for_test(&registry))).await;
     let context_id = worker_node.id;
     let assert_eq_gc_stats = |stale_object_size,
                               stale_object_count,

@@ -291,6 +291,7 @@ mod tests {
     use clap::Parser;
     use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
+    use risingwave_common::config::SystemConfig;
     use risingwave_pb::hummock::HummockVersion;
     use risingwave_pb::meta::SystemParams;
 
@@ -318,17 +319,9 @@ mod tests {
 
     fn get_system_params() -> SystemParams {
         SystemParams {
-            barrier_interval_ms: Some(101),
-            checkpoint_frequency: Some(102),
-            sstable_size_mb: Some(103),
-            block_size_kb: Some(104),
-            bloom_false_positive: Some(0.1),
             state_store: Some("state_store".to_string()),
             data_directory: Some("data_directory".to_string()),
-            backup_storage_url: Some("backup_storage_url".to_string()),
-            backup_storage_directory: Some("backup_storage_directory".to_string()),
-            telemetry_enabled: Some(false),
-            parallel_compact_size_mb: Some(255),
+            ..SystemConfig::default().into_init_system_params()
         }
     }
 

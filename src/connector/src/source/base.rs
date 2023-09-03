@@ -327,7 +327,7 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn init_cdc_properties(&mut self, table_schema: Option<PbTableSchema>) {
+    pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
         match self {
             ConnectorProperties::MySqlCdc(c)
             | ConnectorProperties::PostgresCdc(c)
@@ -484,7 +484,6 @@ pub struct SourceMessage {
     pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
-
     pub meta: SourceMeta,
 }
 

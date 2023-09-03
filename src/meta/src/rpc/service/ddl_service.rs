@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
+use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -32,6 +33,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
     IdCategoryType, MetaSrvEnv, StreamingJob,
@@ -47,6 +49,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
+    sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController<S>,
     aws_client: Arc<Option<AwsEc2Client>>,
 }
@@ -56,7 +59,7 @@ where
     S: MetaStore,
 {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv<S>,
         aws_client: Option<AwsEc2Client>,
         catalog_manager: CatalogManagerRef<S>,
@@ -65,6 +68,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
@@ -76,12 +80,14 @@ where
             fragment_manager,
             barrier_manager,
             aws_cli_ref.clone(),
-        );
+        )
+        .await;
         Self {
             env,
             catalog_manager,
             ddl_controller,
             aws_client: aws_cli_ref,
+            sink_manager,
         }
     }
 }
@@ -253,6 +259,10 @@ where
                 drop_mode,
             ))
             .await?;
+
+        self.sink_manager
+            .stop_sink_coordinator(SinkId::from(sink_id))
+            .await;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -581,6 +591,21 @@ where
             .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
             .await?;
         Ok(Response::new(AlterRelationNameResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_source(
+        &self,
+        request: Request<AlterSourceRequest>,
+    ) -> Result<Response<AlterSourceResponse>, Status> {
+        let AlterSourceRequest { source } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
+            .await?;
+        Ok(Response::new(AlterSourceResponse {
             status: None,
             version,
         }))

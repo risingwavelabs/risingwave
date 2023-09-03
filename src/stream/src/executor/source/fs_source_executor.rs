@@ -265,11 +265,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.source_id
-                ))
+                )
             })?;
 
         let source_desc_builder: SourceDescBuilder =
@@ -279,9 +279,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .build_fs_source_desc()
             .map_err(StreamExecutorError::connector_error)?;
 
-        // If the first barrier is configuration change, then the source executor must be newly
-        // created, and we should start with the paused state.
-        let start_with_paused = barrier.is_update();
+        // If the first barrier requires us to pause on startup, pause the stream.
+        let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_deref() {

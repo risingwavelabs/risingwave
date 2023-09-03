@@ -3,6 +3,7 @@ syntax = "proto3";
 package connector_service;
 
 import "catalog.proto";
+import "common.proto";
 import "data.proto";
 import "plan_common.proto";
 
@@ -128,7 +129,9 @@ message SinkCoordinatorStreamRequest {
 message SinkCoordinatorStreamResponse {
   message StartResponse {}
 
-  message CommitResponse {}
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
 
   oneof response {
     StartResponse start = 1;
@@ -182,4 +185,40 @@ service ConnectorService {
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+}
+
+message CoordinateRequest {
+  // The first request that starts a coordination between sink writer and coordinator.
+  // The service will respond after sink writers of all vnodes have sent the request.
+  message StartCoordinationRequest {
+    common.Buffer vnode_bitmap = 1;
+    SinkParam param = 2;
+  }
+
+  message CommitRequest {
+    uint64 epoch = 1;
+    SinkMetadata metadata = 2;
+  }
+
+  oneof msg {
+    StartCoordinationRequest start_request = 1;
+    CommitRequest commit_request = 2;
+  }
+}
+
+message CoordinateResponse {
+  message StartCoordinationResponse {}
+
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
+
+  oneof msg {
+    StartCoordinationResponse start_response = 1;
+    CommitResponse commit_response = 2;
+  }
+}
+
+service SinkCoordinationService {
+  rpc Coordinate(stream CoordinateRequest) returns (stream CoordinateResponse);
 }

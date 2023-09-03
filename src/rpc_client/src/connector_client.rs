@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_coordinator_stream_request::{
     CommitMetadata, StartCoordinator,
@@ -106,8 +107,23 @@ impl SinkCoordinatorStreamHandle {
         .await?;
         match self.next_response().await? {
             SinkCoordinatorStreamResponse {
-                response: Some(sink_coordinator_stream_response::Response::Commit(_)),
-            } => Ok(()),
+                response:
+                    Some(sink_coordinator_stream_response::Response::Commit(
+                        sink_coordinator_stream_response::CommitResponse {
+                            epoch: response_epoch,
+                        },
+                    )),
+            } => {
+                if epoch == response_epoch {
+                    Ok(())
+                } else {
+                    Err(RpcError::Internal(anyhow!(
+                        "get different response epoch to commit epoch: {} {}",
+                        epoch,
+                        response_epoch
+                    )))
+                }
+            }
             msg => Err(RpcError::Internal(anyhow!(
                 "should get Commit response but get {:?}",
                 msg
@@ -144,7 +160,6 @@ impl ConnectorClient {
             })?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5));
 
         let channel = {
@@ -154,11 +169,17 @@ impl ConnectorClient {
             }
             #[cfg(not(madsim))]
             {
-                endpoint.connect_lazy()
+                endpoint.monitored_connect_lazy(
+                    "grpc-connector-client",
+                    TcpConfig {
+                        tcp_nodelay: true,
+                        keepalive_duration: None,
+                    },
+                )
             }
         };
         Ok(Self {
-            rpc_client: ConnectorServiceClient::new(channel),
+            rpc_client: ConnectorServiceClient::new(channel).max_decoding_message_size(usize::MAX),
             endpoint: connector_endpoint.to_string(),
         })
     }

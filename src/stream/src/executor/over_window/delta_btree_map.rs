@@ -92,9 +92,9 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
         })
     }
 
-    /// Get a [`CursorWithDiff`] pointing to the first element that is above the given bound.
+    /// Get a [`CursorWithDelta`] pointing to the first element that is above the given bound.
     pub fn lower_bound(&self, bound: Bound<&K>) -> CursorWithDelta<'_, K, V> {
-        // the implementation is very similar to `CursorWithDiff::peek_next`
+        // the implementation is very similar to `CursorWithDelta::peek_next`
         let mut ss_cursor = self.snapshot.lower_bound(bound);
         let mut dt_cursor = self.delta.lower_bound(bound);
         let next_ss_entry = || {
@@ -116,9 +116,9 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
         }
     }
 
-    /// Get a [`CursorWithDiff`] pointing to the first element that is below the given bound.
+    /// Get a [`CursorWithDelta`] pointing to the first element that is below the given bound.
     pub fn upper_bound(&self, bound: Bound<&K>) -> CursorWithDelta<'_, K, V> {
-        // the implementation is very similar to `CursorWithDiff::peek_prev`
+        // the implementation is very similar to `CursorWithDelta::peek_prev`
         let mut ss_cursor = self.snapshot.upper_bound(bound);
         let mut dt_cursor = self.delta.upper_bound(bound);
         let prev_ss_entry = || {
@@ -168,7 +168,9 @@ enum PeekDirection {
 impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
     /// Get the cursor position type.
     pub fn position(&self) -> PositionType {
-        let Some((key, _)) = self.curr_key_value else { return PositionType::Ghost; };
+        let Some((key, _)) = self.curr_key_value else {
+            return PositionType::Ghost;
+        };
         if self.delta.contains_key(key) {
             assert!(matches!(self.delta.get(key).unwrap(), Change::Insert(_)));
             if self.snapshot.contains_key(key) {

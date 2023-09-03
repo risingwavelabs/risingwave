@@ -53,6 +53,7 @@ pub enum Relation {
     SystemTable(Box<BoundSystemTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    Apply(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(ExprImpl),
     Watermark(Box<BoundWatermark>),
@@ -64,6 +65,7 @@ impl RewriteExprsRecursive for Relation {
         match self {
             Relation::Subquery(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Join(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Apply(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
@@ -77,7 +79,7 @@ impl Relation {
     pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
-            Relation::Join(join) => {
+            Relation::Join(join) | Relation::Apply(join) => {
                 join.cond.has_correlated_input_ref_by_depth(depth)
                     || join.left.is_correlated(depth)
                     || join.right.is_correlated(depth)
@@ -95,7 +97,7 @@ impl Relation {
             Relation::Subquery(subquery) => subquery
                 .query
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
-            Relation::Join(join) => {
+            Relation::Join(join) | Relation::Apply(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
                     join.cond
@@ -346,7 +348,7 @@ impl Binder {
             )?;
 
             // Share the CTE.
-            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query, lateral: false }));
             let share_relation = Relation::Share(Box::new(BoundShare {
                 share_id,
                 input: input_relation,
@@ -448,18 +450,15 @@ impl Binder {
                     self.try_mark_lateral_as_visible();
 
                     // Bind lateral subquery here.
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias, true)?;
 
                     // Mark the lateral context as invisible once again.
                     self.try_mark_lateral_as_invisible();
-                    Err(ErrorCode::NotImplemented(
-                        "lateral subqueries are not yet supported".into(),
-                        Some(3815).into(),
-                    )
-                    .into())
+                    Ok(Relation::Subquery(Box::new(bound_subquery)))
                 } else {
                     // Non-lateral subqueries to not have access to the join-tree context.
                     self.push_lateral_context();
-                    let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias, false)?;
                     self.pop_and_merge_lateral_context()?;
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }

@@ -218,11 +218,11 @@ pub mod grpc_middleware {
     use std::sync::Arc;
     use std::task::{Context, Poll};
 
+    use either::Either;
     use futures::Future;
     use hyper::Body;
     use tokio::sync::Mutex;
-    use tower::layer::util::Identity;
-    use tower::util::Either;
+    use tonic::transport::NamedService;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
@@ -230,23 +230,18 @@ pub mod grpc_middleware {
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
-        manager: AwaitTreeRegistryRef,
+        registry: Option<AwaitTreeRegistryRef>,
     }
-    pub type OptionalAwaitTreeMiddlewareLayer = Either<AwaitTreeMiddlewareLayer, Identity>;
 
     impl AwaitTreeMiddlewareLayer {
-        pub fn new(manager: AwaitTreeRegistryRef) -> Self {
-            Self { manager }
+        pub fn new(registry: AwaitTreeRegistryRef) -> Self {
+            Self {
+                registry: Some(registry),
+            }
         }
 
-        pub fn new_optional(
-            optional: Option<AwaitTreeRegistryRef>,
-        ) -> OptionalAwaitTreeMiddlewareLayer {
-            if let Some(manager) = optional {
-                Either::A(Self::new(manager))
-            } else {
-                Either::B(Identity::new())
-            }
+        pub fn new_optional(registry: Option<AwaitTreeRegistryRef>) -> Self {
+            Self { registry }
         }
     }
 
@@ -256,7 +251,7 @@ pub mod grpc_middleware {
         fn layer(&self, service: S) -> Self::Service {
             AwaitTreeMiddleware {
                 inner: service,
-                manager: self.manager.clone(),
+                registry: self.registry.clone(),
                 next_id: Default::default(),
             }
         }
@@ -265,7 +260,7 @@ pub mod grpc_middleware {
     #[derive(Clone)]
     pub struct AwaitTreeMiddleware<S> {
         inner: S,
-        manager: AwaitTreeRegistryRef,
+        registry: Option<AwaitTreeRegistryRef>,
         next_id: Arc<AtomicU64>,
     }
 
@@ -284,6 +279,10 @@ pub mod grpc_middleware {
         }
 
         fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
+            let Some(registry) = self.registry.clone() else {
+                return Either::Left(self.inner.call(req));
+            };
+
             // This is necessary because tonic internally uses `tower::buffer::Buffer`.
             // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
             // for details on why this is necessary
@@ -291,16 +290,19 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            let manager = self.manager.clone();
 
-            async move {
-                let root = manager
+            Either::Right(async move {
+                let root = registry
                     .lock()
                     .await
                     .register(id, format!("{}:{}", req.uri().path(), id));
 
                 root.instrument(inner.call(req)).await
-            }
+            })
         }
+    }
+
+    impl<S: NamedService> NamedService for AwaitTreeMiddleware<S> {
+        const NAME: &'static str = S::NAME;
     }
 }

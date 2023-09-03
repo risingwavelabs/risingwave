@@ -14,7 +14,8 @@
 
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
-use super::{Access, ChangeEvent, ChangeEventOperation};
+use super::{Access, AccessError, ChangeEvent, ChangeEventOperation};
+use crate::parser::TransactionControl;
 
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
@@ -24,11 +25,16 @@ pub struct DebeziumChangeEvent<A> {
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
+const TRANSACTION_STATUS: &str = "status";
+const TRANSACTION_ID: &str = "id";
 
 pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
 pub const DEBEZIUM_DELETE_OP: &str = "d";
+
+pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
+pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
 
 impl<A> DebeziumChangeEvent<A>
 where
@@ -49,6 +55,33 @@ where
             value_accessor,
             key_accessor,
         }
+    }
+
+    /// Returns the transaction metadata if exists.
+    ///
+    /// See the [doc](https://debezium.io/documentation/reference/2.3/connectors/postgresql.html#postgresql-transaction-metadata) of Debezium for more details.
+    pub(crate) fn transaction_control(&self) -> Result<TransactionControl, AccessError> {
+        if let Some(accessor) = &self.value_accessor {
+            if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
+                accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
+                accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
+            ) {
+                match status.as_ref() {
+                    DEBEZIUM_TRANSACTION_STATUS_BEGIN => {
+                        return Ok(TransactionControl::Begin { id })
+                    }
+                    DEBEZIUM_TRANSACTION_STATUS_COMMIT => {
+                        return Ok(TransactionControl::Commit { id })
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Err(AccessError::Undefined {
+            name: "transaction status".into(),
+            path: Default::default(),
+        })
     }
 }
 
@@ -82,7 +115,7 @@ where
         }
     }
 
-    fn op(&self) -> std::result::Result<ChangeEventOperation, super::AccessError> {
+    fn op(&self) -> Result<ChangeEventOperation, AccessError> {
         if let Some(accessor) = &self.value_accessor {
             if let Some(ScalarImpl::Utf8(op)) = accessor.access(&[OP], Some(&DataType::Varchar))? {
                 match op.as_ref() {

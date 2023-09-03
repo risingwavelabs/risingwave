@@ -95,6 +95,8 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Duration => DataType::Interval,
         Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
+        Schema::TimeMillis => DataType::Time,
+        Schema::TimeMicros => DataType::Time,
         Schema::Record { fields, name, .. } => {
             if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
                 && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())

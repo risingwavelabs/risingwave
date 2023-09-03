@@ -461,6 +461,17 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::List(Box::new(DataType::Varchar))))
         }
+        ExprType::RegexpReplace => {
+            // regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
+            // TODO: Preprocessing?
+            ensure_arity!("regexp_replace", 3 <= | inputs | <= 6);
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::RegexpCount => {
+            // TODO: Preprocessing?
+            ensure_arity!("regexp_count", 2 <= | inputs | <= 4);
+            Ok(Some(DataType::Int32))
+        }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());
@@ -863,7 +874,9 @@ fn narrow_category<'a>(
                 .all(|(formal, category)| {
                     // category.is_none() means the actual argument is non-null and skipped category
                     // selection.
-                    let Some(selected) = category else { return true };
+                    let Some(selected) = category else {
+                        return true;
+                    };
                     *formal == *selected
                         || !is_preferred(*selected) && implicit_ok(*formal, *selected, false)
                 })

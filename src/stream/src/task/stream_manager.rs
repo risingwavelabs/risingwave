@@ -41,7 +41,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::{StreamError, StreamResult};
+use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -430,9 +430,7 @@ impl LocalStreamManagerCore {
     #[cfg(test)]
     fn for_test() -> Self {
         use risingwave_storage::monitor::MonitoredStorageMetrics;
-
-        let register = prometheus::Registry::new();
-        let streaming_metrics = Arc::new(StreamingMetrics::new(register));
+        let streaming_metrics = Arc::new(StreamingMetrics::unused());
         Self::new_inner(
             StateStoreImpl::shared_in_memory_store(Arc::new(MonitoredStorageMetrics::unused())),
             SharedContext::for_test(),
@@ -551,6 +549,7 @@ impl LocalStreamManagerCore {
             actor_context.id,
             executor_id,
             self.streaming_metrics.clone(),
+            self.config.developer.enable_executor_row_count,
         )
         .boxed();
 
@@ -605,9 +604,10 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
     ) -> StreamResult<()> {
         for &actor_id in actors {
-            let actor = self.actors.remove(&actor_id).ok_or_else(|| {
-                StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
-            })?;
+            let actor = self
+                .actors
+                .remove(&actor_id)
+                .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))?;
             let mview_definition = &actor.mview_definition;
             let actor_context = ActorContext::create_with_metrics(
                 actor_id,

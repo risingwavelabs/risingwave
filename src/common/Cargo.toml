@@ -16,9 +16,9 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "44"
-arrow-buffer = "44"
-arrow-schema = "44"
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
@@ -30,7 +30,7 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
-comfy-table = "6"
+comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
 educe = "0.4"
@@ -38,10 +38,12 @@ either = "1"
 enum-as-inner = "0.6"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
+fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
+hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.11"
 itoa = "1.0"
@@ -52,9 +54,10 @@ num-traits = "0.2"
 number_prefix = "0.4.0"
 opentelemetry = { version = "0.20", default-features = false }
 parking_lot = "0.12"
-parse-display = "0.6"
+parse-display = "0.8"
 paste = "1"
-postgres-types = { version = "0.2.5", features = [
+pin-project-lite = "0.2"
+postgres-types = { version = "0.2.6", features = [
     "derive",
     "with-chrono-0_4",
     "with-serde_json-1",
@@ -74,10 +77,10 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-speedate = "0.11.0"
+speedate = "0.12.0"
 static_assertions = "1"
 strum = "0.25"
-strum_macros = "0.24"
+strum_macros = "0.25"
 sysinfo = { version = "0.29", default-features = false }
 thiserror = "1"
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
@@ -93,13 +96,16 @@ toml = "0.7"
 tonic = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = "0.20"
-tracing-subscriber = "0.3.16"
+tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
 uuid = "1.4.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+http-body = "0.4.5"
+tower-layer = "0.3.2"
+tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false }

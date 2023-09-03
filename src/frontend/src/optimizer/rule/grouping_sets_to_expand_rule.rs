@@ -80,9 +80,6 @@ impl Rule for GroupingSetsToExpandRule {
         let flag_col_idx = group_keys.len();
         let input_schema_len = input.schema().len();
 
-        // TODO: support GROUPING expression.
-        // TODO: optimize the case existing only one set.
-
         let column_subset = grouping_sets
             .iter()
             .map(|set| set.indices().collect_vec())

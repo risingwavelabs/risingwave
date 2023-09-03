@@ -25,6 +25,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
+use crate::optimizer::rule::apply_offset_rewriter::ApplyCorrelatedIndicesConverter;
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -211,15 +212,9 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: apply_left_len as isize,
             join_right_offset: apply_left_len as isize,
-            index_mapping: ColIndexMapping::without_target_size(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                &correlated_indices,
+            ),
             correlated_id,
         };
 
@@ -297,15 +292,9 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: 0,
             join_right_offset: apply_left_len as isize,
-            index_mapping: ColIndexMapping::without_target_size(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                &correlated_indices,
+            ),
             correlated_id,
         };
 
@@ -419,15 +408,9 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: apply_left_len as isize,
             join_right_offset: 2 * apply_left_len as isize,
-            index_mapping: ColIndexMapping::without_target_size(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                &correlated_indices,
+            ),
             correlated_id,
         };
 

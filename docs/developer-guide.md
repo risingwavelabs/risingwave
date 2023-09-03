@@ -47,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Add new dependencies](#add-new-dependencies)
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
+- [Understanding RisingWave Macros](#understanding-risingwave-macros)
 
 ## Read the design docs
 
@@ -61,6 +62,8 @@ You can also read the [crate level documentation](https://risingwavelabs.github.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
 - The `dashboard` folder contains RisingWave dashboard v2.
+
+The [src/README.md](../src/README.md) file contains more details about Design Patterns in RisingWave.
 
 ## Set up the development environment
 
@@ -340,7 +343,7 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 
 > **Note**
 >
-> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won’t affect other tests due to table cleanups.
+> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 
 Alternatively, you can also run some specific tests:
 
@@ -446,6 +449,24 @@ Deterministic test is included in CI as well. See [CI script](../ci/scripts/dete
 To run these tests:
 ```shell
 ./risedev sit-test
+```
+
+Sometimes in CI you may see a backtrace, followed by an error message with a `MADSIM_TEST_SEED`:
+```shell
+ 161: madsim::sim::task::Executor::block_on
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/task/mod.rs:238:13
+ 162: madsim::sim::runtime::Runtime::block_on
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/runtime/mod.rs:126:9
+ 163: madsim::sim::runtime::builder::Builder::run::{{closure}}::{{closure}}::{{closure}}
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/runtime/builder.rs:128:35
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+context: node=6 "compute-1", task=2237 (spawned at /risingwave/src/stream/src/task/stream_manager.rs:689:34)
+note: run with `MADSIM_TEST_SEED=2` environment variable to reproduce this error
+```
+
+You may use that to reproduce it in your local environment. For example:
+```shell
+MADSIM_TEST_SEED=4 ./risedev sit-test test_backfill_with_upstream_and_snapshot_read
 ```
 
 ## Miscellaneous checks

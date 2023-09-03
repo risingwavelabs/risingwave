@@ -171,8 +171,9 @@
     select * from tumble(t, ts, interval '3' minute);
   stream_plan: |-
     StreamMaterialize { columns: [ts, v1, v2, window_start, window_end, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [ts, window_start, window_end] }
-    └─StreamProject { exprs: [t.ts, t.v1, t.v2, TumbleStart(t.ts, '00:03:00':Interval) as $expr1, AddWithTimeZone(TumbleStart(t.ts, '00:03:00':Interval), '00:03:00':Interval, 'UTC':Varchar) as $expr2, t._row_id], output_watermarks: [t.ts, $expr1, $expr2] }
-      └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.ts, t.v1, t.v2, $expr1, AddWithTimeZone($expr1, '00:03:00':Interval, 'UTC':Varchar) as $expr2, t._row_id], output_watermarks: [t.ts, $expr1, $expr2] }
+      └─StreamProject { exprs: [t.ts, t.v1, t.v2, TumbleStart(t.ts, '00:03:00':Interval) as $expr1, t._row_id], output_watermarks: [t.ts, $expr1] }
+        └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: hop all
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;

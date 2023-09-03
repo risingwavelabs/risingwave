@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(madsim), expect(unused_imports))]
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
-use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
@@ -106,7 +107,9 @@ pub mod predicate {
             // The rescheduling of no-shuffle downstreams must be derived from the most upstream
             // fragment. So if a fragment has no-shuffle upstreams, it cannot be rescheduled.
             !any(root(f), &|n| {
-                let Some(NodeBody::Merge(merge)) = &n.node_body else { return false };
+                let Some(NodeBody::Merge(merge)) = &n.node_body else {
+                    return false;
+                };
                 merge.upstream_dispatcher_type() == DispatcherType::NoShuffle
             })
         };
@@ -217,6 +220,7 @@ impl Fragment {
 
 impl Cluster {
     /// Locate fragments that satisfy all the predicates.
+    #[cfg_or_panic(madsim)]
     pub async fn locate_fragments(
         &mut self,
         predicates: impl IntoIterator<Item = BoxedPredicate>,
@@ -289,6 +293,7 @@ impl Cluster {
         self.locate_one_fragment([predicate::id(id)]).await
     }
 
+    #[cfg_or_panic(madsim)]
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let response = self
             .ctl
@@ -303,6 +308,7 @@ impl Cluster {
     }
 
     // update node schedulability
+    #[cfg_or_panic(madsim)]
     async fn update_worker_node_schedulability(
         &self,
         worker_ids: Vec<u32>,
@@ -343,11 +349,12 @@ impl Cluster {
         self.reschedule_helper(plan, false).await
     }
 
-    /// Same as reschedule, but resolve the no_shuffle upstream
+    /// Same as reschedule, but resolve the no-shuffle upstream
     pub async fn reschedule_resolve_no_shuffle(&mut self, plan: impl Into<String>) -> Result<()> {
         self.reschedule_helper(plan, true).await
     }
 
+    #[cfg_or_panic(madsim)]
     async fn reschedule_helper(
         &mut self,
         plan: impl Into<String>,
@@ -392,6 +399,33 @@ impl Cluster {
         Ok(())
     }
 
+    /// Pause all data sources in the cluster.
+    #[cfg_or_panic(madsim)]
+    pub async fn pause(&mut self) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "pause"]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+
+        Ok(())
+    }
+
+    /// Resume all data sources in the cluster.
+    #[cfg_or_panic(madsim)]
+    pub async fn resume(&mut self) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "resume"]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+
+        Ok(())
+    }
+
+    #[cfg_or_panic(madsim)]
     pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
         let revision = self
             .ctl

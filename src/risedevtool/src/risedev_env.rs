@@ -12,25 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::doc_markdown)] // RiseDev
+
 use std::fmt::Write;
 use std::process::Command;
 
-use anyhow::Result;
-
 use crate::{add_hummock_backend, HummockInMemoryStrategy, ServiceConfig};
 
-pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
-    // Pick one of the compute node and generate risectl config
+/// Generate environment variables from the given service configurations to be used by future
+/// RiseDev commands, like `risedev ctl` or `risedev psql`.
+pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
+    let mut env = String::new();
     for item in services {
         if let ServiceConfig::ComputeNode(c) = item {
-            let mut env = String::new();
-
             // RW_HUMMOCK_URL
             // If the cluster is launched without a shared storage, we will skip this.
             {
                 let mut cmd = Command::new("compute-node");
                 if add_hummock_backend(
-                    "risectl",
+                    "dummy",
                     c.provide_opendal.as_ref().unwrap(),
                     c.provide_minio.as_ref().unwrap(),
                     c.provide_aws_s3.as_ref().unwrap(),
@@ -41,7 +41,7 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
                 {
                     writeln!(
                         env,
-                        "export RW_HUMMOCK_URL=\"{}\"",
+                        "RW_HUMMOCK_URL=\"{}\"",
                         cmd.get_args().nth(1).unwrap().to_str().unwrap()
                     )
                     .unwrap();
@@ -53,14 +53,22 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
                 let meta_node = &c.provide_meta_node.as_ref().unwrap()[0];
                 writeln!(
                     env,
-                    "export RW_META_ADDR=\"http://{}:{}\"",
+                    "RW_META_ADDR=\"http://{}:{}\"",
                     meta_node.address, meta_node.port
                 )
                 .unwrap();
             }
-
-            return Ok(env);
+            break;
         }
     }
-    Ok("".into())
+    for item in services {
+        if let ServiceConfig::Frontend(c) = item {
+            let listen_address = &c.listen_address;
+            writeln!(env, "RW_FRONTEND_LISTEN_ADDRESS=\"{listen_address}\"",).unwrap();
+            let port = &c.port;
+            writeln!(env, "RW_FRONTEND_PORT=\"{port}\"",).unwrap();
+            break;
+        }
+    }
+    env
 }

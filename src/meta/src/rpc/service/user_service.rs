@@ -54,7 +54,23 @@ where
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
             if let Some(Object::AllTablesSchemaId(schema_id)) = &privilege.object {
-                let tables = self.catalog_manager.list_table_ids(*schema_id).await;
+                let tables = self
+                    .catalog_manager
+                    .list_readonly_table_ids(*schema_id)
+                    .await;
+                for table_id in tables {
+                    let mut privilege = privilege.clone();
+                    privilege.object = Some(Object::TableId(table_id));
+                    if let Some(true) = with_grant_option {
+                        privilege
+                            .action_with_opts
+                            .iter_mut()
+                            .for_each(|p| p.with_grant_option = true);
+                    }
+                    expanded_privileges.push(privilege);
+                }
+            } else if let Some(Object::AllDmlTablesSchemaId(schema_id)) = &privilege.object {
+                let tables = self.catalog_manager.list_dml_table_ids(*schema_id).await;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::TableId(table_id));

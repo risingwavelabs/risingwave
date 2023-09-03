@@ -20,19 +20,19 @@ async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
-crossbeam = "0.8.1"
+crossbeam = "0.8.2"
 dashmap = { version = "5", default-features = false }
-dyn-clone = "1.0.12"
+dyn-clone = "1.0.13"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "6bd19cb" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "99b21df" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 itertools = "0.11"
 libc = "0.2"
-lz4 = "1.23.1"
+lz4 = "1.24.0"
 memcomparable = "0.2"
 more-asserts = "0.3"
 num-integer = "0.1"
@@ -70,13 +70,13 @@ tokio-retry = "0.3"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
-xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
+xxhash-rust = { version = "0.8.6", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.12", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false }
 libc = "0.2"
-nix = { version = "0.25", features = ["fs", "mman"] }
+nix = { version = "0.26", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }

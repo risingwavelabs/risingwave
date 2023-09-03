@@ -722,26 +722,30 @@
       ├─BatchExchange { order: [], dist: HashShard(id, $expr1, $expr2) }
       │ └─BatchHashAgg { group_key: [id, name, $expr1, $expr2], aggs: [] }
       │   └─BatchExchange { order: [], dist: HashShard(id, name, $expr1, $expr2) }
-      │     └─BatchProject { exprs: [id, name, TumbleStart(date_time, '00:00:10':Interval) as $expr1, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
-      │       └─BatchSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id], filter: (None, None) }
+      │     └─BatchProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+      │       └─BatchProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
+      │         └─BatchSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id], filter: (None, None) }
       └─BatchHashAgg { group_key: [seller, $expr3, $expr4], aggs: [] }
         └─BatchExchange { order: [], dist: HashShard(seller, $expr3, $expr4) }
-          └─BatchProject { exprs: [seller, TumbleStart(date_time, '00:00:10':Interval) as $expr3, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr4] }
-            └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+          └─BatchProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
+            └─BatchProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
+              └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, name, starttime, $expr2, seller, $expr3, $expr4], pk_columns: [id, name, starttime, $expr2, seller, $expr3, $expr4], pk_conflict: NoCheck }
     └─StreamHashJoin [append_only] { type: Inner, predicate: id = seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all }
       ├─StreamExchange { dist: HashShard(id, $expr1, $expr2) }
       │ └─StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] }
       │   └─StreamExchange { dist: HashShard(id, name, $expr1, $expr2) }
-      │     └─StreamProject { exprs: [id, name, TumbleStart(date_time, '00:00:10':Interval) as $expr1, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
-      │       └─StreamRowIdGen { row_id_index: 8 }
-      │         └─StreamSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] }
+      │     └─StreamProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+      │       └─StreamProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
+      │         └─StreamRowIdGen { row_id_index: 8 }
+      │           └─StreamSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] }
       └─StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] }
         └─StreamExchange { dist: HashShard(seller, $expr3, $expr4) }
-          └─StreamProject { exprs: [seller, TumbleStart(date_time, '00:00:10':Interval) as $expr3, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr4] }
-            └─StreamRowIdGen { row_id_index: 10 }
-              └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
+          └─StreamProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
+            └─StreamProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
+              └─StreamRowIdGen { row_id_index: 10 }
+                └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, name, starttime, $expr2, seller, $expr3, $expr4], pk_columns: [id, name, starttime, $expr2, seller, $expr3, $expr4], pk_conflict: NoCheck }
@@ -756,14 +760,16 @@
     └── StreamExchange Hash([0, 1, 2, 3]) from 2
 
     Fragment 2
-    StreamProject { exprs: [id, name, TumbleStart(date_time, '00:00:10':Interval) as $expr1, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
-    └── StreamRowIdGen { row_id_index: 8 }
-        └── StreamSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] } { source state table: 5 }
+    StreamProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+    └── StreamProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
+        └── StreamRowIdGen { row_id_index: 8 }
+            └── StreamSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] } { source state table: 5 }
 
     Fragment 3
-    StreamProject { exprs: [seller, TumbleStart(date_time, '00:00:10':Interval) as $expr3, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr4] }
-    └── StreamRowIdGen { row_id_index: 10 }
-        └── StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] } { source state table: 7 }
+    StreamProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
+    └── StreamProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
+        └── StreamRowIdGen { row_id_index: 10 }
+            └── StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] } { source state table: 7 }
 
     Table 0 { columns: [ id, name, $expr1, $expr2 ], primary key: [ $0 ASC, $2 ASC, $3 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3 }
 
@@ -1414,24 +1420,20 @@
         └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
           └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
-        └─StreamExchange { dist: HashShard(bidder, auction) }
-          └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
-            └─StreamRowIdGen { row_id_index: 7 }
-              └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id, bidder, auction], pk_columns: [_row_id, bidder, auction], pk_conflict: NoCheck }
+    └─StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
+      └─StreamExchange { dist: HashShard(bidder, auction) }
+        └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+          └─StreamRowIdGen { row_id_index: 7 }
+            └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id, bidder, auction], pk_columns: [_row_id, bidder, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamExchange Hash([7]) from 1
+    └── StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] } { state table: 0 }
+        └── StreamExchange Hash([1, 0]) from 1
 
     Fragment 1
-    StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] } { state table: 0 }
-    └── StreamExchange Hash([1, 0]) from 2
-
-    Fragment 2
     StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
     └── StreamRowIdGen { row_id_index: 7 }
         └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 1 }
@@ -1447,10 +1449,10 @@
 
     Table 4294967294
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id ]
-    ├── primary key: [ $7 ASC ]
+    ├── primary key: [ $7 ASC, $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 7 ]
-    └── read pk prefix len hint: 1
+    ├── distribution key: [ 1, 0 ]
+    └── read pk prefix len hint: 3
 
 - id: nexmark_q19
   before:
@@ -2118,7 +2120,7 @@
     StreamRowIdGen { row_id_index: 7 }
     └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 8 }
 
-    Table 0 { columns: [ id, item_name, count(auction), $expr1 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ id, item_name, count(auction), $expr1 ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ id, item_name, count(auction), $expr1 ]

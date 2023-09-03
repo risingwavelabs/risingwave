@@ -346,11 +346,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id
-                ))
+                )
             })?;
 
         let mut core = self.stream_source_core.unwrap();
@@ -370,6 +370,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     ..
                 } => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                        tracing::info!(
+                            "source exector: actor {:?} boot with splits: {:?}",
+                            self.actor_ctx.id,
+                            splits
+                        );
                         boot_state = splits.clone();
                     }
                 }
@@ -410,9 +415,8 @@ impl<S: StateStore> SourceExecutor<S> {
             source_chunk_reader,
         );
 
-        // If the first barrier is configuration change, then the source executor must be newly
-        // created, and we should start with the paused state.
-        if barrier.is_update() {
+        // If the first barrier requires us to pause on startup, pause the stream.
+        if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
 
@@ -425,6 +429,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
+
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -580,10 +585,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
                     self.actor_ctx.id
-                ))
+                )
             })?;
         yield Message::Barrier(barrier);
 
@@ -721,6 +726,7 @@ mod tests {
                     }),
                 ],
             },
+            pause: false,
         });
         barrier_tx.send(init_barrier).unwrap();
 
@@ -812,6 +818,7 @@ mod tests {
                     }),
                 ],
             },
+            pause: false,
         });
         barrier_tx.send(init_barrier).unwrap();
 

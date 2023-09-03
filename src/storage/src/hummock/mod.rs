@@ -14,13 +14,13 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -32,6 +32,7 @@ use tracing::log::error;
 mod block_cache;
 pub use block_cache::*;
 
+use crate::filter_key_extractor::RpcFilterKeyExtractorManager;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::opts::StorageOpts;
 
@@ -73,7 +74,7 @@ use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
-use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
@@ -106,6 +107,8 @@ pub struct HummockStorage {
 
     context: Arc<CompactorContext>,
 
+    sstable_object_id_manager: SstableObjectIdManagerRef,
+
     buffer_tracker: BufferTracker,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
@@ -136,7 +139,7 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+        filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
@@ -182,8 +185,9 @@ impl HummockStorage {
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
-            sstable_object_id_manager.clone(),
-            filter_key_extractor_manager.clone(),
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                filter_key_extractor_manager.clone(),
+            ),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -193,6 +197,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
             options
                 .data_file_cache_refill_levels
@@ -203,6 +208,7 @@ impl HummockStorage {
 
         let instance = Self {
             context: compactor_context,
+            sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch,
@@ -253,10 +259,10 @@ impl HummockStorage {
     }
 
     pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        &self.context.sstable_object_id_manager
+        &self.sstable_object_id_manager
     }
 
-    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
         &self.context.filter_key_extractor_manager
     }
 
@@ -327,7 +333,7 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             notification_client,
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
         )
@@ -368,7 +374,7 @@ pub async fn get_from_sstable_info(
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash
-        && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), &(Bound::Included(full_key.user_key), Bound::Included(full_key.user_key)), hash, local_stats)
     {
         if !read_options.ignore_range_tombstone {
             let delete_epoch = get_min_delete_range_epoch_from_sstable(
@@ -429,11 +435,12 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
+    user_key_range: &UserKeyRangeRef<'_>,
     prefix_hash: u64,
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let may_exist = sstable_info_ref.may_match_hash(prefix_hash);
+    let may_exist = sstable_info_ref.may_match_hash(user_key_range, prefix_hash);
     if !may_exist {
         local_stats.bloom_filter_true_negative_counts += 1;
     }

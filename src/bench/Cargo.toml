@@ -40,13 +40,13 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-stream = "0.1"
 toml = "0.7"
 tracing = "0.1"
-tracing-subscriber = "0.3.16"
+tracing-subscriber = "0.3.17"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.25", features = ["fs", "mman"] }
+nix = { version = "0.26", features = ["fs", "mman"] }
 
 [[bin]]
 name = "s3-bench"

@@ -20,9 +20,9 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
@@ -38,6 +38,7 @@ pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
+pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
@@ -58,6 +59,7 @@ mod csv_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
+mod mysql;
 mod plain_parser;
 mod protobuf;
 mod schema_registry;
@@ -78,6 +80,7 @@ impl SourceStreamChunkBuilder {
             .iter()
             .map(|desc| desc.data_type.create_array_builder(cap))
             .collect();
+
         Self {
             descs,
             builders,
@@ -93,6 +96,7 @@ impl SourceStreamChunkBuilder {
         }
     }
 
+    /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
         StreamChunk::new(
             self.op_builder,
@@ -104,8 +108,21 @@ impl SourceStreamChunkBuilder {
         )
     }
 
+    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
+    /// the builders of the next [`StreamChunk`].
+    #[must_use]
+    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish()
+    }
+
     pub fn op_num(&self) -> usize {
         self.op_builder.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.op_builder.is_empty()
     }
 }
 
@@ -119,7 +136,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
 /// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
-/// the [`SourceParser::parse`] implementation.
+/// the `SourceParser::parse` implementation.
 #[derive(Debug)]
 pub struct WriteGuard(());
 
@@ -154,7 +171,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Insert)
+        writer.op_builder.push(Op::Insert);
     }
 }
 
@@ -177,7 +194,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Delete)
+        writer.op_builder.push(Op::Delete);
     }
 }
 
@@ -222,10 +239,10 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_meta {
+                if desc.is_meta() || desc.is_offset() {
                     return Ok(());
                 }
-                let output = if desc.is_row_id {
+                let output = if desc.is_row_id() {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
@@ -262,11 +279,11 @@ impl SourceStreamChunkRowWriter<'_> {
 
     /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
     /// builder. e.g after insert
-    /// `data_builder` = [1], `meta_column_builder` = [], `op` = [insert]
+    /// `data_builder = [1], meta_column_builder = [], op = [insert]`
     ///
     /// This function is used to fulfill this hollow in `meta_column_builder`.
     /// e.g after fulfill
-    /// `data_builder` = [1], `meta_column_builder` = [1], `op` = [insert]
+    /// `data_builder = [1], meta_column_builder = [1], op = [insert]`
     pub fn fulfill_meta_column(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
@@ -311,6 +328,12 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+/// Transaction control message. Currently only used by Debezium messages.
+pub enum TransactionControl {
+    Begin { id: Box<str> },
+    Commit { id: Box<str> },
+}
+
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
 /// the input data stream and return a stream of parsed msgs.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
@@ -328,6 +351,20 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<WriteGuard>> + Send + 'a;
 
+    /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
+    /// as a transaction control message.
+    ///
+    /// The default implementation forwards to [`ByteStreamSourceParser::parse_one`] for
+    /// non-transactional sources.
+    fn parse_one_with_txn<'a>(
+        &'a mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> impl Future<Output = Result<Either<WriteGuard, TransactionControl>>> + Send + 'a {
+        self.parse_one(key, payload, writer).map_ok(Either::Left)
+    }
+
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
     ///
     /// # Arguments
@@ -336,72 +373,165 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     ///
     /// # Returns
     ///
-    /// A [`BoxSourceWithStateStream`] which is a stream of parsed msgs.
+    /// A [`crate::source::BoxSourceWithStateStream`] which is a stream of parsed msgs.
     fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
         into_chunk_stream(self, data_stream)
     }
 }
 
+/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
+/// committed to avoid potential OOM.
+const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
+
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+    let columns = parser.columns().to_vec();
+
+    let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut split_offset_mapping = HashMap::<SplitId, String>::new();
+
+    struct Transaction {
+        id: Box<str>,
+        len: usize,
+    }
+    let mut current_transaction = None;
+    let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
+
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
-        let mut builder =
-            SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), batch.len());
-        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+        let batch_len = batch.len();
 
-        for msg in batch {
+        if let Some(Transaction { len, id }) = &mut current_transaction {
+            // Dirty state. The last batch is not yielded due to uncommitted transaction.
+            if *len > MAX_ROWS_FOR_TRANSACTION {
+                // Large transaction. Force commit.
+                tracing::warn!(
+                    id,
+                    len,
+                    "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
+                );
+                *len = 0; // reset `len` while keeping `id`
+                yield_asap = false;
+                yield StreamChunkWithState {
+                    chunk: builder.take(batch_len),
+                    split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                };
+            } else {
+                // Normal transaction. After the transaction is committed, we should yield the last
+                // batch immediately, so set `yield_asap` to true.
+                yield_asap = true;
+            }
+        } else {
+            // Clean state. Reserve capacity for the builder.
+            assert!(builder.is_empty());
+            assert!(!yield_asap);
+            assert!(split_offset_mapping.is_empty());
+            let _ = builder.take(batch_len);
+        }
+
+        for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 continue;
             }
 
-            split_offset_mapping.insert(msg.split_id, msg.offset);
+            let msg_offset = msg.offset;
+            split_offset_mapping.insert(msg.split_id, msg_offset.clone());
 
             let old_op_num = builder.op_num();
-
-            if let Err(e) = parser
-                .parse_one(msg.key, msg.payload, builder.row_writer())
+            match parser
+                .parse_one_with_txn(msg.key, msg.payload, builder.row_writer())
                 .await
             {
-                tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                // This will throw an error for batch
-                parser.source_ctx().report_user_source_error(e)?;
-                continue;
-            }
+                Ok(Either::Left(WriteGuard(_))) => {
+                    // new_op_num - old_op_num is the number of rows added to the builder
+                    let new_op_num = builder.op_num();
 
-            let new_op_num = builder.op_num();
+                    // Aggregate the number of rows in the current transaction.
+                    if let Some(Transaction { len, .. }) = &mut current_transaction {
+                        *len += new_op_num - old_op_num;
+                    }
 
-            // new_op_num - old_op_num is the number of rows added to the builder
-            for _ in old_op_num..new_op_num {
-                // TODO: support more kinds of SourceMeta
-                if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                    let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                        if !desc.is_meta {
-                            return None;
-                        }
-                        match desc.name.as_str() {
-                            KAFKA_TIMESTAMP_COLUMN_NAME => Some(kafka_meta.timestamp.map(|ts| {
-                                risingwave_common::cast::i64_to_timestamptz(ts)
-                                    .unwrap()
-                                    .into()
-                            })),
-                            _ => {
-                                unreachable!("kafka will not have this meta column: {}", desc.name)
+                    // fill in meta column for specific source and offset column if needed
+                    for _ in old_op_num..new_op_num {
+                        let f =
+                            |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                                if desc.is_meta() && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                                    match desc.name.as_str() {
+                                        KAFKA_TIMESTAMP_COLUMN_NAME => {
+                                            Some(kafka_meta.timestamp.map(|ts| {
+                                                risingwave_common::cast::i64_to_timestamptz(ts)
+                                                    .unwrap()
+                                                    .into()
+                                            }))
+                                        }
+                                        _ => {
+                                            unreachable!(
+                                                "kafka will not have this meta column: {}",
+                                                desc.name
+                                            )
+                                        }
+                                    }
+                                } else if desc.is_offset() {
+                                    Some(Some(msg_offset.as_str().into()))
+                                } else {
+                                    // None will be ignored by `fulfill_meta_column`
+                                    None
+                                }
+                            };
+
+                        // fill in meta or offset column if any
+                        builder.row_writer().fulfill_meta_column(f)?;
+                    }
+                }
+
+                Ok(Either::Right(txn_ctl)) => {
+                    match txn_ctl {
+                        TransactionControl::Begin { id } => {
+                            if let Some(Transaction { id: current_id, .. }) = &current_transaction {
+                                tracing::warn!(current_id, id, "already in transaction");
                             }
+                            current_transaction = Some(Transaction { id, len: 0 });
                         }
-                    };
-                    builder.row_writer().fulfill_meta_column(f)?;
+                        TransactionControl::Commit { id } => {
+                            let current_id = current_transaction.as_ref().map(|t| &t.id);
+                            if current_id != Some(&id) {
+                                tracing::warn!(?current_id, id, "transaction id mismatch");
+                            }
+                            current_transaction = None;
+                        }
+                    }
+
+                    // Not in a transaction anymore and `yield_asap` is set, so we should yield the
+                    // chunk now.
+                    if current_transaction.is_none() && yield_asap {
+                        yield_asap = false;
+                        yield StreamChunkWithState {
+                            chunk: builder.take(batch_len - (i + 1)),
+                            split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+                        };
+                    }
+                }
+
+                Err(error) => {
+                    tracing::warn!(%error, "message parsing failed, skipping");
+                    // This will throw an error for batch
+                    parser.source_ctx().report_user_source_error(error)?;
+                    continue;
                 }
             }
         }
 
-        yield StreamChunkWithState {
-            chunk: builder.finish(),
-            split_offset_mapping: Some(split_offset_mapping),
-        };
+        // If we are not in a transaction, we should yield the chunk now.
+        if current_transaction.is_none() {
+            yield_asap = false;
+            yield StreamChunkWithState {
+                chunk: builder.take(0),
+                split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
+            };
+        }
     }
 }
 
@@ -439,7 +569,9 @@ impl AccessBuilderImpl {
             EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
             }
-            EncodingProperties::Json(_) => AccessBuilderImpl::Json(JsonAccessBuilder::new()?),
+            EncodingProperties::Json(config) => {
+                AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?)
+            }
             _ => unreachable!(),
         };
         Ok(accessor)
@@ -497,7 +629,7 @@ impl ByteStreamSourceParserImpl {
         let encode = &parser_config.specific.encoding_config;
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
-                JsonParser::new(rw_columns, source_ctx).map(Self::Json)
+                JsonParser::new(parser_config.specific, rw_columns, source_ctx).map(Self::Json)
             }
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
@@ -505,8 +637,8 @@ impl ByteStreamSourceParserImpl {
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
             }
-            (ProtocolProperties::Canal, EncodingProperties::Json(_)) => {
-                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
+            (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
+                CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)
             }
             (ProtocolProperties::Native, _) => unreachable!("Native parser should not be created"),
             (ProtocolProperties::Upsert, _) => {
@@ -556,6 +688,17 @@ pub struct SpecificParserConfig {
     pub key_encoding_config: Option<EncodingProperties>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
+}
+
+impl SpecificParserConfig {
+    // for test only
+    pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
+        key_encoding_config: None,
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+        }),
+        protocol_config: ProtocolProperties::Plain,
+    };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -610,7 +753,9 @@ pub struct CsvProperties {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct JsonProperties {}
+pub struct JsonProperties {
+    pub use_schema_registry: bool,
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct BytesProperties {
@@ -767,14 +912,20 @@ impl SpecificParserConfig {
                 })
             }
             (
-                SourceFormat::Debezium
-                | SourceFormat::DebeziumMongo
+                SourceFormat::Plain
+                | SourceFormat::Debezium
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
-                | SourceFormat::Plain
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
-            ) => EncodingProperties::Json(JsonProperties {}),
+            ) => EncodingProperties::Json(JsonProperties {
+                use_schema_registry: info.use_schema_registry,
+            }),
+            (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
+                EncodingProperties::Json(JsonProperties {
+                    use_schema_registry: false,
+                })
+            }
             (SourceFormat::Plain, SourceEncode::Bytes) => {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }

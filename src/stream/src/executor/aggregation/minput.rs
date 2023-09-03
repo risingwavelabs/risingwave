@@ -18,11 +18,11 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::row::RowExt;
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::agg::{build, AggCall, AggKind, BoxedAggState};
+use risingwave_expr::agg::{AggCall, AggKind, BoxedAggregateFunction};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -40,12 +40,6 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// when need to get output.
 #[derive(EstimateSize)]
 pub struct MaterializedInputState {
-    /// The aggregation state. It is always initial.
-    ///
-    /// This is `None` if the aggregate function is either `min`, `max`, `first_value` or
-    /// `last_value`.
-    aggregator: Option<BoxedAggState>,
-
     /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
 
@@ -60,6 +54,9 @@ pub struct MaterializedInputState {
 
     /// Cache of state table.
     cache: Box<dyn AggStateCache + Send + Sync>,
+
+    /// Whether to output the first value from cache.
+    output_first_value: bool,
 
     /// Serializer for cache key.
     #[estimate_size(ignore)]
@@ -133,10 +130,6 @@ impl MaterializedInputState {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let aggregator = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => None,
-            _ => Some(build(agg_call)?),
-        };
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
             AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => {
                 Box::new(GenericAggStateCache::new(
@@ -153,14 +146,18 @@ impl MaterializedInputState {
                 agg_call.kind
             ),
         };
+        let output_first_value = matches!(
+            agg_call.kind,
+            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue
+        );
 
         Ok(Self {
-            aggregator,
             arg_col_indices,
             state_table_arg_col_indices,
             order_col_indices,
             state_table_order_col_indices,
             cache,
+            output_first_value,
             cache_key_serializer,
         })
     }
@@ -181,12 +178,13 @@ impl MaterializedInputState {
         &mut self,
         state_table: &StateTable<impl StateStore>,
         group_key: Option<&GroupKey>,
+        func: &BoxedAggregateFunction,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
             let mut cache_filler = self.cache.begin_syncing();
 
             let all_data_iter = state_table
-                .iter_with_pk_prefix(
+                .iter_row_with_pk_prefix(
                     group_key.map(GroupKey::table_pk),
                     PrefetchOptions {
                         exhaust_iter: cache_filler.capacity().is_none(),
@@ -196,8 +194,8 @@ impl MaterializedInputState {
             pin_mut!(all_data_iter);
 
             #[for_await]
-            for state_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
-                let state_row: OwnedRow = state_row?;
+            for keyed_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
+                let state_row = keyed_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
                     self.cache_key_serializer.serialize(
@@ -219,17 +217,18 @@ impl MaterializedInputState {
         }
         assert!(self.cache.is_synced());
 
-        if let Some(aggregator) = &mut self.aggregator {
-            const CHUNK_SIZE: usize = 1024;
-            let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
-            for chunk in chunks {
-                aggregator.update(&chunk).await?;
-            }
-            Ok(aggregator.output()?)
-        } else {
+        if self.output_first_value {
             // special case for `min`, `max`, `first_value` and `last_value`
             // take the first value from the cache
             Ok(self.cache.output_first())
+        } else {
+            const CHUNK_SIZE: usize = 1024;
+            let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
+            let mut state = func.create_state();
+            for chunk in chunks {
+                func.update(&mut state, &chunk).await?;
+            }
+            Ok(func.get_result(&state).await?)
         }
     }
 }
@@ -248,7 +247,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::agg::{build, AggCall};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -307,6 +306,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(min:int4 $2:int4)"); // min(c)
+        let agg = build(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -347,7 +347,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(3i32.into()));
         }
 
@@ -365,7 +365,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(2i32.into()));
         }
 
@@ -379,7 +379,7 @@ mod tests {
                 &input_schema,
             )
             .unwrap();
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(2i32.into()));
         }
 
@@ -399,6 +399,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(max:int4 $2:int4)"); // max(c)
+        let agg = build(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -439,7 +440,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
         }
 
@@ -457,7 +458,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(9i32.into()));
         }
 
@@ -472,7 +473,7 @@ mod tests {
             )
             .unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(9i32.into()));
         }
 
@@ -493,6 +494,8 @@ mod tests {
 
         let agg_call_1 = AggCall::from_pretty("(min:varchar $0:varchar)"); // min(a)
         let agg_call_2 = AggCall::from_pretty("(max:int4 $1:int4)"); // max(b)
+        let agg1 = build(&agg_call_1).unwrap();
+        let agg2 = build(&agg_call_2).unwrap();
         let group_key = None;
 
         let (mut table_1, mapping_1) = create_mem_state_table(
@@ -569,10 +572,14 @@ mod tests {
             table_1.commit(epoch).await.unwrap();
             table_2.commit(epoch).await.unwrap();
 
-            let out1 = state_1.get_output(&table_1, group_key.as_ref()).await?;
+            let out1 = state_1
+                .get_output(&table_1, group_key.as_ref(), &agg1)
+                .await?;
             assert_eq!(out1, Some("a".into()));
 
-            let out2 = state_2.get_output(&table_2, group_key.as_ref()).await?;
+            let out2 = state_2
+                .get_output(&table_2, group_key.as_ref(), &agg2)
+                .await?;
             assert_eq!(out2, Some(9i32.into()));
         }
 
@@ -592,6 +599,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(max:int4 $1:int4)"); // max(b)
+        let agg = build(&agg_call).unwrap();
         let group_key = Some(GroupKey::new(OwnedRow::new(vec![Some(8.into())]), None));
 
         let (mut table, mapping) = create_mem_state_table(
@@ -632,7 +640,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(5i32.into()));
         }
 
@@ -650,7 +658,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
         }
 
@@ -665,7 +673,7 @@ mod tests {
             )
             .unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
         }
 
@@ -683,6 +691,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2]);
 
         let agg_call = AggCall::from_pretty("(min:int4 $0:int4)"); // min(a)
+        let agg = build(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -739,7 +748,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(min_value.into()));
         }
 
@@ -766,7 +775,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(min_value.into()));
         }
 
@@ -784,6 +793,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2]);
 
         let agg_call = AggCall::from_pretty("(min:int4 $0:int4)"); // min(a)
+        let agg = build(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -822,7 +832,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(4i32.into()));
         }
 
@@ -842,7 +852,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(12i32.into()));
         }
 
@@ -864,7 +874,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(12i32.into()));
         }
 
@@ -889,6 +899,7 @@ mod tests {
         let agg_call = AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $0:desc)",
         );
+        let agg = build(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -929,7 +940,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some("c,a".into()));
         }
 
@@ -946,7 +957,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some("d_c,a+e".into()));
         }
 
@@ -967,6 +978,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(array_agg:int4[] $1:int4 orderby $2:asc $0:desc)");
+        let agg = build(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -1006,7 +1018,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res
@@ -1033,7 +1045,7 @@ mod tests {
             epoch.inc();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref()).await?;
+            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res

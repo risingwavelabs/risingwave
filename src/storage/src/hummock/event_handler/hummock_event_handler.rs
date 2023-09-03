@@ -44,7 +44,7 @@ use crate::hummock::store::version::{
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
+    HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager, TrackerId,
 };
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
@@ -127,26 +127,31 @@ pub struct HummockEventHandler {
     last_instance_id: LocalInstanceId,
 
     cache_refill_policy: Arc<CacheRefillPolicy>,
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
 }
 
 async fn flush_imms(
     payload: UploadTaskPayload,
     task_info: UploadTaskInfo,
     compactor_context: Arc<crate::hummock::compactor::CompactorContext>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
-        let _ = compactor_context
-            .sstable_object_id_manager
+        let _ = sstable_object_id_manager
             .add_watermark_object_id(Some(*epoch))
             .await
             .inspect_err(|e| {
                 error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
             });
     }
-    compact(compactor_context, payload, task_info.compaction_group_index)
-        .verbose_instrument_await("shared_buffer_compact")
-        .await
+    compact(
+        compactor_context,
+        sstable_object_id_manager,
+        payload,
+        task_info.compaction_group_index,
+    )
+    .verbose_instrument_await("shared_buffer_compact")
+    .await
 }
 
 impl HummockEventHandler {
@@ -155,6 +160,7 @@ impl HummockEventHandler {
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<CompactorContext>,
+        sstable_object_id_manager: Arc<SstableObjectIdManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_data_file_cache_levels: HashSet<u32>,
     ) -> Self {
@@ -171,8 +177,8 @@ impl HummockEventHandler {
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_store = compactor_context.sstable_store.clone();
         let metrics = compactor_context.compactor_metrics.clone();
-        let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
         let upload_compactor_context = compactor_context.clone();
+        let cloned_sstable_object_id_manager = sstable_object_id_manager.clone();
         let uploader = HummockUploader::new(
             state_store_metrics,
             pinned_version.clone(),
@@ -181,6 +187,7 @@ impl HummockEventHandler {
                     payload,
                     task_info,
                     upload_compactor_context.clone(),
+                    cloned_sstable_object_id_manager.clone(),
                 ))
             }),
             buffer_tracker,

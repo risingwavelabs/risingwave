@@ -20,13 +20,15 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::Aggregator;
+use super::{AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction};
 use crate::agg::AggCall;
 use crate::Result;
 
 #[build_aggregate("mode(*) -> auto")]
-fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
-    Ok(Box::new(Mode::new(agg.return_type.clone())))
+fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
+    Ok(Box::new(Mode {
+        return_type: agg.return_type.clone(),
+    }))
 }
 
 /// Computes the mode, the most frequent value of the aggregated argument (arbitrarily choosing the
@@ -64,26 +66,21 @@ fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
 /// ----
 /// NULL
 /// ```
-#[derive(Clone, EstimateSize)]
-pub struct Mode {
+struct Mode {
     return_type: DataType,
+}
+
+#[derive(Debug, Clone, EstimateSize, Default)]
+struct State {
     cur_mode: Datum,
     cur_mode_freq: usize,
     cur_item: Datum,
     cur_item_freq: usize,
 }
 
-impl Mode {
-    pub fn new(return_type: DataType) -> Self {
-        Self {
-            return_type,
-            cur_mode: None,
-            cur_mode_freq: 0,
-            cur_item: None,
-            cur_item_freq: 0,
-        }
-    }
+impl AggStateDyn for State {}
 
+impl State {
     fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         let datum = datum_ref.to_owned_datum();
         if datum.is_some() && self.cur_item == datum {
@@ -100,51 +97,38 @@ impl Mode {
 }
 
 #[async_trait::async_trait]
-impl Aggregator for Mode {
+impl AggregateFunction for Mode {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Any(Box::<State>::default())
+    }
+
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        let state = state.downcast_mut::<State>();
         for (_, row) in input.rows() {
-            self.add_datum(row.datum_at(0));
+            state.add_datum(row.datum_at(0));
         }
         Ok(())
     }
 
-    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        let state = state.downcast_mut::<State>();
         for (_, row) in input.rows_in(range) {
-            self.add_datum(row.datum_at(0));
+            state.add_datum(row.datum_at(0));
         }
         Ok(())
     }
 
-    fn get_output(&self) -> Result<Datum> {
-        Ok(self.cur_mode.clone())
-    }
-
-    fn output(&mut self) -> Result<Datum> {
-        let result = self.get_output()?;
-        self.reset();
-        Ok(result)
-    }
-
-    fn reset(&mut self) {
-        self.cur_mode = None;
-        self.cur_mode_freq = 0;
-        self.cur_item = None;
-        self.cur_item_freq = 0;
-    }
-
-    fn get_state(&self) -> Datum {
-        unimplemented!("get_state is not supported for mode");
-    }
-
-    fn set_state(&mut self, _: Datum) {
-        unimplemented!("set_state is not supported for mode");
-    }
-
-    fn estimated_size(&self) -> usize {
-        EstimateSize::estimated_size(self)
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<State>();
+        Ok(state.cur_mode.clone())
     }
 }

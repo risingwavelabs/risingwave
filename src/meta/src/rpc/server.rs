@@ -22,7 +22,7 @@ use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
 use regex::Regex;
-use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -30,6 +30,7 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
+use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -59,19 +60,23 @@ use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::HummockManager;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{
+    start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
+};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cloud_service::CloudServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
+use crate::rpc::service::sink_coordination_service::SinkCoordinationServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
@@ -295,30 +300,39 @@ pub async fn start_service_as_election_follower(
 
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
-        .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(MetricsMiddlewareLayer::new(Arc::new(
+            GLOBAL_META_METRICS.clone(),
+        )))
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
-        .serve_with_shutdown(address_info.listen_addr, async move {
-            tokio::select! {
-                // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down services"),
-                        Err(_) => tracing::error!("Service shutdown sender dropped")
-                    }
-                },
-                // shutdown service if follower becomes leader
-                res = follower_shutdown_rx => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down follower services"),
-                        Err(_) => tracing::error!("Follower service shutdown sender dropped")
-                    }
-                },
-            }
-        })
-        .await
-        .unwrap();
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-follower-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            async move {
+                tokio::select! {
+                    // shutdown service if all services should be shut down
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown sender dropped")
+                        }
+                    },
+                    // shutdown service if follower becomes leader
+                    res = follower_shutdown_rx => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down follower services"),
+                            Err(_) => tracing::error!("Follower service shutdown sender dropped")
+                        }
+                    },
+                }
+            },
+        )
+        .await;
 }
 
 /// Starts all services needed for the meta leader node
@@ -340,9 +354,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts.clone(), init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-    let meta_metrics = Arc::new(MetaMetrics::new());
-    let registry = meta_metrics.registry();
-    monitor_process(registry).unwrap();
 
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
@@ -382,6 +393,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
+
+    let meta_metrics = Arc::new(GLOBAL_META_METRICS.clone());
 
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
@@ -440,6 +453,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .unwrap(),
     );
 
+    let (sink_manager, shutdown_handle) =
+        SinkCoordinatorManager::start_worker(env.connector_client());
+    let mut sub_tasks = vec![shutdown_handle];
+
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
@@ -448,6 +465,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         fragment_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
+        sink_manager.clone(),
         meta_metrics.clone(),
     ));
 
@@ -514,7 +532,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         cluster_manager.clone(),
         fragment_manager.clone(),
         barrier_manager.clone(),
-    );
+        sink_manager.clone(),
+    )
+    .await;
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
 
@@ -525,6 +545,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         source_manager,
         catalog_manager.clone(),
         stream_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
@@ -535,6 +556,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         catalog_manager.clone(),
         fragment_manager.clone(),
     );
+    let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         vacuum_manager.clone(),
@@ -558,19 +580,16 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager.clone(), aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
-        MetricsManager::boot_metrics_service(
-            prometheus_addr.to_string(),
-            meta_metrics.registry().clone(),
-        )
+        MetricsManager::boot_metrics_service(prometheus_addr.to_string())
     }
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks = hummock::start_hummock_workers(
+    sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
         vacuum_manager,
         // compaction_scheduler,
         &env.opts,
-    );
+    ));
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),
@@ -585,6 +604,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             cluster_manager.clone(),
             catalog_manager,
             fragment_manager.clone(),
+            hummock_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -693,7 +713,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
-        .add_service(HummockManagerServiceServer::new(hummock_srv))
+        .add_service(
+            HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(NotificationServiceServer::new(notification_srv))
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
@@ -705,26 +727,35 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
-        .serve_with_shutdown(address_info.listen_addr, async move {
-            tokio::select! {
-                res = svc_shutdown_rx.changed() => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down services"),
-                        Err(_) => tracing::error!("Service shutdown receiver dropped")
-                    }
-                    shutdown_all.await;
-                },
-                _ = idle_recv => {
-                    shutdown_all.await;
-                },
-            }
-        })
-        .await
-        .unwrap();
+        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-leader-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            async move {
+                tokio::select! {
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown receiver dropped")
+                        }
+                        shutdown_all.await;
+                    },
+                    _ = idle_recv => {
+                        shutdown_all.await;
+                    },
+                }
+            },
+        )
+        .await;
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        dashboard_task.await.unwrap().unwrap();
+        // Join the task while ignoring the cancellation error.
+        let _ = dashboard_task.await;
     }
     Ok(())
 }

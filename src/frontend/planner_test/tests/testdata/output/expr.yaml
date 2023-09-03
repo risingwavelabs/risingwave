@@ -487,7 +487,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamNow { output: [now] }
@@ -501,7 +501,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
@@ -512,8 +512,8 @@
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v2] }
-    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id] }
-      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
+      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
       │ ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamNow { output: [now] }
@@ -531,7 +531,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [max_time, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: NoCheck, watermark_columns: [max_time] }
     └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [max(t.v1)] }
-      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t.v2, max(t.v1)] }
         │ └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
         │   └─StreamExchange { dist: HashShard(t.v2) }

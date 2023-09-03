@@ -69,6 +69,7 @@ message ExprNode {
     SUBSTR = 202;
     LENGTH = 203;
     LIKE = 204;
+    I_LIKE = 279;
     UPPER = 205;
     LOWER = 206;
     TRIM = 207;
@@ -101,6 +102,8 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    REGEXP_REPLACE = 280;
+    REGEXP_COUNT = 281;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -142,6 +145,9 @@ message ExprNode {
     LOG10 = 273;
     CBRT = 274;
     SIGN = 275;
+    SCALE = 276;
+    MIN_SCALE = 277;
+    TRIM_SCALE = 278;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -190,6 +196,7 @@ message ExprNode {
     ARRAY_POSITION = 542;
     ARRAY_REPLACE = 543;
     ARRAY_DIMS = 544;
+    ARRAY_TRANSFORM = 545;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -202,6 +209,7 @@ message ExprNode {
     JSONB_ACCESS_STR = 601;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
+    IS_JSON = 604;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -228,6 +236,7 @@ message TableFunction {
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    GENERATE_SUBSCRIPTS = 5;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;
