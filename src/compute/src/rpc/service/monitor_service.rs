@@ -113,7 +113,7 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    // #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")]
     #[cfg_attr(coverage, no_coverage)]
     async fn heap_profiling(
         &self,
@@ -161,16 +161,16 @@ impl MonitorService for MonitorServiceImpl {
         response
     }
 
-    // #[cfg(not(target_os = "linux"))]
-    // #[cfg_attr(coverage, no_coverage)]
-    // async fn heap_profiling(
-    //     &self,
-    //     _request: Request<HeapProfilingRequest>,
-    // ) -> Result<Response<HeapProfilingResponse>, Status> {
-    //     Err(Status::unimplemented(
-    //         "heap profiling is only implemented on Linux",
-    //     ))
-    // }
+    #[cfg(not(target_os = "linux"))]
+    #[cfg_attr(coverage, no_coverage)]
+    async fn heap_profiling(
+        &self,
+        _request: Request<HeapProfilingRequest>,
+    ) -> Result<Response<HeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "heap profiling is only implemented on Linux",
+        ))
+    }
 
     #[cfg_attr(coverage, no_coverage)]
     async fn list_heap_profiling(
@@ -186,11 +186,11 @@ impl MonitorService for MonitorServiceImpl {
             .try_collect()?;
         let manually_dump_dir = self.server_config.manually_dump_heap_profile_dir.clone();
         let manually_dump_files_name: Vec<_> = fs::read_dir(manually_dump_dir.clone())?
-        .map(|entry| {
-            let entry = entry?;
-            Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
-        })
-        .try_collect()?;
+            .map(|entry| {
+                let entry = entry?;
+                Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
+            })
+            .try_collect()?;
 
         Ok(Response::new(ListHeapProfilingResponse {
             dir_auto: auto_dump_dir,

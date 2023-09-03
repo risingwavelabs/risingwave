@@ -27,7 +27,8 @@ use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     DownloadRequest, DownloadResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse, ListHeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    StackTraceRequest, StackTraceResponse,
 };
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;

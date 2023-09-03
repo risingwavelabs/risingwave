@@ -12,19 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{process::Command, path::Path, fs};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
 
 use anyhow::anyhow;
 
 use super::handlers::{err, DashboardError};
 
-pub async fn run_jeprof(profile_path: String, collapsed_path: String, binary_path: String) -> Result<(), DashboardError> {
+pub async fn run_jeprof(
+    profile_path: String,
+    collapsed_path: String,
+    binary_path: String,
+) -> Result<(), DashboardError> {
     let prof_cmd = move || {
-        Command::new("jeprof").arg("--collapsed")
+        Command::new("jeprof")
+            .arg("--collapsed")
             .arg(Path::new(&binary_path))
-            .arg(Path::new(&profile_path)).output()
+            .arg(Path::new(&profile_path))
+            .output()
     };
-    match prof_cmd() {
+    match tokio::task::spawn_blocking(prof_cmd).await.unwrap() {
         Ok(output) => {
             if output.status.success() {
                 fs::write(Path::new(&collapsed_path), &output.stdout).map_err(err)?;

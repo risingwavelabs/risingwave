@@ -36,7 +36,6 @@ use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
-use base64_url;
 
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::storage::MetaStore;
@@ -68,7 +67,9 @@ pub(super) mod handlers {
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
-    use risingwave_pb::monitor_service::{HeapProfilingResponse, StackTraceResponse, ListHeapProfilingResponse};
+    use risingwave_pb::monitor_service::{
+        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+    };
     use serde_json::json;
 
     use super::*;
@@ -262,7 +263,6 @@ pub(super) mod handlers {
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.list_heap_profile().await.map_err(err)?;
-        dbg!(&result);
         Ok(result.into())
     }
 
@@ -274,7 +274,8 @@ pub(super) mod handlers {
             bail!("Should provide ui_path");
         }
 
-        let file_path = String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
+        let file_path =
+            String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
         let worker_node = srv
             .cluster_manager
@@ -287,8 +288,9 @@ pub(super) mod handlers {
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
         // Cache path for the target node.
-        let node_cache_dir =
-            FilePath::new(&srv.ui_path.clone().unwrap()).join("profiling").join(worker_id.to_string());
+        let node_cache_dir = FilePath::new(&srv.ui_path.clone().unwrap())
+            .join("profiling")
+            .join(worker_id.to_string());
         fs::create_dir_all(node_cache_dir.clone()).map_err(err)?;
 
         let cache_file_path = node_cache_dir.join(FilePath::new(&file_path).file_name().unwrap());
@@ -299,13 +301,19 @@ pub(super) mod handlers {
             let result = client.download(file_path.clone()).await.map_err(err)?;
             fs::write(cache_file_path.clone(), result.result).map_err(err)?;
             if let Some(binary_path) = srv.binary_path.clone() {
-                heap_profile::run_jeprof(cache_file_path_str, collapsed_path_str.clone(), binary_path).await?;
+                heap_profile::run_jeprof(
+                    cache_file_path_str,
+                    collapsed_path_str.clone(),
+                    binary_path,
+                )
+                .await?;
             } else {
                 bail!("RisingWave binary path not specified");
             }
-        } 
+        }
 
-        let collapsed_str = String::from_utf8_lossy(&fs::read(collapsed_path).map_err(err)?).to_string();
+        let collapsed_str =
+            String::from_utf8_lossy(&fs::read(collapsed_path).map_err(err)?).to_string();
 
         Ok(collapsed_str.into())
     }
@@ -339,8 +347,14 @@ where
                 get(prometheus::list_prometheus_cluster::<S>),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
-            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile::<S>))
-            .route("/monitor/list_heap_profile/:worker_id", get(list_heap_profile::<S>))
+            .route(
+                "/monitor/dump_heap_profile/:worker_id",
+                get(heap_profile::<S>),
+            )
+            .route(
+                "/monitor/list_heap_profile/:worker_id",
+                get(list_heap_profile::<S>),
+            )
             .route("/monitor/analyze/:worker_id/*path", get(analyze_heap::<S>))
             .layer(
                 ServiceBuilder::new()
