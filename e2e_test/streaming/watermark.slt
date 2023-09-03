@@ -15,6 +15,11 @@ statement ok
 insert into t values ('2023-05-06 16:51:00', 1);
 
 statement ok
+insert into t values ('2023-01-01 00:00:00', 1);
+
+sleep 5s
+
+statement ok
 insert into t values ('2023-05-06 16:56:01', 1);
 
 skipif in-memory
