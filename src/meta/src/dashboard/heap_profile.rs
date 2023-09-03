@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{process::Command, path::Path};
+use std::{process::Command, path::Path, fs};
 
 use anyhow::anyhow;
 
@@ -20,20 +20,14 @@ use super::handlers::{err, DashboardError};
 
 pub async fn run_jeprof(profile_path: String, collapsed_path: String, binary_path: String) -> Result<(), DashboardError> {
     let prof_cmd = move || {
-        let mut cmd = Command::new("jeprof");
-         let cmd =  cmd.arg("--collapsed")
+        Command::new("jeprof").arg("--collapsed")
             .arg(Path::new(&binary_path))
-            .arg(Path::new(&profile_path));
-            // .arg(">")
-            // .arg(Path::new(&collapsed_path));
-
-        dbg!(&cmd);
-             cmd.output()
-        
+            .arg(Path::new(&profile_path)).output()
     };
     match prof_cmd() {
         Ok(output) => {
             if output.status.success() {
+                fs::write(Path::new(&collapsed_path), &output.stdout).map_err(err)?;
                 Ok(())
             } else {
                 Err(err(anyhow!(

@@ -132,7 +132,7 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.risectl-dump-heap-prof.compute.dump\0", time_prefix,);
+        let file_name = format!("{}.manually-dump-heap-prof.compute.dump\0", time_prefix,);
         let arg_dir = request.into_inner().get_dir().clone();
         let dir = PathBuf::from(if arg_dir.is_empty() {
             &self.server_config.manually_dump_heap_profile_dir
@@ -184,9 +184,19 @@ impl MonitorService for MonitorServiceImpl {
                 Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
             })
             .try_collect()?;
+        let manually_dump_dir = self.server_config.manually_dump_heap_profile_dir.clone();
+        let manually_dump_files_name: Vec<_> = fs::read_dir(manually_dump_dir.clone())?
+        .map(|entry| {
+            let entry = entry?;
+            Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
+        })
+        .try_collect()?;
+
         Ok(Response::new(ListHeapProfilingResponse {
-            dir: auto_dump_dir,
-            name: auto_dump_files_name,
+            dir_auto: auto_dump_dir,
+            name_auto: auto_dump_files_name,
+            dir_manually: manually_dump_dir,
+            name_manually: manually_dump_files_name,
         }))
     }
 

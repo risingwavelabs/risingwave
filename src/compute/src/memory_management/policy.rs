@@ -108,7 +108,7 @@ impl JemallocMemoryControl {
         {
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
             let file_name = format!(
-                "{}.exceed-threshold-aggressive-heap-prof.compute.dump.{}\0",
+                "{}.auto-dump-heap-prof.compute.dump.{}\0",
                 time_prefix, self.dump_seq,
             );
             let file_path = Path::new(&self.auto_dump_heap_profile_config.dir)

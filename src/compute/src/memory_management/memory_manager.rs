@@ -48,6 +48,7 @@ impl GlobalMemoryManager {
         metrics: Arc<StreamingMetrics>,
         total_memory_bytes: usize,
         auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
+        manually_dump_heap_profile_dir: String,
     ) -> Arc<Self> {
         let memory_control_policy =
             build_memory_control_policy(total_memory_bytes, auto_dump_heap_profile_config.clone())
@@ -57,6 +58,7 @@ impl GlobalMemoryManager {
         if auto_dump_heap_profile_config.enabled() {
             fs::create_dir_all(&auto_dump_heap_profile_config.dir).unwrap();
         }
+        fs::create_dir_all(manually_dump_heap_profile_dir).unwrap();
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             metrics,
