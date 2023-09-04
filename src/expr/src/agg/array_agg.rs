@@ -13,44 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::array::ListValue;
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
+use risingwave_common::types::{Datum, ScalarRef};
 use risingwave_expr_macro::aggregate;
 
-#[aggregate("array_agg(*) -> list", state = "State")]
-fn array_agg<'a, T: ScalarRef<'a>>(state: Option<State>, value: Option<T>) -> State {
-    let mut state = state.unwrap_or_default();
-    state.0.push(value.map(|v| v.to_owned_scalar().into()));
-    state
-}
-
-#[derive(Default, Clone)]
-struct State(Vec<Datum>);
-
-impl EstimateSize for State {
-    fn estimated_heap_size(&self) -> usize {
-        std::mem::size_of::<Datum>() * self.0.capacity()
-    }
-}
-
-impl From<State> for ListValue {
-    fn from(state: State) -> Self {
-        ListValue::new(state.0)
-    }
-}
-
-impl TryFrom<ScalarImpl> for State {
-    type Error = ();
-
-    fn try_from(state: ScalarImpl) -> Result<Self, Self::Error> {
-        state.try_into().map_err(|_| ())
-    }
-}
-
-impl From<State> for ScalarImpl {
-    fn from(state: State) -> Self {
-        ListValue::new(state.0).into()
-    }
+#[aggregate("array_agg(*) -> list")]
+fn array_agg<'a>(state: Option<ListValue>, value: Option<impl ScalarRef<'a>>) -> ListValue {
+    let mut state: Vec<Datum> = state.unwrap_or_default().into();
+    state.push(value.map(|v| v.to_owned_scalar().into()));
+    state.into()
 }
 
 #[cfg(test)]
@@ -69,9 +39,10 @@ mod tests {
             + 456
             + 789",
         );
-        let mut agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        agg.update(&chunk).await?;
-        let actual = agg.output()?;
+        let array_agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        let mut state = array_agg.create_state();
+        array_agg.update(&mut state, &chunk).await?;
+        let actual = array_agg.get_result(&state).await?;
         assert_eq!(
             actual,
             Some(ListValue::new(vec![Some(123.into()), Some(456.into()), Some(789.into())]).into())
@@ -81,16 +52,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
-        let mut agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        let array_agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        let mut state = array_agg.create_state();
 
-        assert_eq!(agg.output()?, None);
+        assert_eq!(array_agg.get_result(&state).await?, None);
 
         let chunk = StreamChunk::from_pretty(
             " i
             + .",
         );
-        agg.update(&chunk).await?;
-        assert_eq!(agg.output()?, Some(ListValue::new(vec![None]).into()));
+        array_agg.update(&mut state, &chunk).await?;
+        assert_eq!(
+            array_agg.get_result(&state).await?,
+            Some(ListValue::new(vec![None]).into())
+        );
         Ok(())
     }
 }

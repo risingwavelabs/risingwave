@@ -20,81 +20,89 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::agg::{
+    AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
+};
 use risingwave_expr::Result;
 
 /// `Distinct` is a wrapper of `Aggregator` that only keeps distinct rows.
-#[derive(Clone)]
 pub struct Distinct {
-    inner: BoxedAggState,
+    inner: BoxedAggregateFunction,
+}
+
+/// The intermediate state for distinct aggregation.
+#[derive(Debug)]
+struct State {
+    /// Inner aggregate function state.
+    inner: AggregateState,
+    /// The set of distinct rows.
     exists: HashSet<OwnedRow>, // TODO: optimize for small rows
     exists_estimated_heap_size: usize,
 }
 
+impl EstimateSize for State {
+    fn estimated_heap_size(&self) -> usize {
+        self.inner.estimated_size()
+            + self.exists.capacity() * std::mem::size_of::<OwnedRow>()
+            + self.exists_estimated_heap_size
+    }
+}
+
+impl AggStateDyn for State {}
+
 impl Distinct {
-    pub fn new(inner: BoxedAggState) -> Self {
-        Self {
-            inner,
-            exists: Default::default(),
-            exists_estimated_heap_size: 0,
-        }
+    pub fn new(inner: BoxedAggregateFunction) -> Self {
+        Self { inner }
     }
 }
 
 #[async_trait::async_trait]
-impl Aggregator for Distinct {
+impl AggregateFunction for Distinct {
     fn return_type(&self) -> DataType {
         self.inner.return_type()
     }
 
-    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
-        self.update_range(input, 0..input.capacity()).await
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Any(Box::new(State {
+            inner: self.inner.create_state(),
+            exists: HashSet::new(),
+            exists_estimated_heap_size: 0,
+        }))
     }
 
-    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        self.update_range(state, input, 0..input.capacity()).await
+    }
+
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        let state = state.downcast_mut::<State>();
+
         let mut bitmap_builder = BitmapBuilder::with_capacity(input.capacity());
         bitmap_builder.append_bitmap(&input.data_chunk().vis().to_bitmap());
         for row_id in range.clone() {
             let (row_ref, vis) = input.data_chunk().row_at(row_id);
             let row = row_ref.to_owned_row();
             let row_size = row.estimated_heap_size();
-            let b = vis && self.exists.insert(row);
+            let b = vis && state.exists.insert(row);
             if b {
-                self.exists_estimated_heap_size += row_size;
+                state.exists_estimated_heap_size += row_size;
             }
             bitmap_builder.set(row_id, b);
         }
         let input = input.with_visibility(bitmap_builder.finish().into());
-        self.inner.update_range(&input, range).await
+        self.inner
+            .update_range(&mut state.inner, &input, range)
+            .await
     }
 
-    fn get_output(&self) -> Result<Datum> {
-        self.inner.get_output()
-    }
-
-    fn output(&mut self) -> Result<Datum> {
-        self.inner.output()
-    }
-
-    fn reset(&mut self) {
-        self.inner.reset();
-        self.exists.clear();
-        self.exists_estimated_heap_size = 0;
-    }
-
-    fn get_state(&self) -> Datum {
-        self.inner.get_state()
-    }
-
-    fn set_state(&mut self, _: Datum) {
-        unimplemented!("set is not supported for distinct");
-    }
-
-    fn estimated_size(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.inner.estimated_size()
-            + self.exists.capacity() * std::mem::size_of::<OwnedRow>()
-            + self.exists_estimated_heap_size
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<State>();
+        self.inner.get_result(&state.inner).await
     }
 }
 
@@ -194,9 +202,13 @@ mod tests {
     }
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
-        let mut agg_state = build(&AggCall::from_pretty(pretty)).unwrap();
-        agg_state.update(&input).now_or_never().unwrap().unwrap();
-        let actual = agg_state.output().unwrap();
+        let agg = build(&AggCall::from_pretty(pretty)).unwrap();
+        let mut state = agg.create_state();
+        agg.update(&mut state, &input)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        let actual = agg.get_result(&state).now_or_never().unwrap().unwrap();
         assert_eq!(actual, expected);
     }
 }

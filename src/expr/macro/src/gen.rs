@@ -320,8 +320,8 @@ impl FunctionAttr {
 
     /// Generate build function for aggregate function.
     fn generate_agg_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
-        let ret_owned: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
         let state_type: TokenStream2 = match &self.state {
+            Some(state) if state == "ref" => types::ref_type(&self.ret).parse().unwrap(),
             Some(state) if state != "ref" => state.parse().unwrap(),
             _ => types::owned_type(&self.ret).parse().unwrap(),
         };
@@ -347,17 +347,23 @@ impl FunctionAttr {
             })
             .collect_vec();
         let let_state = match &self.state {
-            Some(s) if s == "ref" => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
-            _ => quote! { self.state.take() },
+            Some(s) if s == "ref" => {
+                quote! { state0.as_ref().map(|x| x.as_scalar_ref_impl().try_into().unwrap()) }
+            }
+            _ => quote! { state0.take().map(|s| s.try_into().unwrap()) },
         };
         let assign_state = match &self.state {
-            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar()) },
-            _ => quote! { state },
+            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar().into()) },
+            _ => quote! { state.map(|s| s.into()) },
         };
-        let init_state = match &self.init_state {
-            Some(s) => format!("Some({s})").parse().unwrap(),
-            _ => quote! { None },
-        };
+        let create_state = self.init_state.as_ref().map(|state| {
+            let state: TokenStream2 = state.parse().unwrap();
+            quote! {
+                fn create_state(&self) -> AggregateState {
+                    AggregateState::Datum(Some(#state.into()))
+                }
+            }
+        });
         let fn_name = format_ident!("{}", user_fn.name);
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
         let args = quote! { #(#args,)* };
@@ -417,21 +423,25 @@ impl FunctionAttr {
                 use risingwave_common::estimate_size::EstimateSize;
 
                 use crate::Result;
+                use crate::agg::AggregateState;
 
-                #[derive(Clone, EstimateSize)]
+                #[derive(Clone)]
                 struct Agg {
                     return_type: DataType,
-                    state: Option<#state_type>,
                 }
 
                 #[async_trait::async_trait]
-                impl crate::agg::Aggregator for Agg {
+                impl crate::agg::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
-                    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+
+                    #create_state
+
+                    async fn update(&self, state0: &mut AggregateState, input: &StreamChunk) -> Result<()> {
                         #(#let_arrays)*
-                        let mut state = #let_state;
+                        let state0 = state0.as_datum_mut();
+                        let mut state: Option<#state_type> = #let_state;
                         match input.vis() {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
@@ -450,13 +460,15 @@ impl FunctionAttr {
                                 }
                             }
                         }
-                        self.state = #assign_state;
+                        *state0 = #assign_state;
                         Ok(())
                     }
-                    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()> {
+
+                    async fn update_range(&self, state0: &mut AggregateState, input: &StreamChunk, range: Range<usize>) -> Result<()> {
                         assert!(range.end <= input.capacity());
                         #(#let_arrays)*
-                        let mut state = #let_state;
+                        let state0 = state0.as_datum_mut();
+                        let mut state: Option<#state_type> = #let_state;
                         match input.vis() {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
@@ -480,35 +492,17 @@ impl FunctionAttr {
                                 }
                             }
                         }
-                        self.state = #assign_state;
+                        *state0 = #assign_state;
                         Ok(())
                     }
-                    fn reset(&mut self) {
-                        self.state = #init_state;
-                    }
-                    fn get_state(&self) -> Datum {
-                        self.state.clone().map(|s| s.into())
-                    }
-                    fn set_state(&mut self, state: Datum) {
-                        self.state = state.map(|s| s.try_into().unwrap());
-                    }
-                    fn get_output(&self) -> Result<Datum> {
-                        // FIXME: avoid copy state
-                        Ok(self.state.clone().map(|s| <#ret_owned>::from(s).into()))
-                    }
-                    fn output(&mut self) -> Result<Datum> {
-                        #[allow(clippy::mem_replace_option_with_none)]
-                        let state = std::mem::replace(&mut self.state, #init_state);
-                        Ok(state.map(|s| <#ret_owned>::from(s).into()))
-                    }
-                    fn estimated_size(&self) -> usize {
-                        EstimateSize::estimated_size(self)
+
+                    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+                        Ok(state.as_datum().clone())
                     }
                 }
 
                 Ok(Box::new(Agg {
                     return_type: agg.return_type.clone(),
-                    state: #init_state,
                 }))
             }
         })

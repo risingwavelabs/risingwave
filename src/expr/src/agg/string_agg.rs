@@ -15,19 +15,20 @@
 use risingwave_common::bail;
 use risingwave_expr_macro::aggregate;
 
-#[aggregate("string_agg(varchar, varchar) -> varchar", state = "String")]
+#[aggregate("string_agg(varchar, varchar) -> varchar")]
 fn string_agg(
-    state: Option<String>,
+    state: Option<Box<str>>,
     value: Option<&str>,
     delimiter: Option<&str>,
-) -> Option<String> {
+) -> Option<Box<str>> {
     let Some(value) = value else { return state };
-    let Some(mut state) = state else {
+    let Some(state) = state else {
         return Some(value.into());
     };
+    let mut state = String::from(state);
     state += delimiter.unwrap_or("");
     state += value;
-    Some(state)
+    Some(state.into())
 }
 
 #[cfg(test)]
@@ -46,11 +47,15 @@ mod tests {
             + ccc ,
             + ddd ,",
         );
-        let mut agg = crate::agg::build(&AggCall::from_pretty(
+        let string_agg = crate::agg::build(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        agg.update(&chunk).await?;
-        assert_eq!(agg.output()?, Some("aaa,bbb,ccc,ddd".into()));
+        let mut state = string_agg.create_state();
+        string_agg.update(&mut state, &chunk).await?;
+        assert_eq!(
+            string_agg.get_result(&state).await?,
+            Some("aaa,bbb,ccc,ddd".into())
+        );
         Ok(())
     }
 
@@ -63,11 +68,15 @@ mod tests {
             + ccc _
             + ddd .",
         );
-        let mut agg = crate::agg::build(&AggCall::from_pretty(
+        let string_agg = crate::agg::build(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        agg.update(&chunk).await?;
-        assert_eq!(agg.output()?, Some("aaa_cccddd".into()));
+        let mut state = string_agg.create_state();
+        string_agg.update(&mut state, &chunk).await?;
+        assert_eq!(
+            string_agg.get_result(&state).await?,
+            Some("aaa_cccddd".into())
+        );
         Ok(())
     }
 }
