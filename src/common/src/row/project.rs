@@ -60,9 +60,10 @@ impl<'i, R: Row> Project<'i, R> {
     pub(crate) fn new(row: R, indices: &'i [usize]) -> Self {
         if let Some(index) = indices.iter().find(|&&i| i >= row.len()) {
             panic!(
-                "index {} out of bounds for row of length {}",
+                "index {} out of bounds for row of length {}, row {:?}",
                 index,
-                row.len()
+                row.len(),
+                row
             );
         }
         Self { row, indices }

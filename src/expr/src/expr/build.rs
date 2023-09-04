@@ -32,6 +32,7 @@ use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_proctime::ProcTimeExpression;
+use crate::expr::expr_regexp_count::RegexpCountExpression;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -65,6 +66,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::Row => NestedConstructExpression::try_from_boxed(prost),
         E::RegexpMatch => RegexpMatchExpression::try_from_boxed(prost),
         E::RegexpReplace => RegexpReplaceExpression::try_from_boxed(prost),
+        E::RegexpCount => RegexpCountExpression::try_from_boxed(prost),
         E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
             // Now we implement these three functions as a single expression for the
             // sake of simplicity. If performance matters at some time, we can split
