@@ -7615,6 +7615,7 @@ dependencies = [
  "multimap",
  "num-traits",
  "parking_lot 0.12.1",
+ "parse-display",
  "pin-project",
  "prometheus",
  "prost",
