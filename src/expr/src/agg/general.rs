@@ -55,7 +55,9 @@ fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
 
-#[aggregate("bit_and(*int) -> auto")]
+// XXX: state = "ref" is required so that
+// for the first non-null value, the state is set to that value.
+#[aggregate("bit_and(*int) -> auto", state = "ref")]
 fn bit_and<T>(state: T, input: T) -> T
 where
     T: BitAnd<Output = T>,
