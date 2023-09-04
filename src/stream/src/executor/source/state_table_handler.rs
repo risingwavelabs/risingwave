@@ -56,9 +56,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         }
     }
 
-    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_store.init_epoch(epoch).await?;
-        Ok(())
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
+        self.state_store.init_epoch(epoch);
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
@@ -286,7 +285,7 @@ pub(crate) mod tests {
         let init_epoch = EpochPair::new_test_epoch(init_epoch_num);
         let next_epoch = EpochPair::new_test_epoch(init_epoch_num + 1);
 
-        state_table.init_epoch(init_epoch).await.unwrap();
+        state_table.init_epoch(init_epoch);
         state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
         state_table.commit(next_epoch).await.unwrap();
 
@@ -311,7 +310,7 @@ pub(crate) mod tests {
         let epoch_2 = EpochPair::new_test_epoch(2);
         let epoch_3 = EpochPair::new_test_epoch(3);
 
-        state_table_handler.init_epoch(epoch_1).await?;
+        state_table_handler.init_epoch(epoch_1);
         state_table_handler
             .take_snapshot(vec![split_impl.clone()])
             .await?;

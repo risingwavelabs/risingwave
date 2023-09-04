@@ -78,7 +78,7 @@ impl<S: StateStore> NowExecutor<S> {
         while let Some(barrier) = barrier_receiver.recv().await {
             if !initialized {
                 // Handle the first barrier.
-                state_table.init_epoch(barrier.epoch).await?;
+                state_table.init_epoch(barrier.epoch);
 
                 let state_row = {
                     let data_iter = state_table.iter_row(Default::default()).await?;

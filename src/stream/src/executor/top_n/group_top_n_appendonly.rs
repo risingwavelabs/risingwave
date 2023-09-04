@@ -250,7 +250,7 @@ where
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch).await?;
+        self.managed_state.state_table.init_epoch(epoch);
         Ok(())
     }
 

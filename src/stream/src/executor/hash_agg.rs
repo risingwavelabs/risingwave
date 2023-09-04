@@ -580,9 +580,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        for table in this.all_state_tables_mut() {
-            table.init_epoch(barrier.epoch).await?;
-        }
+        this.all_state_tables_mut().for_each(|table| {
+            table.init_epoch(barrier.epoch);
+        });
         vars.agg_group_cache.update_epoch(barrier.epoch.curr);
         vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
             cache.update_epoch(barrier.epoch.curr);
