@@ -63,11 +63,11 @@ impl SplitReader for NatsSplitReader {
 impl NatsSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
-        let capacity = 1024;
+        let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
         #[for_await]
         for msgs in self.subscriber.ready_chunks(capacity) {
             let mut msg_vec = Vec::with_capacity(capacity);
-            for msg in msgs{
+            for msg in msgs {
                 msg_vec.push(SourceMessage::from_nats_message(msg));
             }
             yield msg_vec;
