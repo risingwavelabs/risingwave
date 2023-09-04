@@ -128,13 +128,12 @@ where
 }
 
 /// Collects data chunks from stream of rows.
-pub async fn collect_data_chunk_with_builder<E, S, R>(
+pub async fn collect_data_chunk_with_builder<E, S>(
     stream: &mut S,
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    R: Row,
-    S: Stream<Item = Result<R, E>> + Unpin,
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
     // TODO(kwannoel): If necessary, we can optimize it in the future.
     // This can be done by moving the check if builder is full from `append_one_row` to here,
@@ -207,7 +206,6 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     );
 }
 
-#[derive(Debug)]
 pub struct KeyedRow<T: AsRef<[u8]>> {
     vnode_prefixed_key: TableKey<T>,
     row: OwnedRow,

@@ -7536,7 +7536,6 @@ dependencies = [
  "dyn-clone",
  "either",
  "enum-as-inner",
- "expect-test",
  "fail",
  "fiemap",
  "foyer",

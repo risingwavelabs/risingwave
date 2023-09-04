@@ -104,7 +104,7 @@ impl From<Vec<(VirtualNode, BackfillProgressPerVnode)>> for BackfillState {
 pub enum BackfillProgressPerVnode {
     NotStarted,
     InProgress(OwnedRow),
-    Completed(OwnedRow),
+    Completed,
 }
 
 pub(crate) fn mark_chunk(
@@ -155,11 +155,8 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let v = match backfill_state.get_progress(&vnode)? {
-            // We want to just forward the row, if the vnode has finished backfill.
-            BackfillProgressPerVnode::Completed(_current_pos) => true,
-            // If not started, no need to forward.
+            BackfillProgressPerVnode::Completed => true,
             BackfillProgressPerVnode::NotStarted => false,
-            // If in progress, we need to check row <= current_pos.
             BackfillProgressPerVnode::InProgress(current_pos) => {
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos.project(pk_in_output_indices);
@@ -299,7 +296,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
             Some(row) => {
                 let vnode_is_finished = row.last().unwrap();
                 if vnode_is_finished.into_bool() {
-                    BackfillProgressPerVnode::Completed(row)
+                    BackfillProgressPerVnode::Completed
                 } else {
                     BackfillProgressPerVnode::InProgress(row)
                 }
@@ -308,7 +305,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         };
         result.push((vnode, backfill_progress));
     }
-    assert_eq!(result.len(), state_table.vnodes().count_ones());
     Ok(result)
 }
 
@@ -477,12 +473,11 @@ where
     }
 }
 
-#[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E, R>(mut iter: S, builder: &'a mut DataChunkBuilder)
+#[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+pub(crate) async fn iter_chunks<'a, S, E>(mut iter: S, builder: &'a mut DataChunkBuilder)
 where
     StreamExecutorError: From<E>,
-    R: Row,
-    S: Stream<Item = Result<R, E>> + Unpin + 'a,
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) = collect_data_chunk_with_builder(&mut iter, builder)
         .instrument_await("backfill_snapshot_read")
@@ -491,32 +486,18 @@ where
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-        yield stream_chunk;
+        yield Some(stream_chunk);
     }
+
+    yield None;
 }
 
 /// Schema
 /// | vnode | pk | `backfill_finished` |
-/// Persists the state per vnode based on `BackfillState`.
-/// We track the current committed state via `committed_progress`
-/// so we know whether we need to persist the state or not.
-///
-/// The state is encoded as follows:
-/// `NotStarted`:
-/// - Not persist to store at all.
-///
-/// `InProgress`:
-/// - Format: | vnode | pk | false |
-/// - If change in current pos: Persist.
-/// - No change in current pos: Do not persist.
-///
-/// Completed
-/// - Format: | vnode | pk | true |
-/// - If previous state is `InProgress` / `NotStarted`: Persist.
-/// - If previous state is Completed: Do not persist.
-///
-/// TODO(kwannoel): Why this did not persist state for all vnodes?
-/// Also we should check committed state to be all `finished` in the tests.
+/// Persists the state per vnode.
+/// 1. For each (`vnode`, `current_pos`),
+///    Either insert if no old state,
+///    Or update the state if have old state.
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
@@ -526,19 +507,16 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
     // No progress -> No need to commit anything.
-    // if backfill_state.has_no_progress() {
-    //     table.commit_no_data_expected(epoch);
-    //     return Ok(());
-    // }
+    if backfill_state.has_no_progress() {
+        table.commit_no_data_expected(epoch);
+    }
 
-    let mut has_progress = false;
     for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
         let current_pos = match backfill_progress {
-            BackfillProgressPerVnode::NotStarted => {
+            BackfillProgressPerVnode::Completed | BackfillProgressPerVnode::NotStarted => {
                 continue;
             }
-            BackfillProgressPerVnode::Completed(current_pos)
-            | BackfillProgressPerVnode::InProgress(current_pos) => current_pos,
+            BackfillProgressPerVnode::InProgress(current_pos) => current_pos,
         };
         build_temporary_state_with_vnode(temporary_state, *vnode, is_finished, current_pos);
 
@@ -546,32 +524,25 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
 
         if let Some(old_state) = old_state {
             // No progress for vnode, means no data
-            if &old_state[1..current_pos.len() + 1] == current_pos.as_inner()
-                && old_state[current_pos.len() + 1] == Some(is_finished.into())
-            {
-                continue;
+            if old_state == current_pos.as_inner() {
+                table.commit_no_data_expected(epoch);
+                return Ok(());
             } else {
-                debug_assert!(old_state[0] == Some((*vnode).to_scalar().into()));
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
                     old_row: &old_state[..],
                     new_row: &(*temporary_state),
                 });
-                has_progress = true;
+                table.commit(epoch).await?;
             }
         } else {
             // No existing state, create a new entry.
             table.write_record(Record::Insert {
                 new_row: &(*temporary_state),
             });
-            has_progress = true;
+            table.commit(epoch).await?;
         }
-        committed_progress.insert(*vnode, temporary_state.to_vec());
-    }
-    if has_progress {
-        table.commit(epoch).await?;
-    } else {
-        table.commit_no_data_expected(epoch);
+        committed_progress.insert(*vnode, current_pos.as_inner().to_vec());
     }
     Ok(())
 }

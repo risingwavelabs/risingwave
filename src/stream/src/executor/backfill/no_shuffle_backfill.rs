@@ -513,14 +513,14 @@ where
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
+
         let row_iter = owned_row_iter(iter);
         pin_mut!(row_iter);
 
         #[for_await]
         for chunk in iter_chunks(row_iter, builder) {
-            yield Some(chunk?);
+            yield chunk?;
         }
-        yield None;
     }
 
     async fn persist_state(

@@ -59,6 +59,7 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
+
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
@@ -150,7 +151,6 @@ async fn compaction_test(
         cardinality: None,
         created_at_epoch: None,
         cleaned_by_watermark: false,
-        output_indices: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -422,10 +422,13 @@ impl NormalState {
             .get(
                 Bytes::copy_from_slice(key),
                 ReadOptions {
+                    prefix_hint: None,
                     ignore_range_tombstone,
+                    retention_seconds: None,
                     table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
-                    ..Default::default()
                 },
             )
             .await
@@ -446,11 +449,13 @@ impl NormalState {
                     Bound::Excluded(Bytes::copy_from_slice(right)),
                 ),
                 ReadOptions {
+                    prefix_hint: None,
                     ignore_range_tombstone,
+                    retention_seconds: None,
                     table_id: self.table_id,
+                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
-                    ..Default::default()
                 },
             )
             .await
@@ -476,11 +481,13 @@ impl CheckState for NormalState {
                         Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
+                        prefix_hint: None,
                         ignore_range_tombstone: true,
+                        retention_seconds: None,
                         table_id: self.table_id,
+                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
                     },
                 )
                 .await

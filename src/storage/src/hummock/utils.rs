@@ -18,15 +18,17 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use tokio::sync::watch::Receiver;
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
@@ -548,6 +550,47 @@ pub(crate) fn filter_with_delete_range<'a>(
             true
         }
     })
+}
+
+pub(crate) async fn wait_for_epoch(
+    mut receiver: Receiver<HummockEpoch>,
+    wait_epoch: u64,
+) -> StorageResult<()> {
+    // avoid unnecessary check in the loop if the value does not change
+    let max_committed_epoch = *receiver.borrow_and_update();
+    if max_committed_epoch >= wait_epoch {
+        return Ok(());
+    }
+    loop {
+        match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+            Err(elapsed) => {
+                // The reason that we need to retry here is batch scan in
+                // chain/rearrange_chain is waiting for an
+                // uncommitted epoch carried by the CreateMV barrier, which
+                // can take unbounded time to become committed and propagate
+                // to the CN. We should consider removing the retry as well as wait_epoch
+                // for chain/rearrange_chain if we enforce
+                // chain/rearrange_chain to be scheduled on the same
+                // CN with the same distribution as the upstream MV.
+                // See #3845 for more details.
+                tracing::warn!(
+                    "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
+                    wait_epoch,
+                    elapsed
+                );
+                continue;
+            }
+            Ok(Err(_)) => {
+                return Err(HummockError::wait_epoch("tx dropped").into());
+            }
+            Ok(Ok(_)) => {
+                let max_committed_epoch = *receiver.borrow();
+                if max_committed_epoch >= wait_epoch {
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

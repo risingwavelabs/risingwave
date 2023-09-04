@@ -281,17 +281,11 @@ impl<T: LocalStateStore> LocalStateStoreTestExt for T {}
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
-/// TODO(kwannoel): Refactor this to `StateTableReadOptions`
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
     pub exhaust_iter: bool,
-
-    /// If None -> read from state table's current epoch.
-    /// If Some(epoch) -> read from this epoch instead.
-    /// Used to read previously checkpointed data.
-    pub read_epoch: Option<u64>,
 }
 
 impl PrefetchOptions {
@@ -300,17 +294,7 @@ impl PrefetchOptions {
     }
 
     pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self {
-            exhaust_iter,
-            ..Default::default()
-        }
-    }
-
-    pub fn new_with_epoch(epoch_option: Option<u64>) -> Self {
-        Self {
-            read_epoch: epoch_option,
-            ..Default::default()
-        }
+        Self { exhaust_iter }
     }
 }
 
@@ -318,7 +302,6 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
             exhaust_iter: value.exhaust_iter,
-            read_epoch: None,
         }
     }
 }

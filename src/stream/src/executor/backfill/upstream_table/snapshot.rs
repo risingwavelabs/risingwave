@@ -128,9 +128,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             let chunk_stream = iter_chunks(row_stream, &mut builder);
             #[for_await]
             for chunk in chunk_stream {
-                yield Some(chunk?);
+                yield chunk?;
             }
-            yield None;
         }
     }
 

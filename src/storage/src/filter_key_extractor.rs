@@ -549,7 +549,6 @@ mod tests {
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
-            output_indices: vec![],
         }
     }
 

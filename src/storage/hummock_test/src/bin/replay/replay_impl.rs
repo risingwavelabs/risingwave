@@ -202,8 +202,10 @@ pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 #[async_trait::async_trait]
 impl LocalReplay for LocalReplayImpl {
     async fn init(&mut self, epoch: EpochPair) -> Result<()> {
-        self.0.init(epoch).await.unwrap(); // FIXME(kwannoel): coerce error
-        Ok(())
+        self.0
+            .init(epoch)
+            .await
+            .map_err(|_| TraceError::Other("init failed"))
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
