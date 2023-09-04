@@ -357,17 +357,11 @@ where
                         StreamChunk::from_parts(ops, chunk)
                     })
                 })) {
-
                     if let Some(chunk) = chunk {
                         // Raise the current position.
                         // As snapshot read streams are ordered by pk, so we can
                         // just use the last row to update `current_pos`.
-                        update_pos_by_vnode(
-                            vnode,
-                            &chunk,
-                            &pk_in_output_indices,
-                            &mut backfill_state,
-                        );
+                        update_pos_by_vnode(vnode, &chunk, &pk_indices, &mut backfill_state);
 
                         let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -589,8 +583,8 @@ where
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);
 
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, builder)
-                .map_ok(move |chunk| (vnode, chunk));
+            let vnode_chunk_iter =
+                iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));
         }

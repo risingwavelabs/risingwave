@@ -21,7 +21,6 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use rand::{thread_rng, RngCore};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -479,10 +478,8 @@ where
 }
 
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E, R>(
-    mut iter: S,
-    builder: &'a mut DataChunkBuilder,
-) where
+pub(crate) async fn iter_chunks<'a, S, E, R>(mut iter: S, builder: &'a mut DataChunkBuilder)
+where
     StreamExecutorError: From<E>,
     R: Row,
     S: Stream<Item = Result<R, E>> + Unpin + 'a,
