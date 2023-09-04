@@ -205,10 +205,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         self.inner.seal_current_epoch(next_epoch)
     }
 
-    async fn try_flush(
-        &mut self,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<()> {
+    async fn try_flush(&mut self) -> StorageResult<()> {
         unimplemented!()
     }
 }

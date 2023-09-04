@@ -129,10 +129,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn try_flush(
-        &mut self,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<()> {
+    async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 }

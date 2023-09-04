@@ -281,12 +281,9 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.seal_current_epoch(next_epoch)
     }
 
-    fn try_flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.inner
-            .try_flush(delete_ranges)
+            .try_flush()
             .verbose_instrument_await("store_try_flush")
     }
 }

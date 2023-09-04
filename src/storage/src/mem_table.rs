@@ -561,10 +561,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         );
     }
 
-    async fn try_flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<()> {
+    async fn try_flush(&mut self) -> StorageResult<()> {
         tracing::info!("In memory state store");
         if self.mem_table.kv_size.size() > 64 * 1024 * 1024 {
             tracing::info!(
@@ -576,7 +573,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             self.epoch
                 .replace(gap_epoch)
                 .expect("should have init epoch before seal the first epoch");
-            self.flush(delete_ranges).await?;
+            self.flush(vec![]).await?;
         }
 
         Ok(())

@@ -1038,8 +1038,7 @@ where
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
-        let delete_ranges = self.get_delete_range()?;
-        self.local_store.try_flush(delete_ranges).await?;
+        self.local_store.try_flush().await?;
         Ok(())
     }
 }
