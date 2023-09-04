@@ -386,6 +386,47 @@ impl NatsCommon {
         Ok(subscription)
     }
 
+    pub(crate) async fn build_consumer(
+        &self,
+        start_sequence: Option<u64>,
+    ) -> anyhow::Result<
+        async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
+    > {
+        let context = self.build_context().await?;
+        let stream = self.build_or_get_stream(context.clone()).await?;
+        let name = "consuemr";
+        match start_sequence {
+            Some(v) => {
+                let consumer = stream
+                    .get_or_create_consumer(
+                        name,
+                        async_nats::jetstream::consumer::pull::Config {
+                            durable_name: Some(name.to_string()),
+                            deliver_policy:
+                                async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
+                                    start_sequence: (v),
+                                },
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                Ok(consumer)
+            }
+            None => {
+                let consumer = stream
+                    .get_or_create_consumer(
+                        name,
+                        async_nats::jetstream::consumer::pull::Config {
+                            durable_name: Some(name.to_string()),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                Ok(consumer)
+            }
+        }
+    }
+
     pub(crate) async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,

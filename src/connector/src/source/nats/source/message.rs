@@ -20,12 +20,12 @@ use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
 impl SourceMessage {
-    pub fn from_nats_message(message: async_nats::Message) -> Self {
+    pub fn from_nats_jetstream_message(message: async_nats::jetstream::message::Message) -> Self {
         SourceMessage {
             key: None,
-            payload: Some(message.payload.to_vec()),
-            // Nats message doesn't have offset
-            offset: "".to_string(),
+            payload: Some(message.message.payload.to_vec()),
+            // For nats jetstream, use sequence id as offset
+            offset: message.info().unwrap().consumer_sequence.to_string(),
             split_id: Arc::from(""),
             meta: SourceMeta::Empty,
         }

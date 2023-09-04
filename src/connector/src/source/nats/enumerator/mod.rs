@@ -45,6 +45,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
         let nats_split = NatsSplit {
             subject: self.subject.clone(),
             split_num: 1,
+            start_sequence: None,
         };
 
         Ok(vec![nats_split])
