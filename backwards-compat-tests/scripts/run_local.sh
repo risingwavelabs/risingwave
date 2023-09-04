@@ -14,6 +14,7 @@ setup_old_cluster() {
 
 setup_new_cluster() {
   echo "--- Setting up new cluster"
+  rm -r .risingwave/bin/risingwave
   git checkout "$NEW_TAG"
 }
 
