@@ -853,7 +853,9 @@ where
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert!(self.epoch() >= new_epoch.prev);
-        assert!(self.epoch() < new_epoch.curr);
+        if self.epoch() >= new_epoch.curr {
+            panic!("Fail to commit, the epoch gap runs out");
+        }
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),
@@ -1035,11 +1037,9 @@ where
         Ok(())
     }
 
-    pub async fn try_flush(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
         let delete_ranges = self.get_delete_range()?;
-        self.local_store
-            .try_flush(delete_ranges, next_epoch)
-            .await?;
+        self.local_store.try_flush(delete_ranges).await?;
         Ok(())
     }
 }

@@ -1873,7 +1873,7 @@ async fn test_mem_table_spill() {
         Some(text.clone().into()),
     ]));
 
-    state_table.try_flush(10).await.unwrap();
+    state_table.try_flush().await.unwrap();
     assert_eq!(state_table.epoch(), 1);
 
     state_table.insert(OwnedRow::new(vec![
@@ -1881,7 +1881,7 @@ async fn test_mem_table_spill() {
         Some(text.clone().into()),
     ]));
 
-    state_table.try_flush(10).await.unwrap();
+    state_table.try_flush().await.unwrap();
 
     // spill occurs, the epoch has changed.
     assert_eq!(state_table.epoch(), 2);
@@ -1890,7 +1890,7 @@ async fn test_mem_table_spill() {
         Some(text.clone().into()),
     ]));
 
-    state_table.try_flush(10).await.unwrap();
+    state_table.try_flush().await.unwrap();
 
     // spill not occurs, the epoch has not changed.
     assert_eq!(state_table.epoch(), 2);
@@ -1900,7 +1900,7 @@ async fn test_mem_table_spill() {
         Some(text.clone().into()),
     ]));
 
-    state_table.try_flush(10).await.unwrap();
+    state_table.try_flush().await.unwrap();
 
     // spill occurs, the epoch has changed.
     assert_eq!(state_table.epoch(), 3);
@@ -1910,7 +1910,7 @@ async fn test_mem_table_spill() {
         Some(text.clone().into()),
     ]));
 
-    state_table.try_flush(10).await.unwrap();
+    state_table.try_flush().await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(6_i32.into()),
@@ -1918,6 +1918,6 @@ async fn test_mem_table_spill() {
     ]));
 
     assert_eq!(state_table.epoch(), 3);
-    let flush_epoch = EpochPair::new_test_epoch(10);
+    let flush_epoch = EpochPair::new(10, 1);
     state_table.commit(flush_epoch).await.unwrap();
 }
