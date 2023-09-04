@@ -399,6 +399,32 @@ impl Cluster {
         Ok(())
     }
 
+    /// Pause all data sources in the cluster.
+    #[cfg_or_panic(madsim)]
+    pub async fn pause(&mut self) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "pause"]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+
+        Ok(())
+    }
+
+    /// Resume all data sources in the cluster.
+    #[cfg_or_panic(madsim)]
+    pub async fn resume(&mut self) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "resume"]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+
+        Ok(())
+    }
+
     #[cfg_or_panic(madsim)]
     pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
         let revision = self
