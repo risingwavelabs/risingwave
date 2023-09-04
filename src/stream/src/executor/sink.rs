@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -26,7 +25,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::{
     build_sink, Sink, SinkImpl, SinkParam, SinkWriter, SinkWriterParam,
 };
@@ -74,27 +73,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
         sink_writer_param: SinkWriterParam,
+        sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
-        properties: HashMap<String, String>,
-        pk_indices: Vec<usize>,
-        sink_type: SinkType,
-        sink_id: SinkId,
         actor_context: ActorContextRef,
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
 
-        let sink_param = SinkParam {
-            sink_id,
-            properties,
-            columns: columns
-                .iter()
-                .filter(|col| !col.is_hidden)
-                .map(|col| col.column_desc.clone())
-                .collect(),
-            pk_indices,
-            sink_type,
-        };
         let sink = build_sink(sink_param.clone())?;
         let input_schema = columns
             .iter()
@@ -384,15 +369,26 @@ mod test {
             ],
         );
 
+        let sink_param = SinkParam {
+            sink_id: 0.into(),
+            properties,
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
+            pk_indices: pk.clone(),
+            sink_type: SinkType::ForceAppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::default(),
+            sink_param,
             columns.clone(),
-            properties,
-            pk.clone(),
-            SinkType::ForceAppendOnly,
-            0.into(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
@@ -470,15 +466,26 @@ mod test {
             ],
         );
 
+        let sink_param = SinkParam {
+            sink_id: 0.into(),
+            properties,
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
+            pk_indices: pk.clone(),
+            sink_type: SinkType::ForceAppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::default(),
+            sink_param,
             columns,
-            properties,
-            pk.clone(),
-            SinkType::ForceAppendOnly,
-            0.into(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )

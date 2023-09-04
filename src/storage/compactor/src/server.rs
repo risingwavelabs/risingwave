@@ -36,7 +36,9 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::filter_key_extractor::{FilterKeyExtractorManager, RemoteTableAccessor};
+use risingwave_storage::filter_key_extractor::{
+    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
+};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -156,7 +158,7 @@ pub async fn compactor_serve(
 
     let telemetry_enabled = system_params_reader.telemetry_enabled();
 
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+    let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
     )));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
@@ -201,7 +203,9 @@ pub async fn compactor_serve(
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
         )),
-        filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager.clone(),
+        ),
         memory_limiter,
 
         task_progress_manager: Default::default(),

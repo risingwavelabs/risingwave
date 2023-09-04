@@ -218,6 +218,7 @@ mod tests {
             adds: Default::default(),
             added_actors: maplit::hashset! {actor_id},
             splits: Default::default(),
+            pause: false,
         });
         tx.send(first_message).unwrap();
 

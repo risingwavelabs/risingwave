@@ -167,7 +167,6 @@ where
                     let snapshot = Self::snapshot_read_per_vnode(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
-                        self.chunk_size,
                         &mut builders,
                     );
                     pin_mut!(snapshot);
@@ -251,7 +250,6 @@ where
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
-                        self.chunk_size,
                         &mut builders,
                     )
                     .map(Either::Right),);
@@ -354,16 +352,24 @@ where
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
                 // we encounter "higher-ranked lifetime error".
                 for (vnode, chunk) in vnodes.iter_vnodes().zip_eq(builders.iter_mut().map(|b| {
-                    let chunk = b.build_data_chunk();
-                    let ops = vec![Op::Insert; chunk.capacity()];
-                    StreamChunk::from_parts(ops, chunk)
+                    b.consume_all().map(|chunk| {
+                        let ops = vec![Op::Insert; chunk.capacity()];
+                        StreamChunk::from_parts(ops, chunk)
+                    })
                 })) {
-                    // Raise the current position.
-                    // As snapshot read streams are ordered by pk, so we can
-                    // just use the last row to update `current_pos`.
-                    let chunk_cardinality = chunk.cardinality() as u64;
-                    if chunk_cardinality > 0 {
-                        update_pos_by_vnode(vnode, &chunk, &pk_indices, &mut backfill_state);
+
+                    if let Some(chunk) = chunk {
+                        // Raise the current position.
+                        // As snapshot read streams are ordered by pk, so we can
+                        // just use the last row to update `current_pos`.
+                        update_pos_by_vnode(
+                            vnode,
+                            &chunk,
+                            &pk_in_output_indices,
+                            &mut backfill_state,
+                        );
+
+                        let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
                         yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
@@ -534,7 +540,7 @@ where
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
     ///
-    /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
+    /// We interleave at chunk per vnode level rather than rows.
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
     ///
@@ -545,11 +551,16 @@ where
     ///
     /// The `snapshot_read_epoch` is supplied as a parameter for `state_table`.
     /// It is required to ensure we read a fully-checkpointed snapshot the **first time**.
+    ///
+    /// The rows from upstream snapshot read will be buffered inside the `builder`.
+    /// If snapshot is dropped before its rows are consumed,
+    /// remaining data in `builder` must be flushed manually.
+    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
+    /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
-        chunk_size: usize,
         builders: &'a mut [DataChunkBuilder],
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
@@ -578,7 +589,7 @@ where
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);
 
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, chunk_size, builder)
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, builder)
                 .map_ok(move |chunk| (vnode, chunk));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));

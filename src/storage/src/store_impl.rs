@@ -23,7 +23,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{
-    FilterKeyExtractorManager, FilterKeyExtractorManagerRef, RemoteTableAccessor,
+    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
 use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -637,7 +637,7 @@ impl StateStoreImpl {
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-                let key_filter_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+                let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
                     RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
                 )));
                 let inner = HummockStorage::new(
@@ -676,7 +676,7 @@ impl StateStoreImpl {
 pub trait HummockTrait {
     fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager;
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
     fn backup_reader(&self) -> BackupReaderRef;
     fn as_hummock(&self) -> Option<&HummockStorage>;
@@ -691,7 +691,7 @@ impl HummockTrait for HummockStorage {
         self.sstable_store()
     }
 
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
         self.filter_key_extractor_manager()
     }
 

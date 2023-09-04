@@ -221,30 +221,27 @@ fn mark_cdc_chunk_inner(
 
     // `_rw_offset` must be placed at the last column right now
     let offset_col_idx = data.dimension() - 1;
-    for v in data.rows_with_holes().map(|row| {
+    for v in data.rows().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
         let event_offset = table_reader.parse_binlog_offset(offset_datum.into_utf8())?;
-        let visible = match row {
-            None => false,
-            Some(row) => {
-                // filter changelog events with binlog range
-                let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
-                    binlog_low <= &event_offset
-                } else {
-                    true
-                };
+        let visible = {
+            // filter changelog events with binlog range
+            let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
+                binlog_low <= &event_offset
+            } else {
+                true
+            };
 
-                if in_binlog_range {
-                    let lhs = row.project(pk_in_output_indices);
-                    let rhs = current_pos.project(pk_in_output_indices);
-                    let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                    match order {
-                        Ordering::Less | Ordering::Equal => true,
-                        Ordering::Greater => false,
-                    }
-                } else {
-                    false
+            if in_binlog_range {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos;
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
                 }
+            } else {
+                false
             }
         };
         Ok::<_, ConnectorError>(visible)
@@ -484,17 +481,15 @@ where
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
 pub(crate) async fn iter_chunks<'a, S, E, R>(
     mut iter: S,
-    chunk_size: usize,
     builder: &'a mut DataChunkBuilder,
 ) where
     StreamExecutorError: From<E>,
     R: Row,
     S: Stream<Item = Result<R, E>> + Unpin + 'a,
 {
-    while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
-            .instrument_await("backfill_snapshot_read")
-            .await?
+    while let Some(data_chunk) = collect_data_chunk_with_builder(&mut iter, builder)
+        .instrument_await("backfill_snapshot_read")
+        .await?
     {
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];
