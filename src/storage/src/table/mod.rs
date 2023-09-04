@@ -132,7 +132,6 @@ pub async fn collect_data_chunk_with_builder<E, S, R>(
     stream: &mut S,
     chunk_size: Option<usize>,
     builder: &mut DataChunkBuilder,
-    _uid: u64,
 ) -> Result<Option<DataChunk>, E>
 where
     R: Row,

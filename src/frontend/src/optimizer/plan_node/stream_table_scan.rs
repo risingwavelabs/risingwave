@@ -273,7 +273,10 @@ impl StreamTableScan {
         println!("upstream_column_ids: {:?}", upstream_column_ids);
         println!("output_column_ids {:?}", self.logical.output_column_ids());
         println!("output_indices {:?}", output_indices);
-        println!("upstream_table_catalog_columns: {:?}", upstream_table_catalog.columns());
+        println!(
+            "upstream_table_catalog_columns: {:?}",
+            upstream_table_catalog.columns()
+        );
 
         let arrangement_table = if self.chain_type == ChainType::ArrangementBackfill {
             Some(upstream_table_catalog.to_internal_table_prost())

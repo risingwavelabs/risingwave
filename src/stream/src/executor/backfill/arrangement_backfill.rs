@@ -390,6 +390,7 @@ where
                         ));
                     }
 
+                    println!("Replicate");
                     // Replicate
                     upstream_table.write_chunk(chunk);
                 }

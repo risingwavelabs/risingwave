@@ -492,7 +492,7 @@ pub(crate) async fn iter_chunks<'a, S, E, R>(
     S: Stream<Item = Result<R, E>> + Unpin + 'a,
 {
     while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder, uid)
+        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
             .instrument_await("backfill_snapshot_read")
             .await?
     {
