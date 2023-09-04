@@ -32,19 +32,14 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
-use std::ffi::c_void;
 use std::future::Future;
 use std::pin::Pin;
 
 use clap::{Parser, ValueEnum};
-use jni::objects::{JObject, JValue};
-use jni::strings::JNIString;
-use jni::NativeMethod;
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_java_binding::jvm_runtime::JVM;
-use risingwave_java_binding::run_this_func_to_get_valid_ptr_from_java_binding;
+use risingwave_jni_core::jvm_runtime;
 use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
@@ -219,241 +214,15 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
 
+        jvm_runtime::register_native_method_for_jvm();
+
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts).await;
-
-        std::thread::spawn(move || {
-            run_jvm();
-        });
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
         }
     })
-}
-
-fn run_jvm() {
-    let mut env = JVM.attach_current_thread_as_daemon().unwrap();
-
-    // FIXME: remove this function would cause segment fault.
-    run_this_func_to_get_valid_ptr_from_java_binding();
-
-    let binding_class = env
-        .find_class("com/risingwave/java/binding/Binding")
-        .unwrap();
-    env.register_native_methods(binding_class, &[
-        NativeMethod {
-            name: JNIString::from("vnodeCount"),
-            sig: JNIString::from("()I"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_vnodeCount as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("hummockIteratorNew"),
-            sig: JNIString::from("([B)J"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_hummockIteratorNew as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("hummockIteratorNext"),
-            sig: JNIString::from("(J)J"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_hummockIteratorNext as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("hummockIteratorClose"),
-            sig: JNIString::from("(J)V"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_hummockIteratorClose as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetKey"),
-            sig: JNIString::from("(J)[B"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetKey as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetOp"),
-            sig: JNIString::from("(J)I"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetOp as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowIsNull"),
-            sig: JNIString::from("(JI)Z"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowIsNull as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetInt16Value"),
-            sig: JNIString::from("(JI)S"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetInt16Value as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetInt32Value"),
-            sig: JNIString::from("(JI)I"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetInt32Value as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetInt64Value"),
-            sig: JNIString::from("(JI)J"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetInt64Value as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetFloatValue"),
-            sig: JNIString::from("(JI)F"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetFloatValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetDoubleValue"),
-            sig: JNIString::from("(JI)D"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetDoubleValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetBooleanValue"),
-            sig: JNIString::from("(JI)Z"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetBooleanValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetStringValue"),
-            sig: JNIString::from("(JI)Ljava/lang/String;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetStringValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetTimestampValue"),
-            sig: JNIString::from("(JI)Ljava/sql/Timestamp;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetTimestampValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetDecimalValue"),
-            sig: JNIString::from("(JI)Ljava/math/BigDecimal;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetDecimalValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetTimeValue"),
-            sig: JNIString::from("(JI)Ljava/sql/Time;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetTimeValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetDateValue"),
-            sig: JNIString::from("(JI)Ljava/sql/Date;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetDateValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetIntervalValue"),
-            sig: JNIString::from("(JI)Ljava/lang/String;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetIntervalValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetJsonbValue"),
-            sig: JNIString::from("(JI)Ljava/lang/String;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetJsonbValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetByteaValue"),
-            sig: JNIString::from("(JI)[B"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetByteaValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowGetArrayValue"),
-            sig: JNIString::from("(JILjava/lang/Class;)Ljava/lang/Object;"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowGetArrayValue as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("rowClose"),
-            sig: JNIString::from("(J)V"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_rowClose as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("streamChunkIteratorNew"),
-            sig: JNIString::from("([B)J"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("streamChunkIteratorNext"),
-            sig: JNIString::from("(J)J"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("streamChunkIteratorClose"),
-            sig: JNIString::from("(J)V"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_streamChunkIteratorClose as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("streamChunkIteratorFromPretty"),
-            sig: JNIString::from("(Ljava/lang/String;)J"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_streamChunkIteratorFromPretty as *mut c_void,
-        },
-
-
-        NativeMethod {
-            name: JNIString::from("sendMsgToChannel"),
-            sig: JNIString::from("(J[B)Z"),
-            fn_ptr: risingwave_java_binding::Java_com_risingwave_java_binding_Binding_sendMsgToChannel as *mut c_void,
-        },
-
-    ]).unwrap();
-
-    let string_class = env.find_class("java/lang/String").unwrap();
-    let jarray = env
-        .new_object_array(0, string_class, JObject::null())
-        .unwrap();
-
-    // FIXME: if we finish rewriting all RPCs to JNI calls, we don't need to run main anymore.
-    let _ = env
-        .call_static_method(
-            "com/risingwave/connector/ConnectorService",
-            "main",
-            "([Ljava/lang/String;)V",
-            &[JValue::Object(&jarray)],
-        )
-        .inspect_err(|e| eprintln!("{:?}", e))
-        .unwrap();
 }
 
 fn default_total_memory_bytes() -> usize {

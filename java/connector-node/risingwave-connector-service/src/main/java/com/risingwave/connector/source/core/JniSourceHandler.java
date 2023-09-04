@@ -59,10 +59,10 @@ public class JniSourceHandler {
                                 "Engine#{}: emit one chunk {} events to network ",
                                 config.getSourceId(),
                                 resp.getEventsCount());
-                        success = Binding.sendMsgToChannel(channelPtr, resp.toByteArray());
+                        success = Binding.sendCdcSourceMsgToChannel(channelPtr, resp.toByteArray());
                     } else {
                         // If resp is null means just check whether channel is closed.
-                        success = Binding.sendMsgToChannel(channelPtr, null);
+                        success = Binding.sendCdcSourceMsgToChannel(channelPtr, null);
                     }
                     if (!success) {
                         LOG.info(

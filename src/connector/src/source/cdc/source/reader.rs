@@ -20,8 +20,8 @@ use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use jni::objects::{JObject, JValue};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_java_binding::jvm_runtime::JVM;
-use risingwave_java_binding::GetEventStreamJniSender;
+use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_jni_core::GetEventStreamJniSender;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 use tokio::sync::mpsc;
 

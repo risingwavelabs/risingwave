@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_java_binding"
+name = "risingwave_jni_core"
 version = "0.1.0"
 edition = "2021"
 
@@ -17,7 +17,6 @@ jni = "0.21.1"
 prost = "0.11"
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_jni_core = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_storage = { workspace = true }
@@ -37,16 +36,3 @@ tracing = "0.1"
 
 [dev-dependencies]
 risingwave_expr = { workspace = true }
-
-[lib]
-crate-type = ["cdylib"]
-
-[[bin]]
-name = "data-chunk-payload-generator"
-test = false
-bench = false
-
-[[bin]]
-name = "data-chunk-payload-convert-generator"
-test = false
-bench = false
