@@ -114,6 +114,8 @@ message Sink {
   optional uint32 connection_id = 14;
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
+  string db_name = 17;
+  string sink_from_name = 18;
 }
 
 message Connection {

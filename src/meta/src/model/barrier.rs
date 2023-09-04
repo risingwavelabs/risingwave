@@ -14,6 +14,16 @@
 
 use crate::barrier::TracedEpoch;
 
+/// The reason why the data sources in the cluster are paused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PausedReason {
+    /// The cluster is paused due to configuration change, e.g. altering table schema and scaling.
+    ConfigChange,
+    /// The cluster is paused due to manual operation, e.g. `risectl` command or the
+    /// `pause_on_next_bootstrap` system variable.
+    Manual,
+}
+
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
     /// The last sent `prev_epoch`
@@ -21,13 +31,32 @@ pub struct BarrierManagerState {
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
     in_flight_prev_epoch: TracedEpoch,
+
+    /// Whether the cluster is paused and the reason.
+    paused_reason: Option<PausedReason>,
 }
 
 impl BarrierManagerState {
-    pub fn new(in_flight_prev_epoch: TracedEpoch) -> Self {
+    pub fn new(in_flight_prev_epoch: TracedEpoch, paused_reason: Option<PausedReason>) -> Self {
         Self {
             in_flight_prev_epoch,
+            paused_reason,
         }
+    }
+
+    pub fn paused_reason(&self) -> Option<PausedReason> {
+        self.paused_reason
+    }
+
+    pub fn set_paused_reason(&mut self, paused_reason: Option<PausedReason>) {
+        if self.paused_reason != paused_reason {
+            tracing::info!(current = ?self.paused_reason, new = ?paused_reason, "update paused state");
+            self.paused_reason = paused_reason;
+        }
+    }
+
+    pub fn in_flight_prev_epoch(&self) -> &TracedEpoch {
+        &self.in_flight_prev_epoch
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.

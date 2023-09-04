@@ -334,7 +334,7 @@ type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
-type CdcBackfill = ConfigBool<CDC_BACKFILL, true>;
+type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {

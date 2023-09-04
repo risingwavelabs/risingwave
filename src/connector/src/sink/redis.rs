@@ -28,7 +28,7 @@ use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 
-use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::RedisCommon;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -69,22 +69,17 @@ pub struct RedisSink {
 }
 
 impl RedisSink {
-    pub fn new(
-        config: RedisConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Result<Self> {
-        if pk_indices.is_empty() {
+    pub fn new(config: RedisConfig, param: SinkParam) -> Result<Self> {
+        if param.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Redis Sink Primary Key must be specified."
             )));
         }
         Ok(Self {
             config,
-            schema,
-            is_append_only,
-            pk_indices,
+            schema: param.schema(),
+            is_append_only: param.sink_type.is_append_only(),
+            pk_indices: param.pk_indices,
         })
     }
 }

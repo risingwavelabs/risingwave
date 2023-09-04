@@ -74,6 +74,8 @@ pub struct SinkParam {
     pub columns: Vec<ColumnDesc>,
     pub pk_indices: Vec<usize>,
     pub sink_type: SinkType,
+    pub db_name: String,
+    pub sink_from_name: String,
 }
 
 impl SinkParam {
@@ -91,6 +93,8 @@ impl SinkParam {
             sink_type: SinkType::from_proto(
                 PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
             ),
+            db_name: pb_param.db_name,
+            sink_from_name: pb_param.sink_from_name,
         }
     }
 
@@ -103,6 +107,8 @@ impl SinkParam {
                 pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 
@@ -125,6 +131,8 @@ impl From<SinkCatalog> for SinkParam {
             columns,
             pk_indices: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            db_name: sink_catalog.db_name,
+            sink_from_name: sink_catalog.sink_from_name,
         }
     }
 }
@@ -419,24 +427,9 @@ macro_rules! dispatch_sink {
 impl SinkImpl {
     pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(
-                cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-            )?),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
-                *cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-            )),
-            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
-                *cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-            )),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param)?),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(*cfg, param)),
+            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(*cfg, param)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
