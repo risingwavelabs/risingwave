@@ -68,7 +68,14 @@ impl SplitReader for KinesisSplitReader {
 
         let start_position = match &split.start_position {
             KinesisOffset::None => match &properties.scan_startup_mode {
-                None => KinesisOffset::Earliest,
+                None => {
+                    if properties.seq_offset.is_some() {
+                        return Err(anyhow!(
+                            "scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number"
+                        ));
+                    }
+                    KinesisOffset::Earliest
+                }
                 Some(mode) => match mode.as_str() {
                     "earliest" => KinesisOffset::Earliest,
                     "latest" => KinesisOffset::Latest,
