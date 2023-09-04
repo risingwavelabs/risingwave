@@ -308,12 +308,22 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl ClickHouseCommon {
     pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        let client = Client::default()
+        use hyper_tls::HttpsConnector;
+
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(https);
+
+        let client = Client::with_http_client(client)
             .with_url(&self.url)
             .with_user(&self.user)
-            .with_password(&self.password);
+            .with_password(&self.password)
+            .with_database(&self.database);
         Ok(client)
     }
 }
@@ -355,14 +365,25 @@ pub struct NatsCommon {
 }
 
 impl NatsCommon {
-    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
         if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
             connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
         }
         let client = connect_options.connect(self.server_url.clone()).await?;
+        Ok(client)
+    }
+
+    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+        let client = self.build_client().await?;
         let jetstream = async_nats::jetstream::new(client);
         Ok(jetstream)
+    }
+
+    pub(crate) async fn build_subscriber(&self) -> anyhow::Result<async_nats::Subscriber> {
+        let client = self.build_client().await?;
+        let subscription = client.subscribe(self.subject.clone()).await?;
+        Ok(subscription)
     }
 
     pub(crate) async fn build_or_get_stream(

@@ -41,6 +41,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+    RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
@@ -212,13 +213,19 @@ async fn compaction_test(
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
-        Arc::new(FilterKeyExtractorManager::default()),
+        Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();
-    let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
+    let filter_key_extractor_manager = match store.filter_key_extractor_manager().clone() {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
+
     filter_key_extractor_manager.update(
         1,
         Arc::new(FilterKeyExtractorImpl::FullKey(
@@ -560,7 +567,7 @@ fn run_compactor_thread(
     storage_opts: Arc<StorageOpts>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
     compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
@@ -574,14 +581,15 @@ fn run_compactor_thread(
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager,
+        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager,
+        ),
         memory_limiter: MemoryLimiter::unlimit(),
-        sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     });
-    start_compactor(compactor_context)
+    start_compactor(compactor_context, sstable_object_id_manager)
 }
 
 #[cfg(test)]

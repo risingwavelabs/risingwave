@@ -178,6 +178,7 @@ mod test {
                     },
                     added_actors: maplit::hashset! { actor_id },
                     splits: Default::default(),
+                    pause: false,
                 })),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
