@@ -325,6 +325,11 @@ enum KafkaSinkState {
     Running(u64),
 }
 
+/// The delivery buffer queue size
+/// When the `DeliveryFuture` the current `future_delivery_buffer`
+/// is buffering is greater than this size, then enforcing commit once
+const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 10;
+
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
     pub inner: FutureProducer<PrivateLinkProducerContext>,
@@ -334,7 +339,6 @@ pub struct KafkaSinkWriter {
     pk_indices: Vec<usize>,
     is_append_only: bool,
     future_delivery_buffer: Vec<DeliveryFuture>,
-    max_limit: Option<usize>,
 }
 
 impl KafkaSinkWriter {
@@ -344,7 +348,6 @@ impl KafkaSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
         identifier: String,
-        // max_limit: Option<usize>,
     ) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
@@ -380,8 +383,6 @@ impl KafkaSinkWriter {
             pk_indices,
             is_append_only,
             future_delivery_buffer: Vec::new(),
-            // FIXME: Where to accept the input?
-            max_limit: Some(10),
         })
     }
 
@@ -438,11 +439,9 @@ impl KafkaSinkWriter {
                     push_flag = true;
 
                     // First see if the size is greater than the limit
-                    if let Some(max_limit) = self.max_limit {
-                        if future_buffer.len() > max_limit {
-                            commit_flag = true;
-                            break;
-                        }
+                    if future_buffer.len() > KAFKA_WRITER_MAX_QUEUE_SIZE {
+                        commit_flag = true;
+                        break;
                     }
                     break;
                 }
