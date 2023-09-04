@@ -14,6 +14,8 @@
 
 pub mod columns;
 pub mod tables;
+pub mod views;
 
 pub use columns::*;
 pub use tables::*;
+pub use views::*;
