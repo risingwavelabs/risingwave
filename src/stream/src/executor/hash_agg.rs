@@ -438,8 +438,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for key in &vars.group_change_set {
             let agg_group = vars.agg_group_cache.get_mut(key).unwrap();
             let encoded_states = agg_group.encode_states(&this.agg_funcs)?;
-            vars.buffer
-                .update_without_old_value(encoded_states, &mut this.intermediate_state_table);
+            if this.emit_on_window_close {
+                vars.buffer
+                    .update_without_old_value(encoded_states, &mut this.intermediate_state_table);
+            } else {
+                this.intermediate_state_table
+                    .update_without_old_value(encoded_states);
+            }
         }
 
         if this.emit_on_window_close {
