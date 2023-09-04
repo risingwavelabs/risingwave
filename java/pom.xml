@@ -392,7 +392,8 @@
                 </configuration>
             </plugin>
 
-            <plugin>
+            <!-- uncomment when deploying -->
+            <!-- <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-gpg-plugin</artifactId>
                 <version>3.1.0</version>
@@ -405,7 +406,7 @@
                         </goals>
                     </execution>
                 </executions>
-            </plugin>
+            </plugin> -->
 
             <plugin>
                 <groupId>org.sonatype.plugins</groupId>
