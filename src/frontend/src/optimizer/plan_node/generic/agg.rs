@@ -20,6 +20,7 @@ use itertools::{Either, Itertools};
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding;
 use risingwave_expr::agg::{agg_kinds, AggKind};
@@ -476,47 +477,42 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let in_append_only = self.input.append_only();
+        let mut out_fields = me.schema().fields().to_vec();
 
-        let fields = self
+        // rewrite data types in fields
+        let in_append_only = self.input.append_only();
+        for (agg_call, field) in self
             .agg_calls
             .iter()
-            .map(|agg_call| {
-                let sig = AGG_FUNC_SIG_MAP
-                    .get(
-                        agg_call.agg_kind,
-                        &agg_call
-                            .inputs
-                            .iter()
-                            .map(|input| (&input.data_type).into())
-                            .collect_vec(),
-                        (&agg_call.return_type).into(),
-                        in_append_only,
-                    )
-                    .expect("agg not found");
-                let data_type = if !in_append_only && sig.append_only {
-                    // we use materialized input state for non-retractable aggregate function.
-                    // for backward compatibility, the state type is same as the return type.
-                    // its values in the intermediate state table are always null.
-                    agg_call.return_type.clone()
-                } else {
-                    sig.state_type.into()
-                };
-                Field {
-                    data_type,
-                    name: format!("{:?}_state", agg_call.agg_kind),
-                    sub_fields: vec![],
-                    type_name: String::default(),
-                }
-            })
-            .collect_vec();
+            .zip_eq_fast(&mut out_fields[self.group_key.len()..])
+        {
+            let sig = AGG_FUNC_SIG_MAP
+                .get(
+                    agg_call.agg_kind,
+                    &agg_call
+                        .inputs
+                        .iter()
+                        .map(|input| (&input.data_type).into())
+                        .collect_vec(),
+                    (&agg_call.return_type).into(),
+                    in_append_only,
+                )
+                .expect("agg not found");
+            if !in_append_only && sig.append_only {
+                // we use materialized input state for non-retractable aggregate function.
+                // for backward compatibility, the state type is same as the return type.
+                // its values in the intermediate state table are always null.
+            } else {
+                field.data_type = sig.state_type.into();
+            }
+        }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let n_group_key_cols = self.group_key.len();
 
         let (mut table_builder, _, _) = self.create_table_builder(me.ctx(), window_col_idx);
         let read_prefix_len_hint = table_builder.get_current_pk_len();
 
-        for field in fields.iter().skip(n_group_key_cols) {
+        for field in out_fields.iter().skip(n_group_key_cols) {
             table_builder.add_column(field);
         }
 
@@ -526,9 +522,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             table_builder.set_vnode_col_idx(tb_vnode_idx);
         }
 
-        // the intermediate state table is composed of group_key and all agg_call's states, so the
-        // value_indices of this table should skip group_key.len().
-        table_builder.set_value_indices((n_group_key_cols..fields.len()).collect());
+        // the result_table is composed of group_key and all agg_call's values, so the value_indices
+        // of this table should skip group_key.len().
+        table_builder.set_value_indices((n_group_key_cols..out_fields.len()).collect());
         table_builder.build(tb_dist, read_prefix_len_hint)
     }
 
