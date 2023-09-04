@@ -6873,6 +6873,8 @@ dependencies = [
  "futures-async-stream",
  "glob",
  "google-cloud-pubsub",
+ "hyper",
+ "hyper-tls",
  "icelake",
  "itertools 0.11.0",
  "jsonschema-transpiler",
