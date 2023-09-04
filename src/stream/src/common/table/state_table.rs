@@ -17,7 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
@@ -148,6 +148,35 @@ pub type WatermarkCacheStateTable<S> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
 pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
+
+// initialize
+/// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        self.local_store.init(epoch).await
+    }
+}
+
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, false, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
+        self.local_store
+            .init(epoch)
+            .now_or_never()
+            .expect("non-replicated state store should start immediately.")
+            .expect("non-replicated state store should not fail to init.")
+    }
+}
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
@@ -472,11 +501,6 @@ where
         } else {
             self.dist_key_in_pk_indices.is_empty()
         }
-    }
-
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
-        self.local_store.init(epoch).await
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
