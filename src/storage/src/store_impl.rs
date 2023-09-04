@@ -450,14 +450,11 @@ pub mod verify {
         async fn try_flush(
             &mut self,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            next_epoch: u64,
         ) -> StorageResult<()> {
             if let Some(expected) = &mut self.expected {
-                expected
-                    .try_flush(delete_ranges.clone(), next_epoch)
-                    .await?;
+                expected.try_flush(delete_ranges.clone()).await?;
             }
-            self.actual.try_flush(delete_ranges, next_epoch).await
+            self.actual.try_flush(delete_ranges).await
         }
 
         fn init(&mut self, epoch: u64) {
@@ -833,7 +830,6 @@ pub mod boxed_state_store {
         async fn try_flush(
             &mut self,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            next_epoch: u64,
         ) -> StorageResult<()>;
 
         fn epoch(&self) -> u64;
@@ -890,9 +886,8 @@ pub mod boxed_state_store {
         async fn try_flush(
             &mut self,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            next_epoch: u64,
         ) -> StorageResult<()> {
-            self.try_flush(delete_ranges, next_epoch).await
+            self.try_flush(delete_ranges).await
         }
 
         fn epoch(&self) -> u64 {
@@ -964,9 +959,8 @@ pub mod boxed_state_store {
         fn try_flush(
             &mut self,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            next_epoch: u64,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref_mut().try_flush(delete_ranges, next_epoch)
+            self.deref_mut().try_flush(delete_ranges)
         }
 
         fn epoch(&self) -> u64 {

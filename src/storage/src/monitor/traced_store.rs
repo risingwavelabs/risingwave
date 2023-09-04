@@ -208,7 +208,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     async fn try_flush(
         &mut self,
         _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        _next_epoch: u64,
     ) -> StorageResult<()> {
         unimplemented!()
     }

@@ -318,7 +318,6 @@ impl LocalStateStore for LocalHummockStorage {
     async fn try_flush(
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        next_epoch: u64,
     ) -> StorageResult<()> {
         if self.mem_table.kv_size.size() > 64 * 1024 * 1024 {
             tracing::info!(
@@ -326,9 +325,6 @@ impl LocalStateStore for LocalHummockStorage {
                 self.table_id.table_id()
             );
             let gap_epoch = self.epoch() + 1;
-            if next_epoch < gap_epoch {
-                panic!("Fail to spill mem table, the epoch gap runs out");
-            }
             self.epoch
                 .replace(gap_epoch)
                 .expect("should have init epoch before seal the gap epoch");

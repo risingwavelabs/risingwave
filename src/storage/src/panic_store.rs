@@ -132,7 +132,6 @@ impl LocalStateStore for PanicStateStore {
     async fn try_flush(
         &mut self,
         _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        _next_epoch: u64,
     ) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }

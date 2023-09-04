@@ -241,7 +241,6 @@ pub trait LocalStateStore: StaticSendSync {
     fn try_flush(
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        next_epoch: u64,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
 

@@ -856,6 +856,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         Ok(())
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        // All changes to the state has been buffered in the mem-table of the state table. Just
+        // `commit` them here.
+        self.side_l.ht.try_flush().await?;
+        self.side_r.ht.try_flush().await?;
+        Ok(())
+    }
+
     // We need to manually evict the cache.
     fn evict_cache(
         side_update: &mut JoinSide<K, S>,
