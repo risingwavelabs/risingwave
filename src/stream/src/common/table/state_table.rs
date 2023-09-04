@@ -931,7 +931,8 @@ where
         self.local_store.seal_current_epoch(new_epoch.curr);
     }
 
-    fn get_delete_range(&mut self) -> StreamExecutorResult<Vec<(Bound<Bytes>, Bound<Bytes>)>> {
+    /// Write to state store.
+    async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
         let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1024,13 +1025,6 @@ where
         if USE_WATERMARK_CACHE && !delete_ranges.is_empty() {
             self.watermark_cache.clear();
         }
-
-        Ok(delete_ranges)
-    }
-
-    /// Write to state store.
-    async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
-        let delete_ranges = self.get_delete_range()?;
 
         self.local_store.flush(delete_ranges).await?;
         self.local_store.seal_current_epoch(next_epoch);
