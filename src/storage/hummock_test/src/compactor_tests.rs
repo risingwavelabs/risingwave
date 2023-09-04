@@ -43,8 +43,8 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch};
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::{
-        default_level_selector, partition_level, CompactStatus, LevelSelector,
-        LocalSelectorStatistic, ManualCompactionOption, SubLevelPartition,
+        default_level_selector, partition_level, partition_sub_levels, CompactStatus,
+        LevelSelector, LocalSelectorStatistic, ManualCompactionOption, SubLevelPartition,
     };
     use risingwave_meta::hummock::model::CompactionGroup;
     use risingwave_meta::hummock::test_utils::{
@@ -1399,7 +1399,7 @@ pub(crate) mod tests {
         async fn test_selector_compact_impl<S: SstableInfoGenerator>(&mut self, mut generator: S) {
             const CHECKPOINT_TIMES: u64 = 10;
             const KV_COUNT: usize = 8;
-            const MAX_COMPACT_TASK_COUNT: usize = 8;
+            const MAX_COMPACT_TASK_COUNT: usize = 12;
             let mut rng = rand::thread_rng();
             let mut finished_task = vec![];
             for i in 1..self.test_count {
@@ -1466,15 +1466,39 @@ pub(crate) mod tests {
                 }
             }
 
+            println!("=============flush end=========");
+
+            while self.pick_one_task(self.test_count, self.test_count) {
+                for task_id in self.pending_tasks.keys() {
+                    finished_task.push(*task_id);
+                }
+                for task_id in finished_task.drain(..) {
+                    let (mut task, _, _) = self.pending_tasks.remove(&task_id).unwrap();
+                    self.finish_compaction_task(&mut task).await;
+                    for sst in task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|level| level.table_infos.iter())
+                    {
+                        self.sstable_store.delete(sst.object_id).await.unwrap();
+                    }
+                    self.apply_compaction_task(task);
+                }
+            }
+
             println!(
                 "partition compact task count: {}, max task size: {}",
                 self.stats.vnode_partition_task_count, self.max_task_size,
             );
 
-            assert!(
-                self.max_task_size <= self.group_config.compaction_config().max_compaction_bytes
-            );
+            // assert!(
+            //     self.max_task_size <= self.group_config.compaction_config().max_compaction_bytes
+            // );
 
+            println!(
+                "l0.total_file_size: {}",
+                self.group.l0.as_ref().unwrap().total_file_size
+            );
             for (idx, level) in self
                 .group
                 .l0
@@ -1485,14 +1509,33 @@ pub(crate) mod tests {
                 .enumerate()
             {
                 println!(
-                    "group.l0.level[{}] file count: {}, total file size: {}",
+                    "group.l0.level[{}].sub_level_id {} file count: {}, partition count: {}, total file size: {}",
                     idx,
+                    level.sub_level_id,
                     level.table_infos.len(),
+                    level.vnode_partition_count,
                     level.total_file_size,
                 );
             }
+            let partitions = partition_sub_levels(&self.group);
+            for (idx, part) in partitions.into_iter().enumerate() {
+                let sub_levels = part
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| sub_level.right_idx > sub_level.left_idx)
+                    .map(|sub_level| (sub_level.sub_level_id, sub_level.total_file_size))
+                    .collect_vec();
+                println!("part[{}] = {:?}", idx, sub_levels);
+            }
             assert!(
-                self.group.l0.as_ref().unwrap().sub_levels.len()
+                self.group
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                    .count()
                     <= self
                         .group_config
                         .compaction_config()

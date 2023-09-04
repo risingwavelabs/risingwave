@@ -20,9 +20,14 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{
+    CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
+};
 
-use crate::hummock::compaction::picker::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::create_overlap_strategy;
+use crate::hummock::compaction::picker::{
+    CompactionInput, CompactionPicker, LocalPickerStatistic, TrivialMovePicker,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default, Clone, Debug)]
@@ -49,6 +54,81 @@ impl IntraSubLevelPicker {
     pub fn new(config: Arc<CompactionConfig>, partitions: Vec<SubLevelPartition>) -> Self {
         Self { config, partitions }
     }
+
+    fn pick_l0_trivial_move_file(
+        &self,
+        l0: &OverlappingLevel,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.level_type == LevelType::Overlapping as i32 || idx + 1 >= l0.sub_levels.len() {
+                continue;
+            }
+
+            if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
+                continue;
+            }
+
+            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
+
+            let select_sst = trivial_move_picker.pick_trivial_move_sst(
+                &l0.sub_levels[idx + 1].table_infos,
+                &level.table_infos,
+                level_handlers,
+                stats,
+            );
+
+            // only pick tables for trivial move
+            if select_sst.is_none() {
+                continue;
+            }
+
+            let select_sst = select_sst.unwrap();
+
+            // support trivial move cross multi sub_levels
+            let mut overlap = overlap_strategy.create_overlap_info();
+            overlap.update(&select_sst);
+
+            assert!(overlap
+                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                .is_empty());
+            let mut target_level_idx = idx;
+            while target_level_idx > 0 {
+                if l0.sub_levels[target_level_idx - 1].level_type
+                    != LevelType::Nonoverlapping as i32
+                    || !overlap
+                        .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
+                        .is_empty()
+                {
+                    break;
+                }
+                target_level_idx -= 1;
+            }
+
+            let input_levels = vec![
+                InputLevel {
+                    level_idx: 0,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: vec![select_sst],
+                },
+                InputLevel {
+                    level_idx: 0,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: vec![],
+                },
+            ];
+            return Some(CompactionInput {
+                input_levels,
+                target_level: 0,
+                target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                vnode_partition_count: 0,
+            });
+        }
+        None
+    }
 }
 
 impl CompactionPicker for IntraSubLevelPicker {
@@ -67,10 +147,11 @@ impl CompactionPicker for IntraSubLevelPicker {
                     .sub_levels
                     .last()
                     .map(|level| level.sub_level_id)
-                    .unwrap_or(0)
+                    .unwrap_or(u64::MAX)
             })
             .min()
             .unwrap_or(0);
+        println!("max_sub_level_id: {}", max_sub_level_id);
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
@@ -110,9 +191,11 @@ impl CompactionPicker for IntraSubLevelPicker {
                     break;
                 }
 
-                if next_level.level_type() != LevelType::Nonoverlapping
-                    || level_handlers[0].is_level_pending_compact(next_level)
-                {
+                if level.vnode_partition_count == 0 && next_level.vnode_partition_count > 0 {
+                    break;
+                }
+
+                if level_handlers[0].is_level_pending_compact(next_level) {
                     wait_enough = false;
                     break;
                 }
@@ -130,11 +213,7 @@ impl CompactionPicker for IntraSubLevelPicker {
             if input_levels.len() < self.config.level0_sub_level_compact_level_count as usize
                 && (!levels.can_partition_by_vnode()
                     || !wait_enough
-                    || can_partition_level(
-                        levels.member_table_ids[0],
-                        levels.vnode_partition_count as usize,
-                        &level.table_infos,
-                    ))
+                    || level.vnode_partition_count > 0)
             {
                 continue;
             }
@@ -164,7 +243,7 @@ impl CompactionPicker for IntraSubLevelPicker {
 
                 let max_compaction_bytes = std::cmp::min(
                     self.config.max_compaction_bytes,
-                    self.config.sub_level_max_compaction_bytes,
+                    self.config.max_bytes_for_level_base,
                 );
 
                 let mut compaction_bytes = 0;
@@ -178,6 +257,12 @@ impl CompactionPicker for IntraSubLevelPicker {
                     }
                     let mut pending_compact = false;
                     let sub_level_info = &part.sub_levels[right];
+                    if compaction_bytes > self.config.sub_level_max_compaction_bytes
+                        && sub_level_info.total_file_size
+                            > self.config.sub_level_max_compaction_bytes / 2
+                    {
+                        break;
+                    }
                     if sub_level_info.right_idx > sub_level_info.left_idx {
                         let mut input_level = InputLevel {
                             level_idx: 0,
@@ -225,7 +310,7 @@ impl CompactionPicker for IntraSubLevelPicker {
         } else {
             stats.skip_by_count_limit += 1;
         }
-        None
+        self.pick_l0_trivial_move_file(levels.l0.as_ref().unwrap(), level_handlers, stats)
     }
 }
 

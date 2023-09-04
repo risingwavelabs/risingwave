@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -63,7 +64,7 @@ pub trait LevelSelector: Sync + Send {
     fn task_type(&self) -> compact_task::TaskType;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub enum PickerType {
     L0Tier,
     L0ToBaseLevel(Vec<SubLevelPartition>),
@@ -158,29 +159,15 @@ impl DynamicLevelSelectorCore {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
         let mut ctx = SelectContext::default();
-        let mut first_level_partition_count = 0;
+
+        if levels.can_partition_by_vnode() {
+            ctx.target_partitions =
+                vec![SubLevelPartition::default(); levels.vnode_partition_count as usize];
+        }
 
         for level in &levels.levels {
             if level.total_file_size > 0 && first_non_empty_level == 0 {
                 first_non_empty_level = level.level_idx as usize;
-                if level.vnode_partition_count > 0 && levels.can_partition_by_vnode() {
-                    first_level_partition_count = level.vnode_partition_count;
-                    ctx.target_partitions =
-                        vec![SubLevelPartition::default(); first_level_partition_count as usize];
-                    if !partition_level(
-                        levels.member_table_ids[0],
-                        first_level_partition_count as usize,
-                        level,
-                        &mut ctx.target_partitions,
-                    ) {
-                        tracing::warn!(
-                            "can not partition level-{} of group-{}",
-                            level.level_idx,
-                            levels.group_id
-                        );
-                        first_level_partition_count = 0;
-                    }
-                }
             }
             max_level_size = std::cmp::max(max_level_size, level.total_file_size);
         }
@@ -188,15 +175,15 @@ impl DynamicLevelSelectorCore {
         ctx.level_max_bytes
             .resize(self.config.max_level as usize + 1, u64::MAX);
 
+        ctx.max_bytes_for_level_base = self.config.max_bytes_for_level_base;
+        if levels.vnode_partition_count > 1 {
+            ctx.max_bytes_for_level_base *= levels.vnode_partition_count as u64 / 2;
+        }
+
         if max_level_size == 0 {
             // Use the bottommost level.
             ctx.base_level = self.config.max_level as usize;
             return ctx;
-        }
-
-        ctx.max_bytes_for_level_base = self.config.max_bytes_for_level_base;
-        if first_level_partition_count > 1 {
-            ctx.max_bytes_for_level_base *= first_level_partition_count as u64 / 4;
         }
 
         let base_bytes_max = ctx.max_bytes_for_level_base;
@@ -221,6 +208,17 @@ impl DynamicLevelSelectorCore {
             }
             std::cmp::min(base_bytes_max, cur_level_size)
         };
+
+        if levels.can_partition_by_vnode()
+            && !partition_level(
+                levels.member_table_ids[0],
+                levels.vnode_partition_count as usize,
+                levels.get_level(ctx.base_level),
+                &mut ctx.target_partitions,
+            )
+        {
+            ctx.target_partitions.clear();
+        }
 
         let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
@@ -286,7 +284,7 @@ impl DynamicLevelSelectorCore {
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
 
             // size limit
-            let non_overlapping_size_score = total_size / 2 * SCORE_BASE
+            let mut non_overlapping_size_score = total_size * SCORE_BASE
                 / std::cmp::max(ctx.max_bytes_for_level_base, base_level_size);
 
             // level count limit
@@ -300,6 +298,37 @@ impl DynamicLevelSelectorCore {
                 .count() as u64;
             let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
                 / self.config.level0_sub_level_compact_level_count as u64;
+            if non_overlapping_level_score > SCORE_BASE {
+                // Reduce the level num of l0 non-overlapping sub_level
+                let partitions = if levels.can_partition_by_vnode() {
+                    partition_sub_levels(levels)
+                } else {
+                    vec![]
+                };
+                if partitions.len() == ctx.target_partitions.len() {
+                    for (part, target_part) in
+                        partitions.iter().zip_eq_fast(ctx.target_partitions.iter())
+                    {
+                        non_overlapping_size_score = std::cmp::max(
+                            non_overlapping_size_score,
+                            part.total_file_size * SCORE_BASE
+                                / std::cmp::max(
+                                    self.config.max_bytes_for_level_base,
+                                    target_part.total_file_size,
+                                ),
+                        );
+                    }
+                }
+
+                if non_overlapping_size_score <= SCORE_BASE {
+                    ctx.score_levels.push(PickerInfo {
+                        score: non_overlapping_level_score,
+                        select_level: 0,
+                        target_level: 0,
+                        picker_type: PickerType::L0SubLevel(partitions),
+                    });
+                }
+            }
 
             if non_overlapping_size_score > SCORE_BASE {
                 ctx.score_levels.push(PickerInfo {
@@ -307,19 +336,6 @@ impl DynamicLevelSelectorCore {
                     select_level: 0,
                     target_level: ctx.base_level,
                     picker_type: PickerType::L0ToBaseLevel(ctx.target_partitions.clone()),
-                });
-            } else if non_overlapping_level_score > SCORE_BASE {
-                // Reduce the level num of l0 non-overlapping sub_level
-                let partitions = if levels.can_partition_by_vnode() {
-                    partition_sub_levels(levels)
-                } else {
-                    vec![]
-                };
-                ctx.score_levels.push(PickerInfo {
-                    score: non_overlapping_level_score,
-                    select_level: 0,
-                    target_level: 0,
-                    picker_type: PickerType::L0SubLevel(partitions),
                 });
             }
         }
@@ -476,14 +492,14 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
-        for info in ctx.score_levels {
+        for info in &ctx.score_levels {
             if info.score <= SCORE_BASE {
                 return None;
             }
             let mut picker = dynamic_level_core.create_compaction_picker(
                 info.select_level,
                 info.target_level,
-                info.picker_type,
+                info.picker_type.clone(),
                 overlap_strategy.clone(),
             );
             let mut stats = LocalPickerStatistic::default();

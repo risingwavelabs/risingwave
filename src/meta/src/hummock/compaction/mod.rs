@@ -41,7 +41,9 @@ use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlap
 use crate::hummock::compaction::picker::{
     can_partition_level, CompactionInput, LocalPickerStatistic,
 };
-pub use crate::hummock::compaction::picker::{partition_level, SubLevelPartition};
+pub use crate::hummock::compaction::picker::{
+    partition_level, partition_sub_levels, SubLevelPartition,
+};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
