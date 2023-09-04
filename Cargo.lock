@@ -49,9 +49,9 @@ dependencies = [
 
 [[package]]
 name = "aho-corasick"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6748e8def348ed4d14996fa801f4122cd763fff530258cdc03f64b25f89d3a5a"
+checksum = "0c378d78423fdad8089616f827526ee33c19f2fddbd5de1629152c9593ba4783"
 dependencies = [
  "memchr",
 ]
@@ -6873,6 +6873,8 @@ dependencies = [
  "futures-async-stream",
  "glob",
  "google-cloud-pubsub",
+ "hyper",
+ "hyper-tls",
  "icelake",
  "itertools 0.11.0",
  "jsonschema-transpiler",
@@ -7615,6 +7617,7 @@ dependencies = [
  "multimap",
  "num-traits",
  "parking_lot 0.12.1",
+ "parse-display",
  "pin-project",
  "prometheus",
  "prost",
@@ -9308,9 +9311,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55ae70283aba8d2a8b411c695c437fe25b8b5e44e23e780662002fc72fb47a82"
+checksum = "61c5bb1d698276a2443e5ecfabc1008bf15a36c12e6a7176e7bf089ea9131140"
 dependencies = [
  "bitflags 2.4.0",
  "bytes",

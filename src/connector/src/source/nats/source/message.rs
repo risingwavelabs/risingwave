@@ -12,12 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod delta_btree_map;
-mod eowc;
-mod estimated_btree_map;
-mod general;
-mod over_partition;
-mod sentinel;
+use std::sync::Arc;
 
-pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
-pub use general::{OverWindowExecutor, OverWindowExecutorArgs};
+use async_nats;
+
+use crate::source::base::SourceMessage;
+use crate::source::SourceMeta;
+
+impl SourceMessage {
+    pub fn from_nats_message(message: async_nats::Message) -> Self {
+        SourceMessage {
+            key: None,
+            payload: Some(message.payload.to_vec()),
+            // Nats message doesn't have offset
+            offset: "".to_string(),
+            split_id: Arc::from(""),
+            meta: SourceMeta::Empty,
+        }
+    }
+}

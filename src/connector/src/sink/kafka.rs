@@ -32,7 +32,8 @@ use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::{
-    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::utils::{
@@ -260,20 +261,19 @@ pub struct KafkaSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KafkaSink {
-    pub fn new(
-        config: KafkaConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Self {
+    pub fn new(config: KafkaConfig, param: SinkParam) -> Self {
         Self {
             config,
-            schema,
-            pk_indices,
-            is_append_only,
+            schema: param.schema(),
+            pk_indices: param.pk_indices,
+            is_append_only: param.sink_type.is_append_only(),
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
         }
     }
 }
@@ -290,6 +290,8 @@ impl Sink for KafkaSink {
                 self.schema.clone(),
                 self.pk_indices.clone(),
                 self.is_append_only,
+                self.db_name.clone(),
+                self.sink_from_name.clone(),
                 format!("sink-{:?}", writer_param.executor_id),
             )
             .await?,
@@ -339,6 +341,8 @@ pub struct KafkaSinkWriter {
     pk_indices: Vec<usize>,
     is_append_only: bool,
     future_delivery_buffer: Vec<DeliveryFuture>,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KafkaSinkWriter {
@@ -347,6 +351,8 @@ impl KafkaSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        db_name: String,
+        sink_from_name: String,
         identifier: String,
     ) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
@@ -383,6 +389,8 @@ impl KafkaSinkWriter {
             pk_indices,
             is_append_only,
             future_delivery_buffer: Vec::new(),
+            db_name,
+            sink_from_name,
         })
     }
 
@@ -562,6 +570,8 @@ impl KafkaSinkWriter {
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
+            &self.db_name,
+            &self.sink_from_name,
         );
 
         #[for_await]
@@ -828,6 +838,8 @@ mod test {
             pk_indices,
             true,
             "test_sink_1".to_string(),
+            "test_db".into(),
+            "test_table".into(),
         )
         .await
         .unwrap();
@@ -916,8 +928,8 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
-        let schema_json = schema_to_json(&schema);
-        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
+        let schema_json = schema_to_json(&schema, "test_db", "test_table");
+        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
         assert_eq!(
             serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
             serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")

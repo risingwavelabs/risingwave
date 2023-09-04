@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::SinkWriterParam;
+use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_storage::dispatch_state_store;
 
@@ -42,6 +42,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id = sink_desc.get_id().into();
+        let db_name = sink_desc.get_db_name().into();
+        let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
             .downstream_pk
@@ -54,6 +56,19 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .into_iter()
             .map(ColumnCatalog::from)
             .collect_vec();
+        let sink_param = SinkParam {
+            sink_id,
+            properties,
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
+            pk_indices,
+            sink_type,
+            db_name,
+            sink_from_name,
+        };
 
         match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
@@ -70,11 +85,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                             vnode_bitmap: params.vnode_bitmap,
                             meta_client: params.env.meta_client(),
                         },
+                        sink_param,
                         columns,
-                        properties,
-                        pk_indices,
-                        sink_type,
-                        sink_id,
                         params.actor_context,
                         factory,
                     )
@@ -100,11 +112,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                                 vnode_bitmap: params.vnode_bitmap,
                                 meta_client: params.env.meta_client(),
                             },
+                            sink_param,
                             columns,
-                            properties,
-                            pk_indices,
-                            sink_type,
-                            sink_id,
                             params.actor_context,
                             factory,
                         )

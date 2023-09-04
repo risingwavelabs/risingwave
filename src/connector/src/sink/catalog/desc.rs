@@ -54,6 +54,13 @@ pub struct SinkDesc {
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+
+    /// Name of the database
+    pub db_name: String,
+
+    /// Name of the "table" field for Debezium. If the sink is from table or mv,
+    /// it is the name of table/mv. Otherwise, it is the name of the sink.
+    pub sink_from_name: String,
 }
 
 impl SinkDesc {
@@ -82,6 +89,8 @@ impl SinkDesc {
             connection_id,
             created_at_epoch: None,
             initialized_at_epoch: None,
+            db_name: self.db_name,
+            sink_from_name: self.sink_from_name,
         }
     }
 
@@ -100,6 +109,8 @@ impl SinkDesc {
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 }

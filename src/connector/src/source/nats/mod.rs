@@ -12,12 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod delta_btree_map;
-mod eowc;
-mod estimated_btree_map;
-mod general;
-mod over_partition;
-mod sentinel;
+pub mod enumerator;
+pub mod source;
+pub mod split;
 
-pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
-pub use general::{OverWindowExecutor, OverWindowExecutorArgs};
+use std::collections::HashMap;
+
+use risingwave_pb::connector_service::TableSchema;
+use serde::Deserialize;
+
+use crate::common::NatsCommon;
+pub const NATS_CONNECTOR: &str = "nats";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct NatsProperties {
+    /// Properties specified in the WITH clause by user
+    pub props: Option<HashMap<String, String>>,
+
+    /// Schema of the source specified by users
+    pub table_schema: Option<TableSchema>,
+
+    #[serde(flatten)]
+    pub common: NatsCommon,
+}
+
+impl NatsProperties {}
