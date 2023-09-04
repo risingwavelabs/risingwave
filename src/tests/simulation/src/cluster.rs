@@ -472,8 +472,8 @@ impl Cluster {
             .await
     }
 
-    /// Kill some nodes and restart them in 2s + restart_delay_secs with a probability of 0.1.
-    #[cfg_or_panic(madsim)]
+    /// Generate a list of random worker nodes to kill by `opts`, then call `kill_nodes` to kill and
+    /// restart them.
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
@@ -528,7 +528,20 @@ impl Cluster {
                 nodes.push(format!("compactor-{}", i));
             }
         }
-        join_all(nodes.iter().map(|name| async move {
+
+        self.kill_nodes(nodes, opts.restart_delay_secs).await
+    }
+
+    /// Kill the given nodes by their names and restart them in 2s + restart_delay_secs with a
+    /// probability of 0.1.
+    #[cfg_or_panic(madsim)]
+    pub async fn kill_nodes(
+        &self,
+        nodes: impl IntoIterator<Item = impl AsRef<str>>,
+        restart_delay_secs: u32,
+    ) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
@@ -540,7 +553,7 @@ impl Cluster {
             // so that the node is expired and removed from the cluster
             if rand::thread_rng().gen_bool(0.1) {
                 // max_heartbeat_interval_secs = 15
-                t += Duration::from_secs(opts.restart_delay_secs as u64);
+                t += Duration::from_secs(restart_delay_secs as u64);
             }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
