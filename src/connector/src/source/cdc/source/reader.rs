@@ -99,8 +99,9 @@ impl SplitReader for CdcSplitReader {
 }
 
 impl CdcSplitReader {
+    /// RPC version which is deprecated
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn ____into_data_stream(self) {
+    async fn into_data_stream_rpc_version(self) {
         let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
             anyhow!("connector node endpoint not specified or unable to connect to connector node")
         })?;
@@ -158,6 +159,7 @@ impl CdcSplitReader {
         }
     }
 
+    /// JNI version
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         // rewrite the hostname and port for the split
