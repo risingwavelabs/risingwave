@@ -122,7 +122,7 @@ RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=true
+ENABLE_KAFKA=false
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
@@ -141,6 +141,7 @@ EOF
 # TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
   configure_rw
+  ./risedev clean-data
   ./risedev d full-without-monitoring && rm .risingwave/log/*
 
   run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
