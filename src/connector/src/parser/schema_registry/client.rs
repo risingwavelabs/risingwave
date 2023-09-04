@@ -94,7 +94,10 @@ impl Client {
         while !fut_req.is_empty() {
             let (result, _index, remaining) = select_all(fut_req).await;
             match result {
-                Ok(Ok(res)) => return Ok(res),
+                Ok(Ok(res)) => {
+                    let _ = remaining.iter().map(|ele| ele.abort());
+                    return Ok(res);
+                }
                 Ok(Err(e)) => errs.push(e),
                 Err(e) => errs.push(RwError::from(e)),
             }
