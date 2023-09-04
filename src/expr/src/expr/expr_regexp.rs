@@ -741,7 +741,6 @@ impl Expression for RegexpReplaceExpression {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        println!("Current Expr: {:?}", self);
         // Get the source text to match and replace
         let source = self.source.eval_row(input).await?;
         let source = match source {

@@ -150,6 +150,12 @@ pub struct SinkCatalog {
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
+
+    /// Name of the database
+    pub db_name: String,
+
+    /// Name for the table info for Debezium sink
+    pub sink_from_name: String,
 }
 
 impl SinkCatalog {
@@ -183,6 +189,8 @@ impl SinkCatalog {
             connection_id: self.connection_id.map(|id| id.into()),
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 
@@ -257,6 +265,8 @@ impl From<PbSink> for SinkCatalog {
             connection_id: pb.connection_id.map(ConnectionId),
             created_at_epoch: pb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
+            db_name: pb.db_name,
+            sink_from_name: pb.sink_from_name,
         }
     }
 }

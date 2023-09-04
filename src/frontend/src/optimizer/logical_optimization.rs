@@ -362,8 +362,11 @@ static SET_OPERATION_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static GROUPING_SETS: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Grouping Sets",
-        vec![GroupingSetsToExpandRule::create()],
-        ApplyOrder::BottomUp,
+        vec![
+            GroupingSetsToExpandRule::create(),
+            ExpandToProjectRule::create(),
+        ],
+        ApplyOrder::TopDown,
     )
 });
 

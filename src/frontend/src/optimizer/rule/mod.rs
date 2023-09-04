@@ -142,6 +142,8 @@ mod apply_over_window_transpose_rule;
 pub use apply_over_window_transpose_rule::*;
 mod apply_expand_transpose_rule;
 pub use apply_expand_transpose_rule::*;
+mod expand_to_project_rule;
+pub use expand_to_project_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -203,6 +205,7 @@ macro_rules! for_all_rules {
             , { BatchProjectMergeRule }
             , { ApplyOverWindowTransposeRule }
             , { ApplyExpandTransposeRule }
+            , { ExpandToProjectRule }
         }
     };
 }

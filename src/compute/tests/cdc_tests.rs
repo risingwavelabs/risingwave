@@ -177,6 +177,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MySqlOffset::new(binlog_file.clone(), 2), // binlog low watermark
         MySqlOffset::new(binlog_file.clone(), 4),
         MySqlOffset::new(binlog_file.clone(), 6),
+        MySqlOffset::new(binlog_file.clone(), 8),
+        MySqlOffset::new(binlog_file.clone(), 10),
     ];
 
     let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
