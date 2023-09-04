@@ -387,6 +387,9 @@
                         </goals>
                     </execution>
                 </executions>
+                <configuration>
+                    <excludePackageNames>com.risingwave.connector.*</excludePackageNames>
+                </configuration>
             </plugin>
 
             <plugin>
