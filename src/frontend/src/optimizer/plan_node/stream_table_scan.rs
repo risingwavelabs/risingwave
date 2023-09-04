@@ -255,11 +255,6 @@ impl StreamTableScan {
         // For arrangement backfill we need to maintain 2 sets of output_indices.
         // 1. output_indices for the updates.
         // 2. output_indices for the records from the arrangement table.
-        //
-        // These 2 may not match because the output indices for state table is inclusive of pk.
-        //
-        // On the other hand the arrangement within backfill is a full replica of the upstream
-        // state table.
         let upstream_table_catalog = self
             .get_upstream_state_table()
             .unwrap()
@@ -279,7 +274,6 @@ impl StreamTableScan {
         println!("output_column_ids {:?}", self.logical.output_column_ids());
         println!("output_indices {:?}", output_indices);
         println!("upstream_table_catalog_columns: {:?}", upstream_table_catalog.columns());
-        assert_eq!(upstream_column_ids);
 
         let arrangement_table = if self.chain_type == ChainType::ArrangementBackfill {
             Some(upstream_table_catalog.to_internal_table_prost())
