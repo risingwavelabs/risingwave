@@ -68,14 +68,7 @@ impl SplitReader for KinesisSplitReader {
 
         let start_position = match &split.start_position {
             KinesisOffset::None => match &properties.scan_startup_mode {
-                None => {
-                    if properties.seq_offset.is_some() {
-                        return Err(anyhow!(
-                            "scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number"
-                        ));
-                    }
-                    KinesisOffset::Earliest
-                }
+                None => KinesisOffset::Earliest,
                 Some(mode) => match mode.as_str() {
                     "earliest" => KinesisOffset::Earliest,
                     "latest" => KinesisOffset::Latest,
@@ -95,6 +88,11 @@ impl SplitReader for KinesisSplitReader {
             },
             start_position => start_position.to_owned(),
         };
+        if start_position != KinesisOffset::SequenceNumber && properties.seq_offset.is_some() {
+            return Err(
+                anyhow!("scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number")
+            );
+        }
 
         let stream_name = properties.common.stream_name.clone();
         let client = properties.common.build_client().await?;
