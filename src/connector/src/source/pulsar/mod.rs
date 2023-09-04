@@ -51,7 +51,7 @@ pub struct PulsarOauth {
     pub scope: Option<String>,
 
     #[serde(flatten)]
-    /// required keys refer to [`AWS_DEFAULT_CONFIG`]
+    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
     pub s3_credentials: HashMap<String, String>,
 }
 

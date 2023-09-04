@@ -396,7 +396,7 @@ pub fn avro_extract_field_schema<'a>(
             let name =
                 name.ok_or_else(|| anyhow::format_err!("no name provided for a field in record"))?;
             let index = lookup.get(name).ok_or_else(|| {
-                anyhow::format_err!("No filed named {} in record {:?}", name, schema)
+                anyhow::format_err!("no field named '{}' in record: {:?}", name, schema)
             })?;
             let field = fields
                 .get(*index)

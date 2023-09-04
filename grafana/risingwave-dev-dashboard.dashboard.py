@@ -1443,6 +1443,16 @@ def section_streaming_errors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Source Reader Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_reader_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
@@ -2245,13 +2255,53 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_ops(
-                    "Refill",
+                panels.timeseries_count(
+                    "Refill Queue Length",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('compute_refill_data_file_cache_count')}[$__rate_interval])) by (extra, instance)",
-                            "refill data file cache - {{extra}} @ {{instance}}",
+                            f"sum(refill_queue_length) by (instance)",
+                            "refill queue length @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Refill Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('data_refill_duration_count')}[$__rate_interval])) by (op, instance)",
+                            "data file cache refill - {{op}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('data_refill_filtered_total')}[$__rate_interval])) by (instance)",
+                            "data file cache refill - filtered @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_refill_duration_count')}[$__rate_interval])) by (op, instance)",
+                            "meta file cache refill - {{op}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Refill Latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('data_refill_duration_bucket')}[$__rate_interval])) by (le, op, instance))",
+                                f"p{legend} - " +
+                                "data file cache refill - {{op}} @ {{instance}}",
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('meta_refill_duration_bucket')}[$__rate_interval])) by (le, instance))",
+                                f"p{legend} - " +
+                                "meta cache refill @ {{instance}}",
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -3174,6 +3224,128 @@ def section_connector_node(outer_panels):
         )
     ]
 
+def section_network_connection(outer_panels):
+    panels = outer_panels.sub_panel()
+    s3_filter = 'connection_type="S3"'
+    grpc_filter = 'connection_type=~"grpc.*"'
+    return [
+        outer_panels.row_collapsed(
+            "Network connection",
+            [
+                panels.timeseries_bytesps(
+                    "Network throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('connection_read_rate')}[$__rate_interval])) by (job, instance) / (1024*1024)",
+                            "{{job}} read @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_write_rate')}[$__rate_interval])) by (job, instance) / (1024*1024)",
+                            "{{job}} write @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "S3 throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('connection_read_rate', filter=s3_filter)}[$__rate_interval])) by (job, instance) / (1024*1024)",
+                            "{{job}} read @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_write_rate', filter=s3_filter)}[$__rate_interval])) by (job, instance) / (1024*1024)",
+                            "{{job}} write @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "gRPC throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('connection_read_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance, connection_type) / (1024*1024)",
+                            "{{job}} {{connection_type}} read @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_write_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance, connection_type) / (1024*1024)",
+                            "{{job}} {{connection_type}} write @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_read_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance) / (1024*1024)",
+                            "{{job}} total read @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_write_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance) / (1024*1024)",
+                            "{{job}} total write @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "IO error rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('connection_io_err_rate', filter=s3_filter)}[$__rate_interval])) by (job, instance, op_type, error_kind)",
+                            "{{job}} S3 {{op_type}} err[{{error_kind}}] @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_io_err_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance, op_type, error_kind)",
+                            "{{job}} grpc {{op_type}} err[{{error_kind}}] @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('connection_io_err_rate')}[$__rate_interval])) by (job, instance, op_type, error_kind)",
+                            "{{job}} total {{op_type}} err[{{error_kind}}] @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Existing connection count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('connection_count', filter=s3_filter)}) by (job, instance)",
+                            "{{job}} S3 @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum({metric('connection_count', filter=grpc_filter)}) by (job, instance, connection_type)",
+                            "{{job}} {{connection_type}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Create new connection rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('connection_create_rate', filter=s3_filter)}[$__rate_interval])) by (job, instance)",
+                            "{{job}} S3 @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('connection_create_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance, connection_type)",
+                            "{{job}} {{connection_type}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Create new connection err rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('connection_err_rate', filter=s3_filter)}[$__rate_interval])) by (job, instance)",
+                            "{{job}} S3 @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('connection_err_rate', filter=grpc_filter)}[$__rate_interval])) by (job, instance, connection_type)",
+                            "{{job}} {{connection_type}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
 
 templating_list = []
 if dynamic_source_enabled:
@@ -3365,5 +3537,6 @@ dashboard = Dashboard(
         *section_memory_manager(panels),
         *section_connector_node(panels),
         *section_kafka_native_metrics(panels),
+        *section_network_connection(panels)
     ],
 ).auto_panel_ids()

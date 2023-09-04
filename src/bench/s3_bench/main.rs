@@ -136,7 +136,7 @@ enum Case {
 
 #[derive(Parser, Debug)]
 pub struct Config {
-    /// AWS S3 Bucket, either <BUCKET> should be given.
+    /// AWS S3 Bucket.
     #[clap(short, long)]
     bucket: String,
 

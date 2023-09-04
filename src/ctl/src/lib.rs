@@ -288,6 +288,15 @@ pub struct ScaleResizeCommands {
     #[clap(long)]
     target_parallelism: Option<u32>,
 
+    /// The target parallelism per worker, conflicts with `target_parallelism`, requires
+    /// `include_workers` to be set.
+    #[clap(
+        long,
+        requires = "include_workers",
+        conflicts_with = "target_parallelism"
+    )]
+    target_parallelism_per_worker: Option<u32>,
+
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
     #[clap(long, default_value_t = false)]
@@ -354,12 +363,14 @@ enum MetaCommands {
     /// `added` when both are provided.
     ///
     /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// ```text
     /// {
     ///     100: Reschedule {
     ///         added_parallel_units: [4,5],
     ///         removed_parallel_units: [1,2,3],
     ///     }
     /// }
+    /// ```
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
     #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
