@@ -186,8 +186,8 @@ impl StateStore for HummockStorage {
             }
             _ => return Ok(()),
         };
-        let receiver = self.version_update_notifier_tx.subscribe();
-        wait_for_epoch(receiver, wait_epoch).await
+        let notifier = &self.version_update_notifier_tx;
+        wait_for_epoch(notifier, wait_epoch).await
     }
 
     async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {

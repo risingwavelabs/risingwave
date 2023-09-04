@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
-use tokio::sync::watch::Receiver;
+use tokio::sync::watch::Sender;
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
@@ -553,9 +553,10 @@ pub(crate) fn filter_with_delete_range<'a>(
 }
 
 pub(crate) async fn wait_for_epoch(
-    mut receiver: Receiver<HummockEpoch>,
+    notifier: &Sender<HummockEpoch>,
     wait_epoch: u64,
 ) -> StorageResult<()> {
+    let mut receiver = notifier.subscribe();
     // avoid unnecessary check in the loop if the value does not change
     let max_committed_epoch = *receiver.borrow_and_update();
     if max_committed_epoch >= wait_epoch {
