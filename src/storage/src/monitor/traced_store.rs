@@ -196,7 +196,8 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
-        let _span = TraceSpan::new_local_storage_init_span(options.clone().into(), self.storage_type);
+        let _span =
+            TraceSpan::new_local_storage_init_span(options.clone().into(), self.storage_type);
         self.inner.init(options).await
     }
 

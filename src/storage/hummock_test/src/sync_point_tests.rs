@@ -40,9 +40,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
-use risingwave_storage::store::{
-    LocalStateStore, LocalStateStoreTestExt, NewLocalOptions, ReadOptions,
-};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use serial_test::serial;
 
@@ -50,6 +48,7 @@ use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
