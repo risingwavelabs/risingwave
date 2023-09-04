@@ -120,6 +120,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         exclude_workers,
         include_workers,
         target_parallelism,
+        target_parallelism_per_worker,
         generate,
         output,
         yes,
@@ -132,8 +133,15 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         let include_worker_ids =
             worker_input_to_worker_ids(include_workers.unwrap_or_default(), true);
 
-        if let Some(target) = target_parallelism && target == 0 {
-            fail!("Target parallelism must be greater than 0");
+        match (target_parallelism, target_parallelism_per_worker) {
+            (Some(_), Some(_)) => {
+                fail!("Cannot specify both target parallelism and target parallelism per worker")
+            }
+            (_, Some(_)) if include_worker_ids.is_empty() => {
+                fail!("Cannot specify target parallelism per worker without including any worker")
+            }
+            (Some(target), _) if target == 0 => fail!("Target parallelism must be greater than 0"),
+            _ => {}
         }
 
         for worker_id in exclude_worker_ids.iter().chain(include_worker_ids.iter()) {
@@ -161,6 +169,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             include_worker_ids,
             exclude_worker_ids,
             target_parallelism,
+            target_parallelism_per_worker,
         }
     };
 
