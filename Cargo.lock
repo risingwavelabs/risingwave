@@ -6640,7 +6640,6 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
- "bincode 2.0.0-rc.3",
  "bitflags 2.4.0",
  "byteorder",
  "bytes",
