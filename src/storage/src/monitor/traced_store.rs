@@ -206,7 +206,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        unimplemented!()
+        let span = TraceSpan::new_try_flush_span(self.storage_type);
+        let res = self.inner.try_flush().await;
+        span.may_send_result(OperationResult::TryFlush(res.as_ref().map(|o| *o).into()));
+        res
     }
 }
 
