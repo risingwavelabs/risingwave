@@ -249,7 +249,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Create a group from encoded states for EOWC. The previous output is set to `None`.
     #[allow(clippy::too_many_arguments)]
-    pub async fn create_eowc(
+    pub fn create_eowc(
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],

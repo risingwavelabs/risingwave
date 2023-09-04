@@ -476,8 +476,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         this.row_count_index,
                         this.extreme_cache_size,
                         &this.input_schema,
-                    )
-                    .await?;
+                    )?;
 
                     let change = agg_group
                         .build_change(&this.storages, &this.agg_funcs)
