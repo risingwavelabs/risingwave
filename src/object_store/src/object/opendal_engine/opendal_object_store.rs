@@ -193,7 +193,10 @@ impl StreamingUploader for OpenDalStreamingUploader {
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
         match self.writer.close().await {
             Ok(_) => (),
-            Err(_) => self.writer.abort().await?,
+            Err(err) => {
+                self.writer.abort().await?;
+                return Err(err.into());
+            }
         };
 
         Ok(())

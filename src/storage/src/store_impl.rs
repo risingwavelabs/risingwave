@@ -562,7 +562,7 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
-                enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
+                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
