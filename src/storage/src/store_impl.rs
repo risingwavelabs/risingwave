@@ -230,7 +230,6 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
-    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -448,10 +447,10 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
-        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
-            self.actual.init(epoch).await?;
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch).await?;
+                expected.init(options).await?;
             }
             Ok(())
         }
@@ -738,7 +737,6 @@ pub mod boxed_state_store {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
-    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -824,7 +822,7 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()>;
+        async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
     }
@@ -879,8 +877,8 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
-            self.init(epoch).await
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.init(options).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -947,9 +945,9 @@ pub mod boxed_state_store {
 
         fn init(
             &mut self,
-            epoch: EpochPair,
+            options: InitOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref_mut().init(epoch)
+            self.deref_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {

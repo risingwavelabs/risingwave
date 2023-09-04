@@ -45,7 +45,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
+    StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -158,7 +159,9 @@ where
     W: WatermarkBufferStrategy,
 {
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
-        self.local_store.init(epoch).await
+        self.local_store
+            .init(InitOptions::new_with_epoch(epoch))
+            .await
     }
 }
 
@@ -171,10 +174,10 @@ where
 {
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store
-            .init(epoch)
+            .init(InitOptions::new_with_epoch(epoch))
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
-            .expect("non-replicated state store should not fail to init.")
+            .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
     }
 }
 

@@ -22,7 +22,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::store::LocalStateStore;
+use risingwave_storage::store::{InitOptions, LocalStateStore};
 
 use crate::common::log_store::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store::kv_log_store::serde::LogStoreRowSerde;
@@ -65,7 +65,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
 
     fn init(&mut self, epoch: EpochPair) -> Self::InitFuture<'_> {
         async move {
-            self.state_store.init(epoch).await?;
+            self.state_store
+                .init(InitOptions::new_with_epoch(epoch))
+                .await?;
             self.seq_id = FIRST_SEQ_ID;
             self.tx.init(epoch.curr);
             Ok(())

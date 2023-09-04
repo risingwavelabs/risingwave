@@ -20,7 +20,6 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
@@ -331,7 +330,8 @@ impl LocalStateStore for LocalHummockStorage {
         self.mem_table.is_dirty()
     }
 
-    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        let epoch = options.epoch;
         if self.is_replicated {
             self.wait_for_epoch(epoch.prev).await?;
         }

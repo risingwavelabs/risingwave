@@ -22,7 +22,7 @@ use prost::Message;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
-    LocalStorageId, StorageType, TracedEpochPair, TracedHummockReadEpoch, TracedNewLocalOptions,
+    LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
     TracedReadOptions,
 };
 
@@ -164,7 +164,7 @@ pub enum Operation {
     DropLocalStorage,
 
     /// Init of a local storage
-    LocalStorageInit(TracedEpochPair),
+    LocalStorageInit(TracedInitOptions),
 
     /// Try wait epoch
     TryWaitEpoch(TracedHummockReadEpoch),

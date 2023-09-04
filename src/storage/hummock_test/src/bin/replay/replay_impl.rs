@@ -19,13 +19,12 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
-    ReplayWrite, Result, TraceError, TracedBytes, TracedNewLocalOptions, TracedReadOptions,
-    TracedSubResp,
+    ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
+    TracedReadOptions, TracedSubResp,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -201,9 +200,9 @@ pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 
 #[async_trait::async_trait]
 impl LocalReplay for LocalReplayImpl {
-    async fn init(&mut self, epoch: EpochPair) -> Result<()> {
+    async fn init(&mut self, options: TracedInitOptions) -> Result<()> {
         self.0
-            .init(epoch)
+            .init(options.into())
             .await
             .map_err(|_| TraceError::Other("init failed"))
     }

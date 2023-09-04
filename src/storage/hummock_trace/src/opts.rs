@@ -208,3 +208,8 @@ impl From<TracedEpochPair> for EpochPair {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+pub struct TracedInitOptions {
+    pub epoch: TracedEpochPair,
+}

@@ -18,7 +18,6 @@ use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
@@ -122,7 +121,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn init(&mut self, _epoch: EpochPair) -> StorageResult<()> {
+    async fn init(&mut self, _epoch: InitOptions) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 
