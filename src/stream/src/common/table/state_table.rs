@@ -158,6 +158,8 @@ where
     W: WatermarkBufferStrategy,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// async interface only used for replicated state table,
+    /// as it needs to wait for prev epoch to be committed.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
         self.local_store
             .init(InitOptions::new_with_epoch(epoch))
@@ -174,6 +176,7 @@ where
     W: WatermarkBufferStrategy,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// No need to `wait_for_epoch`, so it should complete immediately.
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store
             .init(InitOptions::new_with_epoch(epoch))
