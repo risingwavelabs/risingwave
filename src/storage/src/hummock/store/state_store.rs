@@ -15,11 +15,13 @@
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
+use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
@@ -41,7 +43,7 @@ use crate::hummock::utils::{
     do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
-use crate::hummock::{MemoryLimiter, SstableIterator};
+use crate::hummock::{HummockError, MemoryLimiter, SstableIterator};
 use crate::mem_table::{merge_stream, KeyOp, MemTable};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
@@ -84,6 +86,8 @@ pub struct LocalHummockStorage {
     stats: Arc<HummockStateStoreMetrics>,
 
     write_limiter: WriteLimiterRef,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 }
 
 impl LocalHummockStorage {
@@ -113,6 +117,48 @@ impl LocalHummockStorage {
         self.hummock_version_reader
             .get(table_key, epoch, read_options, read_snapshot)
             .await
+    }
+
+    pub async fn wait_for_epoch(&self, epoch: u64) -> StorageResult<()> {
+        // TODO(kwannoel): Refactor this copy-paste code.
+        // TODO(kwannoel): Also we should take in read options, because only initial snapshot read
+        // will require this.
+        let wait_epoch = epoch;
+        let mut receiver = self.version_update_notifier_tx.subscribe();
+        let max_committed_epoch = *receiver.borrow_and_update();
+        if max_committed_epoch >= wait_epoch {
+            return Ok(());
+        }
+        loop {
+            match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+                Err(elapsed) => {
+                    // The reason that we need to retry here is batch scan in
+                    // chain/rearrange_chain is waiting for an
+                    // uncommitted epoch carried by the CreateMV barrier, which
+                    // can take unbounded time to become committed and propagate
+                    // to the CN. We should consider removing the retry as well as wait_epoch
+                    // for chain/rearrange_chain if we enforce
+                    // chain/rearrange_chain to be scheduled on the same
+                    // CN with the same distribution as the upstream MV.
+                    // See #3845 for more details.
+                    tracing::warn!(
+                        "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
+                        wait_epoch,
+                        elapsed
+                    );
+                    continue;
+                }
+                Ok(Err(_)) => {
+                    return Err(HummockError::wait_epoch("tx dropped").into());
+                }
+                Ok(Ok(_)) => {
+                    let max_committed_epoch = *receiver.borrow();
+                    if max_committed_epoch >= wait_epoch {
+                        return Ok(());
+                    }
+                }
+            }
+        }
     }
 
     pub async fn iter_inner(
@@ -323,12 +369,16 @@ impl LocalStateStore for LocalHummockStorage {
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        if self.is_replicated {
+            self.wait_for_epoch(epoch.prev).await?;
+        }
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -440,6 +490,7 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         Self {
@@ -456,6 +507,7 @@ impl LocalHummockStorage {
             hummock_version_reader,
             stats,
             write_limiter,
+            version_update_notifier_tx,
         }
     }
 

@@ -104,6 +104,7 @@ pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::arrangement_backfill::*;
 pub use backfill::cdc_backfill::*;
 pub use backfill::no_shuffle_backfill::*;
 pub use backfill::upstream_table::*;
@@ -787,6 +788,12 @@ pub async fn expect_first_barrier(
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
+    // TODO: Is this check correct?
+    assert!(matches!(
+        barrier.kind,
+        BarrierKind::Checkpoint | BarrierKind::Initial
+    ));
+    // assert!(matches!(barrier.kind, BarrierKind::Checkpoint));
     Ok(barrier)
 }
 

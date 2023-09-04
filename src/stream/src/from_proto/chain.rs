@@ -16,15 +16,18 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::{
-    BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
+    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor,
+    RearrangedChainExecutor,
 };
 
 pub struct ChainExecutorBuilder;
@@ -80,7 +83,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 RearrangedChainExecutor::new(snapshot, mview, progress, schema, params.pk_indices)
                     .boxed()
             }
-            ChainType::Backfill => {
+            ChainType::Backfill | ChainType::ArrangementBackfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
@@ -140,37 +143,76 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
-                let upstream_table = StorageTable::new_partial(
-                    state_store.clone(),
-                    table_id,
-                    column_descs,
-                    column_ids,
-                    order_types,
-                    pk_indices,
-                    distribution,
-                    table_option,
-                    value_indices,
-                    prefix_hint_len,
-                    versioned,
-                );
+
                 let state_table = if let Ok(table) = node.get_state_table() {
-                    Some(StateTable::from_table_catalog(table, state_store, vnodes).await)
+                    Some(
+                        StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone())
+                            .await,
+                    )
                 } else {
                     None
                 };
 
-                BackfillExecutor::new(
-                    upstream_table,
-                    mview,
-                    state_table,
-                    output_indices,
-                    progress,
-                    schema,
-                    params.pk_indices,
-                    stream.streaming_metrics.clone(),
-                    params.env.config().developer.chunk_size,
-                )
-                .boxed()
+                if node.chain_type() == ChainType::Backfill {
+                    let upstream_table = StorageTable::new_partial(
+                        state_store,
+                        table_id,
+                        column_descs,
+                        column_ids,
+                        order_types,
+                        pk_indices,
+                        distribution,
+                        table_option,
+                        value_indices,
+                        prefix_hint_len,
+                        versioned,
+                    );
+
+                    BackfillExecutor::new(
+                        upstream_table,
+                        mview,
+                        state_table,
+                        output_indices,
+                        progress,
+                        schema,
+                        params.pk_indices,
+                        stream.streaming_metrics.clone(),
+                        params.env.config().developer.chunk_size,
+                    )
+                    .boxed()
+                } else {
+                    let upstream_table = node.get_arrangement_table().unwrap();
+                    let versioned = upstream_table.get_version().is_ok();
+
+                    macro_rules! new_executor {
+                        ($SD:ident) => {{
+                            let upstream_table =
+                                ReplicatedStateTable::<_, $SD>::from_table_catalog(
+                                    upstream_table,
+                                    state_store.clone(),
+                                    vnodes,
+                                )
+                                .await;
+                            ArrangementBackfillExecutor::<_, $SD>::new(
+                                upstream_table,
+                                mview,
+                                state_table.unwrap(),
+                                output_indices,
+                                progress,
+                                schema,
+                                params.pk_indices,
+                                stream.streaming_metrics.clone(),
+                                params.env.config().developer.chunk_size,
+                            )
+                            .boxed()
+                        }};
+                    }
+                    if versioned {
+                        new_executor!(ColumnAwareSerde)
+                    } else {
+                        new_executor!(BasicSerde)
+                    }
+                }
             }
             ChainType::ChainUnspecified => unreachable!(),
         };

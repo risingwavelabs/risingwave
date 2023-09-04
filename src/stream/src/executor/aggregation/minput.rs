@@ -186,9 +186,7 @@ impl MaterializedInputState {
             let all_data_iter = state_table
                 .iter_row_with_pk_prefix(
                     group_key.map(GroupKey::table_pk),
-                    PrefetchOptions {
-                        exhaust_iter: cache_filler.capacity().is_none(),
-                    },
+                    PrefetchOptions::new_with_exhaust_iter(cache_filler.capacity().is_none()),
                 )
                 .await?;
             pin_mut!(all_data_iter);
@@ -329,7 +327,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
 
         {
             let chunk = create_chunk(
@@ -422,7 +420,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
 
         {
             let chunk = create_chunk(
@@ -518,8 +516,8 @@ mod tests {
         .await;
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table_1.init_epoch(epoch);
-        table_2.init_epoch(epoch);
+        table_1.init_epoch(epoch).await?;
+        table_2.init_epoch(epoch).await?;
 
         let mut state_1 = MaterializedInputState::new(
             &agg_call_1,
@@ -623,7 +621,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
 
         {
             let chunk = create_chunk(
@@ -705,7 +703,7 @@ mod tests {
         .await;
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -816,7 +814,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
 
         {
             let chunk = create_chunk(
@@ -923,7 +921,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
 
         {
             let chunk = create_chunk(
@@ -1002,7 +1000,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(1);
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await?;
         {
             let chunk = create_chunk(
                 " T i i I

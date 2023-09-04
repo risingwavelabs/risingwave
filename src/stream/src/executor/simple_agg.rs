@@ -266,9 +266,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        this.all_state_tables_mut().for_each(|table| {
-            table.init_epoch(barrier.epoch);
-        });
+        for table in this.all_state_tables_mut() {
+            table.init_epoch(barrier.epoch).await?;
+        }
 
         let mut vars = ExecutionVars {
             // Create `AggGroup`. This will fetch previous agg result from the result table.

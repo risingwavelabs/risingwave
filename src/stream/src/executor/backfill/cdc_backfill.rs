@@ -176,7 +176,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::debug!("start cdc backfill: actor {:?}", self.actor_ctx.id);
 
-        self.source_state_handler.init_epoch(first_barrier.epoch);
+        self.source_state_handler
+            .init_epoch(first_barrier.epoch)
+            .await?;
 
         // start from the beginning
         // TODO(siyuan): restore backfill offset from state store

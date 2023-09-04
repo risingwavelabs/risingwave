@@ -28,7 +28,8 @@ use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_tes
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
+    LocalStateStore, LocalStateStoreTestExt, NewLocalOptions, PrefetchOptions, ReadOptions,
+    StateStoreRead, WriteOptions,
 };
 use risingwave_storage::StateStore;
 
@@ -74,7 +75,7 @@ async fn test_failpoints_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local.init(1);
+    local.init_for_test(1).await.unwrap();
     local
         .ingest_batch(
             batch1,

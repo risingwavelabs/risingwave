@@ -342,10 +342,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.update_epoch(epoch.curr);
-        self.state.table.init_epoch(epoch);
-        self.degree_state.table.init_epoch(epoch);
+        self.state.table.init_epoch(epoch).await?;
+        self.degree_state.table.init_epoch(epoch).await?;
+        Ok(())
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {

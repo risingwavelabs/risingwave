@@ -23,6 +23,7 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -539,12 +540,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    #[allow(clippy::unused_async)]
+    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {

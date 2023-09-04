@@ -123,7 +123,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
+        self.state_table.init_epoch(barrier.epoch).await?;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -132,7 +132,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         for msg in input {
             let msg = msg?;
             self.materialize_cache.evict();
-
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {

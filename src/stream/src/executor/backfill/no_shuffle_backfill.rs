@@ -137,7 +137,7 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
         if let Some(state_table) = self.state_table.as_mut() {
-            state_table.init_epoch(first_barrier.epoch);
+            state_table.init_epoch(first_barrier.epoch).await?;
         }
 
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {
@@ -513,14 +513,14 @@ where
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
-
         let row_iter = owned_row_iter(iter);
         pin_mut!(row_iter);
 
         #[for_await]
         for chunk in iter_chunks(row_iter, builder) {
-            yield chunk?;
+            yield Some(chunk?);
         }
+        yield None;
     }
 
     async fn persist_state(

@@ -382,7 +382,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        core.split_state_store.init_epoch(barrier.epoch);
+        core.split_state_store.init_epoch(barrier.epoch).await?;
 
         for ele in &mut boot_state {
             if let Some(recover_state) = core
@@ -868,7 +868,10 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(2))
+            .await
+            .unwrap();
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -906,7 +909,10 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(5))
+            .await
+            .unwrap();
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])

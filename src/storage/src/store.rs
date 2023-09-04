@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -20,7 +21,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
@@ -242,7 +243,13 @@ pub trait LocalStateStore: StaticSendSync {
 
     fn is_dirty(&self) -> bool;
 
-    fn init(&mut self, epoch: u64);
+    /// Initializes the state store with given `epoch` pair.
+    /// Typically we will use `epoch.curr` as the initialized epoch,
+    /// Since state table will begin as empty.
+    /// In some cases like replicated state table, state table may not be empty initially,
+    /// as such we need to wait for `epoch.prev` checkpoint to complete,
+    /// hence this interface is made async.
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
@@ -265,18 +272,45 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
+pub trait LocalStateStoreTestExt: LocalStateStore {
+    fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.init(EpochPair::new_test_epoch(epoch))
+    }
+}
+impl<T: LocalStateStore> LocalStateStoreTestExt for T {}
+
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
+/// TODO(kwannoel): Refactor this to `StateTableReadOptions`
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
     pub exhaust_iter: bool,
+
+    /// If None -> read from state table's current epoch.
+    /// If Some(epoch) -> read from this epoch instead.
+    /// Used to read previously checkpointed data.
+    pub read_epoch: Option<u64>,
 }
 
 impl PrefetchOptions {
     pub fn new_for_exhaust_iter() -> Self {
-        Self { exhaust_iter: true }
+        Self::new_with_exhaust_iter(true)
+    }
+
+    pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
+        Self {
+            exhaust_iter,
+            ..Default::default()
+        }
+    }
+
+    pub fn new_with_epoch(epoch_option: Option<u64>) -> Self {
+        Self {
+            read_epoch: epoch_option,
+            ..Default::default()
+        }
     }
 }
 
@@ -284,6 +318,7 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
             exhaust_iter: value.exhaust_iter,
+            read_epoch: None,
         }
     }
 }

@@ -104,7 +104,7 @@ impl<S: StateStore> SortExecutor<S> {
         let mut input = input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        this.buffer_table.init_epoch(barrier.epoch);
+        this.buffer_table.init_epoch(barrier.epoch).await?;
         yield Message::Barrier(barrier);
 
         let mut vars = ExecutionVars {
