@@ -1,4 +1,5 @@
-statement error scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number
+# reject kinesis source if the start up mode is not sequence number but sequence number is provided
+statement error
 create source s ( a int, b varchar )
 with (
   connector = 'kinesis',
