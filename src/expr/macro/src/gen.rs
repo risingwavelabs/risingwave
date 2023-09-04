@@ -298,7 +298,7 @@ impl FunctionAttr {
         let ret = data_type_name(&self.ret);
         let state_type = match &self.state {
             Some(ty) if ty != "ref" => data_type_name(ty),
-            _ => ret.clone(),
+            _ => data_type_name(&self.ret),
         };
         let append_only = match build_fn {
             false => !user_fn.has_retract(),

@@ -470,6 +470,7 @@ struct AggregateImpl {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 enum AggregateFnOrImpl {
     /// A simple accumulate/retract function.
     Fn(UserFunctionAttr),

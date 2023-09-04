@@ -432,7 +432,7 @@ mod tests {
         };
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
         let pretty = format!("({agg_desc}:int8 $0:int8)");
-        let agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let agg = crate::agg::build_append_only(&AggCall::from_pretty(pretty)).unwrap();
         let mut state = agg.create_state();
         b.iter(|| {
             agg.update(&mut state, &chunk)
