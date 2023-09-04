@@ -117,7 +117,7 @@ full-without-monitoring:
 EOF
 
 cat <<EOF > risedev-components.user.env
-RISEDEV_CONFIGURED=true
+RISEDEV_CONFIGURED=false
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
