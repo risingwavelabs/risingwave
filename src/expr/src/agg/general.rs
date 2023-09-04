@@ -30,24 +30,19 @@ use crate::{ExprError, Result};
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
 #[aggregate("sum0(int64) -> int64", init_state = "0i64")]
-fn sum<S, T>(state: Option<S>, input: Option<T>, retract: bool) -> Result<Option<S>>
+fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
 {
-    let Some(input) = input else {
-        return Ok(state);
-    };
-    let state = state.unwrap_or_default();
-    let result = if retract {
+    if retract {
         state
             .checked_sub(&S::from(input))
-            .ok_or_else(|| ExprError::NumericOutOfRange)?
+            .ok_or_else(|| ExprError::NumericOutOfRange)
     } else {
         state
             .checked_add(&S::from(input))
-            .ok_or_else(|| ExprError::NumericOutOfRange)?
-    };
-    Ok(Some(result))
+            .ok_or_else(|| ExprError::NumericOutOfRange)
+    }
 }
 
 #[aggregate("min(*) -> auto", state = "ref")]

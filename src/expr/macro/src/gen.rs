@@ -432,12 +432,16 @@ impl FunctionAttr {
                     };
                 }
                 1 => {
-                    let first_state = match &self.init_state {
-                        Some(_) => quote! { unreachable!() },
-                        _ => quote! {{
-                            assert_eq!(op, Op::Insert, "can not retract from null state");
-                            Some(v0.into())
-                        }},
+                    let first_state = if self.init_state.is_some() {
+                        quote! { unreachable!() }
+                    } else if let Some(s) = &self.state && s == "ref" {
+                        // for min/max/first/last, the state is the first value
+                        quote! { Some(v0) }
+                    } else {
+                        quote! {{
+                            let state = #state_type::default();
+                            #next_state
+                        }}
                     };
                     next_state = quote! {
                         match (state, v0) {
