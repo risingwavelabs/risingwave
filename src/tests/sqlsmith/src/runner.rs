@@ -538,7 +538,7 @@ async fn run_query_inner(
 /// Create the tables defined in testdata, along with some mviews.
 /// Just test number of rows for now.
 /// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
-/// with select * ORDER BY <all columns>.
+/// with `select * ORDER BY <all columns>`.
 async fn diff_stream_and_batch(
     rng: &mut impl Rng,
     mvs_and_base_tables: Vec<Table>,

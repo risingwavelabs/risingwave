@@ -22,8 +22,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
-    ForceStopActorsRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
@@ -34,7 +33,7 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
-use crate::model::MigrationPlan;
+use crate::model::{BarrierManagerState, MigrationPlan, PausedReason};
 use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
@@ -106,8 +105,16 @@ where
 
     /// Recovery the whole cluster from the latest epoch.
     ///
-    /// Returns the new epoch after recovery.
-    pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
+    /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
+    /// immediately paused after recovery, until the user manually resume them either by restarting
+    /// the cluster or `risectl` command. Used for debugging purpose.
+    ///
+    /// Returns the new state of the barrier manager after recovery.
+    pub(crate) async fn recovery(
+        &self,
+        prev_epoch: TracedEpoch,
+        paused_reason: Option<PausedReason>,
+    ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
@@ -123,9 +130,10 @@ where
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
         let recovery_timer = self.metrics.recovery_latency.start_timer();
-        let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || {
+
+        let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
-                let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
+                let recovery_result: MetaResult<_> = try {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
@@ -158,6 +166,7 @@ where
                         actor_dispatchers: Default::default(),
                         added_actors: Default::default(),
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
+                        pause: paused_reason.is_some(),
                     })));
 
                     // Use a different `curr_epoch` for each recovery attempt.
@@ -170,6 +179,7 @@ where
                         info,
                         prev_epoch.clone(),
                         new_epoch.clone(),
+                        paused_reason,
                         command,
                         BarrierKind::Initial,
                         self.source_manager.clone(),
@@ -180,11 +190,7 @@ where
                     {
                         use risingwave_common::util::epoch::INVALID_EPOCH;
 
-                        let mce = self
-                            .hummock_manager
-                            .get_current_version()
-                            .await
-                            .max_committed_epoch;
+                        let mce = self.hummock_manager.get_current_max_committed_epoch().await;
 
                         if mce != INVALID_EPOCH {
                             command_ctx.wait_epoch_commit(mce).await?;
@@ -209,7 +215,9 @@ where
                             Err(err)
                         }
                     };
-                    res?
+                    let (new_epoch, _) = res?;
+
+                    BarrierManagerState::new(new_epoch, command_ctx.next_paused_reason())
                 };
                 if recovery_result.is_err() {
                     self.metrics.recovery_failure_cnt.inc();
@@ -220,11 +228,17 @@ where
         })
         .await
         .expect("Retry until recovery success.");
+
         recovery_timer.observe_duration();
         self.scheduled_barriers.mark_ready().await;
-        tracing::info!("recovery success");
 
-        new_epoch
+        tracing::info!(
+            epoch = state.in_flight_prev_epoch().value().0,
+            paused = ?state.paused_reason(),
+            "recovery success"
+        );
+
+        state
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
