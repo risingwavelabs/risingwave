@@ -1754,18 +1754,68 @@ where
                 })
                 .collect();
 
+            let include_worker_parallel_unit_ids = include_worker_ids
+                .iter()
+                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
+                .cloned()
+                .collect_vec();
+
+            let exclude_worker_parallel_unit_ids = exclude_worker_ids
+                .iter()
+                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
+                .cloned()
+                .collect_vec();
+
+            fn refilter_parallel_unit_id_by_target_parallelism(
+                worker_parallel_units: &HashMap<u32, HashSet<ParallelUnitId>>,
+                include_worker_ids: &BTreeSet<WorkerId>,
+                include_worker_parallel_unit_ids: &[ParallelUnitId],
+                target_parallel_unit_ids: &mut BTreeSet<ParallelUnitId>,
+                target_parallelism_per_worker: usize,
+            ) {
+                let limited_worker_parallel_unit_ids = include_worker_ids
+                    .iter()
+                    .flat_map(|worker_id| {
+                        worker_parallel_units
+                            .get(worker_id)
+                            .cloned()
+                            .unwrap()
+                            .into_iter()
+                            .sorted()
+                            .take(target_parallelism_per_worker)
+                    })
+                    .collect_vec();
+
+                // remove all the parallel units in the limited workers
+                target_parallel_unit_ids
+                    .retain(|id| !include_worker_parallel_unit_ids.contains(id));
+
+                // then we re-add the limited parallel units from the limited workers
+                target_parallel_unit_ids.extend(limited_worker_parallel_unit_ids.into_iter());
+            }
+
             match fragment.get_distribution_type().unwrap() {
                 FragmentDistributionType::Unspecified => unreachable!(),
                 FragmentDistributionType::Single => {
                     let single_parallel_unit_id =
                         fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
-                    let target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
+                    let mut target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
                         .keys()
                         .filter(|id| !unschedulable_worker_ids.contains(*id))
                         .filter(|id| !exclude_worker_ids.contains(*id))
                         .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
                         .collect();
+
+                    if let Some(target_parallelism_per_worker) = target_parallelism_per_worker {
+                        refilter_parallel_unit_id_by_target_parallelism(
+                            &worker_parallel_units,
+                            &include_worker_ids,
+                            &include_worker_parallel_unit_ids,
+                            &mut target_parallel_unit_ids,
+                            target_parallelism_per_worker,
+                        );
+                    }
 
                     if target_parallel_unit_ids.is_empty() {
                         bail!(
@@ -1793,18 +1843,6 @@ where
                     }
                 }
                 FragmentDistributionType::Hash => {
-                    let include_worker_parallel_unit_ids = include_worker_ids
-                        .iter()
-                        .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                        .cloned()
-                        .collect_vec();
-
-                    let exclude_worker_parallel_unit_ids = exclude_worker_ids
-                        .iter()
-                        .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                        .cloned()
-                        .collect_vec();
-
                     let mut target_parallel_unit_ids: BTreeSet<_> =
                         fragment_parallel_unit_ids.clone();
                     target_parallel_unit_ids.extend(include_worker_parallel_unit_ids.iter());
@@ -1833,26 +1871,13 @@ where
                                 .collect();
                         }
                         (_, Some(target_parallelism_per_worker)) => {
-                            let limited_worker_parallel_unit_ids = include_worker_ids
-                                .iter()
-                                .flat_map(|worker_id| {
-                                    worker_parallel_units
-                                        .get(worker_id)
-                                        .cloned()
-                                        .unwrap()
-                                        .into_iter()
-                                        .sorted()
-                                        .take(target_parallelism_per_worker)
-                                })
-                                .collect_vec();
-
-                            // remove all the parallel units in the limited workers
-                            target_parallel_unit_ids
-                                .retain(|id| !include_worker_parallel_unit_ids.contains(id));
-
-                            // then we re-add the limited parallel units from the limited workers
-                            target_parallel_unit_ids
-                                .extend(limited_worker_parallel_unit_ids.into_iter());
+                            refilter_parallel_unit_id_by_target_parallelism(
+                                &worker_parallel_units,
+                                &include_worker_ids,
+                                &include_worker_parallel_unit_ids,
+                                &mut target_parallel_unit_ids,
+                                target_parallelism_per_worker,
+                            );
                         }
                         _ => {}
                     }
