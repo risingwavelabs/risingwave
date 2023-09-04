@@ -118,8 +118,7 @@ impl LocalHummockStorage {
     }
 
     pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
-        let notifier = &self.version_update_notifier_tx;
-        wait_for_epoch(notifier, wait_epoch).await
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
     pub async fn iter_inner(
