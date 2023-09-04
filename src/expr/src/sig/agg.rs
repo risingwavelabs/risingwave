@@ -61,13 +61,16 @@ impl fmt::Debug for AggFuncSig {
 pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSig>>);
 
 impl AggFuncSigMap {
+    /// Inserts a function signature into the map.
     fn insert(&mut self, sig: AggFuncSig) {
         let arity = sig.inputs_type.len();
         self.0.entry((sig.func, arity)).or_default().push(sig);
     }
 
-    /// Returns a function signature with the given type, argument types, return type,
-    /// and append-only flag.
+    /// Returns a function signature with the given type, argument types, return type.
+    ///
+    /// The `append_only` flag only works when both append-only and retractable version exist.
+    /// Otherwise, return the signature of the only version.
     pub fn get(
         &self,
         ty: AggKind,
@@ -76,27 +79,20 @@ impl AggFuncSigMap {
         append_only: bool,
     ) -> Option<&AggFuncSig> {
         let v = self.0.get(&(ty, args.len()))?;
-        v.iter()
-            .find(|d| d.inputs_type == args && d.ret_type == ret && d.append_only == append_only)
+        let mut iter = v
+            .iter()
+            .filter(|d| d.inputs_type == args && d.ret_type == ret);
+        if iter.clone().count() == 2 {
+            iter.find(|d| d.append_only == append_only)
+        } else {
+            iter.next()
+        }
     }
 
     /// Returns the return type for the given function and arguments.
     pub fn get_return_type(&self, ty: AggKind, args: &[DataTypeName]) -> Option<DataTypeName> {
         let v = self.0.get(&(ty, args.len()))?;
         v.iter().find(|d| d.inputs_type == args).map(|d| d.ret_type)
-    }
-
-    /// Returns the state type for the given function and arguments.
-    pub fn get_state_type(
-        &self,
-        ty: AggKind,
-        args: &[DataTypeName],
-        append_only: bool,
-    ) -> Option<DataTypeName> {
-        let v = self.0.get(&(ty, args.len()))?;
-        v.iter()
-            .find(|d| d.inputs_type == args && d.append_only == append_only)
-            .map(|d| d.state_type)
     }
 }
 

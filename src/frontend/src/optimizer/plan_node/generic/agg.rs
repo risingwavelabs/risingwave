@@ -483,16 +483,18 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .map(|agg_call| Field {
                 data_type: AGG_FUNC_SIG_MAP
-                    .get_state_type(
+                    .get(
                         agg_call.agg_kind,
                         &agg_call
                             .inputs
                             .iter()
                             .map(|input| (&input.data_type).into())
                             .collect_vec(),
+                        (&agg_call.return_type).into(),
                         in_append_only,
                     )
                     .expect("agg not found")
+                    .state_type
                     .into(),
                 name: format!("{:?}_state", agg_call.agg_kind),
                 sub_fields: vec![],
