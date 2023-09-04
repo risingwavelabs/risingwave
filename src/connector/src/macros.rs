@@ -13,39 +13,6 @@
 // limitations under the License.
 
 #[macro_export]
-macro_rules! impl_split_enumerator {
-    ($({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
-        impl SplitEnumeratorImpl {
-
-             pub async fn create(properties: ConnectorProperties, context: SourceEnumeratorContextRef) -> Result<Self> {
-                match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props, context).await.map(Self::$variant_name), )*
-                    other => Err(anyhow!(
-                        "split enumerator type for config {:?} is not supported",
-                        other
-                    )),
-                }
-             }
-
-             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner
-                        .list_splits()
-                        .await
-                        .map(|ss| {
-                            ss.into_iter()
-                                .map(SplitImpl::$variant_name)
-                                .collect_vec()
-                        })
-                        .map_err(|e| ErrorCode::ConnectorError(e.into()).into()),
-                    )*
-                }
-             }
-        }
-    }
-}
-
-#[macro_export]
 macro_rules! impl_split {
     ($({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
         impl From<&SplitImpl> for ConnectorSplit {
@@ -55,6 +22,25 @@ macro_rules! impl_split {
                 }
             }
         }
+        $(
+            impl TryFrom<SplitImpl> for $split {
+                type Error = anyhow::Error;
+
+                fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
+                    match split {
+                        SplitImpl::$variant_name(inner) => Ok(inner),
+                        other => Err(anyhow::anyhow!("expect {} but get {:?}", stringify!($split), other))
+                    }
+                }
+            }
+
+            impl From<$split> for SplitImpl {
+                fn from(split: $split) -> SplitImpl {
+                    SplitImpl::$variant_name(split)
+                }
+            }
+
+        )*
 
         impl TryFrom<&ConnectorSplit> for SplitImpl {
             type Error = anyhow::Error;
@@ -125,43 +111,13 @@ macro_rules! impl_split {
 }
 
 #[macro_export]
-macro_rules! impl_split_reader {
-    ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderImpl {
-            pub fn into_stream(self) -> BoxSourceWithStateStream {
-                match self {
-                    $( Self::$variant_name(inner) => inner.into_stream(), )*                 }
-            }
-
-            pub async fn create(
-                config: ConnectorProperties,
-                state: ConnectorState,
-                parser_config: ParserConfig,
-                source_ctx: SourceContextRef,
-                columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
-                if state.is_none() {
-                    return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                }
-                let splits = state.unwrap();
-                let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, splits, parser_config, source_ctx, columns).await?)), )*
-                };
-
-                Ok(connector)
-            }
-        }
-    }
-}
-
-#[macro_export]
 macro_rules! impl_connector_properties {
     ($({ $variant_name:ident, $connector_name:ident } ),*) => {
         impl ConnectorProperties {
             pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";
                 let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-                if connector.ends_with("cdc") {
+                if connector.ends_with("-cdc") {
                     ConnectorProperties::new_cdc_properties(&connector, props)
                 } else {
                     let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
@@ -179,58 +135,4 @@ macro_rules! impl_connector_properties {
             }
         }
     }
-}
-
-#[macro_export]
-macro_rules! impl_common_split_reader_logic {
-    ($reader:ty, $props:ty) => {
-        impl $reader {
-            #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
-            pub(crate) async fn into_chunk_stream(self) {
-                let parser_config = self.parser_config.clone();
-                let actor_id = self.source_ctx.source_info.actor_id.to_string();
-                let source_id = self.source_ctx.source_info.source_id.to_string();
-                let metrics = self.source_ctx.metrics.clone();
-                let source_ctx = self.source_ctx.clone();
-
-                let data_stream = self.into_data_stream();
-
-                let data_stream = data_stream
-                .inspect_ok(move |data_batch| {
-                    let mut by_split_id = std::collections::HashMap::new();
-
-                    for msg in data_batch {
-                        by_split_id
-                            .entry(msg.split_id.as_ref())
-                            .or_insert_with(Vec::new)
-                            .push(msg);
-                    }
-
-                    for (split_id, msgs) in by_split_id {
-                        metrics
-                            .partition_input_count
-                            .with_label_values(&[&actor_id, &source_id, split_id])
-                            .inc_by(msgs.len() as u64);
-
-                        let sum_bytes = msgs
-                            .iter()
-                            .flat_map(|msg| msg.payload.as_ref().map(|p| p.len() as u64))
-                            .sum();
-
-                        metrics
-                            .partition_input_bytes
-                            .with_label_values(&[&actor_id, &source_id, &split_id])
-                            .inc_by(sum_bytes);
-                    }
-                }).boxed();
-
-                let parser =
-                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
-                #[for_await]
-                for msg_batch in parser.into_stream(data_stream) {
-                    yield msg_batch?;
-                }
-            }
-        }
-    };
 }

@@ -16,7 +16,6 @@ pub mod base;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;
-pub mod dummy_connector;
 pub mod filesystem;
 pub mod google_pubsub;
 pub mod kafka;
@@ -25,10 +24,13 @@ pub mod monitor;
 pub mod nexmark;
 pub mod pulsar;
 pub use base::*;
+pub(crate) use common::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
+mod common;
 mod manager;
+
 pub use manager::SourceColumnDesc;
 
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;

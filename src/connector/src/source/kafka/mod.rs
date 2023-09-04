@@ -27,6 +27,8 @@ pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
+use crate::source::SourceProperties;
+
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
@@ -113,6 +115,14 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub rdkafka_properties: RdKafkaPropertiesConsumer,
+}
+
+impl SourceProperties for KafkaProperties {
+    type Split = KafkaSplit;
+    type SplitEnumerator = KafkaSplitEnumerator;
+    type SplitReader = KafkaSplitReader;
+
+    const SOURCE_NAME: &'static str = KAFKA_CONNECTOR;
 }
 
 impl KafkaProperties {
