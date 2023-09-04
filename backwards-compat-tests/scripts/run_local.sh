@@ -2,20 +2,20 @@
 
 set -euo pipefail
 
-OLD_TAG=v0.18.0
-NEW_TAG=main
+OLD_TAG=1.0.0
+NEW_TAG=1.1.0
 
 source backwards-compat-tests/scripts/utils.sh
 
 setup_old_cluster() {
   echo "--- Setting up old cluster"
-  git checkout "$OLD_TAG"
+  git checkout "v${OLD_TAG}"
 }
 
 setup_new_cluster() {
   echo "--- Setting up new cluster"
   rm -r .risingwave/bin/risingwave
-  git checkout "$NEW_TAG"
+  git checkout main
 }
 
 main() {

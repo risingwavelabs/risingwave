@@ -139,9 +139,16 @@ EOF
 # TODO: Run nexmark, tpch queries
 # TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
+  OLD_TAG=$1
   configure_rw
   ./risedev clean-data
   ./risedev d full-without-monitoring && rm .risingwave/log/*
+
+  version=$(run_sql "SELECT version();" | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
+  if [[ "$version" != "$OLD_TAG" ]]; then
+    echo "Version mismatch, expected $OLD_TAG, got $version"
+    exit 1
+  fi
 
   run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
 
