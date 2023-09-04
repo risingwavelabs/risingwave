@@ -17,263 +17,143 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
 use itertools::Itertools;
-use prehash::{new_prehashed_map, Passthru, Prehashed};
+use prehash::{new_prehashed_map, new_prehashed_map_with_capacity, Passthru, Prehashed};
 
+use super::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use super::DataChunk;
 use crate::array::{Op, RowRef, StreamChunk};
 use crate::buffer::BitmapBuilder;
-use crate::row::Project;
+use crate::row::{Project, RowExt};
 use crate::util::chunk_coalesce::DataChunkBuilder;
 use crate::util::hash_util::Crc32FastBuilder;
 
-/// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT and
-/// UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to certain rules
-/// (see `merge_insert` and `merge_delete` for more details).
-pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> StreamChunk {
-    // let mut chunk_cache = HashMap::new();
-    let mut chunk_cache = new_prehashed_map();
-    let mut bitmap_builder = None;
-    let mut ops = None;
-
-    let hash_values = stream_chunk
-        .data_chunk()
-        .get_hash_values(pk_indices, Crc32FastBuilder)
-        .into_iter()
-        .map(|hash| hash.value())
-        .collect_vec();
-
-    for (op, row) in stream_chunk.rows() {
-        let pk = Project::new(row, pk_indices);
-        match op {
-            Op::Insert => {
-                merge_insert(
-                    &stream_chunk,
-                    pk,
-                    &mut chunk_cache,
-                    &mut bitmap_builder,
-                    &hash_values,
-                );
-            }
-            Op::Delete => {
-                merge_delete(
-                    &stream_chunk,
-                    pk,
-                    &mut chunk_cache,
-                    &mut bitmap_builder,
-                    &hash_values,
-                );
-            }
-            Op::UpdateDelete => {
-                if ops.is_none() {
-                    // Lazily initialize ops to save one clone if the chunk needn't be modified.
-                    ops = Some(stream_chunk.ops().to_vec());
-                };
-                ops.as_mut().unwrap()[row.index()] = Op::Delete;
-                merge_delete(
-                    &stream_chunk,
-                    pk,
-                    &mut chunk_cache,
-                    &mut bitmap_builder,
-                    &hash_values,
-                );
-            }
-            Op::UpdateInsert => {
-                if ops.is_none() {
-                    ops = Some(stream_chunk.ops().to_vec());
-                };
-                ops.as_mut().unwrap()[row.index()] = Op::Insert;
-                merge_insert(
-                    &stream_chunk,
-                    pk,
-                    &mut chunk_cache,
-                    &mut bitmap_builder,
-                    &hash_values,
-                );
-            }
-        }
-    }
-
-    match (bitmap_builder, ops) {
-        (Some(bitmap_builder), Some(ops)) => {
-            let (_, columns, _) = stream_chunk.into_inner();
-            StreamChunk::new(ops, columns, Some(bitmap_builder.finish()))
-        }
-        (Some(bitmap_builder), None) => {
-            let (ops, columns, _) = stream_chunk.into_inner();
-            StreamChunk::new(ops, columns, Some(bitmap_builder.finish()))
-        }
-        (None, Some(ops)) => {
-            let (_, columns, vis) = stream_chunk.into_inner();
-            StreamChunk::from_parts(ops, DataChunk::new(columns, vis))
-        }
-        (None, None) => stream_chunk,
-    }
+struct StreamChunkCompactorOwner {
+    chunks: Vec<StreamChunk>,
+    stream_key: Vec<usize>,
 }
 
-fn merge_insert<'a, 'b>(
-    chunk: &StreamChunk,
-    pk: Project<'a, RowRef<'b>>,
-    chunk_cache: &mut HashMap<Prehashed<Project<'a, RowRef<'b>>>, Op, BuildHasherDefault<Passthru>>,
-    bitmap_builder: &mut Option<BitmapBuilder>,
-    hash_values: &[u64],
-) {
-    let row_idx = pk.row().index();
-    match chunk_cache.entry(Prehashed::new(pk, hash_values[row_idx])) {
-        Entry::Vacant(v) => {
-            v.insert(Op::Insert);
-        }
-        Entry::Occupied(o) => match o.get() {
-            Op::Insert => {
-                // INSERT K, INSERT K => INSERT K (invis), INSERT K
-                if bitmap_builder.is_none() {
-                    // Lazily initialize the bitmap builder to save one clone if the chunk needn't
-                    // be modified.
-                    *bitmap_builder = Some(BitmapBuilder::from_bitmap(
-                        &chunk.data_chunk().vis().to_bitmap(),
-                    ))
-                }
-                let (old_pk, _) = o.replace_entry(Op::Insert);
-                bitmap_builder
-                    .as_mut()
-                    .unwrap()
-                    .set(old_pk.row().index(), false);
-                bitmap_builder.as_mut().unwrap().set(pk.row().index(), true);
-            }
-            Op::Delete => {
-                // DELETE K (R1), INSERT K (R2)
-                //     R1 == R2 => DELETE K (R1) (invis), INSERT K (R2) (invis)
-                //     R1 != R2 => DELETE K (R1), INSERT K (R2)
-                if bitmap_builder.is_none() {
-                    *bitmap_builder = Some(BitmapBuilder::from_bitmap(
-                        &chunk.data_chunk().vis().to_bitmap(),
-                    ))
-                }
-                if o.key().row() == pk.row() {
-                    let (deleted_pk, _) = o.remove_entry();
-                    bitmap_builder
-                        .as_mut()
-                        .unwrap()
-                        .set(deleted_pk.row().index(), false);
-                    bitmap_builder
-                        .as_mut()
-                        .unwrap()
-                        .set(pk.row().index(), false);
+pub struct StreamChunkCompactor {
+    chunks: Vec<StreamChunk>,
+    stream_key: Vec<usize>,
+}
+
+struct OpRowMutRefTuple<'a> {
+    previous: Option<OpRowMutRef<'a>>,
+    latest: OpRowMutRef<'a>,
+}
+
+impl<'a> OpRowMutRefTuple<'a> {
+    fn push(&mut self, mut op_row: OpRowMutRef<'a>) -> bool {
+        match (self.latest.op(), op_row.op()) {
+            (Op::Insert, Op::Insert) => panic!(
+                "receive duplicated insert on the stream. old valie {:?}, new value {:?}",
+                self.latest, op_row
+            ),
+            (Op::Delete, Op::Delete) => panic!(
+                "receive duplicated delete on the stream. old valie {:?}, new value {:?}",
+                self.latest, op_row
+            ),
+            (Op::Insert, Op::Delete) => {
+                self.latest.set_vis(false);
+                op_row.set_vis(false);
+                self.latest = if let Some(prev) = self.previous.take() {
+                    prev
                 } else {
-                    o.replace_entry(Op::Insert);
+                    return true;
                 }
             }
-            _ => {
-                unreachable!();
-            }
-        },
-    }
-}
+            (Op::Delete, Op::Insert) => {
+                // The operation for the key must be (+, -, +) or (-, +). And the (+, -) must has
+                // been filtered.
+                debug_assert!(self.previous.is_none());
 
-fn merge_delete<'a, 'b>(
-    chunk: &StreamChunk,
-    pk: Project<'a, RowRef<'b>>,
-    chunk_cache: &mut HashMap<Prehashed<Project<'a, RowRef<'b>>>, Op, BuildHasherDefault<Passthru>>,
-    bitmap_builder: &mut Option<BitmapBuilder>,
-    hash_values: &[u64],
-) {
-    let row_idx = pk.row().index();
-    match chunk_cache.entry(Prehashed::new(pk, hash_values[row_idx])) {
-        Entry::Vacant(v) => {
-            v.insert(Op::Delete);
-        }
-        Entry::Occupied(o) => match o.get() {
-            Op::Insert => {
-                // INSERT K, DELETE K => INSERT K (invis), DELETE K (invis)
-                debug_assert_eq!(o.key().row(), pk.row());
-                if bitmap_builder.is_none() {
-                    *bitmap_builder = Some(BitmapBuilder::from_bitmap(
-                        &chunk.data_chunk().vis().to_bitmap(),
-                    ))
-                }
-                let (inserted_pk, _) = o.remove_entry();
-                bitmap_builder
-                    .as_mut()
-                    .unwrap()
-                    .set(inserted_pk.row().index(), false);
-                bitmap_builder
-                    .as_mut()
-                    .unwrap()
-                    .set(pk.row().index(), false);
+                todo!();
             }
-            Op::Delete => {
-                // DELETE K, DELETE K => DELETE K, DELETE K (invis)
-                debug_assert_eq!(o.key().row(), pk.row());
-                if bitmap_builder.is_none() {
-                    *bitmap_builder = Some(BitmapBuilder::from_bitmap(
-                        &chunk.data_chunk().vis().to_bitmap(),
-                    ))
-                }
-                bitmap_builder
-                    .as_mut()
-                    .unwrap()
-                    .set(pk.row().index(), false);
-            }
-            _ => {
-                unreachable!();
-            }
-        },
-    }
-}
-
-/// Convert DELETE and INSERT on the same key to UPDATE messages.
-///
-/// This function must be called on a chunk with INSERT and DELETE ops only.
-pub fn gen_update_from_pk(pk_indices: &[usize], chunk: StreamChunk) -> StreamChunk {
-    let mut delete_cache = HashSet::new();
-    let mut insert_cache = HashSet::new();
-    for (op, row) in chunk.rows() {
-        let key = Project::new(row, pk_indices);
-        match op {
-            Op::Insert => {
-                insert_cache.insert(key);
-            }
-            Op::Delete => {
-                if let Some(inserted_pk) = insert_cache.take(&key) {
-                    if inserted_pk.row() != key.row() {
-                        // It's invalid that `key` has already had an inserted value and this value
-                        // is different from the value to be deleted here.
-                        panic!("deleting a non-existing record {:?}", key.row());
-                    }
-                } else if !delete_cache.contains(&key) {
-                    delete_cache.insert(key);
-                }
-            }
+            // `all the updateDelete` and `updateInsert` should be normalized to `delete`
+            // and`insert`
             _ => unreachable!(),
+        };
+        false
+    }
+}
+
+type OpRowMap<'a, 'b> =
+    HashMap<Prehashed<Project<'b, RowRef<'a>>>, OpRowMutRefTuple<'a>, BuildHasherDefault<Passthru>>;
+
+impl StreamChunkCompactor {
+    pub fn new(stream_key: Vec<usize>) -> Self {
+        Self {
+            stream_key,
+            chunks: vec![],
         }
     }
 
-    let mut chunk_builder =
-        DataChunkBuilder::new(chunk.data_chunk().data_types(), chunk.cardinality() + 1);
-    let mut ops = Vec::with_capacity(chunk.cardinality());
+    pub fn into_inner(self) -> (Vec<StreamChunk>, Vec<usize>) {
+        (self.chunks, self.stream_key)
+    }
 
-    for deleted_pk in delete_cache {
-        if let Some(inserted_pk) = insert_cache.take(&deleted_pk) {
-            ops.push(Op::UpdateDelete);
-            let returned_chunk = chunk_builder.append_one_row(deleted_pk.row());
-            debug_assert_eq!(returned_chunk, None);
+    pub fn push_chunk(&mut self, c: StreamChunk) {
+        self.chunks.push(c);
+    }
 
-            ops.push(Op::UpdateInsert);
-            let returned_chunk = chunk_builder.append_one_row(inserted_pk.row());
-            debug_assert_eq!(returned_chunk, None);
-        } else {
-            ops.push(Op::Delete);
-            let returned_chunk = chunk_builder.append_one_row(deleted_pk.row());
-            debug_assert_eq!(returned_chunk, None);
+    /// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT
+    /// and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
+    /// certain rules (see `merge_insert` and `merge_delete` for more details).
+
+    pub fn into_compacted_chunks(self) -> Vec<StreamChunk> {
+        let (chunks, key_indices) = self.into_inner();
+
+        let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
+        let mut chunks: Vec<(Vec<u64>, StreamChunkMut)> = chunks
+            .into_iter()
+            .map(|c| {
+                let hash_values = c
+                    .data_chunk()
+                    .get_hash_values(&key_indices, Crc32FastBuilder)
+                    .into_iter()
+                    .map(|hash| hash.value())
+                    .collect_vec();
+                (hash_values, StreamChunkMut::from(c))
+            })
+            .collect_vec();
+        {
+            let mut op_row_map: OpRowMap = new_prehashed_map_with_capacity(estimate_size);
+            for (hash_values, c) in &mut chunks {
+                for mut r in c.to_mut_rows() {
+                    if !r.vis() {
+                        continue;
+                    }
+                    r.set_op(r.op().normalize_update());
+                    let hash = hash_values[r.index()];
+                    let stream_key = r.row_ref().project(&key_indices);
+                    match op_row_map.entry(Prehashed::new(stream_key, hash)) {
+                        Entry::Vacant(v) => {
+                            v.insert(OpRowMutRefTuple {
+                                previous: None,
+                                latest: r,
+                            });
+                        }
+                        Entry::Occupied(mut o) => {
+                            if o.get_mut().push(r) {
+                                o.remove_entry();
+                            }
+                        }
+                    }
+                }
+            }
         }
+        chunks.into_iter().map(|(_, c)| c.into()).collect_vec()
     }
+}
 
-    for inserted_pk in insert_cache {
-        ops.push(Op::Insert);
-        let returned_chunk = chunk_builder.append_one_row(inserted_pk.row());
-        debug_assert_eq!(returned_chunk, None);
-    }
-
-    StreamChunk::from_parts(ops, chunk_builder.consume_all().unwrap())
+pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> StreamChunk {
+    let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
+    compactor.push_chunk(stream_chunk);
+    compactor
+        .into_compacted_chunks()
+        .into_iter()
+        .next()
+        .unwrap()
 }
 
 #[cfg(test)]
@@ -335,57 +215,6 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I
                 + 4 9 9",
-            )
-        );
-    }
-
-    #[test]
-    fn test_gen_update_from_pk() {
-        let pk_indices = [0, 1];
-
-        let chunk = StreamChunk::from_pretty(
-            " I I I
-            + 2 5 1
-            + 4 9 2
-            - 2 5 1",
-        );
-        assert_eq!(
-            gen_update_from_pk(&pk_indices, chunk),
-            StreamChunk::from_pretty(
-                " I I I
-                + 4 9 2",
-            )
-        );
-
-        let chunk = StreamChunk::from_pretty(
-            " I I I
-            - 2 5 1
-            + 6 6 6
-            + 2 5 3",
-        );
-        assert_eq!(
-            gen_update_from_pk(&pk_indices, chunk),
-            StreamChunk::from_pretty(
-                "  I I I
-                U- 2 5 1
-                U+ 2 5 3
-                 + 6 6 6",
-            )
-        );
-
-        let chunk = StreamChunk::from_pretty(
-            " I I I
-            - 2 5 1
-            + 4 9 2
-            + 2 5 3
-            - 2 5 3",
-        );
-        assert_eq!(
-            gen_update_from_pk(&pk_indices, chunk),
-            StreamChunk::from_pretty(
-                " I I I
-                - 2 5 1
-                + 4 9 2",
             )
         );
     }

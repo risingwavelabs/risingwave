@@ -23,13 +23,14 @@ use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::vis::VisMut;
-use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
+use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
+use crate::array::data_chunk_iter::RowRefIter;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
-use crate::types::{DataType, DefaultOrdered, ToText};
+use crate::types::{DataType, DatumRef, DefaultOrdered, ToText};
 use crate::util::iter_util::ZipEqDebug;
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -65,6 +66,15 @@ impl Op {
             None => bail!("No such op type"),
         };
         Ok(op)
+    }
+
+    pub fn normalize_update(self) -> Op {
+        match self {
+            Op::Insert => Op::Insert,
+            Op::Delete => Op::Delete,
+            Op::UpdateDelete => Op::Delete,
+            Op::UpdateInsert => todo!(),
+        }
     }
 }
 
@@ -327,7 +337,15 @@ impl OpsMut {
         }
     }
 
+    pub fn len(&self) -> usize {
+        match &self.state {
+            OpsMutState::ArcRef(v) => v.len(),
+            OpsMutState::Mut(v) => v.len(),
+        }
+    }
+
     pub fn set(&mut self, n: usize, val: Op) {
+        debug_assert!(n < self.len());
         if let OpsMutState::Mut(v) = &mut self.state {
             v[n] = val;
         } else {
@@ -338,6 +356,14 @@ impl OpsMut {
             };
             v[n] = val;
             self.state = OpsMutState::Mut(v);
+        }
+    }
+
+    pub fn get(&self, n: usize) -> Op {
+        debug_assert!(n < self.len());
+        match &self.state {
+            OpsMutState::ArcRef(v) => v[n],
+            OpsMutState::Mut(v) => v[n],
         }
     }
 }
@@ -352,7 +378,7 @@ impl From<OpsMut> for Arc<[Op]> {
 
 /// A mutable wrapper for `StreamChunk`. can only set the visibilities and ops in place, can not
 /// change the length.
-struct StreamChunkMut {
+pub struct StreamChunkMut {
     columns: Arc<[ArrayRef]>,
     ops: OpsMut,
     vis: VisMut,
@@ -375,18 +401,74 @@ impl From<StreamChunkMut> for StreamChunk {
         StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.into()))
     }
 }
+
 pub struct OpRowMutRef<'a> {
     c: &'a mut StreamChunkMut,
     i: usize,
 }
 
 impl OpRowMutRef<'_> {
+    pub fn index(&self) -> usize {
+        self.i
+    }
+
+    pub fn vis(&self) -> bool {
+        self.c.vis.is_set(self.i)
+    }
+
+    pub fn op(&self) -> Op {
+        self.c.ops.get(self.i)
+    }
+
     pub fn set_vis(&mut self, val: bool) {
         self.c.set_vis(self.i, val);
     }
 
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
+    }
+
+    pub fn row_ref(&self) -> RowRef<'_> {
+        RowRef {
+            columns: self.c.columns(),
+            idx: self.i,
+        }
+    }
+}
+
+impl<'a> std::fmt::Debug for OpRowMutRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+impl PartialEq for OpRowMutRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+impl Eq for OpRowMutRef<'_> {}
+
+impl Row for OpRowMutRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        unsafe { self.c.columns[index].value_at_unchecked(self.i) }
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        self.c
+            .columns
+            .get_unchecked(index)
+            .value_at_unchecked(self.i)
+    }
+
+    fn len(&self) -> usize {
+        self.c.columns.len()
+    }
+
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
+        RowRefIter {
+            columns: self.c.columns.iter(),
+            row_idx: self.i,
+        }
     }
 }
 
@@ -399,8 +481,12 @@ impl StreamChunkMut {
         self.ops.set(n, val);
     }
 
+    pub fn columns(&self) -> &[ArrayRef] {
+        &self.columns
+    }
+
     /// get the mut reference of the stream chunk.
-    pub fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+    pub fn to_mut_rows(&mut self) -> impl Iterator<Item = OpRowMutRef<'_>> {
         unsafe {
             (0..self.vis.len()).map(|i| {
                 let p = self as *const StreamChunkMut;

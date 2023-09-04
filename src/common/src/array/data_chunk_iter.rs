@@ -60,7 +60,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
             Some(idx) if idx < self.idx.end => {
                 self.idx.start = idx + 1;
                 Some(RowRef {
-                    chunk: self.chunk,
+                    columns: self.chunk.columns(),
                     idx,
                 })
             }
@@ -108,7 +108,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
                 None
             } else {
                 Some(RowRef {
-                    chunk: self.chunk,
+                    columns: self.chunk.columns(),
                     idx: self.idx,
                 })
             });
@@ -128,7 +128,7 @@ unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 
 #[derive(Clone, Copy)]
 pub struct RowRef<'a> {
-    chunk: &'a DataChunk,
+    columns: &'a [ArrayRef],
 
     idx: usize,
 }
@@ -142,7 +142,10 @@ impl<'a> std::fmt::Debug for RowRef<'a> {
 impl<'a> RowRef<'a> {
     pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
         debug_assert!(idx < chunk.capacity());
-        Self { chunk, idx }
+        Self {
+            columns: chunk.columns(),
+            idx,
+        }
     }
 
     /// Get the index of this row in the data chunk.
@@ -161,7 +164,7 @@ impl Eq for RowRef<'_> {}
 
 impl Hash for RowRef<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let len = self.chunk.columns().len();
+        let len = self.columns.len();
         for i in 0..len {
             self.datum_at(i).hash(state);
         }
@@ -170,28 +173,24 @@ impl Hash for RowRef<'_> {
 
 impl Row for RowRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
-        unsafe { self.chunk.columns()[index].value_at_unchecked(self.idx) }
+        unsafe { self.columns[index].value_at_unchecked(self.idx) }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
-        self.chunk
-            .columns()
+        self.columns
             .get_unchecked(index)
             .value_at_unchecked(self.idx)
     }
 
     fn len(&self) -> usize {
-        self.chunk.columns().len()
+        self.columns.len()
     }
 
     fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
-        debug_assert!(self.idx < self.chunk.capacity());
         RowRefIter {
-            columns: self.chunk.columns().iter(),
+            columns: self.columns.iter(),
             row_idx: self.idx,
         }
     }
