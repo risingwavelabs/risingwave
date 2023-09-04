@@ -467,6 +467,11 @@ fn infer_type_for_special(
             ensure_arity!("regexp_replace", 3 <= | inputs | <= 6);
             Ok(Some(DataType::Varchar))
         }
+        ExprType::RegexpCount => {
+            // TODO: Preprocessing?
+            ensure_arity!("regexp_count", 2 <= | inputs | <= 4);
+            Ok(Some(DataType::Int32))
+        }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());

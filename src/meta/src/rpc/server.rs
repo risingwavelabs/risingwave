@@ -543,6 +543,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         source_manager,
         catalog_manager.clone(),
         stream_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());

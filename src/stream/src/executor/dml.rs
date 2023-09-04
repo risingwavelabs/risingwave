@@ -119,9 +119,8 @@ impl DmlExecutor {
         // a round robin way.
         let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
 
-        // If the first barrier is configuration change, then the DML executor must be newly
-        // created, and we should start with the paused state.
-        if barrier.is_update() {
+        // If the first barrier requires us to pause on startup, pause the stream.
+        if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
 
