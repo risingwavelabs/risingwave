@@ -34,7 +34,6 @@ assert_not_empty() {
     echo "assert_not_empty PASSED for $1"
   else
     echo "assert_not_empty FAILED for $1"
-    buildkite-agent artifact upload "$1"
     exit 1
   fi
   set -e
@@ -46,8 +45,8 @@ assert_eq() {
     echo "assert_eq PASSED for $1 and $2"
   else
     echo "FAILED"
-    buildkite-agent artifact upload "$1"
-    buildkite-agent artifact upload "$2"
+    echo "LHS: " $1
+    echo "RHS: " $2
     exit 1
   fi
   set -e
