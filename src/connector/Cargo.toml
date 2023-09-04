@@ -106,6 +106,7 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
+valico = "4.0.0"
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
