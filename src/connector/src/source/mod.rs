@@ -28,7 +28,9 @@ pub use base::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
+mod common;
 mod manager;
+
 pub use manager::SourceColumnDesc;
 
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;

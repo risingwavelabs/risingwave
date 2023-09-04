@@ -15,34 +15,85 @@
 pub mod enumerator;
 pub mod source;
 pub mod split;
-
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
-use anyhow::anyhow;
 pub use enumerator::*;
-use risingwave_pb::connector_service::{SourceType, TableSchema};
-use serde::Deserialize;
+use paste::paste;
+use risingwave_pb::connector_service::{PbSourceType, SourceType, TableSchema};
 pub use source::*;
 pub use split::*;
 
-pub const MYSQL_CDC_CONNECTOR: &str = "mysql-cdc";
-pub const POSTGRES_CDC_CONNECTOR: &str = "postgres-cdc";
-pub const CITUS_CDC_CONNECTOR: &str = "citus-cdc";
+pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
+pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
+pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 
-#[derive(Clone, Debug, Deserialize, Default)]
-pub struct CdcProperties {
-    /// Type of the cdc source, e.g. mysql, postgres
-    pub source_type: String,
+pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
+    const CDC_CONNECTOR_NAME: &'static str;
+    fn source_type() -> CdcSourceType;
+}
+
+macro_rules! impl_cdc_source_type {
+    ($({$source_type:ident, $name:expr }),*) => {
+        $(
+            paste!{
+                #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+                pub struct $source_type;
+                impl CdcSourceTypeTrait for $source_type {
+                    const CDC_CONNECTOR_NAME: &'static str = concat!($name, "-cdc");
+                    fn source_type() -> CdcSourceType {
+                        CdcSourceType::$source_type
+                    }
+                }
+
+                pub type [< $source_type DebeziumSplitEnumerator >] = DebeziumSplitEnumerator<$source_type>;
+            }
+        )*
+
+        pub enum CdcSourceType {
+            $(
+                $source_type,
+            )*
+        }
+
+        impl From<PbSourceType> for CdcSourceType {
+            fn from(value: PbSourceType) -> Self {
+                match value {
+                    PbSourceType::Unspecified => unreachable!(),
+                    $(
+                        PbSourceType::$source_type => CdcSourceType::$source_type,
+                    )*
+                }
+            }
+        }
+
+        impl From<CdcSourceType> for PbSourceType {
+            fn from(this: CdcSourceType) -> PbSourceType {
+                match this {
+                    $(
+                        CdcSourceType::$source_type => PbSourceType::$source_type,
+                    )*
+                }
+            }
+        }
+    }
+}
+
+impl_cdc_source_type!({ Mysql, "mysql" }, { Postgres, "postgres" }, { Citus, "citus" });
+
+#[derive(Clone, Debug, Default)]
+pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
     pub props: HashMap<String, String>,
 
     /// Schema of the source specified by users
     pub table_schema: Option<TableSchema>,
+
+    pub _phantom: PhantomData<T>,
 }
 
-impl CdcProperties {
-    pub fn get_source_type_pb(&self) -> anyhow::Result<SourceType> {
-        SourceType::from_str_name(&self.source_type.to_ascii_uppercase())
-            .ok_or_else(|| anyhow!("unknown source type: {}", self.source_type))
+impl<T: CdcSourceTypeTrait> CdcProperties<T> {
+    pub fn get_source_type_pb(&self) -> SourceType {
+        SourceType::from(T::source_type())
     }
 }

@@ -20,12 +20,11 @@ use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::types::ShardIteratorType;
 use aws_sdk_kinesis::Client as KinesisClient;
-use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use tokio_retry;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::KinesisProperties;
@@ -33,8 +32,6 @@ use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
     SplitMetaData, SplitReader,
 };
-
-impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
 
 #[derive(Debug, Clone)]
 pub struct KinesisSplitReader {
@@ -108,13 +105,15 @@ impl SplitReader for KinesisSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
-impl KinesisSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub(crate) async fn into_data_stream(mut self) {
+impl CommonSplitReader for KinesisSplitReader {
+    #[try_stream(ok = Vec < SourceMessage >, error = anyhow::Error)]
+    async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
         loop {
             if self.shard_iter.is_none() {
@@ -189,7 +188,8 @@ impl KinesisSplitReader {
             }
         }
     }
-
+}
+impl KinesisSplitReader {
     async fn new_shard_iter(&mut self) -> Result<()> {
         let (starting_seq_num, iter_type) = if self.latest_offset.is_some() {
             (
@@ -269,7 +269,7 @@ impl KinesisSplitReader {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
+    use futures::{pin_mut, StreamExt};
 
     use super::*;
     use crate::common::KinesisCommon;
@@ -294,7 +294,7 @@ mod tests {
             seq_offset: None,
         };
 
-        let mut trim_horizen_reader = KinesisSplitReader::new(
+        let trim_horizen_reader = KinesisSplitReader::new(
             properties.clone(),
             vec![SplitImpl::Kinesis(KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
@@ -307,9 +307,10 @@ mod tests {
         )
         .await?
         .into_data_stream();
+        pin_mut!(trim_horizen_reader);
         println!("{:?}", trim_horizen_reader.next().await.unwrap()?);
 
-        let mut offset_reader = KinesisSplitReader::new(
+        let offset_reader = KinesisSplitReader::new(
             properties.clone(),
             vec![SplitImpl::Kinesis(KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
@@ -324,6 +325,7 @@ mod tests {
         )
         .await?
         .into_data_stream();
+        pin_mut!(offset_reader);
         println!("{:?}", offset_reader.next().await.unwrap()?);
 
         Ok(())
