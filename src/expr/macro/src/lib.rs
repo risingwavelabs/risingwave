@@ -463,7 +463,9 @@ struct AggregateImpl {
     #[allow(dead_code)] // TODO(wrj): add merge to trait
     merge: Option<UserFunctionAttr>,
     finalize: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support encode
     encode_state: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support decode
     decode_state: Option<UserFunctionAttr>,
 }
 

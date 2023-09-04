@@ -481,8 +481,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let fields = self
             .agg_calls
             .iter()
-            .map(|agg_call| Field {
-                data_type: AGG_FUNC_SIG_MAP
+            .map(|agg_call| {
+                let sig = AGG_FUNC_SIG_MAP
                     .get(
                         agg_call.agg_kind,
                         &agg_call
@@ -493,12 +493,21 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         (&agg_call.return_type).into(),
                         in_append_only,
                     )
-                    .expect("agg not found")
-                    .state_type
-                    .into(),
-                name: format!("{:?}_state", agg_call.agg_kind),
-                sub_fields: vec![],
-                type_name: String::default(),
+                    .expect("agg not found");
+                let data_type = if !in_append_only && sig.append_only {
+                    // we use materialized input state for non-retractable aggregate function.
+                    // for backward compatibility, the state type is same as the return type.
+                    // its values in the intermediate state table are always null.
+                    agg_call.return_type.clone()
+                } else {
+                    sig.state_type.into()
+                };
+                Field {
+                    data_type,
+                    name: format!("{:?}_state", agg_call.agg_kind),
+                    sub_fields: vec![],
+                    type_name: String::default(),
+                }
             })
             .collect_vec();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();

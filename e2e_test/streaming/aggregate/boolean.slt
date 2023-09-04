@@ -15,10 +15,11 @@ NULL NULL
 
 statement ok
 insert into t values (true);
-# t: true
 
 statement ok
 flush;
+
+# t: true
 
 query BB
 select * from mv;
@@ -28,10 +29,11 @@ t t
 
 statement ok
 insert into t values (false);
-# t: true, false
 
 statement ok
 flush;
+
+# t: true, false
 
 query BB
 select * from mv;
@@ -41,10 +43,11 @@ f t
 
 statement ok
 delete from t where v = true;
-# t: false
 
 statement ok
 flush;
+
+# t: false
 
 query BB
 select * from mv;
@@ -54,10 +57,11 @@ f f
 
 statement ok
 delete from t;
-# t: empty
 
 statement ok
 flush;
+
+# t: empty
 
 query BB
 select * from mv;

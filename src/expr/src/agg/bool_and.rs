@@ -114,6 +114,7 @@ impl BoolAndUpdatable {
         }
     }
 
+    #[allow(dead_code)] // TODO: support merge
     fn merge(&self, state1: i64, state2: i64) -> i64 {
         state1 + state2
     }
