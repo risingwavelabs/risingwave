@@ -62,9 +62,8 @@ pub(crate) mod tests {
     use risingwave_storage::store::*;
 
     use crate::get_notification_client_for_test;
-    use crate::test_utils::{
-        register_tables_with_id_for_test, LocalStateStoreTestExt, TestIngestBatch,
-    };
+    use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+    use crate::test_utils::{register_tables_with_id_for_test, TestIngestBatch};
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
         hummock_meta_client: Arc<dyn HummockMetaClient>,

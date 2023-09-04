@@ -28,7 +28,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::StateStore;
 
-use crate::test_utils::{prepare_hummock_test_env, LocalStateStoreTestExt, TestIngestBatch};
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+use crate::test_utils::{prepare_hummock_test_env, TestIngestBatch};
 
 #[tokio::test]
 async fn test_storage_basic() {

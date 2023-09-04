@@ -26,9 +26,8 @@ use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
 
-use crate::test_utils::{
-    with_hummock_storage_v2, HummockStateStoreTestTrait, LocalStateStoreTestExt, TestIngestBatch,
-};
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
