@@ -2833,7 +2833,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=cf0293d#cf0293de1bc0506444ab80e477e3a7b2c6cc52b9"
+source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2861,7 +2861,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=cf0293d#cf0293de1bc0506444ab80e477e3a7b2c6cc52b9"
+source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=cf0293d#cf0293de1bc0506444ab80e477e3a7b2c6cc52b9"
+source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2893,7 +2893,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=cf0293d#cf0293de1bc0506444ab80e477e3a7b2c6cc52b9"
+source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2924,21 +2924,27 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=cf0293d#cf0293de1bc0506444ab80e477e3a7b2c6cc52b9"
+source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",
  "either",
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-sink",
+ "futures-util",
  "itertools 0.10.5",
+ "lock_api",
  "nix 0.27.1",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
  "proc-macro2",
  "quote",
  "rand",
+ "regex",
+ "regex-automata 0.3.7",
+ "regex-syntax 0.7.5",
  "syn 2.0.29",
  "tokio",
  "tracing-core",
