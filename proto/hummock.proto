@@ -436,25 +436,25 @@ message SubscribeCompactionEventResponse {
   uint64 create_at = 7;
 }
 
-message DispatchCompactionTaskRequest {
-  // DispatchCompactionTaskRequest is used to pass compaction task level parameters.
-  oneof task {
-    CompactTask compact_task = 1;
-    VacuumTask vacuum_task = 2;
-    FullScanTask full_scan_task = 3;
-    ValidationTask validation_task = 4;
-    CancelCompactTask cancel_compact_task = 5;
-  }
-  // Used to build filter_key_extract.
-  repeated catalog.Table tables = 6;
-  // We can generate output object ids for each compactor, which equal to the number of input SSTs.
-  // If all the output object ids are used up, this compaction task fails, and the next allocation will be twice the previous amount of output object ids.
-  repeated uint64 output_object_ids = 7;
-}
+// message DispatchCompactionTaskRequest {
+//   // DispatchCompactionTaskRequest is used to pass compaction task level parameters.
+//   oneof task {
+//     CompactTask compact_task = 1;
+//     VacuumTask vacuum_task = 2;
+//     FullScanTask full_scan_task = 3;
+//     ValidationTask validation_task = 4;
+//     CancelCompactTask cancel_compact_task = 5;
+//   }
+//   // Used to build filter_key_extract.
+//   repeated catalog.Table tables = 6;
+//   // We can generate output object ids for each compactor, which equal to the number of input SSTs.
+//   // If all the output object ids are used up, this compaction task fails, and the next allocation will be twice the previous amount of output object ids.
+//   repeated uint64 output_object_ids = 7;
+// }
 
-message DispatchCompactionTaskResponse {
-  common.Status status = 1;
-}
+// message DispatchCompactionTaskResponse {
+//   common.Status status = 1;
+// }
 
 message ReportCompactionTaskRequest {
   // ReportTask provides the compact task to report to the meta.

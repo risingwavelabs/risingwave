@@ -15,14 +15,13 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use risingwave_pb::compactor::dispatch_compaction_task_request;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::{
-    dispatch_compaction_task_request, ReportFullScanTaskRequest, ReportVacuumTaskRequest,
-};
+use risingwave_pb::hummock::{ReportFullScanTaskRequest, ReportVacuumTaskRequest};
 pub mod compactor_runner;
 mod context;
 mod iterator;

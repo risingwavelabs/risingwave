@@ -35,8 +35,8 @@ use risingwave_object_store::object::object_metrics::{self, GLOBAL_OBJECT_STORE_
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
+use risingwave_pb::compactor::DispatchCompactionTaskRequest;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
-use risingwave_pb::hummock::DispatchCompactionTaskRequest;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{
@@ -53,10 +53,10 @@ use risingwave_storage::monitor::{
     monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
-use tonic::Request;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
@@ -66,6 +66,7 @@ use crate::CompactorOpts;
 
 pub async fn prepare_start_parameters(
     config: RwConfig,
+
     storage_opts: Arc<StorageOpts>,
     object_metrics: Arc<object_metrics::ObjectStoreMetrics>,
     state_store_url: &str,
@@ -311,22 +312,14 @@ pub async fn compactor_serve(
     (join_handle, observer_join_handle, shutdown_send)
 }
 
-pub async fn _shared_compactor_serve(
-    endpoint: &'static str,
+pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
     opts: CompactorOpts,
-    request: Request<DispatchCompactionTaskRequest>,
-    parallel_compact_size_mb: u32,
-    sstable_size_mb: u32,
-    block_size_kb: u32,
-    bloom_false_positive: f64,
-    state_store_url: &str,
-    data_directory: &str,
 ) -> (JoinHandle<()>, Sender<()>) {
+    let endpoint: &'static str = Box::leak(opts.endpoint.clone().into_boxed_str());
     let channel = Channel::from_static(endpoint).connect().await.unwrap();
 
     let client: HummockManagerServiceClient<Channel> = HummockManagerServiceClient::new(channel);
-    type CompactorMemoryCollector = HummockMemoryCollector;
 
     let config = load_config(&opts.config_path, &opts);
     info!("Starting Serverless compactor node",);
@@ -354,87 +347,109 @@ pub async fn _shared_compactor_serve(
     let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::new(
         &config,
         &storage_memory_config,
-        parallel_compact_size_mb,
-        sstable_size_mb,
-        block_size_kb,
-        bloom_false_positive,
-        data_directory,
-        state_store_url,
+        opts.parallel_compact_size_mb,
+        opts.sstable_size_mb,
+        opts.block_size_kb,
+        opts.bloom_false_positive,
+        &opts.data_directory,
+        &opts.state_store_url,
     ));
 
     let (sstable_store, memory_limiter, await_tree_reg) = prepare_start_parameters(
         config.clone(),
         storage_opts.clone(),
         object_metrics,
-        state_store_url,
+        &opts.state_store_url,
     )
     .await;
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
-    let DispatchCompactionTaskRequest {
-        tables,
-        output_object_ids,
-        task: dispatch_task,
-    } = request.into_inner();
+    let cloned_await_tree_reg = await_tree_reg.clone();
 
-    let id_to_tables = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
-        acc.insert(table.id, table);
-        acc
-    });
-
-    let static_filter_key_extractor_manager: Arc<StaticFilterKeyExtractorManager> =
-        Arc::new(StaticFilterKeyExtractorManager::new(id_to_tables));
-    let compactor_context = CompactorContext {
-        storage_opts,
-        sstable_store,
-        compactor_metrics,
-        is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
-        )),
-        filter_key_extractor_manager: FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
-            static_filter_key_extractor_manager,
-        ),
-        memory_limiter,
-
-        task_progress_manager: Default::default(),
-        await_tree_reg: await_tree_reg.clone(),
-        running_task_count: Arc::new(AtomicU32::new(0)),
-    };
-    let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
-    output_object_ids_deque.extend(output_object_ids);
-    let shared_compactor_object_id_manager =
-        SharedComapctorObjectIdManager::new(output_object_ids_deque);
-    let (join_handle, shutdown_sender) =
-        risingwave_storage::hummock::compactor::start_shared_compactor(
-            client,
-            dispatch_task.unwrap(),
-            compactor_context,
-            Box::new(shared_compactor_object_id_manager),
-        );
-
-    let compactor_srv = CompactorServiceImpl::default();
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(CompactorServiceServer::new(compactor_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))
-            .serve_with_shutdown(listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
+            .monitored_serve_with_shutdown(
+                listen_addr,
+                "grpc-compactor-node-service",
+                TcpConfig {
+                    tcp_nodelay: true,
+                    keepalive_duration: None,
+                },
+                async move {
+                    let request = tokio::select! {
+                        request = receiver.recv() =>{
+                            if let Some(request) = request{
+                                request
+                            }else{
+                                panic!("Fail to reveive DispatchCompactionTaskRequest");
                             }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
+                        }
+                    };
 
-                    },
-                }
-            })
+                    let DispatchCompactionTaskRequest {
+                        tables,
+                        output_object_ids,
+                        task: dispatch_task,
+                    } = request.into_inner();
+
+                    let id_to_tables = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
+                        acc.insert(table.id, table);
+                        acc
+                    });
+
+                    let static_filter_key_extractor_manager: Arc<StaticFilterKeyExtractorManager> =
+                        Arc::new(StaticFilterKeyExtractorManager::new(id_to_tables));
+                    let compactor_context = CompactorContext {
+                        storage_opts,
+                        sstable_store,
+                        compactor_metrics,
+                        is_share_buffer_compact: false,
+                        compaction_executor: Arc::new(CompactionExecutor::new(
+                            opts.compaction_worker_threads_number,
+                        )),
+                        filter_key_extractor_manager:
+                            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
+                                static_filter_key_extractor_manager,
+                            ),
+                        memory_limiter,
+
+                        task_progress_manager: Default::default(),
+                        await_tree_reg: cloned_await_tree_reg,
+                        running_task_count: Arc::new(AtomicU32::new(0)),
+                    };
+                    let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
+                    output_object_ids_deque.extend(output_object_ids);
+                    let shared_compactor_object_id_manager =
+                        SharedComapctorObjectIdManager::new(output_object_ids_deque);
+                    let (join_handle, shutdown_sender) =
+                        risingwave_storage::hummock::compactor::start_shared_compactor(
+                            client,
+                            dispatch_task.unwrap(),
+                            compactor_context,
+                            Box::new(shared_compactor_object_id_manager),
+                        );
+
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+
+                        _ = &mut shutdown_recv => {
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                }
+
+                        },
+                    }
+                },
+            )
             .await
-            .unwrap();
     });
 
     // Boot metrics service.
