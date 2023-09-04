@@ -926,7 +926,7 @@ pub mod default {
         }
 
         pub fn manually_dump_heap_profile_dir() -> String {
-            "/risingwave/cache/profiling/manually".to_string()
+            "./.risingwave/profiling/manually".to_string()
         }
     }
 

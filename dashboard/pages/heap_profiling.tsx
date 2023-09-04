@@ -68,31 +68,6 @@ export default function HeapProfiling() {
     }
   }, [computeNodes, computeNodeId])
 
-  function updateSelectedProfileList() {
-    if (!profileList) {
-      return
-    }
-    if (profileType === "Auto") {
-      setSelectedProfileList({
-        dir: profileList.dirAuto,
-        name: profileList.nameAuto,
-      })
-    } else if (profileType === "Manually") {
-      setSelectedProfileList({
-        dir: profileList.dirManually,
-        name: profileList.nameManually,
-      })
-    } else {
-      console.error(`Bad profileType ${profileType}`)
-    }
-    if (selectedProfileList) {
-      if (selectedProfileList.name.length > 0) {
-        setAnalyzeTargetFileName(selectedProfileList.name[0])
-      }
-    } else {
-    }
-  }
-
   async function getProfileList(
     computeNodes: WorkerNode[] | undefined,
     computeNodeId: number | undefined
