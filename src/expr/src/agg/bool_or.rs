@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::aggregate;
 
 /// Returns true if any non-null input value is true, otherwise false.
@@ -93,55 +91,34 @@ fn bool_or_append_only(state: bool, input: bool) -> bool {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate(
-    "bool_or(boolean) -> boolean",
-    state = "BoolOrState",
-    state_type = "int64"
-)]
-fn bool_or(mut state: BoolOrState, input: bool, retract: bool) -> BoolOrState {
-    if input == true {
-        if retract {
-            state.true_count -= 1;
+#[derive(Debug, Default, Clone)]
+struct BoolOrUpdatable;
+
+#[aggregate("bool_or(boolean) -> boolean", state = "int64")]
+impl BoolOrUpdatable {
+    // state is the number of true values
+
+    fn accumulate(&self, state: i64, input: bool) -> i64 {
+        if input {
+            state + 1
         } else {
-            state.true_count += 1;
+            state
         }
     }
-    state
-}
 
-/// State for retractable `bool_or` aggregate.
-#[derive(Debug, Default, Clone, EstimateSize)]
-struct BoolOrState {
-    true_count: i64,
-}
-
-// state -> result
-impl From<BoolOrState> for bool {
-    fn from(state: BoolOrState) -> Self {
-        state.true_count == 0
-    }
-}
-
-// first input -> state
-impl From<bool> for BoolOrState {
-    fn from(b: bool) -> Self {
-        Self {
-            true_count: if b { 1 } else { 0 },
+    fn retract(&self, state: i64, input: bool) -> i64 {
+        if input {
+            state - 1
+        } else {
+            state
         }
     }
-}
 
-impl From<ScalarImpl> for BoolOrState {
-    fn from(d: ScalarImpl) -> Self {
-        let ScalarImpl::Int64(v) = d else {
-            panic!("unexpected state for `bool_or`: {:?}", d);
-        };
-        Self { true_count: v }
+    fn merge(&self, state1: i64, state2: i64) -> i64 {
+        state1 + state2
     }
-}
 
-impl From<BoolOrState> for ScalarImpl {
-    fn from(state: BoolOrState) -> Self {
-        ScalarImpl::Int64(state.true_count)
+    fn finalize(&self, state: i64) -> bool {
+        state != 0
     }
 }

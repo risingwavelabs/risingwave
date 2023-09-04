@@ -14,6 +14,7 @@
 
 //! Parse the tokens of the macro.
 
+use quote::ToTokens;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{LitStr, Token};
@@ -69,8 +70,6 @@ impl Parse for FunctionAttr {
                 parsed.state = Some(get_value()?);
             } else if meta.path().is_ident("init_state") {
                 parsed.init_state = Some(get_value()?);
-            } else if meta.path().is_ident("state_type") {
-                parsed.state_type = Some(get_value()?);
             } else if meta.path().is_ident("prebuild") {
                 parsed.prebuild = Some(get_value()?);
             } else if meta.path().is_ident("type_infer") {
@@ -93,7 +92,12 @@ impl Parse for FunctionAttr {
 impl Parse for UserFunctionAttr {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let itemfn: syn::ItemFn = input.parse()?;
-        let sig = &itemfn.sig;
+        Ok(UserFunctionAttr::from(&itemfn.sig))
+    }
+}
+
+impl From<&syn::Signature> for UserFunctionAttr {
+    fn from(sig: &syn::Signature) -> Self {
         let (return_type, iterator_item_type) = match &sig.output {
             syn::ReturnType::Default => (ReturnType::T, None),
             syn::ReturnType::Type(_, ty) => {
@@ -102,7 +106,7 @@ impl Parse for UserFunctionAttr {
                 (return_type, iterator_item_type)
             }
         };
-        Ok(UserFunctionAttr {
+        UserFunctionAttr {
             name: sig.ident.to_string(),
             write: last_arg_is_write(sig),
             retract: last_arg_is_retract(sig),
@@ -111,7 +115,40 @@ impl Parse for UserFunctionAttr {
             iterator_item_type,
             generic: sig.generics.params.len(),
             return_type_span: sig.output.span(),
+        }
+    }
+}
+
+impl Parse for AggregateImpl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let itemimpl: syn::ItemImpl = input.parse()?;
+        let parse_function = |name: &str| {
+            itemimpl.items.iter().find_map(|item| match item {
+                syn::ImplItem::Fn(syn::ImplItemFn { sig, .. }) if sig.ident == name => {
+                    Some(UserFunctionAttr::from(sig))
+                }
+                _ => None,
+            })
+        };
+        Ok(AggregateImpl {
+            struct_name: itemimpl.self_ty.to_token_stream().to_string(),
+            accumulate: parse_function("accumulate").expect("expect accumulate function"),
+            retract: parse_function("retract"),
+            merge: parse_function("merge"),
+            finalize: parse_function("finalize"),
+            encode_state: parse_function("encode_state"),
+            decode_state: parse_function("decode_state"),
         })
+    }
+}
+
+impl Parse for AggregateFnOrImpl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        if input.peek(Token![impl]) {
+            Ok(AggregateFnOrImpl::Impl(input.parse()?))
+        } else {
+            Ok(AggregateFnOrImpl::Fn(input.parse()?))
+        }
     }
 }
 
