@@ -5,7 +5,7 @@ heartbeat_interval_ms = 1000
 connection_pool_size = 16
 metrics_level = 0
 telemetry_enabled = true
-manually_dump_heap_profile_dir = "/risingwave/cache/profiling/manually"
+manually_dump_heap_profile_dir = "./.risingwave/profiling/manually"
 
 [server.auto_dump_heap_profile]
 dir = ""
