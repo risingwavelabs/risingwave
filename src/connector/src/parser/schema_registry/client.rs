@@ -20,7 +20,7 @@ use futures::future::select_all;
 use itertools::Itertools;
 use reqwest::{Method, Url};
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 
 use crate::parser::schema_registry::util::*;
