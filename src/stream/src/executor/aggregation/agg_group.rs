@@ -247,8 +247,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         })
     }
 
+    /// Create a group from encoded states for EOWC. The previous output is set to `None`.
     #[allow(clippy::too_many_arguments)]
-    pub async fn from_encoded_states(
+    pub async fn create_eowc(
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],
@@ -273,23 +274,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             states.push(state);
         }
 
-        let prev_outputs = {
-            let mut outputs = Vec::with_capacity(states.len());
-            for ((state, storage), func) in states
-                .iter_mut()
-                .zip_eq_fast(storages)
-                .zip_eq_fast(agg_funcs)
-            {
-                let output = state.get_output(storage, func, group_key.as_ref()).await?;
-                outputs.push(output);
-            }
-            Some(OwnedRow::new(outputs))
-        };
-
         Ok(Self {
             group_key,
             states,
-            prev_outputs,
+            prev_outputs: None,
             row_count_index,
             _phantom: PhantomData,
         })
@@ -398,14 +386,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             .chain(OwnedRow::new(encoded_states))
             .into_owned_row();
         Ok(states)
-    }
-
-    /// Get previous outputs.
-    pub fn prev_outputs(&self) -> OwnedRow {
-        self.group_key()
-            .map(GroupKey::table_row)
-            .chain(self.prev_outputs.as_ref().expect("no previous outputs"))
-            .into_owned_row()
     }
 
     /// Get the outputs of all managed agg states, without group key prefix.

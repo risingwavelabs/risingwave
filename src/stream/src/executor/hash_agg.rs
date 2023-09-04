@@ -19,7 +19,7 @@ use std::sync::Arc;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -458,7 +458,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .collect();
                     let states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    let agg_group = AggGroup::from_encoded_states(
+                    let mut agg_group = AggGroup::create_eowc(
                         Some(GroupKey::new(
                             group_key,
                             Some(this.group_key_table_pk_projection.clone()),
@@ -474,10 +474,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     )
                     .await?;
 
-                    let output = agg_group.prev_outputs();
-
-                    if let Some(chunk) = vars.chunk_builder.append_row(Op::Insert, output) {
-                        yield chunk;
+                    let change = agg_group
+                        .build_change(&this.storages, &this.agg_funcs)
+                        .await?;
+                    if let Some(change) = change {
+                        if let Some(chunk) = vars.chunk_builder.append_record(change) {
+                            yield chunk;
+                        }
                     }
                 }
             }
@@ -496,6 +499,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             }
         }
+
+        // clear the change set
+        vars.group_change_set.clear();
 
         // Yield the remaining rows in chunk builder.
         if let Some(chunk) = vars.chunk_builder.take() {
