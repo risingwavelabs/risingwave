@@ -453,3 +453,14 @@ impl NewLocalOptions {
         }
     }
 }
+
+#[derive(Clone)]
+pub struct InitOptions {
+    pub epoch: EpochPair,
+}
+
+impl From<EpochPair> for InitOptions {
+    fn from(value: EpochPair) -> Self {
+        Self { epoch: value }
+    }
+}
