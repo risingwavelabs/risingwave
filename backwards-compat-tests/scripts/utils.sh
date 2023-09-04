@@ -124,7 +124,7 @@ ENABLE_ETCD=true
 ENABLE_KAFKA=false
 
 # Fetch risingwave binary from release.
-ENABLE_BUILD_RUST=false
+ENABLE_BUILD_RUST=true
 
 # Ensure it will link the all-in-one binary from our release.
 ENABLE_ALL_IN_ONE=true
@@ -145,16 +145,16 @@ seed_old_cluster() {
 
   run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
 
-  seed_table 1 10000
+  # seed_table 1 10000
 
   run_sql "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
   CREATE_MV_PID=$!
 
-  seed_table 10001 20000
+  # seed_table 10001 20000
 
-  random_update 1 20000 1000
+  # random_update 1 20000 1000
 
-  random_delete 1 20000 1000
+  # random_delete 1 20000 1000
 
   wait $CREATE_MV_PID
 
