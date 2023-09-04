@@ -308,12 +308,22 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl ClickHouseCommon {
     pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        let client = Client::default()
+        use hyper_tls::HttpsConnector;
+
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(https);
+
+        let client = Client::with_http_client(client)
             .with_url(&self.url)
             .with_user(&self.user)
-            .with_password(&self.password);
+            .with_password(&self.password)
+            .with_database(&self.database);
         Ok(client)
     }
 }
