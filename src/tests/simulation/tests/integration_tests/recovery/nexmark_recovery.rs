@@ -15,10 +15,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::time::{sleep, Instant};
 use risingwave_simulation::cluster::{Configuration, KillOpts};
-use risingwave_simulation::nexmark::{self, NexmarkCluster, THROUGHPUT};
+use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 /// Setup a nexmark stream, inject failures, and verify results.
 async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Result<()> {
@@ -54,7 +54,7 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-            #[madsim::test]
+            #[tokio::test]
             async fn [< nexmark_recovery_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_recovery_common(CREATE, SELECT, DROP)
