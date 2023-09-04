@@ -56,7 +56,7 @@ level0_max_compact_file_number = 96
 tombstone_reclaim_ratio = 40
 
 [batch]
-enable_barrier_read = true
+enable_barrier_read = false
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -92,7 +92,7 @@ sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
-max_preload_wait_time_mill = 10
+max_preload_wait_time_mill = 0
 object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
@@ -106,6 +106,7 @@ object_store_req_retry_max_attempts = 8
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
+storage_metric_level = "Info"
 
 [storage.data_file_cache]
 dir = ""
@@ -150,3 +151,4 @@ backup_storage_url = "memory"
 backup_storage_directory = "backup"
 telemetry_enabled = true
 max_concurrent_creating_streaming_jobs = 1
+pause_on_next_bootstrap = false

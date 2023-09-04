@@ -779,6 +779,8 @@ impl TestCase {
                     format!("CREATE SINK {sink_name} AS {}", stmt),
                     options,
                     false,
+                    "test_db".into(),
+                    "test_table".into(),
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

@@ -14,7 +14,9 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME};
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
+};
 use risingwave_common::types::DataType;
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
@@ -25,12 +27,40 @@ pub struct SourceColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub fields: Vec<ColumnDesc>,
-    /// Now `skip_parse` is used to indicate whether the column is a row id column.
-    pub is_row_id: bool,
+    pub column_type: SourceColumnType,
 
-    pub is_meta: bool,
     // `is_pk` is used to indicate whether the column is part of the primary key columns.
     pub is_pk: bool,
+}
+
+/// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
+/// There are 4 types of columns:
+/// - `Normal`: a visible column
+/// - `RowId`: internal column to uniquely identify a row
+/// - `Meta`: internal column to store source related metadata
+/// - `Offset`: internal column to store upstream offset for a row, used in CDC source
+#[derive(Clone, Debug, PartialEq)]
+pub enum SourceColumnType {
+    Normal,
+
+    // internal columns
+    RowId,
+    Meta,
+    Offset,
+}
+
+impl SourceColumnType {
+    pub fn from_name(name: &str) -> Self {
+        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) {
+            Self::Meta
+        } else if name == (ROWID_PREFIX) {
+            Self::RowId
+        } else if name == OFFSET_COLUMN_NAME {
+            Self::Offset
+        } else {
+            Self::Normal
+        }
+    }
 }
 
 impl SourceColumnDesc {
@@ -47,28 +77,38 @@ impl SourceColumnDesc {
             data_type,
             column_id,
             fields: vec![],
-            is_row_id: false,
-            is_meta: false,
+            column_type: SourceColumnType::Normal,
             is_pk: false,
         }
     }
 
+    pub fn is_row_id(&self) -> bool {
+        self.column_type == SourceColumnType::RowId
+    }
+
+    pub fn is_meta(&self) -> bool {
+        self.column_type == SourceColumnType::Meta
+    }
+
+    pub fn is_offset(&self) -> bool {
+        self.column_type == SourceColumnType::Offset
+    }
+
     #[inline]
     pub fn is_visible(&self) -> bool {
-        !self.is_row_id && !self.is_meta
+        self.column_type == SourceColumnType::Normal
     }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
-        let is_meta = c.name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME);
+        let column_type = SourceColumnType::from_name(c.name.as_str());
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
-            is_row_id: c.name.as_str() == "_row_id",
-            is_meta,
+            column_type,
             is_pk: false,
         }
     }
@@ -95,10 +135,9 @@ mod tests {
     fn test_is_visible() {
         let mut c = SourceColumnDesc::simple("a", DataType::Int32, ColumnId::new(0));
         assert!(c.is_visible());
-        c.is_row_id = true;
+        c.column_type = SourceColumnType::RowId;
         assert!(!c.is_visible());
-        c.is_row_id = false;
-        c.is_meta = true;
+        c.column_type = SourceColumnType::Meta;
         assert!(!c.is_visible());
     }
 }

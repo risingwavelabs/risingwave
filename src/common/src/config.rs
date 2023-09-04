@@ -17,6 +17,7 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -423,6 +424,27 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+pub enum StorageMetricLevel {
+    #[default]
+    Disabled = 0,
+    Critical = 1,
+    Info = 2,
+    Debug = 3,
+}
+
+impl PartialEq<Self> for StorageMetricLevel {
+    fn eq(&self, other: &Self) -> bool {
+        (*self as u8).eq(&(*other as u8))
+    }
+}
+
+impl PartialOrd for StorageMetricLevel {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (*self as u8).partial_cmp(&(*other as u8))
+    }
+}
+
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StorageConfig {
@@ -538,17 +560,19 @@ pub struct StorageConfig {
     pub compactor_max_sst_key_count: u64,
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
-
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+
+    #[serde(default = "default::storage::storage_metric_level")]
+    pub storage_metric_level: StorageMetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
 
-/// The subsection `[storage.file_cache]` in `risingwave.toml`.
+/// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
-/// It's put at [`StorageConfig::file_cache`].
+/// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
@@ -751,6 +775,10 @@ pub struct SystemConfig {
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
+
+    /// Whether to pause all data sources on next bootstrap.
+    #[serde(default = "default::system::pause_on_next_bootstrap")]
+    pub pause_on_next_bootstrap: Option<bool>,
 }
 
 impl SystemConfig {
@@ -768,6 +796,7 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
+            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
         }
     }
 }
@@ -894,6 +923,7 @@ pub mod default {
     }
 
     pub mod storage {
+        use crate::config::StorageMetricLevel;
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -969,7 +999,7 @@ pub mod default {
         }
 
         pub fn max_preload_wait_time_mill() -> u64 {
-            10
+            0
         }
 
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
@@ -998,6 +1028,10 @@ pub mod default {
 
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
+        }
+
+        pub fn storage_metric_level() -> StorageMetricLevel {
+            StorageMetricLevel::Info
         }
     }
 
@@ -1136,60 +1170,12 @@ pub mod default {
     }
 
     pub mod system {
-        use crate::system_param;
-
-        pub fn barrier_interval_ms() -> Option<u32> {
-            system_param::default::barrier_interval_ms()
-        }
-
-        pub fn checkpoint_frequency() -> Option<u64> {
-            system_param::default::checkpoint_frequency()
-        }
-
-        pub fn parallel_compact_size_mb() -> Option<u32> {
-            system_param::default::parallel_compact_size_mb()
-        }
-
-        pub fn sstable_size_mb() -> Option<u32> {
-            system_param::default::sstable_size_mb()
-        }
-
-        pub fn block_size_kb() -> Option<u32> {
-            system_param::default::block_size_kb()
-        }
-
-        pub fn bloom_false_positive() -> Option<f64> {
-            system_param::default::bloom_false_positive()
-        }
-
-        pub fn state_store() -> Option<String> {
-            system_param::default::state_store()
-        }
-
-        pub fn data_directory() -> Option<String> {
-            system_param::default::data_directory()
-        }
-
-        pub fn backup_storage_url() -> Option<String> {
-            system_param::default::backup_storage_url()
-        }
-
-        pub fn backup_storage_directory() -> Option<String> {
-            system_param::default::backup_storage_directory()
-        }
-
-        pub fn telemetry_enabled() -> Option<bool> {
-            system_param::default::telemetry_enabled()
-        }
-
-        pub fn max_concurrent_creating_streaming_jobs() -> Option<u32> {
-            system_param::default::max_concurrent_creating_streaming_jobs()
-        }
+        pub use crate::system_param::default::*;
     }
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
-            true
+            false
         }
     }
 

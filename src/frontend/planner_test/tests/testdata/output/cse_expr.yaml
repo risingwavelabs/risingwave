@@ -80,3 +80,9 @@
                 └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
                   └─StreamProject { exprs: [t.v, (t.v * t.v) as $expr1, t._row_id] }
                     └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: Common sub expression shouldn't extract partial expression of `some`/`all`. See 11766
+  sql: |
+    with t(v, arr) as (select 1, array[2, 3]) select v < all(arr), v < some(arr) from t;
+  batch_plan: |-
+    BatchProject { exprs: [All((1:Int32 < $expr10060)) as $expr1, Some((1:Int32 < $expr10060)) as $expr2] }
+    └─BatchValues { rows: [[1:Int32, ARRAY[2, 3]:List(Int32)]] }

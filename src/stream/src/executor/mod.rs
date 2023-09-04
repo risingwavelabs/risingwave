@@ -35,12 +35,11 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
+    AddMutation, Dispatchers, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
@@ -66,6 +65,7 @@ mod dynamic_filter;
 mod error;
 mod expand;
 mod filter;
+mod flow_control;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
@@ -104,7 +104,9 @@ pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::cdc_backfill::*;
 pub use backfill::no_shuffle_backfill::*;
+pub use backfill::upstream_table::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
@@ -114,6 +116,7 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
+pub use flow_control::FlowControlExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
@@ -225,12 +228,14 @@ pub enum Mutation {
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
         added_actors: HashSet<ActorId>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
+        pause: bool,
     },
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
@@ -317,9 +322,15 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is for pause.
-    pub fn is_pause(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    /// Whether this barrier requires the executor to pause its data stream on startup.
+    pub fn is_pause_on_startup(&self) -> bool {
+        match self.mutation.as_deref() {
+            Some(
+                  Mutation::Update { .. } // new actors for scaling
+                | Mutation::Add { pause: true, .. } // new streaming job, or recovery
+            ) => true,
+            _ => false,
+        }
     }
 
     /// Whether this barrier is for configuration change. Used for source executor initialization.
@@ -412,6 +423,7 @@ impl Mutation {
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
+                actor_new_dispatchers,
             } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -421,11 +433,23 @@ impl Mutation {
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
+                actor_new_dispatchers: actor_new_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Add {
                 adds,
                 added_actors,
                 splits,
+                pause,
             } => PbMutation::Add(AddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -440,6 +464,7 @@ impl Mutation {
                     .collect(),
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
+                pause: *pause,
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -494,6 +519,11 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                actor_new_dispatchers: update
+                    .actor_new_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
+                    .collect(),
             },
 
             PbMutation::Add(add) => Mutation::Add {
@@ -519,6 +549,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                pause: add.pause,
             },
 
             PbMutation::Splits(s) => {

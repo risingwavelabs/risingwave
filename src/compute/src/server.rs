@@ -26,6 +26,7 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
     STREAM_WINDOW_SIZE,
 };
+use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -53,8 +54,8 @@ use risingwave_storage::hummock::compactor::{
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
-    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
-    GLOBAL_HUMMOCK_STATE_STORE_METRICS, GLOBAL_OBJECT_STORE_METRICS, GLOBAL_STORAGE_METRICS,
+    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
+    GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
@@ -175,9 +176,11 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(GLOBAL_HUMMOCK_STATE_STORE_METRICS.clone());
+    let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
+        config.storage.storage_metric_level,
+    ));
     let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let storage_metrics = Arc::new(GLOBAL_STORAGE_METRICS.clone());
+    let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
@@ -222,13 +225,16 @@ pub async fn compute_node_serve(
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
-                sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
+
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
                 running_task_count: Arc::new(AtomicU32::new(0)),
             });
 
-            let (handle, shutdown_sender) = start_compactor(compactor_context);
+            let (handle, shutdown_sender) = start_compactor(
+                compactor_context,
+                storage.sstable_object_id_manager().clone(),
+            );
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -396,7 +402,6 @@ pub async fn compute_node_serve(
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
@@ -418,24 +423,31 @@ pub async fn compute_node_serve(
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
-            .serve_with_shutdown(listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
+            .monitored_serve_with_shutdown(
+                listen_addr,
+                "grpc-compute-node-service",
+                TcpConfig {
+                    tcp_nodelay: true,
+                    keepalive_duration: None,
+                },
+                async move {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = &mut shutdown_recv => {
+                            for (join_handle, shutdown_sender) in sub_tasks {
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                }
                             }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
-                        }
-                    },
-                }
-            })
-            .await
-            .unwrap();
+                        },
+                    }
+                },
+            )
+            .await;
     });
     join_handle_vec.push(join_handle);
 
