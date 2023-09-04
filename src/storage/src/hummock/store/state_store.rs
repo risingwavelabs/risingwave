@@ -320,24 +320,20 @@ impl LocalStateStore for LocalHummockStorage {
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         next_epoch: u64,
     ) -> StorageResult<()> {
-        let size = self.mem_table.kv_size.size();
-        match size > 64 * 1024 * 1024 {
-            true => {
-                tracing::info!(
-                    "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
-                    self.table_id.table_id()
-                );
-                let gap_epoch = self.epoch() + 1;
-                if next_epoch < gap_epoch {
-                    panic!("Fail to spill mem table, the epoch gap runs out");
-                }
-                self.epoch
-                    .replace(gap_epoch)
-                    .expect("should have init epoch before seal the gap epoch");
-                self.flush(delete_ranges).await?;
+        if self.mem_table.kv_size.size() > 64 * 1024 * 1024 {
+            tracing::info!(
+                "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
+                self.table_id.table_id()
+            );
+            let gap_epoch = self.epoch() + 1;
+            if next_epoch < gap_epoch {
+                panic!("Fail to spill mem table, the epoch gap runs out");
             }
-            false => {}
-        };
+            self.epoch
+                .replace(gap_epoch)
+                .expect("should have init epoch before seal the gap epoch");
+            self.flush(delete_ranges).await?;
+        }
 
         Ok(())
     }
