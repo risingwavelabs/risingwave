@@ -105,6 +105,8 @@ pub struct StreamingMetrics {
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
+    /// The progress made by the earliest in-flight barriers in the local barrier manager.
+    pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
 
@@ -606,6 +608,14 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let barrier_manager_progress = register_int_counter_with_registry!(
+            "stream_barrier_manager_progress",
+            "The number of actors that have processed the earliest in-flight barriers",
+            registry
+        )
+        .unwrap();
+
         let sink_commit_duration = register_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
@@ -769,6 +779,7 @@ impl StreamingMetrics {
             arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
+            barrier_manager_progress,
             sink_commit_duration,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
