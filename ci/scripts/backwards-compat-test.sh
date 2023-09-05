@@ -68,31 +68,25 @@ EOF
 }
 
 setup_old_cluster() {
-  echo "--- Build risedev for $TAG, it may not be backwards compatible"
+  echo "--- Build risedev for $OLD_TAG, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
   git checkout "${TAG}-rc"
   cargo build -p risedev
 
-  echo "--- Setup old release $TAG"
+  echo "--- Setup old release $OLD_TAG"
   pushd ..
-  git clone --depth 1 --branch "${TAG}-rc" "https://github.com/risingwavelabs/risingwave.git"
+  git clone --depth 1 --branch "v${OLD_TAG}-rc" "https://github.com/risingwavelabs/risingwave.git"
   pushd risingwave
   mkdir -p target/debug
   echo "Branch:"
   git branch
   cp risingwave target/debug/risingwave
 
-  echo "--- Start cluster on tag $TAG"
+  echo "--- Start cluster on tag $OLD_TAG"
   git config --global --add safe.directory /risingwave
 }
 
 setup_new_cluster() {
-  echo "--- Running Queries Old Cluster @ $TAG"
-  run_sql_old_cluster
-
-  echo "--- Kill cluster on tag $TAG"
-  ./risedev k
-
   echo "--- Setup Risingwave @ $RW_COMMIT"
   download_and_prepare_rw $profile common
 }
