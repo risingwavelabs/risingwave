@@ -3,13 +3,47 @@
 statement ok
 CREATE MATERIALIZED VIEW kafka_m2 as SELECT * FROM kafka_source;
 
-query I
+query I rowsort
 SELECT * FROM kafka_mv2;
 ----
-9
+gtrgretrg 1 NULL NULL 1 NULL
+fsdfgerrg 2 NULL NULL 1 NULL
+sdfergtth 3 NULL NULL 1 NULL
+erwerhghj 4 NULL NULL 2 NULL
+kiku7ikkk 5 NULL NULL 2 NULL
+6786745ge 6 NULL NULL 3 NULL
+fgbgfnyyy 7 NULL NULL 3 NULL
+werwerwwe 8 NULL NULL 4 NULL
+yjtyjtyyy 9 NULL NULL 4 NULL
+gtrgretrg 1 NULL NULL 1 NULL
+fsdfgerrg 2 NULL NULL 1 NULL
+sdfergtth 3 NULL NULL 1 NULL
+erwerhghj 4 NULL NULL 2 NULL
+kiku7ikkk 5 NULL NULL 2 NULL
+6786745ge 6 NULL NULL 3 NULL
+fgbgfnyyy 7 NULL NULL 3 NULL
+werwerwwe 8 NULL NULL 4 NULL
+yjtyjtyyy 9 NULL NULL 4 NULL
 
 # MV1 should also have new records
-query I
+query I rowsort
 SELECT * FROM kafka_mv1;
 ----
-9
+gtrgretrg 1 NULL NULL 1 NULL
+fsdfgerrg 2 NULL NULL 1 NULL
+sdfergtth 3 NULL NULL 1 NULL
+erwerhghj 4 NULL NULL 2 NULL
+kiku7ikkk 5 NULL NULL 2 NULL
+6786745ge 6 NULL NULL 3 NULL
+fgbgfnyyy 7 NULL NULL 3 NULL
+werwerwwe 8 NULL NULL 4 NULL
+yjtyjtyyy 9 NULL NULL 4 NULL
+gtrgretrg 1 NULL NULL 1 NULL
+fsdfgerrg 2 NULL NULL 1 NULL
+sdfergtth 3 NULL NULL 1 NULL
+erwerhghj 4 NULL NULL 2 NULL
+kiku7ikkk 5 NULL NULL 2 NULL
+6786745ge 6 NULL NULL 3 NULL
+fgbgfnyyy 7 NULL NULL 3 NULL
+werwerwwe 8 NULL NULL 4 NULL
+yjtyjtyyy 9 NULL NULL 4 NULL
