@@ -59,7 +59,7 @@ use risingwave_storage::monitor::{
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::GLOBAL_STREAMING_METRICS;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -169,7 +169,9 @@ pub async fn compute_node_serve(
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let streaming_metrics = Arc::new(GLOBAL_STREAMING_METRICS.clone());
+    let streaming_metrics = Arc::new(global_streaming_metrics(
+        config.streaming.streaming_metric_level,
+    ));
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
