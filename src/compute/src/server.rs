@@ -23,8 +23,8 @@ use risingwave_batch::monitor::{
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
-    STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
+    MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -180,7 +180,7 @@ pub async fn compute_node_serve(
         config.server.metrics_level,
     ));
     let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
+    let storage_metrics = Arc::new(global_storage_metrics(config.server.metrics_level));
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
@@ -452,7 +452,7 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
+    if config.server.metrics_level > MetricLevel::Disabled {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 

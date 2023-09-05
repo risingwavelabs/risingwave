@@ -32,7 +32,7 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
+use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -277,7 +277,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
 
-        if config.server.metrics_level > 0 {
+        if config.server.metrics_level > MetricLevel::Disabled {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
