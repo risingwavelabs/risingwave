@@ -5,10 +5,10 @@ set -euo pipefail
 ORIGINAL_BRANCH=$(git branch --show-current)
 
 on_exit() {
-  set +e
+  # set +e
   git checkout "$ORIGINAL_BRANCH"
-  ./risedev k
-  set -e
+  # ./risedev k
+  # set -e
 }
 
 trap on_exit EXIT
