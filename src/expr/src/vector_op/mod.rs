@@ -14,6 +14,7 @@
 
 pub mod arithmetic_op;
 pub mod array_access;
+pub mod array_min;
 pub mod array_distinct;
 pub mod array_length;
 pub mod array_positions;

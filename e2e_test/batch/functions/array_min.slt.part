@@ -1,0 +1,14 @@
+query I
+select array_min(array[1, 2, 3]);
+----
+1
+
+query I
+select array_min(array[2, 3, 5, 2, 4]);
+----
+5
+
+query I
+select array_min(array[114514, 123456]);
+----
+114514
