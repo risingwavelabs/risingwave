@@ -438,7 +438,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let pk_names = bind_pk_names(&column_defs, &constraints)?;
 
     let (columns_from_resolve_source, pk_names, mut source_info) =
-        try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
+        try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties, false)
+            .await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);

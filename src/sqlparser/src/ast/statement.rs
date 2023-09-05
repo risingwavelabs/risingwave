@@ -893,23 +893,9 @@ impl ParseTo for CreateSourceStatement {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
-        // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let source_schema = if connector.contains("-cdc") {
-            if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-            {
-                return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
-            }
-            SourceSchemaV2 {
-                format: Format::Debezium,
-                row_encode: Encode::Json,
-                row_options: Default::default(),
-            }
-            .into()
-        } else if connector.contains("nexmark") {
+        let source_schema = if connector.contains("nexmark") {
             if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
                 || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])

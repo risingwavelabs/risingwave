@@ -57,7 +57,7 @@ use crate::handler::create_table::{
     bind_pk_names, bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{get_connector, is_kafka_connector};
+use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
@@ -84,6 +84,31 @@ async fn extract_json_table_schema(
                 .collect_vec(),
         )),
     }
+}
+
+fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
+    let debezium_columns = vec![
+        ("before", DataType::Jsonb),
+        ("after", DataType::Jsonb),
+        ("source", DataType::Jsonb),
+        ("op", DataType::Varchar),
+        ("ts_ms", DataType::Int64),
+        ("transaction", DataType::Jsonb),
+    ];
+    debezium_columns
+        .into_iter()
+        .map(|(name, data_type)| ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type,
+                column_id: ColumnId::placeholder(),
+                name: name.to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
+                generated_or_default_column: None,
+            },
+            is_hidden: false,
+        })
+        .collect_vec()
 }
 
 fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool)>) -> bool {
@@ -299,6 +324,7 @@ pub(crate) async fn try_bind_columns_from_source(
     sql_defined_pk_names: Vec<String>,
     sql_defined_columns: &[ColumnDef],
     with_properties: &HashMap<String, String>,
+    create_cdc_source_job: bool,
 ) -> Result<(Option<Vec<ColumnCatalog>>, Vec<String>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
@@ -374,24 +400,32 @@ pub(crate) async fn try_bind_columns_from_source(
             )
         }
         (Format::Plain, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut options)?;
-            if schema_config.is_some() && sql_defined_schema {
-                return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with schema registry.".to_string(),
-                )));
-            }
-            if schema_config.is_none() && sql_defined_columns.is_empty() {
-                return Err(RwError::from(InvalidInputSyntax(
-                    "schema definition is required for ENCODE JSON".to_owned(),
-                )));
-            }
+            let (resolved_columns, use_schema_registry) = if !create_cdc_source_job {
+                let schema_config = get_json_schema_location(&mut options)?;
+                if schema_config.is_some() && sql_defined_schema {
+                    return Err(RwError::from(ProtocolError(
+                        "User-defined schema is not allowed with schema registry.".to_string(),
+                    )));
+                }
+                if schema_config.is_none() && sql_defined_columns.is_empty() {
+                    return Err(RwError::from(InvalidInputSyntax(
+                        "schema definition is required for ENCODE JSON".to_owned(),
+                    )));
+                }
+                (
+                    extract_json_table_schema(&schema_config, with_properties).await?,
+                    json_schema_infer_use_schema_registry(&schema_config),
+                )
+            } else {
+                (Some(debezium_cdc_source_schema()), false)
+            };
             (
-                extract_json_table_schema(&schema_config, with_properties).await?,
+                resolved_columns,
                 sql_defined_pk_names,
                 StreamSourceInfo {
                     format: FormatType::Plain as i32,
                     row_encode: EncodeType::Json as i32,
-                    use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    use_schema_registry,
                     ..Default::default()
                 },
             )
@@ -895,6 +929,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
                 ),
                 POSTGRES_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
@@ -1073,9 +1109,15 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) =
-        try_bind_columns_from_source(&source_schema, pk_names, &stmt.columns, &with_properties)
-            .await?;
+    let cdc_backfill = is_cdc_connector(&with_properties); // && session.config().get_cdc_backfill();
+    let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
+        &source_schema,
+        pk_names,
+        &stmt.columns,
+        &with_properties,
+        cdc_backfill,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
@@ -1199,6 +1241,42 @@ pub mod tests {
                 vec![DataType::Varchar,city_type,DataType::Varchar],
                 vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
             ),
+        };
+        assert_eq!(columns, expected_columns);
+    }
+
+    #[tokio::test]
+    async fn test_multi_table_cdc_create_source_handler() {
+        let sql =
+            format!(r#"CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON"#,);
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        // Check source exists.
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t2")
+            .unwrap();
+        assert_eq!(source.name, "t2");
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let row_id_col_name = row_id_column_name();
+        let expected_columns = maplit::hashmap! {
+            row_id_col_name.as_str() => DataType::Serial,
+            "before" => DataType::Jsonb,
+            "after" => DataType::Jsonb,
+            "source" => DataType::Jsonb,
+            "op" => DataType::Varchar,
+            "ts_ms" => DataType::Int64,
+            "transaction" => DataType::Jsonb,
         };
         assert_eq!(columns, expected_columns);
     }
