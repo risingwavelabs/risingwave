@@ -87,10 +87,10 @@ seed_old_cluster() {
   check_version "$OLD_TAG"
 
   echo "--- Seeding old cluster with data"
-  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/seed.sql"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/seed.sql"
 
   echo "--- Validating old cluster"
-  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/validate_original.sql"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.sql"
 
   ./risedev k
 }
@@ -107,6 +107,6 @@ validate_new_cluster() {
   check_version "$NEW_TAG"
 
   echo "--- Validating new cluster"
-  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/validate_original.sql"
-  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/validate_restart.sql"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.sql"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_restart.sql"
 }
