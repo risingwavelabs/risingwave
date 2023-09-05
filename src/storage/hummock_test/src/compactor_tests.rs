@@ -356,6 +356,7 @@ pub(crate) mod tests {
         assert!(ret.is_err());
     }
 
+    // #[ignore]
     #[tokio::test]
     async fn test_compaction_same_key_not_split() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -397,7 +398,7 @@ pub(crate) mod tests {
         .await;
 
         // 2. get compact task
-        let mut compact_task = hummock_manager_ref
+        let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_level_selector(),
@@ -405,20 +406,6 @@ pub(crate) mod tests {
             .await
             .unwrap()
             .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::NONE;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = 0;
-
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            SST_COUNT as usize / 2 + 1,
-        );
-        compact_task.target_level = 6;
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -478,9 +465,8 @@ pub(crate) mod tests {
                 &mut default_level_selector(),
             )
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(6, compact_task.target_level);
+        assert!(compact_task.is_none());
     }
 
     pub(crate) async fn flush_and_commit(
@@ -592,6 +578,7 @@ pub(crate) mod tests {
 
         // 3. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
+
         let output_level_info = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
