@@ -6,7 +6,7 @@ SELECT count(*) FROM t;
 query I
 SELECT sum(v1), sum(v2) FROM t;
 ----
-10000 20000
+50005000 100015000
 
 query I
 SELECT count(*) FROM m;
@@ -16,4 +16,4 @@ SELECT count(*) FROM m;
 query I
 SELECT sum(v1), sum(v2) FROM m;
 ----
-10000 20000
+50005000 100015000
