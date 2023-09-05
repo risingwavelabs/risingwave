@@ -17,8 +17,7 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use risingwave_common::bail;
-use risingwave_common::types::{Datum, ScalarImpl, Timestamp, Timestamptz};
+use risingwave_common::types::{Timestamp, Timestamptz};
 use risingwave_expr_macro::function;
 
 use super::timestamptz::time_zone_err;
@@ -110,19 +109,11 @@ impl ChronoPattern {
             StrftimeItems::new(tmpl).collect::<Vec<_>>()
         })
     }
-
-    pub fn from_datum(pattern: Datum) -> Result<Self> {
-        let pattern = match &pattern {
-            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
-            _ => bail!("invalid pattern: {pattern:?}"),
-        };
-        Ok(Self::compile(pattern))
-    }
 }
 
 #[function(
     "to_char(timestamp, varchar) -> varchar",
-    prebuild = "ChronoPattern::from_datum($1)?"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 fn to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
@@ -131,7 +122,7 @@ fn to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
 
 #[function(
     "to_char(timestamptz, varchar, varchar) -> varchar",
-    prebuild = "ChronoPattern::from_datum($1)?"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 fn to_char_timestamptz(
     data: Timestamptz,

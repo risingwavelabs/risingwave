@@ -291,7 +291,17 @@ impl FunctionAttr {
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
                 // evaluate const arguments
-                #(let #const_child = #const_child.eval_const()?;)*
+                #(
+                    let #const_child = #const_child.eval_const()?;
+                    let #const_child = match &#const_child {
+                        Some(s) => s.as_scalar_ref_impl().try_into()?,
+                        // the function should always return null if any const argument is null
+                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
+                            context.return_type,
+                            None,
+                        ))),
+                    };
+                )*
 
                 #[derive(Debug)]
                 struct #struct_name {
@@ -709,7 +719,14 @@ impl FunctionAttr {
                 crate::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
-                #(let #const_child = #const_child.eval_const()?;)*
+                #(
+                    let #const_child = #const_child.eval_const()?;
+                    let #const_child = match &#const_child {
+                        Some(s) => s.as_scalar_ref_impl().try_into()?,
+                        // the function should always return empty if any const argument is null
+                        None => return Ok(crate::table_function::empty(return_type)),
+                    };
+                )*
 
                 #[derive(Debug)]
                 #[allow(non_camel_case_types)]

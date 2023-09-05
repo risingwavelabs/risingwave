@@ -69,7 +69,7 @@ fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
 
 #[function(
     "to_timestamp1(varchar, varchar) -> timestamp",
-    prebuild = "ChronoPattern::from_datum($1)?"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
     let parsed = parse(s, tmpl)?;
@@ -83,7 +83,7 @@ pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
 
 #[function(
     "to_timestamp1(varchar, varchar, varchar) -> timestamptz",
-    prebuild = "ChronoPattern::from_datum($1)?"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
     let parsed = parse(s, tmpl)?;
@@ -104,7 +104,7 @@ fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Resul
 
 #[function(
     "char_to_date(varchar, varchar) -> date",
-    prebuild = "ChronoPattern::from_datum($1)?"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 pub fn to_date(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
     let mut parsed = parse(s, tmpl)?;

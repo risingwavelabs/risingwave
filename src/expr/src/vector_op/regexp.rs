@@ -18,7 +18,6 @@ use std::str::FromStr;
 
 use regex::{Regex, RegexBuilder};
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_expr_macro::function;
 
 use crate::{bail, ExprError, Result};
@@ -31,7 +30,7 @@ pub struct RegexpContext {
 }
 
 impl RegexpContext {
-    pub fn new(pattern: &str, flags: &str, replacement: &str) -> Result<Self> {
+    fn new(pattern: &str, flags: &str, replacement: &str) -> Result<Self> {
         let options = RegexpOptions::from_str(flags)?;
         Ok(Self {
             regex: RegexBuilder::new(pattern)
@@ -42,68 +41,30 @@ impl RegexpContext {
         })
     }
 
-    pub fn from_pattern(pattern: Datum) -> Result<Self> {
-        let pattern = match &pattern {
-            None => NULL_PATTERN,
-            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
-            _ => bail!("invalid pattern: {pattern:?}"),
-        };
+    pub fn from_pattern(pattern: &str) -> Result<Self> {
         Self::new(pattern, "", "")
     }
 
-    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
-        let pattern = match (&pattern, &flags) {
-            (None, _) | (_, None) => NULL_PATTERN,
-            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
-            _ => bail!("invalid pattern: {pattern:?}"),
-        };
-        let flags = match &flags {
-            None => "",
-            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
-            _ => bail!("invalid flags: {flags:?}"),
-        };
+    pub fn from_pattern_flags(pattern: &str, flags: &str) -> Result<Self> {
         Self::new(pattern, flags, "")
     }
 
-    pub fn from_pattern_flags_for_count(pattern: Datum, flags: Datum) -> Result<Self> {
-        let pattern = match (&pattern, &flags) {
-            (None, _) | (_, None) => NULL_PATTERN,
-            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
-            _ => bail!("invalid pattern: {pattern:?}"),
-        };
-        let flags = match &flags {
-            None => "",
-            Some(ScalarImpl::Utf8(s)) => {
-                if s.contains("g") {
-                    bail!("regexp_count() does not support the global option");
-                }
-                s.as_ref()
-            }
-            _ => bail!("invalid flags: {flags:?}"),
-        };
+    pub fn from_pattern_flags_for_count(pattern: &str, flags: &str) -> Result<Self> {
+        if flags.contains("g") {
+            bail!("regexp_count() does not support the global option");
+        }
         Self::new(pattern, flags, "")
+    }
+
+    pub fn from_pattern_replacement(pattern: &str, replacement: &str) -> Result<Self> {
+        Self::new(pattern, "", replacement)
     }
 
     pub fn from_pattern_replacement_flags(
-        pattern: Datum,
-        replacement: Datum,
-        flags: Datum,
+        pattern: &str,
+        replacement: &str,
+        flags: &str,
     ) -> Result<Self> {
-        let pattern = match &pattern {
-            None => NULL_PATTERN,
-            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
-            _ => bail!("invalid pattern: {pattern:?}"),
-        };
-        let replacement = match &replacement {
-            None => "",
-            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
-            _ => bail!("invalid replacement: {replacement:?}"),
-        };
-        let flags = match &flags {
-            None => "",
-            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
-            _ => bail!("invalid flags: {flags:?}"),
-        };
         Self::new(pattern, flags, replacement)
     }
 }
@@ -167,9 +128,6 @@ impl FromStr for RegexpOptions {
     }
 }
 
-/// The pattern that matches nothing.
-pub const NULL_PATTERN: &str = "a^";
-
 #[function(
     // regexp_match(source, pattern)
     "regexp_match(varchar, varchar) -> varchar[]",
@@ -183,11 +141,11 @@ pub const NULL_PATTERN: &str = "a^";
 fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
     // If there are multiple captures, then the first one is the whole match, and should be
     // ignored in PostgreSQL's behavior.
-    let skip_flag = regex.regex.captures_len() > 1;
+    let skip_first = regex.regex.captures_len() > 1;
     let capture = regex.regex.captures(text)?;
     let list = capture
         .iter()
-        .skip(if skip_flag { 1 } else { 0 })
+        .skip(if skip_first { 1 } else { 0 })
         .map(|mat| mat.map(|m| m.as_str().into()))
         .collect();
     Some(ListValue::new(list))
@@ -243,7 +201,7 @@ fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
 #[function(
     // regexp_replace(source, pattern, replacement)
     "regexp_replace(varchar, varchar, varchar) -> varchar",
-    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, None)?"
+    prebuild = "RegexpContext::from_pattern_replacement($1, $2)?"
 )]
 #[function(
     // regexp_replace(source, pattern, replacement, flags)
@@ -257,7 +215,7 @@ fn regexp_replace0(text: &str, ctx: &RegexpContext) -> Result<Box<str>> {
 #[function(
     // regexp_replace(source, pattern, replacement, start)
     "regexp_replace(varchar, varchar, varchar, int32) -> varchar",
-    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, None)?"
+    prebuild = "RegexpContext::from_pattern_replacement($1, $2)?"
 )]
 fn regexp_replace_with_start(text: &str, start: i32, ctx: &RegexpContext) -> Result<Box<str>> {
     regexp_replace(text, start, None, ctx)
@@ -266,7 +224,7 @@ fn regexp_replace_with_start(text: &str, start: i32, ctx: &RegexpContext) -> Res
 #[function(
     // regexp_replace(source, pattern, replacement, start, N)
     "regexp_replace(varchar, varchar, varchar, int32, int32) -> varchar",
-    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, None)?"
+    prebuild = "RegexpContext::from_pattern_replacement($1, $2)?"
 )]
 fn regexp_replace_with_start_n(
     text: &str,
