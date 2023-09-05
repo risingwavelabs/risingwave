@@ -25,6 +25,35 @@ cp -r e2e_test/streaming/nexmark $TEST_DIR
 
 ################################### TEST UTILIIES
 
+# Older versions of RW may not gracefully kill kafka.
+# So we duplicate the definition here.
+kill_cluster() {
+  # Kill other components
+  tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+  | grep -v 'kafka' \
+  | grep -v 'zookeeper' \
+  | awk '{ print $2 }' \
+  | xargs -I {} tmux send-keys -t {} C-c C-d
+
+  set +e
+  if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+  then
+    echo "kill kafka, wait 5s"
+    ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+    sleep 5
+
+    echo "kill zookeeper, wait 5s"
+    ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+    sleep 5
+    # Kill their tmux sessions
+    tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+  fi
+  set -e
+
+  tmux kill-session -t risedev
+  test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
+}
+
 run_sql () {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
