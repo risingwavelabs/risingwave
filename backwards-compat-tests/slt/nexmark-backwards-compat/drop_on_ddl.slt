@@ -1,4 +1,4 @@
-include ./nexmark/drop_views.slt.part
+include ../nexmark/drop_views.slt.part
 
 include ../nexmark/drop_tables.slt.part
 
