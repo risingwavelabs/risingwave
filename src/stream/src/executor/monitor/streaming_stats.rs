@@ -103,12 +103,19 @@ pub struct StreamingMetrics {
     pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // Over Window
+    pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
+    pub over_window_cache_miss_count: GenericCounterVec<AtomicU64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
+    /// The progress made by the earliest in-flight barriers in the local barrier manager.
+    pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
 
@@ -124,6 +131,9 @@ pub struct StreamingMetrics {
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
+
+    /// User source reader error
+    pub user_source_reader_error_count: GenericCounterVec<AtomicU64>,
 
     // Materialize
     pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
@@ -616,6 +626,30 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_over_window_cached_entry_count",
+            "Total entry (partition) count in over window executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_cache_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_cache_lookup_count",
+            "Over window executor cache lookup count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_cache_miss_count",
+            "Over window executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -629,6 +663,14 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let barrier_manager_progress = register_int_counter_with_registry!(
+            "stream_barrier_manager_progress",
+            "The number of actors that have processed the earliest in-flight barriers",
+            registry
+        )
+        .unwrap();
+
         let sink_commit_duration = register_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
@@ -691,6 +733,20 @@ impl StreamingMetrics {
             "user_compute_error_count",
             "Compute errors in the system, queryable by tags",
             &["error_type", "error_msg", "executor_name", "fragment_id"],
+            registry,
+        )
+        .unwrap();
+
+        let user_source_reader_error_count = register_int_counter_vec_with_registry!(
+            "user_source_reader_error_count",
+            "Source reader error count",
+            &[
+                "error_type",
+                "error_msg",
+                "executor_name",
+                "actor_id",
+                "source_id"
+            ],
             registry,
         )
         .unwrap();
@@ -777,8 +833,12 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             arrangement_backfill_snapshot_read_row_count,
             arrangement_backfill_upstream_output_row_count,
+            over_window_cached_entry_count,
+            over_window_cache_lookup_count,
+            over_window_cache_miss_count,
             barrier_inflight_latency,
             barrier_sync_latency,
+            barrier_manager_progress,
             sink_commit_duration,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
@@ -788,6 +848,7 @@ impl StreamingMetrics {
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             user_compute_error_count,
+            user_source_reader_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,

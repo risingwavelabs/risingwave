@@ -125,7 +125,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
             let mut builder =
                 DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
-            let chunk_stream = iter_chunks(row_stream, args.chunk_size, &mut builder);
+            let chunk_stream = iter_chunks(row_stream, &mut builder);
             #[for_await]
             for chunk in chunk_stream {
                 yield chunk?;

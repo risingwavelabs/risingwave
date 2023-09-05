@@ -48,8 +48,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("foyer_memory", Level::WARN)
         .with_target("foyer_storage", Level::WARN)
         // disable events that are too verbose
-        // if you want to enable any of them, find the target name and set it to `TRACE`
-        // .with_target("events::stream::mview::scan", Level::TRACE)
         .with_target("events", Level::ERROR)
 }
 

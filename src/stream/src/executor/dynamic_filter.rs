@@ -253,7 +253,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
 
-        let left_len = input_l.schema().len();
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
@@ -298,14 +297,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let (left_to_output, _) =
-            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), left_len, 0);
-        let mut stream_chunk_builder = StreamChunkBuilder::new(
-            self.chunk_size,
-            &self.schema.data_types(),
-            vec![],
-            left_to_output,
-        );
+        let mut stream_chunk_builder =
+            StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
@@ -402,7 +395,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
-                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                            if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
                                 row.as_ref(),

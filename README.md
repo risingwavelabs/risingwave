@@ -18,14 +18,14 @@ RisingWave ingests data from sources like Apache Kafka, Apache Pulsar, Amazon Ki
 
 RisingWave 1.0 is a battle-tested version that has undergone rigorous stress tests and performance evaluations. It has proven its reliability and efficiency through successful deployments in numerous production environments across dozens of companies.
 
-Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
+Learn more at [Introduction to RisingWave](https://docs.risingwave.com/docs/current/intro/).
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
 
 
 ## RisingWave Cloud
 
-RisingWave Cloud is a fully-managed and scalable stream processing platform powered by the open-source RisingWave project. Try it out for free at: [risingwave.com/cloud](https://risingwave.com/cloud).
+RisingWave Cloud is a fully-managed and scalable stream processing platform powered by the open-source RisingWave project. Try it out for free at: [cloud.risingwave.com](https://cloud.risingwave.com).
 
 ## Notes on telemetry
 
@@ -33,15 +33,15 @@ RisingWave collects anonymous usage statistics to better understand how the comm
 
 ## Get started
 
-- To learn about how to install and run RisingWave, see [Get started](https://www.risingwave.dev/docs/current/get-started/).
-- To learn about how to ingest data and the supported data sources, see [Sources](https://www.risingwave.dev/docs/current/data-ingestion/).
-- To learn about how to transform data using the PostgreSQL-compatible SQL of RisingWave, see [SQL reference](https://www.risingwave.dev/docs/current/sql-references/).
-- To learn about how to deliver data and the supported data sinks, see [Sinks](https://www.risingwave.dev/docs/current/data-delivery/).
-- To learn about new features and changes in the current and previous versions, see [Release notes](https://www.risingwave.dev/docs/current/release-notes/).
+- To learn about how to install and run RisingWave, see [Get started](https://docs.risingwave.com/docs/current/get-started/).
+- To learn about how to ingest data and the supported data sources, see [Sources](https://docs.risingwave.com/docs/current/data-ingestion/).
+- To learn about how to transform data using the PostgreSQL-compatible SQL of RisingWave, see [SQL reference](https://docs.risingwave.com/docs/current/sql-references/).
+- To learn about how to deliver data and the supported data sinks, see [Sinks](https://docs.risingwave.com/docs/current/data-delivery/).
+- To learn about new features and changes in the current and previous versions, see [Release notes](https://docs.risingwave.com/release-notes/).
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave User Documentation](https://www.risingwave.dev/). To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [readme.md](docs/README.md).
+To learn about how to use RisingWave, refer to [RisingWave User Documentation](https://docs.risingwave.com/). To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [readme.md](docs/README.md).
 
 ## Community
 
