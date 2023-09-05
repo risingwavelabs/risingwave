@@ -135,7 +135,7 @@ CREATE TABLE tt2 (
 );
 
 statement ok
-CREATE SINK s_pg_t2 FROM tt1 WITH (
+CREATE SINK s_pg_t2 FROM tt2 WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t2',
