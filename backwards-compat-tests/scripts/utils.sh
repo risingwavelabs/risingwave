@@ -90,7 +90,7 @@ RISEDEV_CONFIGURED=false
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=false
+ENABLE_KAFKA=true
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=true
