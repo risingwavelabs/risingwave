@@ -12,18 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::{array::*, types::{Scalar, DefaultOrdered, ScalarImpl}, types::ToOwnedDatum};
+use risingwave_common::array::*;
+use risingwave_common::types::{DefaultOrdered, Scalar, ToOwnedDatum};
 use risingwave_expr_macro::function;
 
-use crate::{Result, ExprError};
+use crate::Result;
 
-#[function("array_min(list) -> int32")] 
-pub fn array_min(list: ListRef<'_>) -> Result<i32> {
-    let datum_ref = list.iter().map(|x| DefaultOrdered(x.unwrap())).min();
-    let datum_ref = datum_ref.map(|x| x.into_inner());
-    if let Some(ScalarImpl::Int32(scalar)) = datum_ref.to_owned_datum() {
-        Ok(scalar)
-    } else {
-        Err(ExprError::NumericOutOfRange)
+#[function("array_min(list) -> *int")]
+#[function("array_min(list) -> *float")]
+#[function("array_min(list) -> decimal")]
+#[function("array_min(list) -> serial")]
+#[function("array_min(list) -> int256")]
+#[function("array_min(list) -> date")]
+#[function("array_min(list) -> time")]
+#[function("array_min(list) -> timestamp")]
+#[function("array_min(list) -> timestamptz")]
+#[function("array_min(list) -> varchar")]
+#[function("array_min(list) -> bytea")]
+pub fn array_min<T: Scalar>(list: ListRef<'_>) -> Result<Option<T>> {
+    let min_value = list
+        .iter()
+        .filter_map(|v| v)
+        .map(|x| DefaultOrdered(x))
+        .min();
+    match min_value.map(|v| v.0).to_owned_datum() {
+        Some(s) => Ok(Some(s.try_into()?)),
+        None => Ok(None),
     }
 }

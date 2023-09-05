@@ -597,7 +597,9 @@ fn infer_type_for_special(
         }
         ExprType::ArrayMin => {
             ensure_arity!("array_min", | inputs | == 1);
-            Ok(Some(DataType::Int32))
+            inputs[0].ensure_array_type()?;
+
+            Ok(Some(inputs[0].return_type().as_list().clone()))
         }
         ExprType::ArrayDims => {
             ensure_arity!("array_dims", | inputs | == 1);
