@@ -27,7 +27,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 
@@ -299,7 +298,7 @@ pub enum ConnectorProperties {
     Nexmark(Box<NexmarkProperties>),
     Datagen(Box<DatagenProperties>),
     S3(Box<S3Properties>),
-    MySqlCdc(Box<CdcProperties<Mysql>>),
+    MysqlCdc(Box<CdcProperties<Mysql>>),
     PostgresCdc(Box<CdcProperties<Postgres>>),
     CitusCdc(Box<CdcProperties<Citus>>),
     GooglePubsub(Box<PubsubProperties>),
@@ -308,51 +307,6 @@ pub enum ConnectorProperties {
 }
 
 impl ConnectorProperties {
-    fn new_cdc_properties(
-        connector_name: &str,
-        properties: HashMap<String, String>,
-    ) -> Result<Self> {
-        match connector_name {
-            MYSQL_CDC_CONNECTOR => Ok(Self::MySqlCdc(Box::new(CdcProperties::<Mysql> {
-                props: properties,
-                ..Default::default()
-            }))),
-            POSTGRES_CDC_CONNECTOR => Ok(Self::PostgresCdc(Box::new(CdcProperties::<Postgres> {
-                props: properties,
-                ..Default::default()
-            }))),
-            CITUS_CDC_CONNECTOR => Ok(Self::CitusCdc(Box::new(CdcProperties::<Citus> {
-                props: properties,
-                ..Default::default()
-            }))),
-            _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
-        }
-    }
-
-    pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
-        match self {
-            ConnectorProperties::MySqlCdc(c) => {
-                c.table_schema = table_schema;
-            }
-            ConnectorProperties::PostgresCdc(c) => {
-                c.table_schema = table_schema;
-            }
-            ConnectorProperties::CitusCdc(c) => {
-                c.table_schema = table_schema;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn is_cdc_connector(&self) -> bool {
-        matches!(
-            self,
-            ConnectorProperties::MySqlCdc(_)
-                | ConnectorProperties::PostgresCdc(_)
-                | ConnectorProperties::CitusCdc(_)
-        )
-    }
-
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
     }
@@ -366,7 +320,7 @@ pub enum SplitImpl {
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
     GooglePubsub(PubsubSplit),
-    MySqlCdc(DebeziumCdcSplit<Mysql>),
+    MysqlCdc(DebeziumCdcSplit<Mysql>),
     PostgresCdc(DebeziumCdcSplit<Postgres>),
     CitusCdc(DebeziumCdcSplit<Citus>),
     Nats(NatsSplit),
@@ -399,7 +353,7 @@ pub enum SplitReaderImpl {
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
     Datagen(Box<DatagenSplitReader>),
-    MySqlCdc(Box<CdcSplitReader<Mysql>>),
+    MysqlCdc(Box<CdcSplitReader<Mysql>>),
     PostgresCdc(Box<CdcSplitReader<Postgres>>),
     CitusCdc(Box<CdcSplitReader<Citus>>),
     GooglePubsub(Box<PubsubSplitReader>),
@@ -412,7 +366,7 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
-    MySqlCdc(MysqlDebeziumSplitEnumerator),
+    MysqlCdc(MysqlDebeziumSplitEnumerator),
     PostgresCdc(PostgresDebeziumSplitEnumerator),
     CitusCdc(CitusDebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
@@ -437,7 +391,7 @@ impl_split_enumerator! {
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
     { Datagen, DatagenSplitEnumerator },
-    { MySqlCdc, DebeziumSplitEnumerator },
+    { MysqlCdc, DebeziumSplitEnumerator },
     { PostgresCdc, DebeziumSplitEnumerator },
     { CitusCdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator},
@@ -452,7 +406,7 @@ impl_split! {
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit<Mysql> },
+    { MysqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit<Mysql> },
     { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit<Postgres> },
     { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit<Citus> },
     { S3, S3_CONNECTOR, FsSplit },
@@ -466,7 +420,7 @@ impl_split_reader! {
     { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
-    { MySqlCdc, CdcSplitReader},
+    { MysqlCdc, CdcSplitReader},
     { PostgresCdc, CdcSplitReader},
     { CitusCdc, CdcSplitReader },
     { GooglePubsub, PubsubSplitReader },
@@ -565,7 +519,7 @@ mod tests {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
         let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
         let split = DebeziumCdcSplit::new(Some(mysql_split), None);
-        let split_impl = SplitImpl::MySqlCdc(split);
+        let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
@@ -653,7 +607,7 @@ mod tests {
         ));
 
         let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
-        if let ConnectorProperties::MySqlCdc(c) = conn_props {
+        if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.props.get("database.port").unwrap(), "3306");
