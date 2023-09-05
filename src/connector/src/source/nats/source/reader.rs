@@ -54,7 +54,7 @@ impl SplitReader for NatsSplitReader {
             .collect::<Vec<NatsSplit>>();
         let consumer = properties
             .common
-            .build_consumer(splits[0].start_sequence)
+            .build_consumer(0, splits[0].start_sequence)
             .await?;
         Ok(Self {
             consumer,

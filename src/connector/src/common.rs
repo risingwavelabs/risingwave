@@ -388,20 +388,21 @@ impl NatsCommon {
 
     pub(crate) async fn build_consumer(
         &self,
+        split_id: i32,
         start_sequence: Option<u64>,
     ) -> anyhow::Result<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone()).await?;
-        let name = "risingwave-consumer";
+        let name = format!("risingwave-consumer-{}-{}", self.subject, split_id);
         match start_sequence {
             Some(v) => {
                 let consumer = stream
                     .get_or_create_consumer(
-                        name,
+                        &name,
                         async_nats::jetstream::consumer::pull::Config {
-                            durable_name: Some(name.to_string()),
+                            // rw have no mechanism to ack messages, no need to use client durable
                             deliver_policy:
                                 async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
                                     start_sequence: (v),
@@ -415,9 +416,9 @@ impl NatsCommon {
             None => {
                 let consumer = stream
                     .get_or_create_consumer(
-                        name,
+                        &name,
                         async_nats::jetstream::consumer::pull::Config {
-                            durable_name: Some(name.to_string()),
+                            // rw have no mechanism to ack messages, no need to use client durable
                             ..Default::default()
                         },
                     )
