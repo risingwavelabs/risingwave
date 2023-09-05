@@ -102,13 +102,9 @@ impl HummockJavaBindingIterator {
                     ),
                     read_plan.epoch,
                     ReadOptions {
-                        prefix_hint: None,
-                        ignore_range_tombstone: false,
-                        retention_seconds: None,
                         table_id: read_plan.table_id.into(),
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
                         cache_policy: CachePolicy::NotFill,
+                        ..Default::default()
                     },
                     (vec![], vec![], pin_version.clone()),
                 )
