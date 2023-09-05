@@ -1,7 +1,7 @@
 # create a new mv on source, it should retrieve all records
 # and match mv1.
 statement ok
-CREATE MATERIALIZED VIEW kafka_m2 as SELECT * FROM kafka_source;
+CREATE MATERIALIZED VIEW kafka_mv2 as SELECT * FROM kafka_source;
 
 query I rowsort
 SELECT * FROM kafka_mv2;
