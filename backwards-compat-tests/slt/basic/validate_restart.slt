@@ -15,4 +15,4 @@ SELECT COUNT(*) FROM t;
 query I
 SELECT SUM(v2) FROM t;
 ----
-5000
+25015000
