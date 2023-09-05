@@ -80,16 +80,19 @@ pub(crate) struct SchemaRegistryCtx {
     pub path: Vec<String>,
 }
 
-pub(crate) async fn req_inner<T>(ctx: Arc<SchemaRegistryCtx>, url: Url, method: Method) -> Result<T>
+pub(crate) async fn req_inner<T>(
+    ctx: Arc<SchemaRegistryCtx>,
+    mut url: Url,
+    method: Method,
+) -> Result<T>
 where
     T: DeserializeOwned + Send + Sync + 'static,
 {
-    url.clone()
-        .path_segments_mut()
+    url.path_segments_mut()
         .expect("constructor validated URL can be a base")
         .clear()
         .extend(&ctx.path);
-
+    tracing::debug!("request to url: {}, method {}", &url, &method);
     let mut request_builder = ctx.client.request(method, url);
 
     if let Some(ref username) = ctx.username {
