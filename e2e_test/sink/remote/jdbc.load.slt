@@ -130,6 +130,26 @@ CREATE SINK s_pg_0 FROM tt1 WITH (
 );
 
 statement ok
+CREATE TABLE tt2 (
+    "aBc" INTEGER PRIMARY KEY
+);
+
+statement ok
+CREATE SINK s_pg_t2 FROM tt1 WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t2',
+    schema.name='biz',
+    type='append-only',
+    force_append_only=true
+);
+
+statement ok
+INSERT INTO tt2 VALUES
+    (1),
+    (2);
+
+statement ok
 INSERT INTO tt1 VALUES
     (1, 'aaa'),
     (1, 'bbb'),
