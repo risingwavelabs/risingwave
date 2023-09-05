@@ -504,10 +504,10 @@ select regexp_replace('abc123', 'abc', 'prefix\&suffix');
 ----
 prefixabcsuffix123
 
-query error invalid syntax for `regexp_replace`
+query error Unsupported function
 select regexp_replace('foobarbaz', 'b..', 'X', 1, 'g');
 
-query error invalid parameters specified in regexp_replace
+query error Unsupported function
 select regexp_replace('foobarbaz', 'b..', 'X', 'g', 1);
 
 # With Unicode
@@ -586,16 +586,16 @@ select regexp_count('foobarbaz', 'b..', 3);
 ----
 2
 
-query error Expected start to be a Unsigned Int32
+query error Unsupported function
 select regexp_count('foobarbaz', 'b..', 'g');
 
-query error Expected start to be a Unsigned Int32
+query error Unsupported function
 select regexp_count('foobarbaz', 'b..', 'i');
 
 query error invalid regular expression option: "a"
 select regexp_count('foobarbaz', 'b..', 3, 'a');
 
-query error `regexp_count` does not support global flag option
+query error does not support the global option
 select regexp_count('foobar', 'b..', 1, 'g');
 
 query T

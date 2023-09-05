@@ -27,16 +27,18 @@ use crate::{bail, ExprError, Result};
 pub struct RegexpContext {
     pub regex: Regex,
     pub global: bool,
+    pub replacement: String,
 }
 
 impl RegexpContext {
-    pub fn new(pattern: &str, flags: &str) -> Result<Self> {
+    pub fn new(pattern: &str, flags: &str, replacement: &str) -> Result<Self> {
         let options = RegexpOptions::from_str(flags)?;
         Ok(Self {
             regex: RegexBuilder::new(pattern)
                 .case_insensitive(options.case_insensitive)
                 .build()?,
             global: options.global,
+            replacement: make_replacement(replacement),
         })
     }
 
@@ -46,7 +48,7 @@ impl RegexpContext {
             Some(ScalarImpl::Utf8(s)) => s.as_ref(),
             _ => bail!("invalid pattern: {pattern:?}"),
         };
-        Self::new(pattern, "")
+        Self::new(pattern, "", "")
     }
 
     pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
@@ -60,8 +62,78 @@ impl RegexpContext {
             Some(ScalarImpl::Utf8(s)) => s.as_ref(),
             _ => bail!("invalid flags: {flags:?}"),
         };
-        Self::new(pattern, flags)
+        Self::new(pattern, flags, "")
     }
+
+    pub fn from_pattern_flags_for_count(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match (&pattern, &flags) {
+            (None, _) | (_, None) => NULL_PATTERN,
+            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => {
+                if s.contains("g") {
+                    bail!("regexp_count() does not support the global option");
+                }
+                s.as_ref()
+            }
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags, "")
+    }
+
+    pub fn from_pattern_replacement_flags(
+        pattern: Datum,
+        replacement: Datum,
+        flags: Datum,
+    ) -> Result<Self> {
+        let pattern = match &pattern {
+            None => NULL_PATTERN,
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let replacement = match &replacement {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid replacement: {replacement:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags, replacement)
+    }
+}
+
+/// Construct the regex used to match and replace `\n` expression.
+/// <https://docs.rs/regex/latest/regex/struct.Captures.html#method.expand>
+///
+/// ```text
+/// \& -> ${0}
+/// \1 -> ${1}
+/// ...
+/// \9 -> ${9}
+/// ```
+fn make_replacement(s: &str) -> String {
+    use std::fmt::Write;
+    let mut ret = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            ret.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('&') => ret.push_str("${0}"),
+            Some(c @ '1'..='9') => write!(&mut ret, "${{{c}}}").unwrap(),
+            Some(c) => write!(ret, "\\{c}").unwrap(),
+            None => ret.push('\\'),
+        }
+    }
+    ret
 }
 
 /// <https://www.postgresql.org/docs/current/functions-matching.html#POSIX-EMBEDDED-OPTIONS-TABLE>
@@ -138,7 +210,7 @@ fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
 #[function(
     // regexp_count(source, pattern, start, flags)
     "regexp_count(varchar, varchar, int32, varchar) -> int32",
-    prebuild = "RegexpContext::from_pattern_flags($1, $3)?"
+    prebuild = "RegexpContext::from_pattern_flags_for_count($1, $3)?"
 )]
 fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     // First get the start position to count for
@@ -171,64 +243,56 @@ fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
 #[function(
     // regexp_replace(source, pattern, replacement)
     "regexp_replace(varchar, varchar, varchar) -> varchar",
-    prebuild = "RegexpContext::from_pattern($1)?"
+    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, None)?"
 )]
 #[function(
     // regexp_replace(source, pattern, replacement, flags)
     "regexp_replace(varchar, varchar, varchar, varchar) -> varchar",
-    prebuild = "RegexpContext::from_pattern_flags($1, $3)?"
+    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, $3)?"
 )]
-fn regexp_replace0(text: &str, replacement: &str, ctx: &RegexpContext) -> Result<Box<str>> {
-    regexp_replace(text, replacement, 1, None, ctx)
+fn regexp_replace0(text: &str, ctx: &RegexpContext) -> Result<Box<str>> {
+    regexp_replace(text, 1, None, ctx)
 }
 
 #[function(
     // regexp_replace(source, pattern, replacement, start)
     "regexp_replace(varchar, varchar, varchar, int32) -> varchar",
-    prebuild = "RegexpContext::from_pattern($1)?"
+    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, None)?"
 )]
-fn regexp_replace_with_start(
-    text: &str,
-    replacement: &str,
-    start: i32,
-    ctx: &RegexpContext,
-) -> Result<Box<str>> {
-    regexp_replace(text, replacement, start, None, ctx)
+fn regexp_replace_with_start(text: &str, start: i32, ctx: &RegexpContext) -> Result<Box<str>> {
+    regexp_replace(text, start, None, ctx)
 }
 
 #[function(
     // regexp_replace(source, pattern, replacement, start, N)
     "regexp_replace(varchar, varchar, varchar, int32, int32) -> varchar",
-    prebuild = "RegexpContext::from_pattern($1)?"
+    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, None)?"
 )]
 fn regexp_replace_with_start_n(
     text: &str,
-    replacement: &str,
     start: i32,
     n: i32,
     ctx: &RegexpContext,
 ) -> Result<Box<str>> {
-    regexp_replace(text, replacement, start, Some(n), ctx)
+    regexp_replace(text, start, Some(n), ctx)
 }
 
 #[function(
     // regexp_replace(source, pattern, replacement, start, N, flags)
     "regexp_replace(varchar, varchar, varchar, int32, int32, varchar) -> varchar",
-    prebuild = "RegexpContext::from_pattern_flags($1, $5)?"
+    prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, $5)?"
 )]
 fn regexp_replace_with_start_n_flags(
     text: &str,
-    replacement: &str,
     start: i32,
     n: i32,
     ctx: &RegexpContext,
 ) -> Result<Box<str>> {
-    regexp_replace(text, replacement, start, Some(n), ctx)
+    regexp_replace(text, start, Some(n), ctx)
 }
 
 fn regexp_replace(
     text: &str,
-    replacement: &str,
     start: i32,
     n: Option<i32>, // `None` if not specified
     ctx: &RegexpContext,
@@ -264,7 +328,7 @@ fn regexp_replace(
             return Ok(format!(
                 "{}{}",
                 &text[..start],
-                ctx.regex.replace_all(&text[start..], replacement)
+                ctx.regex.replace_all(&text[start..], &ctx.replacement)
             )
             .into());
         } else {
@@ -290,7 +354,7 @@ fn regexp_replace(
 
                 // Start to replacing
                 // Note that the result will be written directly to `ret` buffer
-                capture.expand(&replacement, &mut ret);
+                capture.expand(&ctx.replacement, &mut ret);
 
                 // Update the `search_start`
                 search_start += match_end;
@@ -319,7 +383,7 @@ fn regexp_replace(
             // There is no capture groups in the regex
             if n.is_none() {
                 // `N` is not specified
-                ret.push_str(&ctx.regex.replacen(&text[start..], 1, replacement));
+                ret.push_str(&ctx.regex.replacen(&text[start..], 1, &ctx.replacement));
             } else {
                 // Replace only the N-th match
                 let mut count = 1;
@@ -336,7 +400,7 @@ fn regexp_replace(
                         ret = format!(
                             "{}{}{}",
                             &text[..search_start + match_start],
-                            &replacement,
+                            &ctx.replacement,
                             &text[search_start + match_end..]
                         );
                         break;
@@ -365,7 +429,7 @@ fn regexp_replace(
                     let match_end = capture.get(0).unwrap().end();
 
                     // Get the replaced string and expand it
-                    capture.expand(&replacement, &mut ret);
+                    capture.expand(&ctx.replacement, &mut ret);
 
                     // Construct the return string
                     ret = format!(
@@ -385,7 +449,7 @@ fn regexp_replace(
                         let match_end = capture.get(0).unwrap().end();
 
                         // Get the replaced string and expand it
-                        capture.expand(&replacement, &mut ret);
+                        capture.expand(&ctx.replacement, &mut ret);
 
                         // Construct the return string
                         ret = format!(
