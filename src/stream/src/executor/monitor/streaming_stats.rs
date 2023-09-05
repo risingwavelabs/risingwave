@@ -99,6 +99,11 @@ pub struct StreamingMetrics {
     pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // Over Window
+    pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
+    pub over_window_cache_miss_count: GenericCounterVec<AtomicU64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
@@ -590,6 +595,30 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_over_window_cached_entry_count",
+            "Total entry (partition) count in over window executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_cache_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_cache_lookup_count",
+            "Over window executor cache lookup count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_cache_miss_count",
+            "Over window executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -750,6 +779,9 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             arrangement_backfill_snapshot_read_row_count,
             arrangement_backfill_upstream_output_row_count,
+            over_window_cached_entry_count,
+            over_window_cache_lookup_count,
+            over_window_cache_miss_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

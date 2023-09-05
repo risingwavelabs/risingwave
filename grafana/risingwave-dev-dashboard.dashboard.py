@@ -1048,6 +1048,10 @@ def section_streaming_actors(outer_panels):
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
                         ),
 
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Over window cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_latency(
@@ -1219,6 +1223,25 @@ def section_streaming_actors(outer_panels):
                                       "lookup cached count | table {{table_id}} actor {{actor_id}}"),
 
                     ],
+                ),
+
+                panels.timeseries_actor_ops(
+                    "Over Window Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cached_entry_count')}[$__rate_interval])",
+                            "cached entry count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
+                            "cache lookup count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
+                            "cache miss count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ]
                 ),
             ],
         )
