@@ -8,7 +8,6 @@ on_exit() {
   set +e
   git checkout "$ORIGINAL_BRANCH"
   ./risedev k
-  ./risedev clean-data
   set -e
 }
 
