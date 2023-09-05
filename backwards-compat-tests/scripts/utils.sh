@@ -211,9 +211,6 @@ validate_new_cluster() {
   echo "--- KAFKA TEST: Seeding new cluster with data"
   seed_json_kafka
 
-  echo "--- KAFKA TEST: wait 5s for kafka to process data"
-  sleep 5
-
   echo "--- KAFKA TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
 
