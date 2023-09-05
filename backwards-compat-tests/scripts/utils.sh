@@ -21,8 +21,6 @@ RECOVERY_DURATION=20
 TEST_DIR=.risingwave/backwards-compat-tests/
 mkdir -p $TEST_DIR
 cp -r backwards-compat-tests/slt/* $TEST_DIR
-cp -r e2e_test/streaming/nexmark $TEST_DIR
-cp -r e2e_test/nexmark/* $TEST_DIR/nexmark
 
 ################################### TEST UTILIIES
 
@@ -109,6 +107,13 @@ EOF
 # TODO: Run nexmark, tpch queries
 # TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
+  # Caller should make sure the test env has these.
+  # They are called here because the current tests
+  # may not be backwards compatible, so we need to call
+  # them in old cluster environment.
+  cp -r e2e_test/streaming/nexmark $TEST_DIR
+  cp -r e2e_test/nexmark/* $TEST_DIR/nexmark
+
   OLD_TAG=$1
   configure_rw
   ./risedev clean-data
