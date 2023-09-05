@@ -45,6 +45,8 @@ impl Epoch {
         let physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
 
+        // The last eight bits of the previous epoch ((prev_epoch + 1, prev_epoch + 255)) will be
+        // used as the gap epoch when the mem table spill occurs.
         let next_epoch = match physical_now.cmp(&prev_physical_time) {
             Ordering::Greater => Self::from_physical_time(physical_now),
             Ordering::Equal => {
