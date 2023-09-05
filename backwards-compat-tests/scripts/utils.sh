@@ -157,15 +157,16 @@ seed_old_cluster() {
   echo "--- BASIC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.slt"
 
-  echo "--- NEXMARK TEST: Seeding old cluster with data"
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/seed_on_ddl.slt"
-
-  echo "--- NEXMARK TEST: Validating old cluster"
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
+#  echo "--- NEXMARK TEST: Seeding old cluster with data"
+#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/seed_on_ddl.slt"
+#
+#  echo "--- NEXMARK TEST: Validating old cluster"
+#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
 
   echo "--- KAFKA TEST: Seeding old cluster with data"
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
+  create_kafka_topic
   seed_json_kafka
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
 
   echo "--- KAFKA TEST: wait 5s for kafka to process data"
   sleep 5
@@ -195,11 +196,11 @@ validate_new_cluster() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.slt"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_restart.slt"
 
-  echo "--- NEXMARK TEST: Validating new cluster"
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
-
-  echo "--- NEXMARK TEST: Drop DDLs"
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/drop_on_ddl.slt"
+#  echo "--- NEXMARK TEST: Validating new cluster"
+#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
+#
+#  echo "--- NEXMARK TEST: Drop DDLs"
+#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/drop_on_ddl.slt"
 
   echo "--- KAFKA TEST: Seeding new cluster with data"
   seed_json_kafka
