@@ -64,6 +64,9 @@ pub fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 #[inline]
 pub fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     if let Ok(res) = SpeedDateTime::parse_str(s) {
+        if res.time.tz_offset.is_some() {
+            return Err(PARSE_ERROR_STR_TO_TIMESTAMP.into());
+        }
         Ok(Date::from_ymd_uncheck(
             res.date.year as i32,
             res.date.month as u32,
@@ -238,7 +241,7 @@ mod tests {
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         assert_eq!(
-            str_to_timestamp("2022-08-03T10:34:02Z").unwrap(),
+            str_to_timestamp("2022-08-03T10:34:02").unwrap(),
             str_to_timestamp("2022-08-03 10:34:02").unwrap()
         );
         str_to_date("1999-01-08").unwrap();
