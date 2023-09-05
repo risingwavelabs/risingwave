@@ -6,4 +6,4 @@ include ../nexmark/insert_auction.slt.part
 include ../nexmark/insert_bid.slt.part
 
 # Then, create materialized views based on the historical data (snapshot)
-include ./nexmark/create_views.slt.part
+include ../nexmark/create_views.slt.part

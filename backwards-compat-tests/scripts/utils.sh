@@ -22,6 +22,7 @@ TEST_DIR=.risingwave/backwards-compat-tests/
 mkdir -p $TEST_DIR
 cp -r backwards-compat-tests/slt/* $TEST_DIR
 cp -r e2e_test/streaming/nexmark $TEST_DIR
+cp -r e2e_test/nexmark/* $TEST_DIR/nexmark
 
 ################################### TEST UTILIIES
 
@@ -115,13 +116,19 @@ seed_old_cluster() {
 
   check_version "$OLD_TAG"
 
-  echo "--- Seeding old cluster with data"
+  echo "--- BASIC TEST: Seeding old cluster with data"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/seed.slt"
 
-  echo "--- Validating old cluster"
+  echo "--- BASIC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.slt"
 
-  ./risedev k
+  echo "--- NEXMARK TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/seed_on_ddl.slt"
+
+  echo "--- NEXMARK TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
+
+  kill_cluster
 }
 
 validate_new_cluster() {
@@ -135,7 +142,15 @@ validate_new_cluster() {
 
   check_version "$NEW_TAG"
 
-  echo "--- Validating new cluster"
+  echo "--- BASIC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.slt"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_restart.slt"
+
+  echo "--- NEXMARK TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
+
+  echo "--- NEXMARK TEST: Drop DDLs"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/drop_on_ddl.slt"
+
+  kill_cluster
 }
