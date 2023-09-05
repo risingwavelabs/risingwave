@@ -12,93 +12,33 @@
 # Steps 1,3 are specific to the execution environment, CI / Local.
 # This script only provides utilities for 2, 4.
 
-################################### ENVIRONMENT VARIABLES
+################################### ENVIRONMENT CONFIG
 
-LOG_DIR=.risingwave/log
-mkdir -p "$LOG_DIR"
-
-# TODO(kwannoel): Use the in-built query log.
-QUERY_LOG_FILE="$LOG_DIR/query.log"
-
-# TODO(kwannoel): automatically derive this by:
-# 1. Fetching major version.
-# 2. Find the earliest minor version of that major version.
 # Duration to wait for recovery (seconds)
 RECOVERY_DURATION=20
 
+# Setup test directory
+TEST_DIR=.risingwave/backwards-compat-tests/
+mkdir -p $TEST_DIR
+cp -r backwards-compat-tests/slt/* $TEST_DIR
+cp -r e2e_test/streaming/nexmark $TEST_DIR
+
 ################################### TEST UTILIIES
-
-assert_not_empty() {
-  set +e
-  if [[ $(wc -l < "$1" | sed 's/^ *//g') -gt 1 ]]; then
-    echo "assert_not_empty PASSED for $1"
-  else
-    echo "assert_not_empty FAILED for $1"
-    exit 1
-  fi
-  set -e
-}
-
-assert_eq() {
-  set +e
-  if [[ -z $(diff "$1" "$2") ]]; then
-    echo "assert_eq PASSED for $1 and $2"
-  else
-    echo "FAILED"
-    echo "LHS: " $1
-    echo "RHS: " $2
-    exit 1
-  fi
-  set -e
-}
-
-################################### QUERIES
 
 run_sql () {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
-seed_table() {
-  START="$1"
-  END="$2"
-  for i in $(seq "$START" "$END")
-  do
-    run_sql "INSERT into t values ($i, $i);" 1>$QUERY_LOG_FILE 2>&1
-  done
-  run_sql "flush;"
-}
-
-random_delete() {
-  START=$1
-  END=$2
-  COUNT=$3
-  for i in $(seq 1 "$COUNT")
-  do
-    run_sql "DELETE FROM t WHERE v1 = $(("$RANDOM" % END));" 1>$QUERY_LOG_FILE 2>&1
-  done
-  run_sql "flush;"
-}
-
-random_update() {
-  START=$1
-  END=$2
-  COUNT=$3
-  for _i in $(seq 1 "$COUNT")
-  do
-    run_sql "UPDATE t SET v2 = v2 + 1 WHERE v1 = $(("$RANDOM" % END));" 1>$QUERY_LOG_FILE 2>&1
-  done
-  run_sql "flush;"
-}
-
-# Just check if the results are the same as old cluster.
-run_sql_new_cluster() {
-  run_sql "SELECT * from m ORDER BY v1;" > AFTER_1
-  run_sql "select * from m2 ORDER BY v1;" > AFTER_2
-}
-
-run_updates_and_deletes_new_cluster() {
-  random_update 1 20000 1000
-  random_delete 1 20000 1000
+check_version() {
+  local TAG=$1
+  local raw_version=$(run_sql "SELECT version();")
+  echo "--- Version"
+  echo "$raw_version"
+  local version=$(echo $raw_version | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
+  if [[ "$version" != "$TAG" ]]; then
+    echo "Version mismatch, expected $TAG, got $version"
+    exit 1
+  fi
 }
 
 ################################### Entry Points
@@ -133,18 +73,6 @@ ENABLE_ALL_IN_ONE=true
 EOF
 }
 
-check_version() {
-  local TAG=$1
-  local raw_version=$(run_sql "SELECT version();")
-  echo "--- Version"
-  echo "$raw_version"
-  local version=$(echo $raw_version | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
-  if [[ "$version" != "$TAG" ]]; then
-    echo "Version mismatch, expected $TAG, got $version"
-    exit 1
-  fi
-}
-
 # Setup table and materialized view.
 # Run updates and deletes on the table.
 # Get the results.
@@ -158,23 +86,11 @@ seed_old_cluster() {
 
   check_version "$OLD_TAG"
 
-  run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
+  echo "--- Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/seed.sql"
 
-  seed_table 1 10000
-
-  run_sql "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
-  CREATE_MV_PID=$!
-
-  seed_table 10001 20000
-  random_update 1 20000 1000
-  random_delete 1 20000 1000
-
-  wait $CREATE_MV_PID
-
-  run_sql "CREATE MATERIALIZED VIEW m2 as SELECT v1, sum(v2) FROM m GROUP BY v1;"
-
-  run_sql "select * from m ORDER BY v1;" > BEFORE_1
-  run_sql "select * from m2 ORDER BY v1;" > BEFORE_2
+  echo "--- Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/validate_original.sql"
 
   ./risedev k
 }
@@ -190,23 +106,7 @@ validate_new_cluster() {
 
   check_version "$NEW_TAG"
 
-  echo "--- Running Queries New Cluster"
-  run_sql_new_cluster
-
-  echo "--- Sanity Checks"
-  echo "AFTER_1"
-  cat AFTER_1 | tail -n 100
-  echo "AFTER_2"
-  cat AFTER_2 | tail -n 100
-
-  echo "--- Comparing results"
-  assert_eq BEFORE_1 AFTER_1
-  assert_eq BEFORE_2 AFTER_2
-  assert_not_empty BEFORE_1
-  assert_not_empty BEFORE_2
-  assert_not_empty AFTER_1
-  assert_not_empty AFTER_2
-
-  echo "--- Running Updates and Deletes on new cluster should not fail"
-  run_updates_and_deletes_new_cluster
+  echo "--- Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/validate_original.sql"
+  sqllogictest -d dev -h localhost -p 4566 -U root -f "$TEST_DIR/basic/validate_restart.sql"
 }

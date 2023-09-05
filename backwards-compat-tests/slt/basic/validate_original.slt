@@ -1,0 +1,19 @@
+query I
+SELECT count(*) FROM t;
+----
+10000
+
+query I
+SELECT sum(v1), sum(v2) FROM t;
+----
+10000 20000
+
+query I
+SELECT count(*) FROM m;
+----
+10000
+
+query I
+SELECT sum(v1), sum(v2) FROM m;
+----
+10000 20000
