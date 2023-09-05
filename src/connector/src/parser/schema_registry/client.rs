@@ -43,6 +43,7 @@ impl Client {
         }
 
         let mut headers = HeaderMap::new();
+        // necessary for schema registry
         headers.insert(
             ACCEPT,
             HeaderValue::from_static("application/vnd.schemaregistry.v1+json"),
@@ -88,19 +89,9 @@ impl Client {
     where
         S: Serialize,
     {
-        // we use `body` instead of `json` here since `json` automatically adds
-        // "application/json" content-type in header.
         let req = self
             .build_request(Method::POST, &["subjects", subject, "versions"])
             .json(schema);
-        // let body = serde_json::to_vec(schema).unwrap();
-        // let req = self
-        //     .build_request(Method::POST, &["subjects", subject, "versions"])
-        //     .body(body)
-        //     .header(
-        //         CONTENT_TYPE,
-        //         HeaderValue::from_static("application/vnd.schemaregistry.v1+json"),
-        //     );
         let res: SchemaRegisterResp = request(req).await?;
         Ok(SchemaId::new(res.id))
     }

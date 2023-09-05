@@ -87,6 +87,7 @@ services:
       - db
       - elasticsearch
       - clickhouse-server
+      - schemaregistry
     volumes:
       - ..:/risingwave
 
