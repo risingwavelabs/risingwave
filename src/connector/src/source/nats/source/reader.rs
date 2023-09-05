@@ -14,17 +14,15 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::nats::NatsProperties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitImpl, SplitReader,
 };
-
-impl_common_split_reader_logic!(NatsSplitReader, NatsProperties);
 
 pub struct NatsSplitReader {
     subscriber: async_nats::Subscriber,
@@ -56,12 +54,14 @@ impl SplitReader for NatsSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
-impl NatsSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+impl CommonSplitReader for NatsSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
         #[for_await]
