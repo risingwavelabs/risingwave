@@ -23,7 +23,13 @@ done
 shift $((OPTIND -1))
 
 # profile is either ci-dev or ci-release
-if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
+if [[ "$profile" == "ci-dev" ]]; then
+  echo "Running in ci-dev mode"
+  ENABLE_RELEASE_PROFILE=false
+elif [[ "$profile" != "ci-release" ]]; then
+  echo "Running in ci-release mode"
+  ENABLE_RELEASE_PROFILE=true
+else
     echo "Invalid option: profile must be either ci-dev or ci-release" 1>&2
     exit 1
 fi
@@ -62,9 +68,9 @@ ENABLE_BUILD_RUST=false
 
 # Ensure it will link the all-in-one binary from our release.
 ENABLE_ALL_IN_ONE=true
-
-# ENABLE_RELEASE_PROFILE=true
 EOF
+
+echo "ENABLE_RELEASE_PROFILE=$ENABLE_RELEASE_PROFILE" >> risedev-components.user.env
 }
 
 setup_old_cluster() {
@@ -72,15 +78,24 @@ setup_old_cluster() {
   git config --global --add safe.directory /risingwave
   git checkout "v${OLD_TAG}-rc"
   cargo build -p risedev
+  OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_TAG}/risingwave-v${OLD_TAG}-x86_64-unknown-linux.tar.gz
+  wget $OLD_URL
+  tar -xvf risingwave-v${OLD_TAG}-x86_64-unknown-linux.tar.gz
+  if [[ $ENABLE_RELEASE_PROFILE == 'true' ]]; then
+    RW_DIR=target/release
+  else
+    RW_DIR=target/debug
+  fi
+  mv risingwave-v${OLD_TAG}-x86_64-unknown-linux/risingwave $RW_DIR/risingwave
 
-  echo "--- Setup old release $OLD_TAG"
-  pushd ..
-  git clone --depth 1 --branch "v${OLD_TAG}-rc" "https://github.com/risingwavelabs/risingwave.git"
-  pushd risingwave
-  mkdir -p target/debug
-  echo "Branch:"
-  git branch
-  cp risingwave target/debug/risingwave
+#  echo "--- Setup old release $OLD_TAG"
+#  pushd ..
+#  git clone --depth 1 --branch "v${OLD_TAG}-rc" "https://github.com/risingwavelabs/risingwave.git"
+#  pushd risingwave
+#  mkdir -p target/debug
+#  echo "Branch:"
+#  git branch
+#  cp risingwave target/debug/risingwave
 
   echo "--- Start cluster on tag $OLD_TAG"
   git config --global --add safe.directory /risingwave
