@@ -24,13 +24,12 @@ use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::vis::VisMut;
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
-use crate::array::data_chunk_iter::RowRefIter;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
-use crate::types::{DataType, DatumRef, DefaultOrdered, ToText};
+use crate::types::{DataType, DefaultOrdered, ToText};
 use crate::util::iter_util::ZipEqDebug;
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -344,6 +343,10 @@ impl OpsMut {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn set(&mut self, n: usize, val: Op) {
         debug_assert!(n < self.len());
         if let OpsMutState::Mut(v) = &mut self.state {
@@ -443,7 +446,7 @@ impl StreamChunkMut {
     }
 
     /// get the mut reference of the stream chunk.
-    pub fn to_mut_rows(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
+    pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
         unsafe {
             (0..self.vis.len()).map(|i| {
                 let p = self as *const StreamChunkMut;

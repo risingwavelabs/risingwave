@@ -16,7 +16,7 @@ use std::hash::Hash;
 use std::iter::{FusedIterator, TrustedLen};
 use std::ops::Range;
 
-use super::{ArrayRef, StreamChunk};
+use super::ArrayRef;
 use crate::array::DataChunk;
 use crate::row::Row;
 use crate::types::DatumRef;

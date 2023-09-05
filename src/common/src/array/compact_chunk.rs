@@ -13,26 +13,17 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::mem;
 
 use itertools::Itertools;
-use prehash::{new_prehashed_map, new_prehashed_map_with_capacity, Passthru, Prehashed};
+use prehash::{new_prehashed_map_with_capacity, Passthru, Prehashed};
 
 use super::stream_chunk::{OpRowMutRef, StreamChunkMut};
-use super::DataChunk;
 use crate::array::{Op, RowRef, StreamChunk};
-use crate::buffer::BitmapBuilder;
 use crate::row::{Project, RowExt};
-use crate::util::chunk_coalesce::DataChunkBuilder;
 use crate::util::hash_util::Crc32FastBuilder;
-
-struct StreamChunkCompactorOwner {
-    chunks: Vec<StreamChunk>,
-    stream_key: Vec<usize>,
-}
-
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
     stream_key: Vec<usize>,
@@ -112,9 +103,9 @@ impl StreamChunkCompactor {
             })
             .collect_vec();
 
-        let mut op_row_map: OpRowMap = new_prehashed_map_with_capacity(estimate_size);
+        let mut op_row_map: OpRowMap<'_, '_> = new_prehashed_map_with_capacity(estimate_size);
         for (hash_values, c) in &mut chunks {
-            for (row, mut op_row) in c.to_mut_rows() {
+            for (row, mut op_row) in c.to_rows_mut() {
                 if !op_row.vis() {
                     continue;
                 }
