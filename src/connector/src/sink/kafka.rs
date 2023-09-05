@@ -18,6 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
+use futures::FutureExt;
+use futures::future::try_join_all;
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -396,8 +398,7 @@ impl KafkaSinkWriter {
 
     /// The wrapper function for the actual `FutureProducer::send_result`
     /// Just for better error handling purpose
-    #[expect(clippy::unused_async)]
-    async fn send_result_inner<'a, K, P>(
+    fn send_result_inner<'a, K, P>(
         &'a self,
         record: FutureRecord<'a, K, P>,
     ) -> core::result::Result<DeliveryFuture, (KafkaError, FutureRecord<'a, K, P>)>
@@ -439,7 +440,7 @@ impl KafkaSinkWriter {
         let mut push_flag = false;
 
         for _ in 0..self.config.max_retry_num {
-            match self.send_result_inner(record).await {
+            match self.send_result_inner(record) {
                 // Add the future to the buffer
                 Ok(delivery_future) => {
                     // Push the future into the buffer
@@ -558,6 +559,25 @@ impl KafkaSinkWriter {
 
         Ok(())
     }
+
+    // async fn commit_inner(&mut self) -> Result<()> {
+    //     let _v = try_join_all(
+    //         self.future_delivery_buffer
+    //             .drain(..)
+    //             .map(|x| {
+    //                 x.map(|f| {
+    //                     match f {
+    //                         Ok(Ok(val)) => Ok(val),
+    //                         Ok(Err((k_err, _msg))) => Err(SinkError::Kafka(k_err)),
+    //                         Err(_) => Err(SinkError::Kafka(KafkaError::Canceled)),
+    //                     }
+    //                 })
+    //             })
+    //     )
+    //     .await?;
+
+    //     Ok(())
+    // }
 
     async fn debezium_update(&mut self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
         let schema = self.schema.clone();
