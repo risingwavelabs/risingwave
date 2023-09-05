@@ -2,6 +2,14 @@
 
 set -euo pipefail
 
+ORIGINAL_BRANCH=$(git branch --show-current)
+
+on_exit() {
+  git checkout "$ORIGINAL_BRANCH"
+}
+
+trap on_exit EXIT
+
 OLD_TAG=1.0.0
 NEW_TAG=1.1.0
 
