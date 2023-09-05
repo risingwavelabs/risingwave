@@ -692,7 +692,7 @@ impl LocalStreamManagerCore {
             self.handles.insert(actor_id, handle);
 
             if self.streaming_metrics.level >= MetricLevel::Debug {
-                tracing::info!("Tokio metrics are enabled because streaming_metric_level >= DEBUG");
+                tracing::info!("Tokio metrics are enabled because metrics_level >= DEBUG");
                 let actor_id_str = actor_id.to_string();
                 let metrics = self.streaming_metrics.clone();
                 let actor_monitor_task = self.runtime.spawn(async move {

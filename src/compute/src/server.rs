@@ -169,9 +169,7 @@ pub async fn compute_node_serve(
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let streaming_metrics = Arc::new(global_streaming_metrics(
-        config.streaming.streaming_metric_level,
-    ));
+    let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
@@ -179,7 +177,7 @@ pub async fn compute_node_serve(
 
     // Initialize state store.
     let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
-        config.storage.storage_metric_level,
+        config.server.metrics_level,
     ));
     let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
     let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
