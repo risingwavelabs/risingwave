@@ -39,7 +39,6 @@ pub(crate) mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
-    use risingwave_meta::storage::MetaStore;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -64,10 +63,10 @@ pub(crate) mod tests {
     use crate::get_notification_client_for_test;
     use crate::test_utils::{register_tables_with_id_for_test, TestIngestBatch};
 
-    pub(crate) async fn get_hummock_storage<S: MetaStore>(
+    pub(crate) async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        hummock_manager_ref: &HummockManagerRef<S>,
+        hummock_manager_ref: &HummockManagerRef,
         table_id: TableId,
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();

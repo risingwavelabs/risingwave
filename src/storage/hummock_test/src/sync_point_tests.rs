@@ -228,7 +228,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 }
 
 pub async fn compact_once(
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    hummock_manager_ref: HummockManagerRef,
     compact_ctx: Arc<CompactorContext>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {

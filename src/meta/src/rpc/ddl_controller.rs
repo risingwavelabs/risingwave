@@ -40,7 +40,6 @@ use crate::manager::{
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::storage::MetaStore;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
@@ -103,32 +102,28 @@ pub enum DdlCommand {
 }
 
 #[derive(Clone)]
-pub struct DdlController<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct DdlController {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
+    stream_manager: GlobalStreamManagerRef,
+    source_manager: SourceManagerRef,
+    cluster_manager: ClusterManagerRef,
+    fragment_manager: FragmentManagerRef,
+    barrier_manager: BarrierManagerRef,
 
     aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
-    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit<S>>,
+    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
 
 #[derive(Clone)]
-pub struct CreatingStreamingJobPermit<S: MetaStore> {
+pub struct CreatingStreamingJobPermit {
     semaphore: Arc<Semaphore>,
-    _phantom: std::marker::PhantomData<S>,
 }
 
-impl<S> CreatingStreamingJobPermit<S>
-where
-    S: MetaStore,
-{
-    async fn new(env: &MetaSrvEnv<S>) -> Self {
+impl CreatingStreamingJobPermit {
+    async fn new(env: &MetaSrvEnv) -> Self {
         let mut permits = env
             .system_params_manager()
             .get_params()
@@ -177,25 +172,19 @@ where
             }
         });
 
-        Self {
-            semaphore,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { semaphore }
     }
 }
 
-impl<S> DdlController<S>
-where
-    S: MetaStore,
-{
+impl DdlController {
     pub(crate) async fn new(
-        env: MetaSrvEnv<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        env: MetaSrvEnv,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        source_manager: SourceManagerRef,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
+        barrier_manager: BarrierManagerRef,
         aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -758,7 +747,7 @@ where
         &self,
         source_id: Option<SourceId>,
         table_id: TableId,
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         drop_mode: DropMode,
     ) -> MetaResult<(
         NotificationVersion,
