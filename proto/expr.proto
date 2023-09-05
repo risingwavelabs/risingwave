@@ -197,6 +197,7 @@ message ExprNode {
     ARRAY_REPLACE = 543;
     ARRAY_DIMS = 544;
     ARRAY_TRANSFORM = 545;
+    ARRAY_MAX = 547;
 
     // Int256 functions
     HEX_TO_INT256 = 560;

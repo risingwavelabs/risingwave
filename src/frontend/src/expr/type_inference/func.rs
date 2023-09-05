@@ -607,6 +607,18 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
+        ExprType::ArrayMax => {
+            ensure_arity!("array_max", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            // FIXME: This will be replaced by `as_list` later
+            let return_type = match inputs[0].return_type() {
+                DataType::List(t) => Some(*t),
+                _ => None,
+            };
+
+            Ok(return_type)
+        }
         ExprType::StringToArray => {
             ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
 
