@@ -73,3 +73,7 @@ CREATE TABLE biz.t_types (
     array_column VARCHAR[],
     array_column2 DECIMAL[]
 );
+
+CREATE TABLE biz.t2 (
+    "aBc" INTEGER PRIMARY KEY
+);

@@ -192,12 +192,16 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
-                var pgDataType = schema.get(e.getKey().toLowerCase());
-                if (pgDataType == null) {
+                // skip validate internal columns
+                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                    continue;
+                }
+                var dataType = schema.get(e.getKey().toLowerCase());
+                if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(pgDataType, e.getValue())) {
+                if (!isDataTypeCompatible(dataType, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -262,11 +266,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
 
         // check whether select privilege on table for snapshot read
-        validateTablePrivileges();
+        validateTablePrivileges(isSuperUser);
         validatePublicationConfig(isSuperUser);
     }
 
-    private void validateTablePrivileges() throws SQLException {
+    private void validateTablePrivileges(boolean isSuperUser) throws SQLException {
+        if (isSuperUser) {
+            return;
+        }
+
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {

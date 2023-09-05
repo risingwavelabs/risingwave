@@ -283,7 +283,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         self.table_id
     }
 }
-
 /// Point get
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get vnode value with given primary key.

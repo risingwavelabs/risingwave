@@ -100,7 +100,7 @@ fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> 
                 .collect(),
             pk_indices,
         };
-        properties.init_cdc_properties(Some(table_schema));
+        properties.init_cdc_properties(table_schema);
     }
     Ok(properties)
 }

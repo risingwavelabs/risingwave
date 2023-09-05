@@ -440,7 +440,7 @@ static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
     LazyLock::new(HashMap::new);
 
 /// A fragment that is either being built or already exists. Used for generalize the logic of
-/// [`ActorGraphBuilder`].
+/// [`crate::stream::ActorGraphBuilder`].
 #[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum EitherFragment {
     /// An internal fragment that is being built for the current streaming job.

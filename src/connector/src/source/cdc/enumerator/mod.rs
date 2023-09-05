@@ -75,7 +75,7 @@ where
                 context.info.source_id as u64,
                 props.get_source_type_pb(),
                 props.props,
-                props.table_schema,
+                Some(props.table_schema),
             )
             .await?;
 

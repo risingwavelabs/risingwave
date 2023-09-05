@@ -117,7 +117,8 @@ macro_rules! impl_connector_properties {
             pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";
                 let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-                if connector.ends_with("-cdc") {
+                use $crate::source::cdc::CDC_CONNECTOR_NAME_SUFFIX;
+                if connector.ends_with(CDC_CONNECTOR_NAME_SUFFIX) {
                     ConnectorProperties::new_cdc_properties(&connector, props)
                 } else {
                     let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
@@ -131,6 +132,92 @@ macro_rules! impl_connector_properties {
                             Err(anyhow!("connector '{}' is not supported", connector,))
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! impl_cdc_source_type {
+    ($({$source_type:ident, $name:expr }),*) => {
+        $(
+            paste!{
+                #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+                pub struct $source_type;
+                impl CdcSourceTypeTrait for $source_type {
+                    const CDC_CONNECTOR_NAME: &'static str = concat!($name, "-cdc");
+                    fn source_type() -> CdcSourceType {
+                        CdcSourceType::$source_type
+                    }
+                }
+
+                pub type [< $source_type DebeziumSplitEnumerator >] = DebeziumSplitEnumerator<$source_type>;
+            }
+        )*
+
+        pub enum CdcSourceType {
+            $(
+                $source_type,
+            )*
+        }
+
+        impl From<PbSourceType> for CdcSourceType {
+            fn from(value: PbSourceType) -> Self {
+                match value {
+                    PbSourceType::Unspecified => unreachable!(),
+                    $(
+                        PbSourceType::$source_type => CdcSourceType::$source_type,
+                    )*
+                }
+            }
+        }
+
+        impl From<CdcSourceType> for PbSourceType {
+            fn from(this: CdcSourceType) -> PbSourceType {
+                match this {
+                    $(
+                        CdcSourceType::$source_type => PbSourceType::$source_type,
+                    )*
+                }
+            }
+        }
+
+        impl ConnectorProperties {
+            pub(crate) fn new_cdc_properties(
+                connector_name: &str,
+                properties: HashMap<String, String>,
+            ) -> std::result::Result<Self, anyhow::Error> {
+                match connector_name {
+                    $(
+                        $source_type::CDC_CONNECTOR_NAME => paste! {
+                            Ok(Self::[< $source_type Cdc >](Box::new(CdcProperties::<$source_type> {
+                                props: properties,
+                                ..Default::default()
+                            })))
+                        },
+                    )*
+                    _ => Err(anyhow::anyhow!("unexpected cdc connector '{}'", connector_name,)),
+                }
+            }
+
+            pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
+                match self {
+                    $(
+                         paste! {ConnectorProperties:: [< $source_type Cdc >](c)} => {
+                            c.table_schema = table_schema;
+                         }
+                    )*
+                    _ => {}
+                }
+            }
+
+            pub fn is_cdc_connector(&self) -> bool {
+                match self {
+                    $(
+                         paste! {ConnectorProperties:: [< $source_type Cdc >](_)} => true,
+                    )*
+                    _ => false,
                 }
             }
         }

@@ -41,7 +41,7 @@ pub struct PubsubProperties {
     pub subscription: String,
 
     /// use the connector with a pubsub emulator
-    /// https://cloud.google.com/pubsub/docs/emulator
+    /// <https://cloud.google.com/pubsub/docs/emulator>
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 

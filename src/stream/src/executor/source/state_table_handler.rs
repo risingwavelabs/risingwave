@@ -143,7 +143,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
+    pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
         let row = [
             Some(Self::string_to_scalar(key.deref())),
             Some(ScalarImpl::Jsonb(value)),

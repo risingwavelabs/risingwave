@@ -20,11 +20,15 @@ use std::marker::PhantomData;
 
 pub use enumerator::*;
 use paste::paste;
-use risingwave_pb::connector_service::{PbSourceType, SourceType, TableSchema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 pub use source::*;
 pub use split::*;
 
-use crate::source::{SourceProperties, SplitImpl};
+use crate::impl_cdc_source_type;
+use crate::source::{ConnectorProperties, SourceProperties, SplitImpl};
+
+pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
@@ -35,52 +39,6 @@ pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     fn source_type() -> CdcSourceType;
 }
 
-macro_rules! impl_cdc_source_type {
-    ($({$source_type:ident, $name:expr }),*) => {
-        $(
-            paste!{
-                #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-                pub struct $source_type;
-                impl CdcSourceTypeTrait for $source_type {
-                    const CDC_CONNECTOR_NAME: &'static str = concat!($name, "-cdc");
-                    fn source_type() -> CdcSourceType {
-                        CdcSourceType::$source_type
-                    }
-                }
-
-                pub type [< $source_type DebeziumSplitEnumerator >] = DebeziumSplitEnumerator<$source_type>;
-            }
-        )*
-
-        pub enum CdcSourceType {
-            $(
-                $source_type,
-            )*
-        }
-
-        impl From<PbSourceType> for CdcSourceType {
-            fn from(value: PbSourceType) -> Self {
-                match value {
-                    PbSourceType::Unspecified => unreachable!(),
-                    $(
-                        PbSourceType::$source_type => CdcSourceType::$source_type,
-                    )*
-                }
-            }
-        }
-
-        impl From<CdcSourceType> for PbSourceType {
-            fn from(this: CdcSourceType) -> PbSourceType {
-                match this {
-                    $(
-                        CdcSourceType::$source_type => PbSourceType::$source_type,
-                    )*
-                }
-            }
-        }
-    }
-}
-
 impl_cdc_source_type!({ Mysql, "mysql" }, { Postgres, "postgres" }, { Citus, "citus" });
 
 #[derive(Clone, Debug, Default)]
@@ -89,7 +47,7 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub props: HashMap<String, String>,
 
     /// Schema of the source specified by users
-    pub table_schema: Option<TableSchema>,
+    pub table_schema: TableSchema,
 
     pub _phantom: PhantomData<T>,
 }
@@ -109,5 +67,17 @@ where
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     pub fn get_source_type_pb(&self) -> SourceType {
         SourceType::from(T::source_type())
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self
+                .table_schema
+                .columns
+                .iter()
+                .map(ColumnDesc::from)
+                .map(Field::from)
+                .collect(),
+        }
     }
 }

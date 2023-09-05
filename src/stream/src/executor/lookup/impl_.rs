@@ -31,7 +31,7 @@ use risingwave_storage::StateStore;
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
 use crate::common::metrics::MetricsInfo;
-use crate::common::StreamChunkBuilder;
+use crate::common::JoinStreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
@@ -264,8 +264,8 @@ impl<S: StateStore> LookupExecutor<S> {
             .boxed()
         };
 
-        let (stream_to_output, arrange_to_output) = StreamChunkBuilder::get_i2o_mapping(
-            self.column_mapping.iter().cloned(),
+        let (stream_to_output, arrange_to_output) = JoinStreamChunkBuilder::get_i2o_mapping(
+            &self.column_mapping,
             self.stream.col_types.len(),
             self.arrangement.col_types.len(),
         );
@@ -310,9 +310,9 @@ impl<S: StateStore> LookupExecutor<S> {
                     let chunk = chunk.compact();
                     let (chunk, ops) = chunk.into_parts();
 
-                    let mut builder = StreamChunkBuilder::new(
+                    let mut builder = JoinStreamChunkBuilder::new(
                         self.chunk_size,
-                        &reorder_chunk_data_types,
+                        reorder_chunk_data_types.clone(),
                         stream_to_output.clone(),
                         arrange_to_output.clone(),
                     );

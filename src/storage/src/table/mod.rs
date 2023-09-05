@@ -130,28 +130,22 @@ where
 /// Collects data chunks from stream of rows.
 pub async fn collect_data_chunk_with_builder<E, S>(
     stream: &mut S,
-    chunk_size: Option<usize>,
     builder: &mut DataChunkBuilder,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
-    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-        match stream.next().await.transpose()? {
-            Some(row) => {
-                builder.append_one_row_no_finish(row.into_owned_row());
-            }
-            None => break,
+    // TODO(kwannoel): If necessary, we can optimize it in the future.
+    // This can be done by moving the check if builder is full from `append_one_row` to here,
+    while let Some(row) = stream.next().await.transpose()? {
+        let result = builder.append_one_row(row);
+        if let Some(chunk) = result {
+            return Ok(Some(chunk));
         }
     }
 
-    let chunk = builder.build_data_chunk();
-
-    if chunk.cardinality() == 0 {
-        Ok(None)
-    } else {
-        Ok(Some(chunk))
-    }
+    let chunk = builder.consume_all();
+    Ok(chunk)
 }
 
 pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {

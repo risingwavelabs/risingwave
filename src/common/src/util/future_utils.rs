@@ -26,9 +26,10 @@ pub fn select_all<S: Stream + Unpin>(
 }
 
 pub fn pending_on_none<I>(future: impl Future<Output = Option<I>>) -> impl Future<Output = I> {
-    use futures::TryFutureExt;
-    future
-        .map(|opt| opt.ok_or(()))
-        .or_else(|()| pending::<std::result::Result<I, ()>>())
-        .map(|result| result.expect("only err on pending, which is unlikely to reach here"))
+    future.then(|opt| async move {
+        match opt {
+            Some(item) => item,
+            None => pending::<I>().await,
+        }
+    })
 }
