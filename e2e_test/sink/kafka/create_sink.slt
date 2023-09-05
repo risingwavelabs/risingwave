@@ -148,7 +148,7 @@ create sink invalid_pk_column from t_kafka with (
 statement ok
 create sink si_kafka_upsert_schema_registry from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29093',
+    properties.bootstrap.server = 'kafka:9093',
     topic = 'test-rw-sink-upsert-registry',
     type = 'upsert',
     primary_key = 'id',
