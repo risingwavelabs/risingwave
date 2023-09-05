@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_nats;
+use std::future::Future;
 
-use crate::source::base::SourceMessage;
-use crate::source::SourceMeta;
+use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::error::StorageResult;
+use risingwave_storage::store::{InitOptions, LocalStateStore};
 
-impl SourceMessage {
-    pub fn from_nats_jetstream_message(message: async_nats::jetstream::message::Message) -> Self {
-        SourceMessage {
-            key: None,
-            payload: Some(message.message.payload.to_vec()),
-            // For nats jetstream, use sequence id as offset
-            offset: message.info().unwrap().consumer_sequence.to_string(),
-            split_id: "0".into(),
-            meta: SourceMeta::Empty,
-        }
+pub trait LocalStateStoreTestExt: LocalStateStore {
+    fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.init(InitOptions::new_with_epoch(EpochPair::new_test_epoch(
+            epoch,
+        )))
     }
 }
+impl<T: LocalStateStore> LocalStateStoreTestExt for T {}

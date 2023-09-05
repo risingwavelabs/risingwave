@@ -16,21 +16,19 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::pin_mut;
 use futures_async_stream::try_stream;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
 };
-
-impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 
 pub struct CdcSplitReader {
     source_id: u64,
@@ -90,12 +88,14 @@ impl SplitReader for CdcSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
-impl CdcSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+impl CommonSplitReader for CdcSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
             anyhow!("connector node endpoint not specified or unable to connect to connector node")

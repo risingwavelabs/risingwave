@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
@@ -196,13 +196,13 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     type InitFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
     type WriteChunkFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
 
-    fn init(&mut self, epoch: u64) -> Self::InitFuture<'_> {
+    fn init(&mut self, epoch: EpochPair) -> Self::InitFuture<'_> {
         async move {
             let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
             init_epoch_tx
-                .send(epoch)
+                .send(epoch.curr)
                 .map_err(|_| anyhow!("unable to send init epoch"))?;
-            self.curr_epoch = Some(epoch);
+            self.curr_epoch = Some(epoch.curr);
             Ok(())
         }
     }
@@ -258,6 +258,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
 mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::EpochPair;
 
     use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
     use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
@@ -289,7 +290,10 @@ mod tests {
         let stream_chunk_clone = stream_chunk.clone();
 
         let join_handle = tokio::spawn(async move {
-            writer.init(init_epoch).await.unwrap();
+            writer
+                .init(EpochPair::new_test_epoch(init_epoch))
+                .await
+                .unwrap();
             writer
                 .write_chunk(stream_chunk_clone.clone())
                 .await

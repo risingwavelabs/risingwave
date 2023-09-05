@@ -447,11 +447,12 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.actual.init(epoch);
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch);
+                expected.init(options).await?;
             }
+            Ok(())
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -564,7 +565,7 @@ impl StateStoreImpl {
                 event_listener: vec![],
                 prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
                 prometheus_namespace: Some("data".to_string()),
-                enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
+                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
@@ -821,7 +822,7 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        fn init(&mut self, epoch: u64);
+        async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
     }
@@ -876,8 +877,8 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.init(epoch)
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.init(options).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -942,8 +943,11 @@ pub mod boxed_state_store {
             self.deref().is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.deref_mut().init(epoch)
+        fn init(
+            &mut self,
+            options: InitOptions,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
