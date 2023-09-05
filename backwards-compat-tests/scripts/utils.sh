@@ -83,8 +83,8 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
-    - use: kafka
     - use: zookeeper
+    - use: kafka
 EOF
 
 cat <<EOF > risedev-components.user.env
@@ -135,6 +135,8 @@ seed_json_kafka() {
 # TODO: Run nexmark, tpch queries
 # TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
+  set -euo pipefail
+
   # Caller should make sure the test env has these.
   # They are called here because the current tests
   # may not be backwards compatible, so we need to call
@@ -177,6 +179,8 @@ seed_old_cluster() {
 }
 
 validate_new_cluster() {
+  set -euo pipefail
+
   NEW_TAG=$1
   echo "--- Start cluster on latest"
   configure_rw
