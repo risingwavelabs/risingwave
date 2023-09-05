@@ -1,0 +1,15 @@
+statement ok
+UPDATE t SET v2 = v2 + 1 WHERE v1 >= 1 AND v1 <= 5000;
+
+statement ok
+DELETE FROM t WHERE v1 > 5000;
+
+query I
+SELECT COUNT(*) FROM t;
+----
+5000
+
+query I
+SELECT SUM(v2) FROM t;
+----
+5000
