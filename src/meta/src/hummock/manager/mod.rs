@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
+use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
@@ -2775,34 +2776,52 @@ fn gen_version_delta<'a>(
         .or_default()
         .group_deltas;
     let mut gc_object_ids = vec![];
+    let mut removed_table_ids_map = BTreeMap::default();
+
     for level in &compact_task.input_ssts {
+        let level_idx = level.level_idx;
+        let mut removed_table_ids = level
+            .table_infos
+            .iter()
+            .map(|sst| {
+                let object_id = sst.get_object_id();
+                let sst_id = sst.get_sst_id();
+                if !trivial_move
+                    && drop_sst(
+                        branched_ssts,
+                        compact_task.compaction_group_id,
+                        object_id,
+                        sst_id,
+                    )
+                {
+                    gc_object_ids.push(object_id);
+                }
+                sst_id
+            })
+            .collect_vec();
+
+        match removed_table_ids_map.entry(level_idx) {
+            Vacant(entry) => {
+                entry.insert(removed_table_ids);
+            }
+
+            Occupied(mut entry) => {
+                entry.get_mut().append(&mut removed_table_ids);
+            }
+        };
+    }
+
+    for (level_idx, removed_table_ids) in removed_table_ids_map {
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: level.level_idx,
-                removed_table_ids: level
-                    .table_infos
-                    .iter()
-                    .map(|sst| {
-                        let object_id = sst.get_object_id();
-                        let sst_id = sst.get_sst_id();
-                        if !trivial_move
-                            && drop_sst(
-                                branched_ssts,
-                                compact_task.compaction_group_id,
-                                object_id,
-                                sst_id,
-                            )
-                        {
-                            gc_object_ids.push(object_id);
-                        }
-                        sst_id
-                    })
-                    .collect_vec(),
+                level_idx,
+                removed_table_ids,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
     }
+
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
