@@ -31,11 +31,15 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
+use super::schema_registry::{
+    generate_json_schema, post_schema_to_schema_registry, SCHEMA_REGISTRY_VERSION_PREFIX,
+};
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
+use crate::parser::SchemaRegistryAuth;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
@@ -203,6 +207,15 @@ pub struct KafkaConfig {
     )]
     pub use_transaction: bool,
 
+    #[serde(rename = "schema.registry", default)]
+    pub schema_registry: Option<String>,
+
+    #[serde(rename = "schema.registry.username", default)]
+    pub schema_registry_username: Option<String>,
+
+    #[serde(rename = "schema.registry.password", default)]
+    pub schema_registry_password: Option<String>,
+
     /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
@@ -305,6 +318,35 @@ impl Sink for KafkaSink {
                 "primary key not defined for {} kafka sink (please define in `primary_key` field)",
                 self.config.r#type
             )));
+        }
+
+        // Check schema registry and post
+        let config = &self.config;
+        if config.r#type == SINK_TYPE_UPSERT && let Some(schema_registry) = &config.schema_registry {
+            let schema = &self.schema;
+            let topic = &config.common.topic;
+            let schema_registry_auth = SchemaRegistryAuth::new(
+                config.schema_registry_username.clone(),
+                config.schema_registry_password.clone(),
+            );
+
+            let key_schema = generate_json_schema(topic,
+                &self.pk_indices.iter().map(|i| schema.fields[*i].clone()).collect());
+            post_schema_to_schema_registry(
+                schema_registry,
+                &key_schema,
+                &format!("{}-key", topic),
+                &schema_registry_auth,
+            ).await?;
+
+            let schema = generate_json_schema(topic, &schema.fields);
+            post_schema_to_schema_registry(
+                schema_registry,
+                &schema,
+                &format!("{}-value", topic),
+                &schema_registry_auth,
+            )
+            .await?;
         }
 
         // Try Kafka connection.
@@ -452,6 +494,27 @@ impl KafkaSinkWriter {
         Err(err)
     }
 
+    async fn write_json_objects_with_schema_prefix(
+        &self,
+        event_key_object: Option<Value>,
+        event_object: Option<Value>,
+    ) -> Result<()> {
+        // here we assume the key part always exists and value part is optional.
+        // if value is None, we will skip the payload part.
+        let mut key_str = event_key_object.unwrap().to_string();
+        key_str.insert_str(0, SCHEMA_REGISTRY_VERSION_PREFIX);
+        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
+            .key(key_str.as_bytes());
+        let mut payload;
+        if let Some(value) = event_object {
+            payload = value.to_string();
+            payload.insert_str(0, SCHEMA_REGISTRY_VERSION_PREFIX);
+            record = record.payload(payload.as_bytes());
+        }
+        self.send_result(record).await?;
+        Ok(())
+    }
+
     async fn write_json_objects(
         &self,
         event_key_object: Option<Value>,
@@ -502,8 +565,17 @@ impl KafkaSinkWriter {
         #[for_await]
         for msg in upsert_stream {
             let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
+            // FIXME: optimization for this additional match
+            match self.config.schema_registry {
+                Some(_) => {
+                    self.write_json_objects_with_schema_prefix(event_key_object, event_object)
+                        .await?
+                }
+                None => {
+                    self.write_json_objects(event_key_object, event_object)
+                        .await?
+                }
+            }
         }
         Ok(())
     }

@@ -22,6 +22,7 @@ pub mod kinesis;
 pub mod nats;
 pub mod redis;
 pub mod remote;
+pub mod schema_registry;
 #[cfg(any(test, madsim))]
 pub mod test_sink;
 pub mod utils;
@@ -473,6 +474,8 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
+    #[error("Schema registry error: {0}")]
+    SchemaRegistry(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {
@@ -484,6 +487,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<RwError> for SinkError {
+    fn from(value: RwError) -> Self {
+        SinkError::SchemaRegistry(anyhow_error!("{}", value))
     }
 }
 

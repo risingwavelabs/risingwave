@@ -6,6 +6,7 @@ set -euo pipefail
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-append-only --create > /dev/null 2>&1
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --create > /dev/null 2>&1
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --create > /dev/null 2>&1
+./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-registry --create > /dev/null 2>&1
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
@@ -98,6 +99,10 @@ if [ $? -ne 0 ]; then
 else
   rm e2e_test/sink/kafka/debezium3.tmp.result
 fi
+
+# test schema registry result
+echo "testing schema registry"
+sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/schema_registry_result.slt'
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/drop_sink.slt'
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-append-only --delete > /dev/null 2>&1

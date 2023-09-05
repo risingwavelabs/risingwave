@@ -14,7 +14,9 @@
 
 use std::collections::HashSet;
 
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use reqwest::{Method, Url};
+use risingwave_common::catalog::SchemaId;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
@@ -40,9 +42,18 @@ impl Client {
             ))));
         }
 
-        let inner = reqwest::Client::builder().build().map_err(|e| {
-            RwError::from(ProtocolError(format!("build reqwest client failed {}", e)))
-        })?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.schemaregistry.v1+json"),
+        );
+
+        let inner = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .map_err(|e| {
+                RwError::from(ProtocolError(format!("build reqwest client failed {}", e)))
+            })?;
 
         Ok(Client {
             inner,
@@ -70,6 +81,28 @@ impl Client {
         }
 
         request
+    }
+
+    /// Post schema
+    pub async fn post_schema<S>(&self, subject: &str, schema: &S) -> Result<SchemaId>
+    where
+        S: Serialize,
+    {
+        // we use `body` instead of `json` here since `json` automatically adds
+        // "application/json" content-type in header.
+        let req = self
+            .build_request(Method::POST, &["subjects", subject, "versions"])
+            .json(schema);
+        // let body = serde_json::to_vec(schema).unwrap();
+        // let req = self
+        //     .build_request(Method::POST, &["subjects", subject, "versions"])
+        //     .body(body)
+        //     .header(
+        //         CONTENT_TYPE,
+        //         HeaderValue::from_static("application/vnd.schemaregistry.v1+json"),
+        //     );
+        let res: SchemaRegisterResp = request(req).await?;
+        Ok(SchemaId::new(res.id))
     }
 
     /// get schema by id
@@ -216,6 +249,11 @@ struct GetBySubjectResp {
     // default to empty/non-reference
     #[serde(default)]
     references: Vec<SchemaReference>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SchemaRegisterResp {
+    id: u32,
 }
 
 #[derive(Debug, Deserialize)]

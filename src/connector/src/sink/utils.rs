@@ -24,7 +24,6 @@ use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use serde_json::{json, Map, Value};
 use tracing::warn;
-use valico::json_schema::{self, Builder, PrimitiveType};
 
 use crate::sink::{Result, SinkError};
 
@@ -457,70 +456,9 @@ pub async fn gen_append_only_message_stream<'a>(
     }
 }
 
-fn datatype_to_json_schema_type(data_type: &DataType) -> PrimitiveType {
-    match data_type {
-        DataType::Boolean => PrimitiveType::Boolean,
-        DataType::Int16 => PrimitiveType::Integer,
-        DataType::Int32 => PrimitiveType::Integer,
-        DataType::Int64 => PrimitiveType::Number,
-        DataType::Float32 => PrimitiveType::Number,
-        DataType::Float64 => PrimitiveType::Number,
-        DataType::Decimal => PrimitiveType::Number,
-        DataType::Date => PrimitiveType::String,
-        DataType::Varchar => PrimitiveType::String,
-        DataType::Time => PrimitiveType::String,
-        DataType::Timestamp => PrimitiveType::String,
-        DataType::Timestamptz => PrimitiveType::String,
-        DataType::Interval => PrimitiveType::String,
-        DataType::Struct(_) => PrimitiveType::Object,
-        DataType::List(_) => PrimitiveType::Array,
-        DataType::Bytea => PrimitiveType::String,
-        DataType::Jsonb => PrimitiveType::String,
-        DataType::Serial => PrimitiveType::String,
-        DataType::Int256 => PrimitiveType::Number,
-    }
-}
-
-fn apply_field_to_json_schema_builder(field: &Field, builder: &mut Builder) {
-    builder.type_(datatype_to_json_schema_type(&field.data_type));
-    match &field.data_type {
-        DataType::List(data_type) => builder.items_schema(|item| {
-            item.type_(datatype_to_json_schema_type(&*data_type));
-        }),
-        DataType::Struct(_) => {
-            builder.properties(|props| {
-                for sub_field in &field.sub_fields {
-                    props.insert(&sub_field.name, |prop| {
-                        apply_field_to_json_schema_builder(&sub_field, prop);
-                    })
-                }
-            });
-        }
-        _ => {}
-    }
-}
-
-pub fn generate_json_schema(schema_name: &str, fields: &[Field]) -> String {
-    json_schema::builder::schema(|s| {
-        // Valico is based on draft 7
-        s.schema("https://json-schema.org/draft-07/schema");
-        s.title(schema_name);
-        s.properties(|props| {
-            for field in fields {
-                props.insert(&field.name, |prop| {
-                    apply_field_to_json_schema_builder(&field, prop);
-                })
-            }
-        })
-    })
-    .into_json()
-    .to_string()
-}
-
 #[cfg(test)]
 mod tests {
-
-    use risingwave_common::types::{DataType, Interval, ScalarImpl, StructType, Time, Timestamp};
+    use risingwave_common::types::{DataType, Interval, ScalarImpl, Time, Timestamp};
 
     use super::*;
     #[test]
@@ -636,54 +574,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
-    }
-
-    #[test]
-    fn test_generate_json_schema() {
-        let fields = vec![
-            Field {
-                data_type: DataType::Boolean,
-                name: "v1".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::Varchar,
-                name: "v2".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::List(Box::new(DataType::Varchar)),
-                name: "v3".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::Struct(StructType::new(vec![
-                    ("a", DataType::Int64),
-                    ("b", DataType::Float64),
-                ])),
-                name: "v4".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Int64,
-                        name: "a".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                    Field {
-                        data_type: DataType::Float64,
-                        name: "b".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                ],
-                type_name: "".into(),
-            },
-        ];
-        let json_schema = generate_json_schema("test", &fields);
-        let json_schema_ans = "{\"$schema\":\"https://json-schema.org/draft-07/schema\",\"properties\":{\"v1\":{\"type\":\"boolean\"},\"v2\":{\"type\":\"string\"},\"v3\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"v4\":{\"properties\":{\"a\":{\"type\":\"number\"},\"b\":{\"type\":\"number\"}},\"type\":\"object\"}},\"title\":\"test\"}";
-        assert_eq!(json_schema, json_schema_ans);
     }
 }

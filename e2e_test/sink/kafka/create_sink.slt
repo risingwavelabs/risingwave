@@ -144,6 +144,17 @@ create sink invalid_pk_column from t_kafka with (
     primary_key = 'id,invalid'
 );
 
+# test schema registry
+statement ok
+create sink si_kafka_upsert_schema_registry from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29093',
+    topic = 'test-rw-sink-upsert-registry',
+    type = 'upsert',
+    primary_key = 'id',
+    schema.registry = 'http://localhost:8082',
+);
+
 statement ok
 insert into t_kafka values
     (1, '8DfUFencLe', 31031, 1872, 1872, 26261.416, 23956.39329760601, '2023-04-14 06:27:14.104742'),

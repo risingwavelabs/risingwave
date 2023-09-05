@@ -34,7 +34,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
-pub use schema_registry::name_strategy_from_str;
+pub use schema_registry::{name_strategy_from_str, Client};
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -705,6 +705,12 @@ impl SpecificParserConfig {
 pub struct SchemaRegistryAuth {
     username: Option<String>,
     password: Option<String>,
+}
+
+impl SchemaRegistryAuth {
+    pub fn new(username: Option<String>, password: Option<String>) -> Self {
+        Self { username, password }
+    }
 }
 
 impl From<&HashMap<String, String>> for SchemaRegistryAuth {
