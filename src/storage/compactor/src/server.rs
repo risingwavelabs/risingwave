@@ -316,7 +316,7 @@ pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let endpoint: &'static str = Box::leak(opts.endpoint.clone().into_boxed_str());
+    let endpoint: &'static str = Box::leak(opts.proxy_rpc_endpoint.clone().into_boxed_str());
     let channel = Channel::from_static(endpoint).connect().await.unwrap();
 
     let client: HummockManagerServiceClient<Channel> = HummockManagerServiceClient::new(channel);

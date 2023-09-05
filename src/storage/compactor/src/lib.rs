@@ -90,13 +90,22 @@ pub struct CompactorOpts {
     #[override_opts(path = storage.object_store_read_timeout_ms)]
     pub object_store_read_timeout_ms: Option<u64>,
 
+    #[clap(long, env = "RW_IS_SHARED_COMPACTOR", default_value = "false")]
     pub is_shared_compactor: bool,
-    endpoint: String,
+
+    #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
+    pub proxy_rpc_endpoint: String,
+    #[clap(long, env = "RW_PARALLEL_COMPACT_SIZE_MB")]
     parallel_compact_size_mb: u32,
+    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
     sstable_size_mb: u32,
+    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
     block_size_kb: u32,
+    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
     bloom_false_positive: f64,
+    #[clap(long, env = "RW_STATE_STORE_URL")]
     state_store_url: String,
+    #[clap(long, env = "RW_DATA_DIRECTORY")]
     data_directory: String,
 }
 
