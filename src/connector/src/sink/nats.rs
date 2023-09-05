@@ -94,8 +94,8 @@ impl Sink for NatsSink {
                 "Nats sink only support append-only mode"
             )));
         }
-        match self.config.common.build_context().await {
-            Ok(_jetstream) => {}
+        match self.config.common.build_client().await {
+            Ok(_client) => {}
             Err(error) => {
                 return Err(SinkError::Nats(anyhow_error!(
                     "validate nats sink error: {:?}",
