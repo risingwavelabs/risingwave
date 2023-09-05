@@ -193,7 +193,16 @@ impl KinesisSplitReader {
                     self.new_shard_iter().await?;
                     continue;
                 }
-                Err(e) => return Err(anyhow!(DisplayErrorContext(e))),
+                Err(e) => {
+                    let error_msg = format!(
+                        "Kinesis got a unhandled error: {:?}, stream {:?}, shard {:?}",
+                        DisplayErrorContext(e),
+                        self.stream_name,
+                        self.shard_id,
+                    );
+                    tracing::error!("{}", error_msg);
+                    return Err(anyhow!("{}", error_msg));
+                }
             }
         }
     }
