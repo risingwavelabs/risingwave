@@ -70,7 +70,7 @@ EOF
 setup_old_cluster() {
   echo "--- Build risedev for $OLD_TAG, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
-  git checkout "${TAG}-rc"
+  git checkout "v${OLD_TAG}-rc"
   cargo build -p risedev
 
   echo "--- Setup old release $OLD_TAG"
