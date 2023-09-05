@@ -28,6 +28,7 @@ cp -r backwards-compat-tests/slt/* $TEST_DIR
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
+  set -euo pipefail
   # Kill other components
   tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
   | grep -v 'kafka' \
@@ -39,11 +40,11 @@ kill_cluster() {
   if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
   then
     echo "kill kafka, wait 5s"
-    $KAFKA_PATH/bin/kafka-server-stop.sh
+    $KAFKA_PATH/kafka-server-stop.sh
     sleep 5
 
     echo "kill zookeeper, wait 5s"
-    $KAFKA_PATH/kafka/bin/zookeeper-server-stop.sh
+    $KAFKA_PATH/bin/zookeeper-server-stop.sh
     sleep 5
     # Kill their tmux sessions
     tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
@@ -55,10 +56,12 @@ kill_cluster() {
 }
 
 run_sql () {
-    psql -h localhost -p 4566 -d dev -U root -c "$@"
+  set -euo pipefail
+  psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
 check_version() {
+  set -euo pipefail
   local TAG=$1
   local raw_version=$(run_sql "SELECT version();")
   echo "--- Version"
@@ -73,6 +76,7 @@ check_version() {
 ################################### Entry Points
 
 configure_rw() {
+set -euo pipefail
 echo "--- Setting up cluster config"
 cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
@@ -105,12 +109,14 @@ EOF
 }
 
 create_kafka_topic() {
+  set -euo pipefail
   "$KAFKA_PATH"/bin/kafka-topics.sh \
     --create \
     --topic backwards_compat_test_kafka_source --bootstrap-server localhost:29092
 }
 
 insert_json_kafka() {
+  set -euo pipefail
   local JSON=$1
   echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
     --topic backwards_compat_test_kafka_source \
