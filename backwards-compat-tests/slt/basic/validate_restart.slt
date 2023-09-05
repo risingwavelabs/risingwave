@@ -1,5 +1,6 @@
 statement ok
 SET RW_IMPLICIT_FLUSH=true;
+
 statement ok
 UPDATE t SET v2 = v2 + 1 WHERE v1 >= 1 AND v1 <= 5000;
 
