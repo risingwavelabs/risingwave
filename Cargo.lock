@@ -2833,7 +2833,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
+source = "git+https://github.com/mrcroxx/foyer?rev=7885ee9#7885ee96dbce0bccaff1ffcd91b31e4e54a820f4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2861,7 +2861,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
+source = "git+https://github.com/mrcroxx/foyer?rev=7885ee9#7885ee96dbce0bccaff1ffcd91b31e4e54a820f4"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
+source = "git+https://github.com/mrcroxx/foyer?rev=7885ee9#7885ee96dbce0bccaff1ffcd91b31e4e54a820f4"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2893,7 +2893,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
+source = "git+https://github.com/mrcroxx/foyer?rev=7885ee9#7885ee96dbce0bccaff1ffcd91b31e4e54a820f4"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2924,7 +2924,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=eb0eb45#eb0eb45151da9b496f751b668ec5913a56345c0f"
+source = "git+https://github.com/mrcroxx/foyer?rev=7885ee9#7885ee96dbce0bccaff1ffcd91b31e4e54a820f4"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",

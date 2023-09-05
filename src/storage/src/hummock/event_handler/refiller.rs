@@ -210,7 +210,7 @@ impl CacheRefillTask {
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
                         Err(e) => {
-                            tracing::warn!("meeta cache refill error: {:?}", e);
+                            tracing::warn!("meta cache refill error: {:?}", e);
                             return;
                         }
                     };
