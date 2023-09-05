@@ -133,6 +133,18 @@ ENABLE_ALL_IN_ONE=true
 EOF
 }
 
+check_version() {
+  local TAG=$1
+  local raw_version=$(run_sql "SELECT version();")
+  echo "--- Version"
+  echo "$raw_version"
+  local version=$(echo $raw_version | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
+  if [[ "$version" != "$TAG" ]]; then
+    echo "Version mismatch, expected $TAG, got $version"
+    exit 1
+  fi
+}
+
 # Setup table and materialized view.
 # Run updates and deletes on the table.
 # Get the results.
@@ -144,11 +156,7 @@ seed_old_cluster() {
   ./risedev clean-data
   ./risedev d full-without-monitoring && rm .risingwave/log/*
 
-  version=$(run_sql "SELECT version();" | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
-  if [[ "$version" != "$OLD_TAG" ]]; then
-    echo "Version mismatch, expected $OLD_TAG, got $version"
-    exit 1
-  fi
+  check_version "$OLD_TAG"
 
   run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
 
@@ -180,12 +188,7 @@ validate_new_cluster() {
   echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
   sleep $RECOVERY_DURATION
 
-  version=$(run_sql "SELECT version();" | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
-  if [[ "$version" != "$NEW_TAG" ]]; then
-    echo "Version mismatch, expected $NEW_TAG, got $version"
-    exit 1
-  fi
-
+  check_version "$NEW_TAG"
 
   echo "--- Running Queries New Cluster"
   run_sql_new_cluster
