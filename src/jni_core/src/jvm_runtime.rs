@@ -87,10 +87,10 @@ pub fn register_native_method_for_jvm() {
 
     let mut env = JVM
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("{:?}", e))
+        .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
         .unwrap();
 
-    // FIXME: remove this function would cause segment fault.
+    // FIXME: remove this function might cause segment fault.
     run_this_func_to_get_valid_ptr_from_java_binding();
 
     let binding_class = env

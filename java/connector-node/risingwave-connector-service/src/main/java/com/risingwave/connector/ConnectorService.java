@@ -37,9 +37,6 @@ public class ConnectorService {
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse(options, args);
 
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-
         // Quoted from the debezium document:
         // > Your application should always properly stop the engine to ensure graceful and complete
         // > shutdown and that each source record is sent to the application exactly one time.

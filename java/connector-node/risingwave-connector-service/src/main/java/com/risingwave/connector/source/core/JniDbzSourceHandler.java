@@ -15,21 +15,44 @@
 package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.CdcEngineRunner;
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.metrics.ConnectorNodeMetrics;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** handler for starting a debezium source connectors */
-public class JniSourceHandler {
+/** handler for starting a debezium source connectors for jni */
+public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
 
     private final DbzConnectorConfig config;
 
-    public JniSourceHandler(DbzConnectorConfig config) {
+    public JniDbzSourceHandler(DbzConnectorConfig config) {
         this.config = config;
+    }
+
+    public static void runJniDbzSourceThread(
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            boolean snapshotDone,
+            long channelPtr) {
+        // For jni.rs
+        java.lang.Thread.currentThread()
+                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+        // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
+        Map<String, String> mutableUserProps = new HashMap<>(userProps);
+        mutableUserProps.put("source.id", Long.toString(sourceId));
+        var config =
+                new DbzConnectorConfig(
+                        source, sourceId, startOffset, mutableUserProps, snapshotDone);
+        JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
+        handler.start(channelPtr);
     }
 
     class OnReadyHandler implements Runnable {
@@ -79,7 +102,7 @@ public class JniSourceHandler {
     }
 
     public void start(long channelPtr) {
-        var runner = DbzCdcEngineRunner.newCdcEngineRunnerV2(config);
+        var runner = DbzCdcEngineRunner.newCdcEngineRunner(config);
         if (runner == null) {
             return;
         }

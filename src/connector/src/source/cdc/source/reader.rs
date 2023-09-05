@@ -196,7 +196,7 @@ impl CdcSplitReader {
                     "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;",
                     &[JValue::from(source_type as i32)],
                 )
-                .inspect_err(|e| tracing::error!("{:?}", e))
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
                 .unwrap();
 
             let st = env.call_static_method(
@@ -204,7 +204,9 @@ impl CdcSplitReader {
                 "valueOf",
                 "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;",
                 &[(&st).into()]
-            ).inspect_err(|e| tracing::error!("{:?}", e)).unwrap();
+                )
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+                .unwrap();
 
             let start_offset = match self.start_offset {
                 Some(start_offset) => {
@@ -227,7 +229,7 @@ impl CdcSplitReader {
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
                     &args,
                 )
-                .inspect_err(|e| tracing::error!("{:?}", e))
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
                 .unwrap();
             }
 
@@ -235,11 +237,13 @@ impl CdcSplitReader {
             let channel_ptr = JValue::from(channel_ptr);
 
             let _ = env.call_static_method(
-                "com/risingwave/connector/source/core/SourceHandlerFactory",
-                "startJniSourceHandler",
+                "com/risingwave/connector/source/core/JniDbzSourceHandler",
+                "runJniDbzSourceThread",
                 "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZJ)V",
                 &[(&st).into(), JValue::from(self.source_id as i64), (&start_offset).into(), JValue::Object(&java_map), JValue::from(self.snapshot_done), channel_ptr]
-            ).inspect_err(|e| tracing::error!("{:?}", e)).unwrap();
+                )
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+                .unwrap();
         });
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {

@@ -70,7 +70,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         return runner;
     }
 
-    public static CdcEngineRunner newCdcEngineRunnerV2(DbzConnectorConfig config) {
+    public static CdcEngineRunner newCdcEngineRunner(DbzConnectorConfig config) {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
