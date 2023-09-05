@@ -83,6 +83,8 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
+    - use: kafka
+    - use: zookeeper
 EOF
 
 cat <<EOF > risedev-components.user.env
