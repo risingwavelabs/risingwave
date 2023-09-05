@@ -17,6 +17,7 @@ use risingwave_expr::agg::{AggArgs, AggKind};
 use risingwave_expr::function::window::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
+use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
 
 use crate::prelude::*;
@@ -78,6 +79,7 @@ async fn create_executor<S: StateStore>(
         order_key_order_types,
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
+        metrics: Arc::new(StreamingMetrics::unused()),
         chunk_size: 1024,
         cache_policy: OverWindowCachePolicy::Recent,
     });

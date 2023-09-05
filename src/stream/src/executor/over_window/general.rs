@@ -15,6 +15,7 @@
 use std::collections::{btree_map, BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -41,6 +42,7 @@ use super::over_partition::{
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
@@ -73,6 +75,7 @@ struct ExecutorInner<S: StateStore> {
 
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
+    metrics: Arc<StreamingMetrics>,
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -84,7 +87,14 @@ struct ExecutionVars<S: StateStore> {
     cached_partitions: ManagedLruCache<OwnedRow, PartitionCache>,
     /// partition key => recently accessed range.
     recently_accessed_ranges: BTreeMap<DefaultOrdered<OwnedRow>, RangeInclusive<StateKey>>,
+    stats: ExecutionStats,
     _phantom: PhantomData<S>,
+}
+
+#[derive(Default)]
+struct ExecutionStats {
+    cache_miss: u64,
+    cache_lookup: u64,
 }
 
 impl<S: StateStore> Executor for OverWindowExecutor<S> {
@@ -146,6 +156,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
+    pub metrics: Arc<StreamingMetrics>,
 
     pub chunk_size: usize,
     pub cache_policy: CachePolicy,
@@ -196,6 +207,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 input_schema_len: input_info.schema.len(),
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
+                metrics: args.metrics,
                 chunk_size: args.chunk_size,
                 cache_policy,
             },
@@ -348,7 +360,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Build final changes partition by partition.
         for (part_key, delta) in deltas {
+            vars.stats.cache_lookup += 1;
             if !vars.cached_partitions.contains(&part_key.0) {
+                vars.stats.cache_miss += 1;
                 vars.cached_partitions
                     .put(part_key.0.clone(), new_empty_partition_cache());
             }
@@ -593,6 +607,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut vars = ExecutionVars {
             cached_partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
             recently_accessed_ranges: Default::default(),
+            stats: Default::default(),
             _phantom: PhantomData::<S>,
         };
 
@@ -621,6 +636,24 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;
                     vars.cached_partitions.evict();
+
+                    {
+                        // update metrics
+                        let actor_id_str = this.actor_ctx.id.to_string();
+                        let table_id_str = this.state_table.table_id().to_string();
+                        this.metrics
+                            .over_window_cached_entry_count
+                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .set(vars.cached_partitions.len() as _);
+                        this.metrics
+                            .over_window_cache_lookup_count
+                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
+                        this.metrics
+                            .over_window_cache_miss_count
+                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .inc_by(std::mem::take(&mut vars.stats.cache_miss));
+                    }
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
                         let (_, cache_may_stale) =
