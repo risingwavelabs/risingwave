@@ -1,0 +1,4 @@
+query I
+SELECT * FROM kafka_mv1;
+----
+9

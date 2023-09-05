@@ -19,6 +19,7 @@ RECOVERY_DURATION=20
 
 # Setup test directory
 TEST_DIR=.risingwave/backwards-compat-tests/
+KAFKA_PATH=.risingwave/bin/kafka
 mkdir -p $TEST_DIR
 cp -r backwards-compat-tests/slt/* $TEST_DIR
 
@@ -101,6 +102,31 @@ ENABLE_ALL_IN_ONE=true
 EOF
 }
 
+create_kafka_topic() {
+  "$KAFKA_PATH"/bin/kafka-topics.sh \
+    --create \
+    --topic backwards_compat_test_kafka_source --bootstrap-server localhost:29092
+}
+
+insert_json_kafka() {
+  local JSON=$1
+  echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
+    --topic backwards_compat_test_kafka_source \
+    --bootstrap-server localhost:29092
+}
+
+seed_json_kafka() {
+  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 1, "page_id": 1, "action": "gtrgretrg"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 2, "page_id": 1, "action": "fsdfgerrg"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 3, "page_id": 1, "action": "sdfergtth"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 4, "page_id": 2, "action": "erwerhghj"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 5, "page_id": 2, "action": "kiku7ikkk"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 6, "page_id": 3, "action": "6786745ge"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 7, "page_id": 3, "action": "fgbgfnyyy"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 8, "page_id": 4, "action": "werwerwwe"}'
+  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
+}
+
 # Setup table and materialized view.
 # Run updates and deletes on the table.
 # Get the results.
@@ -133,6 +159,16 @@ seed_old_cluster() {
   echo "--- NEXMARK TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
 
+  echo "--- KAFKA TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
+  seed_json_kafka
+
+  echo "--- KAFKA TEST: wait 5s for kafka to process data"
+  sleep 5
+
+  echo "--- KAFKA TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_original.slt"
+
   echo "--- Killing cluster"
   kill_cluster
   echo "--- Killed cluster"
@@ -158,6 +194,15 @@ validate_new_cluster() {
 
   echo "--- NEXMARK TEST: Drop DDLs"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/drop_on_ddl.slt"
+
+  echo "--- KAFKA TEST: Seeding new cluster with data"
+  seed_json_kafka
+
+  echo "--- KAFKA TEST: wait 5s for kafka to process data"
+  sleep 5
+
+  echo "--- KAFKA TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
 
   kill_cluster
 }
