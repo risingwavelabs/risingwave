@@ -839,6 +839,17 @@ def section_streaming(panels):
                 ),
             ],
         ),
+        panels.timeseries_ops(
+            "Earliest In-Flight Barrier Progress",
+            "The number of actors that have processed the earliest in-flight barriers per second. "
+            "This metric helps users to detect potential congestion or stuck in the system.",
+            [
+                panels.target(
+                    f"rate({metric('stream_barrier_manager_progress')}[$__rate_interval])",
+                    "{{instance}}",
+                ),
+            ],
+        ),
     ]
 
 
