@@ -31,9 +31,7 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::schema_registry::{
-    generate_json_schema, post_schema_to_schema_registry, SCHEMA_REGISTRY_VERSION_PREFIX,
-};
+use super::schema_registry::{post_key_value_schemas, SchemaType, SCHEMA_REGISTRY_VERSION_PREFIX};
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
@@ -322,7 +320,13 @@ impl Sink for KafkaSink {
 
         // Check schema registry and post
         let config = &self.config;
-        if config.r#type == SINK_TYPE_UPSERT && let Some(schema_registry) = &config.schema_registry {
+        if let Some(schema_registry) = &config.schema_registry {
+            if config.r#type != SINK_TYPE_UPSERT {
+                return Err(SinkError::Config(anyhow!(
+                    "RisingWave currently only support schema registry option
+                    for Kafka upsert json sink."
+                )));
+            }
             let schema = &self.schema;
             let topic = &config.common.topic;
             let schema_registry_auth = SchemaRegistryAuth::new(
@@ -330,21 +334,13 @@ impl Sink for KafkaSink {
                 config.schema_registry_password.clone(),
             );
 
-            let key_schema = generate_json_schema(topic,
-                &self.pk_indices.iter().map(|i| schema.fields[*i].clone()).collect());
-            post_schema_to_schema_registry(
+            post_key_value_schemas(
                 schema_registry,
-                &key_schema,
-                &format!("{}-key", topic),
+                topic,
                 &schema_registry_auth,
-            ).await?;
-
-            let schema = generate_json_schema(topic, &schema.fields);
-            post_schema_to_schema_registry(
-                schema_registry,
-                &schema,
-                &format!("{}-value", topic),
-                &schema_registry_auth,
+                &schema.fields,
+                &self.pk_indices,
+                SchemaType::Json,
             )
             .await?;
         }

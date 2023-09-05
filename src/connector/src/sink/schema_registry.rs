@@ -86,7 +86,7 @@ fn apply_field_to_json_schema_builder(field: &Field, builder: &mut Builder) {
     }
 }
 
-pub fn generate_json_schema(schema_name: &str, fields: &Vec<Field>) -> RegisterSchema {
+fn generate_json_schema(schema_name: &str, fields: &Vec<Field>) -> RegisterSchema {
     let schema = json_schema::builder::schema(|s| {
         // Valico is based on draft 7
         s.schema("https://json-schema.org/draft-07/schema");
@@ -108,19 +108,56 @@ pub fn generate_json_schema(schema_name: &str, fields: &Vec<Field>) -> RegisterS
     }
 }
 
+fn generate_schema(
+    schema_name: &str,
+    fields: &Vec<Field>,
+    schema_type: &SchemaType,
+) -> RegisterSchema {
+    match schema_type {
+        SchemaType::Json => generate_json_schema(schema_name, fields),
+        _ => unreachable!(),
+    }
+}
+
 pub async fn post_schema_to_schema_registry(
-    url: &str,
+    url: Url,
     schema: &RegisterSchema,
     subject: &str,
     schema_registry_auth: &SchemaRegistryAuth,
 ) -> Result<SchemaId> {
-    let url = Url::parse(url)
-        .map_err(|e| SinkError::SchemaRegistry(anyhow!("failed to parse url ({}): {}", url, e,)))?;
     let client = Client::new(url, schema_registry_auth)?;
     client
         .post_schema(subject, schema)
         .await
         .map_err(SinkError::from)
+}
+
+pub async fn post_key_value_schemas(
+    url: &str,
+    topic: &str,
+    schema_registry_auth: &SchemaRegistryAuth,
+    fields: &Vec<Field>,
+    pk_indices: &[usize],
+    schema_type: SchemaType,
+) -> Result<()> {
+    let url = Url::parse(url)
+        .map_err(|e| SinkError::SchemaRegistry(anyhow!("failed to parse url ({}): {}", url, e,)))?;
+    let client = Client::new(url, schema_registry_auth)?;
+    let key_schema = generate_schema(
+        topic,
+        &pk_indices.iter().map(|i| fields[*i].clone()).collect(),
+        &schema_type,
+    );
+    client
+        .post_schema(&format!("{}-key", topic), &key_schema)
+        .await
+        .map_err(SinkError::from)?;
+    let schema = generate_schema(topic, fields, &schema_type);
+    client
+        .post_schema(&format!("{}-value", topic), &schema)
+        .await
+        .map_err(SinkError::from)?;
+    Ok(())
 }
 
 #[cfg(test)]
