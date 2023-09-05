@@ -24,8 +24,9 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::BarrierScheduler;
+use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
+use crate::model::PausedReason;
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
@@ -79,6 +80,22 @@ where
             status: None,
             snapshot: Some(snapshot),
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
+        self.barrier_scheduler
+            .run_command(Command::pause(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(PauseResponse {}))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
+        self.barrier_scheduler
+            .run_command(Command::resume(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(ResumeResponse {}))
     }
 
     async fn cancel_creating_jobs(

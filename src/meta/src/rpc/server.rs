@@ -537,7 +537,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
 
     let scale_srv = ScaleServiceImpl::<S>::new(
-        barrier_scheduler.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
         source_manager,

@@ -1647,6 +1647,8 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, pause, PauseRequest, PauseResponse }
+            ,{ stream_client, resume, ResumeRequest, ResumeResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1712,8 +1714,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
-            ,{ scale_client, pause, PauseRequest, PauseResponse }
-            ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }

@@ -130,6 +130,14 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
+message PauseRequest {}
+
+message PauseResponse {}
+
+message ResumeRequest {}
+
+message ResumeResponse {}
+
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {
     uint32 database_id = 1;
@@ -215,6 +223,8 @@ message ListActorStatesResponse {
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
@@ -389,14 +399,6 @@ service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
 
-message PauseRequest {}
-
-message PauseResponse {}
-
-message ResumeRequest {}
-
-message ResumeResponse {}
-
 message GetClusterInfoRequest {}
 
 message GetClusterInfoResponse {
@@ -455,9 +457,6 @@ message GetReschedulePlanResponse {
 }
 
 service ScaleService {
-  // TODO(Kexiang): delete them when config change interface is finished
-  rpc Pause(PauseRequest) returns (PauseResponse);
-  rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
   rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
