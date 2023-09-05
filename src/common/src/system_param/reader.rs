@@ -80,6 +80,10 @@ impl SystemParamsReader {
         self.prost.telemetry_enabled.unwrap()
     }
 
+    pub fn pause_on_next_bootstrap(&self) -> bool {
+        self.prost.pause_on_next_bootstrap.unwrap_or(false)
+    }
+
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

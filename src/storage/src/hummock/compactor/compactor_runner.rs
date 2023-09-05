@@ -310,7 +310,7 @@ pub async fn compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match context
+    let multi_filter_key_extractor = match compactor_context
         .filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await

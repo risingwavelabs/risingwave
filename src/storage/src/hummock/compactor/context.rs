@@ -19,7 +19,7 @@ use parking_lot::RwLock;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
-use crate::filter_key_extractor::FilterKeyExtractorManagerRef;
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::MemoryLimiter;
@@ -46,7 +46,7 @@ pub struct CompactorContext {
 
     pub compaction_executor: Arc<CompactionExecutor>,
 
-    pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    pub filter_key_extractor_manager: FilterKeyExtractorManager,
 
     pub memory_limiter: Arc<MemoryLimiter>,
 
@@ -63,7 +63,7 @@ impl CompactorContext {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManager,
     ) -> Self {
         let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {

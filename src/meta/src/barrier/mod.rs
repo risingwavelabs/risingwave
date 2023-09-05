@@ -25,6 +25,7 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
@@ -55,7 +56,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
     WorkerId,
 };
-use crate::model::{ActorId, BarrierManagerState};
+use crate::model::{ActorId, BarrierManagerState, PausedReason};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::meta_store::MetaStore;
 use crate::stream::SourceManagerRef;
@@ -541,6 +542,23 @@ where
         *status = new_status;
     }
 
+    /// Check whether we should pause on bootstrap from the system parameter and reset it.
+    async fn take_pause_on_bootstrap(&self) -> MetaResult<bool> {
+        let pm = self.env.system_params_manager();
+        let paused = pm.get_params().await.pause_on_next_bootstrap();
+        if paused {
+            tracing::warn!(
+                "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
+                 It will now be reset to `false`. \
+                 To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
+                PAUSE_ON_NEXT_BOOTSTRAP_KEY
+            );
+            pm.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                .await?;
+        }
+        Ok(paused)
+    }
+
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         // Initialize the barrier manager.
@@ -579,9 +597,13 @@ where
             // inject the first `Initial` barrier.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
-            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
 
-            BarrierManagerState::new(new_epoch)
+            let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
+            let paused_reason = paused.then_some(PausedReason::Manual);
+
+            self.recovery(prev_epoch, paused_reason)
+                .instrument(span)
+                .await
         };
 
         self.set_status(BarrierManagerStatus::Running).await;
@@ -682,6 +704,7 @@ where
             info,
             prev_epoch,
             curr_epoch,
+            state.paused_reason(),
             command,
             kind,
             self.source_manager.clone(),
@@ -692,9 +715,12 @@ where
         send_latency_timer.observe_duration();
 
         checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
-        self.inject_barrier(command_ctx, barrier_complete_tx)
+        self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
             .instrument(span)
             .await;
+
+        // Update the paused state after the barrier is injected.
+        state.set_paused_reason(command_ctx.next_paused_reason());
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it
@@ -918,9 +944,8 @@ where
                 %err,
                 prev_epoch = prev_epoch.value().0
             );
-            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
 
-            *state = BarrierManagerState::new(new_epoch);
+            *state = self.recovery(prev_epoch, None).instrument(span).await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
