@@ -48,6 +48,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::TrackingCommand;
+use crate::barrier::notifier::Injected;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
@@ -678,7 +679,7 @@ where
 
         let Scheduled {
             command,
-            notifiers,
+            mut notifiers,
             send_latency_timer,
             checkpoint,
             span,
@@ -702,25 +703,36 @@ where
             self.fragment_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
-            prev_epoch,
-            curr_epoch,
+            prev_epoch.clone(),
+            curr_epoch.clone(),
             state.paused_reason(),
             command,
             kind,
             self.source_manager.clone(),
             span.clone(),
         ));
-        let mut notifiers = notifiers;
-        notifiers.iter_mut().for_each(Notifier::notify_to_send);
+
         send_latency_timer.observe_duration();
 
-        checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
         self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
             .instrument(span)
             .await;
 
+        // Notify about the injection.
+        let paused = command_ctx.next_paused_reason();
+        let injected = Injected {
+            prev_epoch: prev_epoch.value(),
+            curr_epoch: curr_epoch.value(),
+            paused,
+        };
+        notifiers
+            .iter_mut()
+            .for_each(|n| n.notify_injected(injected));
+
         // Update the paused state after the barrier is injected.
-        state.set_paused_reason(command_ctx.next_paused_reason());
+        state.set_paused_reason(paused);
+        // Record the in-flight barrier.
+        checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it

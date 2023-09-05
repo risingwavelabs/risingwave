@@ -239,7 +239,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// multiple commands are executed continuously.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
+    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         struct Context {
             collect_rx: oneshot::Receiver<MetaResult<()>>,
             finish_rx: oneshot::Receiver<()>,

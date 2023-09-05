@@ -12,15 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::Epoch;
 use tokio::sync::oneshot;
 
+use crate::model::PausedReason;
 use crate::{MetaError, MetaResult};
+
+#[derive(Debug, Clone, Copy)]
+pub struct Injected {
+    pub prev_epoch: Epoch,
+    pub curr_epoch: Epoch,
+    pub paused: Option<PausedReason>,
+}
 
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
 pub(super) struct Notifier {
-    /// Get notified when scheduled barrier is about to send.
-    pub to_send: Option<oneshot::Sender<()>>,
+    /// Get notified when scheduled barrier is injected to compute nodes.
+    pub injected: Option<oneshot::Sender<Injected>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
@@ -30,10 +39,10 @@ pub(super) struct Notifier {
 }
 
 impl Notifier {
-    /// Notify when we are about to send a barrier.
-    pub fn notify_to_send(&mut self) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(()).ok();
+    /// Notify when we have injected a barrier to compute nodes.
+    pub fn notify_injected(&mut self, injected: Injected) {
+        if let Some(tx) = self.injected.take() {
+            tx.send(injected).ok();
         }
     }
 
