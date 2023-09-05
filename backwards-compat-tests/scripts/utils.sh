@@ -75,39 +75,6 @@ check_version() {
 
 ################################### Entry Points
 
-configure_rw() {
-set -euo pipefail
-echo "--- Setting up cluster config"
-cat <<EOF > risedev-profiles.user.yml
-full-without-monitoring:
-  steps:
-    - use: minio
-    - use: etcd
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
-    - use: compactor
-    - use: zookeeper
-    - use: kafka
-EOF
-
-cat <<EOF > risedev-components.user.env
-RISEDEV_CONFIGURED=false
-
-ENABLE_MINIO=true
-ENABLE_ETCD=true
-ENABLE_KAFKA=true
-
-# Fetch risingwave binary from release.
-ENABLE_BUILD_RUST=true
-
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
-# ENABLE_RELEASE_PROFILE=true
-EOF
-}
-
 create_kafka_topic() {
   set -euo pipefail
   "$KAFKA_PATH"/bin/kafka-topics.sh \
@@ -151,7 +118,6 @@ seed_old_cluster() {
   cp -r e2e_test/nexmark/* $TEST_DIR/nexmark
 
   OLD_TAG=$1
-  configure_rw
   ./risedev clean-data
   ./risedev d full-without-monitoring && rm .risingwave/log/*
 
@@ -190,7 +156,6 @@ validate_new_cluster() {
 
   NEW_TAG=$1
   echo "--- Start cluster on latest"
-  configure_rw
   ./risedev d full-without-monitoring
 
   echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
