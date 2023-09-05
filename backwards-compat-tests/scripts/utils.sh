@@ -40,7 +40,7 @@ kill_cluster() {
   if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
   then
     echo "kill kafka, wait 5s"
-    $KAFKA_PATH/kafka-server-stop.sh
+    $KAFKA_PATH/bin/kafka-server-stop.sh
     sleep 5
 
     echo "kill zookeeper, wait 5s"

@@ -30,6 +30,7 @@ setup_new_cluster() {
 }
 
 main() {
+  set -euo pipefail
   setup_old_cluster
   seed_old_cluster $OLD_TAG
   setup_new_cluster
