@@ -17,7 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::StorageError;
+use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -45,7 +45,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
+    StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -148,6 +149,42 @@ pub type WatermarkCacheStateTable<S> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
 pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
+
+// initialize
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// async interface only used for replicated state table,
+    /// as it needs to wait for prev epoch to be committed.
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        self.local_store
+            .init(InitOptions::new_with_epoch(epoch))
+            .await
+    }
+}
+
+// initialize
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, false, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// No need to `wait_for_epoch`, so it should complete immediately.
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
+        self.local_store
+            .init(InitOptions::new_with_epoch(epoch))
+            .now_or_never()
+            .expect("non-replicated state store should start immediately.")
+            .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
+    }
+}
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
@@ -472,10 +509,6 @@ where
         } else {
             self.dist_key_in_pk_indices.is_empty()
         }
-    }
-
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.local_store.init(epoch.curr)
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called

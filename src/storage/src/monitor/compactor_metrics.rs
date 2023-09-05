@@ -16,10 +16,10 @@ use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_counter_vec_with_registry,
-    register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_with_registry, CounterVec, Histogram, HistogramVec, IntGauge, Registry,
+    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
+    IntGauge, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -47,8 +47,6 @@ pub struct CompactorMetrics {
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
     pub sstable_distinct_epoch_count: Histogram,
     pub preload_io_count: GenericCounter<AtomicU64>,
-    pub refill_cache_duration: Histogram,
-    pub refill_data_file_cache_count: CounterVec,
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
 }
@@ -98,19 +96,7 @@ impl CompactorMetrics {
         );
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
-        let opts = histogram_opts!(
-            "compute_refill_cache_duration",
-            "compute_refill_cache_duration",
-            time_buckets.clone()
-        );
-        let refill_cache_duration = register_histogram_with_registry!(opts, registry).unwrap();
-        let refill_data_file_cache_count = register_counter_vec_with_registry!(
-            "compute_refill_data_file_cache_count",
-            "compute refill data file cache count",
-            &["extra"],
-            registry
-        )
-        .unwrap();
+
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
@@ -281,8 +267,6 @@ impl CompactorMetrics {
             write_build_l0_bytes,
             sstable_distinct_epoch_count,
             preload_io_count,
-            refill_cache_duration,
-            refill_data_file_cache_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
         }
