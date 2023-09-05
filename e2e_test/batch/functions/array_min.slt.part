@@ -6,9 +6,42 @@ select array_min(array[1, 2, 3]);
 query I
 select array_min(array[2, 3, 5, 2, 4]);
 ----
-5
+2
 
 query I
 select array_min(array[114514, 123456]);
 ----
 114514
+
+query I
+select array_min(array['a', 'b', 'c', 'a']);
+----
+a
+
+query I
+select array_min(array['💩', '🤔️', '🥵', '🥳', '💩']);
+----
+💩
+
+query I
+select array_min(array['😅🤔😅️', '114🥵514', '🤣🥳', '🥵💩💩🥵']);
+----
+114🥵514
+
+query error invalid digit found in string
+select array_min(array['a', 'b', 'c', 114514]);
+
+query error invalid digit found in string
+select array_min(array[114514, 'a', 'b', 'c']);
+
+# i32::MIN & i32::MIN - 1 & i32::MAX
+query I
+select array_min(array[-2147483648, 2147483647, -2147483649]);
+----
+-2147483649
+
+# i64::MIN & i64::MIN - 1 & i64::MAX
+query I
+select array_min(array[-9223372036854775808, 9223372036854775807, -9223372036854775809]);
+----
+-9223372036854775809

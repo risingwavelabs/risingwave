@@ -32,8 +32,8 @@ use crate::Result;
 pub fn array_min<T: Scalar>(list: ListRef<'_>) -> Result<Option<T>> {
     let min_value = list
         .iter()
-        .filter_map(|v| v)
-        .map(|x| DefaultOrdered(x))
+        .flatten()
+        .map(DefaultOrdered)
         .min();
     match min_value.map(|v| v.0).to_owned_datum() {
         Some(s) => Ok(Some(s.try_into()?)),
