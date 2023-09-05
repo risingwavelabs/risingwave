@@ -176,8 +176,8 @@ impl DynamicLevelSelectorCore {
             .resize(self.config.max_level as usize + 1, u64::MAX);
 
         ctx.max_bytes_for_level_base = self.config.max_bytes_for_level_base;
-        if levels.vnode_partition_count > 1 {
-            ctx.max_bytes_for_level_base *= levels.vnode_partition_count as u64 / 2;
+        if levels.vnode_partition_count > 4 {
+            ctx.max_bytes_for_level_base *= levels.vnode_partition_count as u64 / 4;
         }
 
         if max_level_size == 0 {

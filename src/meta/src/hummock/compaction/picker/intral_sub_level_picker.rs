@@ -151,7 +151,6 @@ impl CompactionPicker for IntraSubLevelPicker {
             })
             .min()
             .unwrap_or(0);
-        println!("max_sub_level_id: {}", max_sub_level_id);
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
@@ -172,7 +171,7 @@ impl CompactionPicker for IntraSubLevelPicker {
 
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes,
+                self.config.max_bytes_for_level_base,
             );
 
             let mut compaction_bytes = 0;
@@ -219,11 +218,12 @@ impl CompactionPicker for IntraSubLevelPicker {
             }
             input_levels.reverse();
 
-            let vnode_partition_count = if compaction_bytes >= max_compaction_bytes {
-                levels.vnode_partition_count
-            } else {
-                0
-            };
+            let vnode_partition_count =
+                if compaction_bytes >= self.config.sub_level_max_compaction_bytes {
+                    levels.vnode_partition_count
+                } else {
+                    0
+                };
 
             return Some(CompactionInput {
                 input_levels,
@@ -243,7 +243,7 @@ impl CompactionPicker for IntraSubLevelPicker {
 
                 let max_compaction_bytes = std::cmp::min(
                     self.config.max_compaction_bytes,
-                    self.config.max_bytes_for_level_base,
+                    self.config.sub_level_max_compaction_bytes,
                 );
 
                 let mut compaction_bytes = 0;
@@ -257,12 +257,6 @@ impl CompactionPicker for IntraSubLevelPicker {
                     }
                     let mut pending_compact = false;
                     let sub_level_info = &part.sub_levels[right];
-                    if compaction_bytes > self.config.sub_level_max_compaction_bytes
-                        && sub_level_info.total_file_size
-                            > self.config.sub_level_max_compaction_bytes / 2
-                    {
-                        break;
-                    }
                     if sub_level_info.right_idx > sub_level_info.left_idx {
                         let mut input_level = InputLevel {
                             level_idx: 0,
