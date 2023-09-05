@@ -22,7 +22,7 @@ main() {
   setup_old_cluster
   seed_old_cluster $OLD_TAG
   setup_new_cluster
-  validate_new_cluster
+  validate_new_cluster $NEW_TAG
 }
 
 main

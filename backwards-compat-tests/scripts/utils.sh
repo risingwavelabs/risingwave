@@ -172,12 +172,20 @@ seed_old_cluster() {
 }
 
 validate_new_cluster() {
+  NEW_TAG=$1
   echo "--- Start cluster on latest"
   configure_rw
   ./risedev d full-without-monitoring
 
   echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
   sleep $RECOVERY_DURATION
+
+  version=$(run_sql "SELECT version();" | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
+  if [[ "$version" != "$NEW_TAG" ]]; then
+    echo "Version mismatch, expected $NEW_TAG, got $version"
+    exit 1
+  fi
+
 
   echo "--- Running Queries New Cluster"
   run_sql_new_cluster
