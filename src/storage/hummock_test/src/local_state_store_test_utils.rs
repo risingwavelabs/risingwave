@@ -12,10 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod columns;
-pub mod tables;
-pub mod views;
+use std::future::Future;
 
-pub use columns::*;
-pub use tables::*;
-pub use views::*;
+use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::error::StorageResult;
+use risingwave_storage::store::{InitOptions, LocalStateStore};
+
+pub trait LocalStateStoreTestExt: LocalStateStore {
+    fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.init(InitOptions::new_with_epoch(EpochPair::new_test_epoch(
+            epoch,
+        )))
+    }
+}
+impl<T: LocalStateStore> LocalStateStoreTestExt for T {}

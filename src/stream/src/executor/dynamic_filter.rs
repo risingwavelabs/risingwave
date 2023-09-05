@@ -275,6 +275,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             input_l.execute(),
             input_r.execute(),
             self.ctx.id,
+            self.ctx.fragment_id,
             self.metrics.clone(),
         );
 
