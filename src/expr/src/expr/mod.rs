@@ -18,7 +18,8 @@
 //!
 //! ## Construction
 //!
-//! Expressions can be constructed by [`build()`] function, which returns a [`BoxedExpression`].
+//! Expressions can be constructed by [`build_func()`] function, which returns a
+//! [`BoxedExpression`].
 //!
 //! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost()`]
 //! function.
@@ -48,6 +49,7 @@ mod expr_literal;
 mod expr_nested_construct;
 mod expr_proctime;
 pub mod expr_regexp;
+pub mod expr_regexp_count;
 mod expr_some_all;
 mod expr_timestamp_to_char_const_tmpl;
 mod expr_timestamptz_to_char_const_tmpl;

@@ -136,7 +136,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
 /// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
-/// the [`SourceParser::parse`] implementation.
+/// the `SourceParser::parse` implementation.
 #[derive(Debug)]
 pub struct WriteGuard(());
 
@@ -279,11 +279,11 @@ impl SourceStreamChunkRowWriter<'_> {
 
     /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
     /// builder. e.g after insert
-    /// `data_builder` = [1], `meta_column_builder` = [], `op` = [insert]
+    /// `data_builder = [1], meta_column_builder = [], op = [insert]`
     ///
     /// This function is used to fulfill this hollow in `meta_column_builder`.
     /// e.g after fulfill
-    /// `data_builder` = [1], `meta_column_builder` = [1], `op` = [insert]
+    /// `data_builder = [1], meta_column_builder = [1], op = [insert]`
     pub fn fulfill_meta_column(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
@@ -373,7 +373,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     ///
     /// # Returns
     ///
-    /// A [`BoxSourceWithStateStream`] which is a stream of parsed msgs.
+    /// A [`crate::source::BoxSourceWithStateStream`] which is a stream of parsed msgs.
     fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
         into_chunk_stream(self, data_stream)
     }
@@ -517,8 +517,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
                 Err(error) => {
                     tracing::warn!(%error, "message parsing failed, skipping");
-                    // This will throw an error for batch
-                    parser.source_ctx().report_user_source_error(error)?;
+                    // Skip for batch
+                    parser.source_ctx().report_user_source_error(error);
                     continue;
                 }
             }

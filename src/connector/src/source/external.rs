@@ -599,6 +599,8 @@ mod tests {
             ],
             pk_indices: vec![0],
             sink_type: SinkType::AppendOnly,
+            db_name: "db".into(),
+            sink_from_name: "table".into(),
         };
 
         let rw_schema = param.schema();

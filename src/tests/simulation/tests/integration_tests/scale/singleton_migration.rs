@@ -16,18 +16,18 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::sleep;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
 const ROOT_MV: &str = "create materialized view m1 as select count(*) as c1 from t;";
 const CASCADE_MV: &str = "create materialized view m2 as select * from m1;";
 
-#[madsim::test]
+#[tokio::test]
 async fn test_singleton_migration() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
