@@ -30,7 +30,7 @@ impl TableFunction for Empty {
         self.return_type.clone()
     }
 
-    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+    async fn eval<'a>(&'a self, _input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
         futures_util::stream::empty().boxed()
     }
 }

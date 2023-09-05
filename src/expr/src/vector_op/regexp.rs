@@ -50,7 +50,7 @@ impl RegexpContext {
     }
 
     pub fn from_pattern_flags_for_count(pattern: &str, flags: &str) -> Result<Self> {
-        if flags.contains("g") {
+        if flags.contains('g') {
             bail!("regexp_count() does not support the global option");
         }
         Self::new(pattern, flags, "")
@@ -197,7 +197,6 @@ fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     Ok(count)
 }
 
-// regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
 #[function(
     // regexp_replace(source, pattern, replacement)
     "regexp_replace(varchar, varchar, varchar) -> varchar",
@@ -249,6 +248,7 @@ fn regexp_replace_with_start_n_flags(
     regexp_replace(text, start, Some(n), ctx)
 }
 
+// regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
 fn regexp_replace(
     text: &str,
     start: i32,
@@ -267,7 +267,7 @@ fn regexp_replace(
     };
 
     // This is because the source text may contain unicode
-    let start = match text.char_indices().nth(start as usize) {
+    let start = match text.char_indices().nth(start) {
         Some((idx, _)) => idx,
         // With no match
         None => return Ok(text.into()),
@@ -283,12 +283,12 @@ fn regexp_replace(
         if ctx.regex.captures_len() <= 1 {
             // There is no capture groups in the regex
             // Just replace all matched patterns after `start`
-            return Ok(format!(
+            Ok(format!(
                 "{}{}",
                 &text[..start],
                 ctx.regex.replace_all(&text[start..], &ctx.replacement)
             )
-            .into());
+            .into())
         } else {
             // The position to start searching for replacement
             let mut search_start = start;
@@ -339,10 +339,7 @@ fn regexp_replace(
         // See if there is capture group or not
         if ctx.regex.captures_len() <= 1 {
             // There is no capture groups in the regex
-            if n.is_none() {
-                // `N` is not specified
-                ret.push_str(&ctx.regex.replacen(&text[start..], 1, &ctx.replacement));
-            } else {
+            if let Some(n) = n {
                 // Replace only the N-th match
                 let mut count = 1;
                 // The absolute index for the start of searching
@@ -352,7 +349,7 @@ fn regexp_replace(
                     let match_start = capture.get(0).unwrap().start();
                     let match_end = capture.get(0).unwrap().end();
 
-                    if count == n.unwrap() as i32 {
+                    if count == n {
                         // We've reached the pattern to replace
                         // Let's construct the return string
                         ret = format!(
@@ -370,38 +367,19 @@ fn regexp_replace(
                     // Update `start`
                     search_start += match_end;
                 }
+            } else {
+                // `N` is not specified
+                ret.push_str(&ctx.regex.replacen(&text[start..], 1, &ctx.replacement));
             }
         } else {
             // There are capture groups in the regex
             // Reset return string at the beginning
             ret = "".to_string();
-            if n.is_none() {
-                // `N` is not specified
-                if ctx.regex.captures(&text[start..]).is_none() {
-                    // No match
-                    return Ok(text.into());
-                }
-                // Otherwise replace the source text
-                if let Some(capture) = ctx.regex.captures(&text[start..]) {
-                    let match_start = capture.get(0).unwrap().start();
-                    let match_end = capture.get(0).unwrap().end();
-
-                    // Get the replaced string and expand it
-                    capture.expand(&ctx.replacement, &mut ret);
-
-                    // Construct the return string
-                    ret = format!(
-                        "{}{}{}",
-                        &text[..start + match_start],
-                        ret,
-                        &text[start + match_end..]
-                    );
-                }
-            } else {
+            if let Some(n) = n {
                 // Replace only the N-th match
                 let mut count = 1;
                 while let Some(capture) = ctx.regex.captures(&text[start..]) {
-                    if count == n.unwrap() as i32 {
+                    if count == n {
                         // We've reached the pattern to replace
                         let match_start = capture.get(0).unwrap().start();
                         let match_end = capture.get(0).unwrap().end();
@@ -425,6 +403,28 @@ fn regexp_replace(
                 // If there is no match, just return the original string
                 if ret.is_empty() {
                     ret = text.into();
+                }
+            } else {
+                // `N` is not specified
+                if ctx.regex.captures(&text[start..]).is_none() {
+                    // No match
+                    return Ok(text.into());
+                }
+                // Otherwise replace the source text
+                if let Some(capture) = ctx.regex.captures(&text[start..]) {
+                    let match_start = capture.get(0).unwrap().start();
+                    let match_end = capture.get(0).unwrap().end();
+
+                    // Get the replaced string and expand it
+                    capture.expand(&ctx.replacement, &mut ret);
+
+                    // Construct the return string
+                    ret = format!(
+                        "{}{}{}",
+                        &text[..start + match_start],
+                        ret,
+                        &text[start + match_end..]
+                    );
                 }
             }
         }
