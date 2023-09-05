@@ -3915,7 +3915,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6971da4d9c3aa03c3d8f3ff0f4155b534aad021292003895a469716b2a230378"
 dependencies = [
  "base64 0.21.3",
- "pem",
+ "pem 1.1.1",
  "ring",
  "serde",
  "serde_json",
@@ -4160,15 +4160,6 @@ dependencies = [
 name = "lru"
 version = "0.7.6"
 source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=cb2d7c7#cb2d7c7149a7f320c5aa73c15a6ec9f46ed5513f"
-dependencies = [
- "hashbrown 0.12.3",
-]
-
-[[package]]
-name = "lru"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e8aaa3f231bb4bd57b84b2d5dc3ae7f350265df8aa96492e0bc394a1571909"
 dependencies = [
  "hashbrown 0.12.3",
 ]
@@ -4567,10 +4558,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "mysql_async"
-version = "0.31.3"
+name = "mysql-common-derive"
+version = "0.30.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2975442c70450b8f3a0400216321f6ab7b8bda177579f533d312ac511f913655"
+checksum = "56b0d8a0db9bf6d2213e11f2c701cb91387b0614361625ab7b9743b41aa4938f"
+dependencies = [
+ "darling 0.20.3",
+ "heck 0.4.1",
+ "num-bigint",
+ "proc-macro-crate 1.3.1",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.31",
+ "termcolor",
+ "thiserror",
+]
+
+[[package]]
+name = "mysql_async"
+version = "0.32.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5272f59b5b1f93d65f7f826c1f025d6e410e89fb50a67e05aa20b35a55a8c0a"
 dependencies = [
  "bytes",
  "crossbeam",
@@ -4579,18 +4588,18 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "lazy_static",
- "lru 0.8.1",
+ "lru 0.10.1",
  "mio",
- "mysql_common",
+ "mysql_common 0.30.6",
  "native-tls",
  "once_cell",
- "pem",
+ "pem 2.0.1",
  "percent-encoding",
  "pin-project",
  "priority-queue",
  "serde",
  "serde_json",
- "socket2 0.4.9",
+ "socket2 0.5.3",
  "thiserror",
  "tokio",
  "tokio-native-tls",
@@ -4606,7 +4615,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9006c95034ccf7b903d955f210469119f6c3477fc9c9e7a7845ce38a3e665c2a"
 dependencies = [
  "base64 0.13.1",
- "bigdecimal",
  "bindgen",
  "bitflags 1.3.2",
  "bitvec",
@@ -4617,9 +4625,43 @@ dependencies = [
  "cmake",
  "crc32fast",
  "flate2",
+ "lazy_static",
+ "lexical",
+ "num-bigint",
+ "num-traits",
+ "rand",
+ "regex",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.7",
+ "smallvec",
+ "subprocess",
+ "thiserror",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.30.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57349d5a326b437989b6ee4dc8f2f34b0cc131202748414712a8e7d98952fc8c"
+dependencies = [
+ "base64 0.21.3",
+ "bigdecimal",
+ "bindgen",
+ "bitflags 2.4.0",
+ "bitvec",
+ "byteorder",
+ "bytes",
+ "cc",
+ "cmake",
+ "crc32fast",
+ "flate2",
  "frunk",
  "lazy_static",
  "lexical",
+ "mysql-common-derive",
  "num-bigint",
  "num-traits",
  "rand",
@@ -5417,6 +5459,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pem"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b13fe415cdf3c8e44518e18a7c95a13431d9bdf6d15367d82b23c377fdd441a"
+dependencies = [
+ "base64 0.21.3",
+ "serde",
+]
+
+[[package]]
 name = "pem-rfc7468"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6073,7 +6125,7 @@ dependencies = [
  "nom",
  "oauth2",
  "openidconnect",
- "pem",
+ "pem 1.1.1",
  "prost",
  "prost-build",
  "prost-derive",
@@ -6884,7 +6936,7 @@ dependencies = [
  "maplit",
  "moka",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.29.2",
  "nexmark",
  "num-bigint",
  "opendal",
