@@ -326,8 +326,7 @@ pub struct ScaleVerticalCommands {
     )]
     workers: Option<Vec<String>>,
 
-    /// The target parallelism per worker, conflicts with `target_parallelism`, requires
-    /// `workers` to be set.
+    /// The target parallelism per worker, requires `workers` to be set.
     #[clap(long, requires = "workers")]
     target_parallelism_per_worker: Option<u32>,
 }
