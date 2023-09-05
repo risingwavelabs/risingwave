@@ -27,7 +27,7 @@ use serde_yaml;
 
 use crate::cmd_impl::meta::ReschedulePayload;
 use crate::common::CtlContext;
-use crate::ScaleHorizonCommands;
+use crate::{ScaleCommon, ScaleHorizonCommands, ScaleVerticalCommands};
 
 macro_rules! fail {
     ($($arg:tt)*) => {{
@@ -36,8 +36,74 @@ macro_rules! fail {
     }};
 }
 
-pub async fn resize(context: &CtlContext, resize: ScaleHorizonCommands) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
+impl From<ScaleHorizonCommands> for ScaleCommandContext {
+    fn from(value: ScaleHorizonCommands) -> Self {
+        let ScaleHorizonCommands {
+            exclude_workers,
+            include_workers,
+            target_parallelism,
+            common:
+                ScaleCommon {
+                    generate,
+                    output,
+                    yes,
+                    fragments,
+                },
+        } = value;
+
+        Self {
+            exclude_workers,
+            include_workers,
+            target_parallelism,
+            generate,
+            output,
+            yes,
+            fragments,
+            target_parallelism_per_worker: None,
+        }
+    }
+}
+
+impl From<ScaleVerticalCommands> for ScaleCommandContext {
+    fn from(value: ScaleVerticalCommands) -> Self {
+        let ScaleVerticalCommands {
+            workers,
+            target_parallelism_per_worker,
+            common:
+                ScaleCommon {
+                    generate,
+                    output,
+                    yes,
+                    fragments,
+                },
+        } = value;
+
+        Self {
+            exclude_workers: None,
+            include_workers: workers,
+            target_parallelism: None,
+            generate,
+            output,
+            yes,
+            fragments,
+            target_parallelism_per_worker,
+        }
+    }
+}
+
+pub struct ScaleCommandContext {
+    exclude_workers: Option<Vec<String>>,
+    include_workers: Option<Vec<String>>,
+    target_parallelism: Option<u32>,
+    generate: bool,
+    output: Option<String>,
+    yes: bool,
+    fragments: Option<Vec<u32>>,
+    target_parallelism_per_worker: Option<u32>,
+}
+
+pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> anyhow::Result<()> {
+    let meta_client = ctl_ctx.meta_client().await?;
 
     let GetClusterInfoResponse {
         worker_nodes,
@@ -116,7 +182,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleHorizonCommands) -> anyho
         streaming_workers_index_by_id.len()
     );
 
-    let ScaleHorizonCommands {
+    let ScaleCommandContext {
         exclude_workers,
         include_workers,
         target_parallelism,
@@ -125,7 +191,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleHorizonCommands) -> anyho
         output,
         yes,
         fragments,
-    } = resize;
+    } = scale_ctx;
 
     let worker_changes = {
         let exclude_worker_ids =

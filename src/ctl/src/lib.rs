@@ -261,8 +261,7 @@ enum TableCommands {
     List,
 }
 
-#[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
+#[derive(clap::Args, Debug, Clone)]
 pub struct ScaleHorizonCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
@@ -288,15 +287,12 @@ pub struct ScaleHorizonCommands {
     #[clap(long)]
     target_parallelism: Option<u32>,
 
-    /// The target parallelism per worker, conflicts with `target_parallelism`, requires
-    /// `include_workers` to be set.
-    #[clap(
-        long,
-        requires = "include_workers",
-        conflicts_with = "target_parallelism"
-    )]
-    target_parallelism_per_worker: Option<u32>,
+    #[command(flatten)]
+    common: ScaleCommon,
+}
 
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleCommon {
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
     #[clap(long, default_value_t = false)]
@@ -316,8 +312,13 @@ pub struct ScaleHorizonCommands {
     fragments: Option<Vec<u32>>,
 }
 
-#[derive(clap::Args, Debug)]
+#[derive(clap::Args, Debug, Clone)]
 pub struct ScaleVerticalCommands {
+    #[command(flatten)]
+    common: ScaleCommon,
+
+    /// The worker that needs to be scheduled, worker_id and worker_host are both
+    /// supported
     #[clap(
         long,
         value_delimiter = ',',
@@ -325,42 +326,24 @@ pub struct ScaleVerticalCommands {
     )]
     workers: Option<Vec<String>>,
 
-    /// The target parallelism, currently, it is used to limit the target parallelism and only
-    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
-    /// with exclude/include_workers.
-    #[clap(long)]
-    target_parallelism: Option<u32>,
-
-    /// Will generate a plan supported by the `reschedule` command and save it to the provided path
-    /// by the `--output`.
-    #[clap(long, default_value_t = false)]
-    generate: bool,
-
-    /// The output file to write the generated plan to, standard output by default
-    #[clap(long)]
-    output: Option<String>,
-
-    /// Automatic yes to prompts
-    #[clap(short = 'y', long, default_value_t = false)]
-    yes: bool,
-
-    /// Specify the fragment ids that need to be scheduled.
-    /// empty by default, which means all fragments will be scheduled
-    #[clap(long)]
-    fragments: Option<Vec<u32>>,
+    /// The target parallelism per worker, conflicts with `target_parallelism`, requires
+    /// `workers` to be set.
+    #[clap(long, requires = "workers")]
+    target_parallelism_per_worker: Option<u32>,
 }
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-
+    /// Scale the compute nodes horizontally, alias of `horizon`
     Resize(ScaleHorizonCommands),
 
-    /// S
+    /// Scale the compute nodes horizontally
     Horizon(ScaleHorizonCommands),
 
+    /// Scale the compute nodes vertically
     Vertical(ScaleVerticalCommands),
 
-    /// mark a compute node as unschedulable
+    /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
         /// Workers that need to be cordoned, both id and host are supported.
@@ -657,11 +640,10 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Scale(ScaleCommands::Horizon(resize))
         | Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize).await?
+            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Vertical(resize)) => {
-            todo!()
-            //            cmd_impl::scale::resize(context, resize).await?
+            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
