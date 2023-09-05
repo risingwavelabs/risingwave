@@ -16,15 +16,16 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::export::futures::StreamExt;
-use madsim::rand::prelude::SliceRandom;
-use madsim::rand::thread_rng;
-use madsim::time;
-use rdkafka::consumer::{MessageStream, StreamConsumer};
+use futures::StreamExt;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
+use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::error::KafkaResult;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use tokio::time;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int) append only;";
 const APPEND_ONLY_SINK_CREATE: &str = "create sink s1 from t with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_append_only', type='append-only');";
@@ -70,7 +71,8 @@ pub struct Before {
     pub count: i64,
 }
 
-#[madsim::test]
+#[tokio::test]
+#[ignore] // https://github.com/risingwavelabs/risingwave/issues/12003
 async fn test_sink_append_only() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
@@ -122,7 +124,8 @@ async fn test_sink_append_only() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
+#[ignore] // https://github.com/risingwavelabs/risingwave/issues/12003
 async fn test_sink_debezium() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
@@ -201,7 +204,7 @@ async fn test_sink_debezium() -> Result<()> {
     Ok(())
 }
 
-fn check_payload(msg: &BorrowedMessage, payload: &[u8], i: i64) {
+fn check_payload(msg: &BorrowedMessage<'_>, payload: &[u8], i: i64) {
     match msg.topic() {
         APPEND_ONLY_TOPIC => {
             let data: AppendOnlyPayload = serde_json::from_slice(payload).unwrap();
@@ -228,7 +231,7 @@ fn check_payload(msg: &BorrowedMessage, payload: &[u8], i: i64) {
 
 async fn check_kafka_after_insert(
     cluster: &mut Cluster,
-    stream: &mut MessageStream<'_>,
+    stream: &mut (impl futures::Stream<Item = KafkaResult<BorrowedMessage<'_>>> + Unpin),
     input: &[i64],
 ) -> Result<()> {
     for i in input {

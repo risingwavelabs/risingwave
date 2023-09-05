@@ -42,7 +42,7 @@ use risingwave_storage::StateStore;
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::StreamChunkBuilder;
+use crate::common::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
 use crate::task::AtomicU64Ref;
@@ -375,8 +375,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
-        let (left_map, right_map) = StreamChunkBuilder::get_i2o_mapping(
-            self.output_indices.iter().cloned(),
+        let (left_map, right_map) = JoinStreamChunkBuilder::get_i2o_mapping(
+            &self.output_indices,
             self.left.schema().len(),
             self.right.schema().len(),
         );
@@ -401,9 +401,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                 InternalMessage::Chunk(chunk) => {
                     // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
                     let chunk = chunk.compact();
-                    let mut builder = StreamChunkBuilder::new(
+                    let mut builder = JoinStreamChunkBuilder::new(
                         self.chunk_size,
-                        &self.schema.data_types(),
+                        self.schema.data_types(),
                         left_map.clone(),
                         right_map.clone(),
                     );

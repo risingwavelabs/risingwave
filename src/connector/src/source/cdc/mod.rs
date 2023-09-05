@@ -20,6 +20,7 @@ use std::marker::PhantomData;
 
 pub use enumerator::*;
 use paste::paste;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::connector_service::{PbSourceType, SourceType, TableSchema};
 pub use source::*;
 pub use split::*;
@@ -87,7 +88,7 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub props: HashMap<String, String>,
 
     /// Schema of the source specified by users
-    pub table_schema: Option<TableSchema>,
+    pub table_schema: TableSchema,
 
     pub _phantom: PhantomData<T>,
 }
@@ -95,5 +96,17 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     pub fn get_source_type_pb(&self) -> SourceType {
         SourceType::from(T::source_type())
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self
+                .table_schema
+                .columns
+                .iter()
+                .map(ColumnDesc::from)
+                .map(Field::from)
+                .collect(),
+        }
     }
 }

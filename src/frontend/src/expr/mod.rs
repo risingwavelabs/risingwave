@@ -29,6 +29,7 @@ use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 mod agg_call;
 mod correlated_input_ref;
 mod function_call;
+mod function_call_with_lambda;
 mod input_ref;
 mod literal;
 mod now;
@@ -55,6 +56,7 @@ pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
+pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use now::{InlineNowProcTime, Now};
@@ -117,6 +119,7 @@ impl_expr_impl!(
     InputRef,
     Literal,
     FunctionCall,
+    FunctionCallWithLambda,
     AggCall,
     Subquery,
     TableFunction,
@@ -364,7 +367,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, WindowFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InequalityInputPair {
@@ -598,8 +601,6 @@ impl ExprImpl {
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {
-                        ExprImpl::Literal(_inner) => {}
-                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
                         ExprImpl::CorrelatedInputRef(_)
                         | ExprImpl::InputRef(_)
                         | ExprImpl::AggCall(_)
@@ -609,6 +610,11 @@ impl ExprImpl {
                         | ExprImpl::UserDefinedFunction(_)
                         | ExprImpl::Parameter(_)
                         | ExprImpl::Now(_) => self.has_others = true,
+                        ExprImpl::Literal(_inner) => {}
+                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                        ExprImpl::FunctionCallWithLambda(inner) => {
+                            self.visit_function_call_with_lambda(inner)
+                        }
                     }
                 }
             }
@@ -989,6 +995,9 @@ impl std::fmt::Debug for ExprImpl {
                 Self::InputRef(arg0) => f.debug_tuple("InputRef").field(arg0).finish(),
                 Self::Literal(arg0) => f.debug_tuple("Literal").field(arg0).finish(),
                 Self::FunctionCall(arg0) => f.debug_tuple("FunctionCall").field(arg0).finish(),
+                Self::FunctionCallWithLambda(arg0) => {
+                    f.debug_tuple("FunctionCallWithLambda").field(arg0).finish()
+                }
                 Self::AggCall(arg0) => f.debug_tuple("AggCall").field(arg0).finish(),
                 Self::Subquery(arg0) => f.debug_tuple("Subquery").field(arg0).finish(),
                 Self::CorrelatedInputRef(arg0) => {
@@ -1007,6 +1016,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::InputRef(x) => write!(f, "{:?}", x),
             Self::Literal(x) => write!(f, "{:?}", x),
             Self::FunctionCall(x) => write!(f, "{:?}", x),
+            Self::FunctionCallWithLambda(x) => write!(f, "{:?}", x),
             Self::AggCall(x) => write!(f, "{:?}", x),
             Self::Subquery(x) => write!(f, "{:?}", x),
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
@@ -1042,6 +1052,14 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 "{:?}",
                 FunctionCallDisplay {
                     function_call: x,
+                    input_schema: self.input_schema
+                }
+            ),
+            ExprImpl::FunctionCallWithLambda(x) => write!(
+                f,
+                "{:?}",
+                FunctionCallDisplay {
+                    function_call: &x.to_full_function_call(),
                     input_schema: self.input_schema
                 }
             ),

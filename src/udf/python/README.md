@@ -1,6 +1,8 @@
-# RisingWave Python API
+# RisingWave Python UDF SDK
 
-This library provides a Python API for creating user-defined functions (UDF) in RisingWave.
+This library provides a Python SDK for creating user-defined functions (UDF) in [RisingWave](https://www.risingwave.com/).
+
+For a detailed guide on how to use Python UDF in RisingWave, please refer to [this doc](https://docs.risingwave.com/docs/current/udf-python/).
 
 ## Introduction
 

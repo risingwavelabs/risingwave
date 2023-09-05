@@ -23,6 +23,7 @@
 #![feature(round_ties_even)]
 #![feature(generators)]
 #![feature(test)]
+#![feature(arc_unwrap_or_clone)]
 
 pub mod agg;
 mod error;

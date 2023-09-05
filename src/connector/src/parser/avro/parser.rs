@@ -21,11 +21,12 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
-use url::Url;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
+use crate::parser::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::{read_schema_from_http, read_schema_from_local, read_schema_from_s3};
@@ -115,9 +116,7 @@ impl AvroParserConfig {
         let avro_config = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let enable_upsert = avro_config.enable_upsert;
-        let url = Url::parse(schema_location).map_err(|e| {
-            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
-        })?;
+        let url = handle_sr_list(schema_location.as_str())?;
         if avro_config.use_schema_registry {
             let client = Client::new(url, &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
@@ -156,12 +155,13 @@ impl AvroParserConfig {
                     "avro upsert without schema registry is not supported".to_string(),
                 )));
             }
+            let url = url.get(0).unwrap();
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
                 "s3" => {
-                    read_schema_from_s3(&url, avro_config.aws_auth_props.as_ref().unwrap()).await
+                    read_schema_from_s3(url, avro_config.aws_auth_props.as_ref().unwrap()).await
                 }
-                "https" | "http" => read_schema_from_http(&url).await,
+                "https" | "http" => read_schema_from_http(url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
                     scheme

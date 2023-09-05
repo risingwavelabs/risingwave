@@ -25,7 +25,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorSuppressor, Result as RwResult, RwError};
+use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::ConnectorSplit;
@@ -36,6 +36,8 @@ use super::filesystem::{FsSplit, S3Properties, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
+use super::nats::enumerator::NatsSplitEnumerator;
+use super::nats::source::NatsSplitReader;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
@@ -61,6 +63,8 @@ use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::nats::split::NatsSplit;
+use crate::source::nats::{NatsProperties, NATS_CONNECTOR};
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
 use crate::source::nexmark::{
     NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
@@ -170,10 +174,9 @@ impl SourceContext {
         ctx
     }
 
-    pub(crate) fn report_user_source_error(&self, e: RwError) -> RwResult<()> {
-        // Repropagate the error if batch
+    pub(crate) fn report_user_source_error(&self, e: RwError) {
         if self.source_info.fragment_id == u32::MAX {
-            return Err(e);
+            return;
         }
         let mut err_str = e.inner().to_string();
         if let Some(suppressor) = &self.error_suppressor
@@ -196,7 +199,6 @@ impl SourceContext {
                 &self.source_info.source_id.table_id.to_string(),
             ])
             .inc();
-        Ok(())
     }
 }
 
@@ -301,6 +303,7 @@ pub enum ConnectorProperties {
     PostgresCdc(Box<CdcProperties<Postgres>>),
     CitusCdc(Box<CdcProperties<Citus>>),
     GooglePubsub(Box<PubsubProperties>),
+    Nats(Box<NatsProperties>),
     Dummy(Box<()>),
 }
 
@@ -326,7 +329,7 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn init_cdc_properties(&mut self, table_schema: Option<PbTableSchema>) {
+    pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
         match self {
             ConnectorProperties::MySqlCdc(c) => {
                 c.table_schema = table_schema;
@@ -366,6 +369,7 @@ pub enum SplitImpl {
     MySqlCdc(DebeziumCdcSplit<Mysql>),
     PostgresCdc(DebeziumCdcSplit<Postgres>),
     CitusCdc(DebeziumCdcSplit<Citus>),
+    Nats(NatsSplit),
     S3(FsSplit),
 }
 
@@ -399,6 +403,7 @@ pub enum SplitReaderImpl {
     PostgresCdc(Box<CdcSplitReader<Postgres>>),
     CitusCdc(Box<CdcSplitReader<Citus>>),
     GooglePubsub(Box<PubsubSplitReader>),
+    Nats(Box<NatsSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -412,6 +417,7 @@ pub enum SplitEnumeratorImpl {
     CitusCdc(CitusDebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
     S3(S3SplitEnumerator),
+    Nats(NatsSplitEnumerator),
 }
 
 impl_connector_properties! {
@@ -421,7 +427,8 @@ impl_connector_properties! {
     { Nexmark, NEXMARK_CONNECTOR },
     { Datagen, DATAGEN_CONNECTOR },
     { S3, S3_CONNECTOR },
-    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR},
+    { Nats, NATS_CONNECTOR }
 }
 
 impl_split_enumerator! {
@@ -434,7 +441,8 @@ impl_split_enumerator! {
     { PostgresCdc, DebeziumSplitEnumerator },
     { CitusCdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator},
-    { S3, S3SplitEnumerator }
+    { S3, S3SplitEnumerator },
+    { Nats, NatsSplitEnumerator }
 }
 
 impl_split! {
@@ -447,7 +455,8 @@ impl_split! {
     { MySqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit<Mysql> },
     { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit<Postgres> },
     { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit<Citus> },
-    { S3, S3_CONNECTOR, FsSplit }
+    { S3, S3_CONNECTOR, FsSplit },
+    { Nats, NATS_CONNECTOR, NatsSplit }
 }
 
 impl_split_reader! {
@@ -461,6 +470,7 @@ impl_split_reader! {
     { PostgresCdc, CdcSplitReader},
     { CitusCdc, CdcSplitReader },
     { GooglePubsub, PubsubSplitReader },
+    { Nats, NatsSplitReader },
     { Dummy, DummySplitReader }
 }
 
@@ -484,7 +494,6 @@ pub struct SourceMessage {
     pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
-
     pub meta: SourceMeta,
 }
 
