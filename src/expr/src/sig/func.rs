@@ -199,6 +199,9 @@ mod tests {
                 ArrayAccess: [
                     "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
                 ],
+                ArrayMax: [
+                    "array_max(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
+                ],
             }
         "#]];
         expected.assert_debug_eq(&duplicated);
