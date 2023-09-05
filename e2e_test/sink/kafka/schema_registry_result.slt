@@ -4,9 +4,9 @@ statement ok
 CREATE TABLE kafka_upsert_schema_registry_result with (
     connector = 'kafka',
     kafka.topic = 'test-rw-sink-upsert-registry',
-    kafka.brokers = 'localhost:29093',
+    kafka.brokers = 'kafka:9093',
     kafka.scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://localhost:8082');
+) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
 
 query
 select * from kafka_upsert_schema_registry_result order by id limit 5;
