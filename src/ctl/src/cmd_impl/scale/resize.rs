@@ -27,7 +27,7 @@ use serde_yaml;
 
 use crate::cmd_impl::meta::ReschedulePayload;
 use crate::common::CtlContext;
-use crate::ScaleResizeCommands;
+use crate::ScaleHorizonCommands;
 
 macro_rules! fail {
     ($($arg:tt)*) => {{
@@ -36,7 +36,7 @@ macro_rules! fail {
     }};
 }
 
-pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow::Result<()> {
+pub async fn resize(context: &CtlContext, resize: ScaleHorizonCommands) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
     let GetClusterInfoResponse {
@@ -116,7 +116,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         streaming_workers_index_by_id.len()
     );
 
-    let ScaleResizeCommands {
+    let ScaleHorizonCommands {
         exclude_workers,
         include_workers,
         target_parallelism,

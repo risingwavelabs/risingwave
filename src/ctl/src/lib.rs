@@ -263,7 +263,7 @@ enum TableCommands {
 
 #[derive(clap::Args, Debug)]
 #[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
-pub struct ScaleResizeCommands {
+pub struct ScaleHorizonCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
     #[clap(
@@ -316,11 +316,50 @@ pub struct ScaleResizeCommands {
     fragments: Option<Vec<u32>>,
 }
 
+#[derive(clap::Args, Debug)]
+pub struct ScaleVerticalCommands {
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "all or worker_id or worker_host, ..."
+    )]
+    workers: Option<Vec<String>>,
+
+    /// The target parallelism, currently, it is used to limit the target parallelism and only
+    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
+    /// with exclude/include_workers.
+    #[clap(long)]
+    target_parallelism: Option<u32>,
+
+    /// Will generate a plan supported by the `reschedule` command and save it to the provided path
+    /// by the `--output`.
+    #[clap(long, default_value_t = false)]
+    generate: bool,
+
+    /// The output file to write the generated plan to, standard output by default
+    #[clap(long)]
+    output: Option<String>,
+
+    /// Automatic yes to prompts
+    #[clap(short = 'y', long, default_value_t = false)]
+    yes: bool,
+
+    /// Specify the fragment ids that need to be scheduled.
+    /// empty by default, which means all fragments will be scheduled
+    #[clap(long)]
+    fragments: Option<Vec<u32>>,
+}
+
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// The resize command scales the cluster by specifying the workers to be included and
-    /// excluded.
-    Resize(ScaleResizeCommands),
+
+    Resize(ScaleHorizonCommands),
+
+    /// S
+    Horizon(ScaleHorizonCommands),
+
+    Vertical(ScaleVerticalCommands),
+
     /// mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
@@ -616,8 +655,13 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
         }
-        Commands::Scale(ScaleCommands::Resize(resize)) => {
+        Commands::Scale(ScaleCommands::Horizon(resize))
+        | Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
+        }
+        Commands::Scale(ScaleCommands::Vertical(resize)) => {
+            todo!()
+            //            cmd_impl::scale::resize(context, resize).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
