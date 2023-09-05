@@ -249,6 +249,7 @@ impl HummockStorage {
             .unwrap();
 
         let (basic_read_version, instance_guard) = rx.await.unwrap();
+        let version_update_notifier_tx = self.version_update_notifier_tx.clone();
         LocalHummockStorage::new(
             instance_guard,
             basic_read_version,
@@ -257,6 +258,7 @@ impl HummockStorage {
             self.buffer_tracker.get_memory_limiter().clone(),
             self.write_limiter.clone(),
             option,
+            version_update_notifier_tx,
         )
     }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
@@ -22,10 +22,14 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntGauge, Registry,
 };
+use risingwave_common::config::MetricLevel;
+use risingwave_common::metrics::RelabeledHistogramVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct StreamingMetrics {
+    pub level: MetricLevel,
+
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -57,11 +61,11 @@ pub struct StreamingMetrics {
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
-    pub join_barrier_align_duration: HistogramVec,
+    pub join_barrier_align_duration: RelabeledHistogramVec,
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
     pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
-    pub join_matched_join_keys: HistogramVec,
+    pub join_matched_join_keys: RelabeledHistogramVec,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -99,12 +103,19 @@ pub struct StreamingMetrics {
     pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // Over Window
+    pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
+    pub over_window_cache_miss_count: GenericCounterVec<AtomicU64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
+    /// The progress made by the earliest in-flight barriers in the local barrier manager.
+    pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
 
@@ -132,11 +143,16 @@ pub struct StreamingMetrics {
     pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
 }
 
-pub static GLOBAL_STREAMING_METRICS: LazyLock<StreamingMetrics> =
-    LazyLock::new(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY));
+pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
+
+pub fn global_streaming_metrics(streaming_metric_level: MetricLevel) -> StreamingMetrics {
+    GLOBAL_STREAMING_METRICS
+        .get_or_init(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY, streaming_metric_level))
+        .clone()
+}
 
 impl StreamingMetrics {
-    fn new(registry: &Registry) -> Self {
+    fn new(registry: &Registry, level: MetricLevel) -> Self {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
@@ -358,9 +374,19 @@ impl StreamingMetrics {
             "Duration of join align barrier",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
-        let join_barrier_align_duration =
-            register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
-                .unwrap();
+        let join_barrier_align_duration = register_histogram_vec_with_registry!(
+            opts,
+            &["actor_id", "fragment_id", "wait_side"],
+            registry
+        )
+        .unwrap();
+
+        let join_barrier_align_duration = RelabeledHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            join_barrier_align_duration,
+            level,
+            1,
+        );
 
         let join_cached_entries = register_int_gauge_vec_with_registry!(
             "stream_join_cached_entries",
@@ -394,10 +420,17 @@ impl StreamingMetrics {
 
         let join_matched_join_keys = register_histogram_vec_with_registry!(
             join_matched_join_keys_opts,
-            &["actor_id", "table_id"],
+            &["actor_id", "fragment_id", "table_id"],
             registry
         )
         .unwrap();
+
+        let join_matched_join_keys = RelabeledHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            join_matched_join_keys,
+            level,
+            1,
+        );
 
         let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
@@ -593,6 +626,30 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_over_window_cached_entry_count",
+            "Total entry (partition) count in over window executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_cache_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_cache_lookup_count",
+            "Over window executor cache lookup count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_cache_miss_count",
+            "Over window executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -606,6 +663,14 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let barrier_manager_progress = register_int_counter_with_registry!(
+            "stream_barrier_manager_progress",
+            "The number of actors that have processed the earliest in-flight barriers",
+            registry
+        )
+        .unwrap();
+
         let sink_commit_duration = register_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
@@ -711,6 +776,7 @@ impl StreamingMetrics {
         .unwrap();
 
         Self {
+            level,
             executor_row_count,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
@@ -767,8 +833,12 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             arrangement_backfill_snapshot_read_row_count,
             arrangement_backfill_upstream_output_row_count,
+            over_window_cached_entry_count,
+            over_window_cache_lookup_count,
+            over_window_cache_miss_count,
             barrier_inflight_latency,
             barrier_sync_latency,
+            barrier_manager_progress,
             sink_commit_duration,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
@@ -787,6 +857,6 @@ impl StreamingMetrics {
 
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        GLOBAL_STREAMING_METRICS.clone()
+        global_streaming_metrics(MetricLevel::Disabled)
     }
 }
