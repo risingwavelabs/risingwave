@@ -394,7 +394,7 @@ impl NatsCommon {
     > {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone()).await?;
-        let name = "consuemr";
+        let name = "risingwave-consumer";
         match start_sequence {
             Some(v) => {
                 let consumer = stream
