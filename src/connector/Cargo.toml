@@ -63,7 +63,7 @@ num-bigint = "0.4"
 opendal = "0.39"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11.9", features = ["no-recursion-limit"] }
+prost = { version = "0.12.0", features = ["no-recursion-limit"] }
 prost-reflect = "0.11.5"
 protobuf-native = "0.2.1"
 pulsar = { version = "6.0", default-features = false, features = [

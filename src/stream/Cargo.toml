@@ -41,7 +41,7 @@ parking_lot = "0.12"
 parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
+prost = "0.12"
 rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }

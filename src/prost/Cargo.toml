@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 enum-as-inner = "0.6"
 pbjson = "0.5"
-prost = "0.11"
+prost = "0.12"
 prost-helpers = { path = "helpers" }
 serde = { version = "1", features = ["derive"] }
 tonic = { workspace = true }

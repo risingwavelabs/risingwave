@@ -14,7 +14,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.11"
 jni = "0.21.1"
-prost = "0.11"
+prost = "0.12"
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_object_store = { workspace = true }
