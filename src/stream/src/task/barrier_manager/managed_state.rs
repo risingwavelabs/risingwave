@@ -87,7 +87,9 @@ impl ManagedBarrierState {
     fn may_notify(&mut self, curr_epoch: u64) {
         // Report if there's progress on the earliest in-flight barrier.
         if self.epoch_barrier_state_map.keys().next() == Some(&curr_epoch) {
-            GLOBAL_STREAMING_METRICS.barrier_manager_progress.inc();
+            if let Some(metrics) = GLOBAL_STREAMING_METRICS.get() {
+                metrics.barrier_manager_progress.inc();
+            }
         }
 
         while let Some(entry) = self.epoch_barrier_state_map.first_entry() {
