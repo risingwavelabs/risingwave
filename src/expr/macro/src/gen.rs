@@ -111,14 +111,14 @@ impl FunctionAttr {
         let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
         let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
         let datums: Vec<_> = arg_ids.iter().map(|i| format_ident!("v{i}")).collect();
-        let arg_arrays = self
-            .args
+        let arg_arrays = arg_ids
             .iter()
-            .map(|t| format_ident!("{}", types::array_type(t)));
-        let arg_types = self
-            .args
-            .iter()
-            .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
+            .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
+        let arg_types = arg_ids.iter().map(|i| {
+            types::ref_type(&self.args[*i])
+                .parse::<TokenStream2>()
+                .unwrap()
+        });
         let annotation: TokenStream2 = match user_fn.core_return_type.as_str() {
             // add type annotation for functions that return generic types
             "T" | "T1" | "T2" | "T3" => format!(": Option<{}>", types::owned_type(&self.ret))

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Regular expression functions.
+
 use std::str::FromStr;
 
 use regex::{Regex, RegexBuilder};
@@ -97,10 +99,12 @@ impl FromStr for RegexpOptions {
 pub const NULL_PATTERN: &str = "a^";
 
 #[function(
+    // regexp_match(source, pattern)
     "regexp_match(varchar, varchar) -> varchar[]",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
 #[function(
+    // regexp_match(source, pattern, flags)
     "regexp_match(varchar, varchar, varchar) -> varchar[]",
     prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
 )]
@@ -118,70 +122,136 @@ fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
 }
 
 #[function(
+    // regexp_count(source, pattern)
     "regexp_count(varchar, varchar) -> int32",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
+fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
+    regexp_count(text, 1, regex)
+}
+
 #[function(
+    // regexp_count(source, pattern, start)
     "regexp_count(varchar, varchar, int32) -> int32",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
 #[function(
+    // regexp_count(source, pattern, start, flags)
     "regexp_count(varchar, varchar, int32, varchar) -> int32",
     prebuild = "RegexpContext::from_pattern_flags($1, $3)?"
 )]
-fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> i32 {
+fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     // First get the start position to count for
-    let start = if let Some(s) = self.start { s - 1 } else { 0 };
+    let start = match start {
+        ..0 => {
+            return Err(ExprError::InvalidParam {
+                name: "start",
+                reason: start.to_string().into(),
+            })
+        }
+        _ => start as usize - 1,
+    };
 
-    // For unicode purpose
-    let mut start = match text.char_indices().nth(start as usize) {
+    // Find the start byte index considering the unicode
+    let mut start = match text.char_indices().nth(start) {
         Some((idx, _)) => idx,
         // The `start` is out of bound
-        None => return Some(0),
+        None => return Ok(0),
     };
 
     let mut count = 0;
-    while let Some(captures) = self.ctx.regex.captures(&text[start..]) {
+    while let Some(captures) = regex.regex.captures(&text[start..]) {
         count += 1;
         start += captures.get(0).unwrap().end();
     }
-    count
+    Ok(count)
 }
 
+// regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
 #[function(
+    // regexp_replace(source, pattern, replacement)
     "regexp_replace(varchar, varchar, varchar) -> varchar",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
 #[function(
+    // regexp_replace(source, pattern, replacement, flags)
+    "regexp_replace(varchar, varchar, varchar, varchar) -> varchar",
+    prebuild = "RegexpContext::from_pattern_flags($1, $3)?"
+)]
+fn regexp_replace0(text: &str, replacement: &str, ctx: &RegexpContext) -> Result<Box<str>> {
+    regexp_replace(text, replacement, 1, None, ctx)
+}
+
+#[function(
+    // regexp_replace(source, pattern, replacement, start)
     "regexp_replace(varchar, varchar, varchar, int32) -> varchar",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
+fn regexp_replace_with_start(
+    text: &str,
+    replacement: &str,
+    start: i32,
+    ctx: &RegexpContext,
+) -> Result<Box<str>> {
+    regexp_replace(text, replacement, start, None, ctx)
+}
+
 #[function(
+    // regexp_replace(source, pattern, replacement, start, N)
     "regexp_replace(varchar, varchar, varchar, int32, int32) -> varchar",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
-#[function(
-    "regexp_replace(varchar, varchar, varchar, int32, int32, varchar) -> varchar",
-    prebuild = "RegexpContext::from_pattern_flags($1, $5)?"
-)]
-fn regexp_replace(
+fn regexp_replace_with_start_n(
     text: &str,
     replacement: &str,
     start: i32,
     n: i32,
     ctx: &RegexpContext,
-) -> Option<ListValue> {
+) -> Result<Box<str>> {
+    regexp_replace(text, replacement, start, Some(n), ctx)
+}
+
+#[function(
+    // regexp_replace(source, pattern, replacement, start, N, flags)
+    "regexp_replace(varchar, varchar, varchar, int32, int32, varchar) -> varchar",
+    prebuild = "RegexpContext::from_pattern_flags($1, $5)?"
+)]
+fn regexp_replace_with_start_n_flags(
+    text: &str,
+    replacement: &str,
+    start: i32,
+    n: i32,
+    ctx: &RegexpContext,
+) -> Result<Box<str>> {
+    regexp_replace(text, replacement, start, Some(n), ctx)
+}
+
+fn regexp_replace(
+    text: &str,
+    replacement: &str,
+    start: i32,
+    n: Option<i32>, // `None` if not specified
+    ctx: &RegexpContext,
+) -> Result<Box<str>> {
     // The start position to begin the search
-    let start = if let Some(s) = start { s - 1 } else { 0 };
+    let start = match start {
+        ..0 => {
+            return Err(ExprError::InvalidParam {
+                name: "start",
+                reason: start.to_string().into(),
+            })
+        }
+        _ => start as usize - 1,
+    };
 
     // This is because the source text may contain unicode
     let start = match text.char_indices().nth(start as usize) {
         Some((idx, _)) => idx,
         // With no match
-        None => return Some(text.into()),
+        None => return Ok(text.into()),
     };
 
-    if (n.is_none() && ctx.global) || (n.is_some() && n.unwrap() == 0) {
+    if n.is_none() && ctx.global || n == Some(0) {
         // --------------------------------------------------------------
         // `-g` enabled (& `N` is not specified) or `N` is `0`          |
         // We need to replace all the occurrence of the matched pattern |
@@ -191,13 +261,12 @@ fn regexp_replace(
         if ctx.regex.captures_len() <= 1 {
             // There is no capture groups in the regex
             // Just replace all matched patterns after `start`
-            return Some(
-                text[..start].to_string()
-                    + &self
-                        .ctx
-                        .regex
-                        .replace_all(&text[start..], replacement.clone()),
-            );
+            return Ok(format!(
+                "{}{}",
+                &text[..start],
+                ctx.regex.replace_all(&text[start..], replacement)
+            )
+            .into());
         } else {
             // The position to start searching for replacement
             let mut search_start = start;
@@ -230,7 +299,7 @@ fn regexp_replace(
             // Push the rest of the text to return string
             ret.push_str(&text[search_start..]);
 
-            Some(ret)
+            Ok(ret.into())
         }
     } else {
         // -------------------------------------------------
@@ -250,7 +319,7 @@ fn regexp_replace(
             // There is no capture groups in the regex
             if n.is_none() {
                 // `N` is not specified
-                ret.push_str(&self.ctx.regex.replacen(&text[start..], 1, &replacement));
+                ret.push_str(&ctx.regex.replacen(&text[start..], 1, replacement));
             } else {
                 // Replace only the N-th match
                 let mut count = 1;
@@ -288,7 +357,7 @@ fn regexp_replace(
                 // `N` is not specified
                 if ctx.regex.captures(&text[start..]).is_none() {
                     // No match
-                    return Some(text.into());
+                    return Ok(text.into());
                 }
                 // Otherwise replace the source text
                 if let Some(capture) = ctx.regex.captures(&text[start..]) {
@@ -338,6 +407,6 @@ fn regexp_replace(
             }
         }
 
-        Some(ret)
+        Ok(ret.into())
     }
 }

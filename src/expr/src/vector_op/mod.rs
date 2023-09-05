@@ -42,7 +42,7 @@ pub mod lower;
 pub mod md5;
 pub mod overlay;
 pub mod position;
-pub mod regexp_match;
+pub mod regexp;
 pub mod repeat;
 pub mod replace;
 pub mod round;

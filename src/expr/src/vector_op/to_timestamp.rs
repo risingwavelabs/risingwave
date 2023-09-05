@@ -103,7 +103,7 @@ fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Resul
 }
 
 #[function(
-    "to_date(varchar, varchar) -> date",
+    "char_to_date(varchar, varchar) -> date",
     prebuild = "ChronoPattern::from_datum($1)?"
 )]
 pub fn to_date(s: &str, tmpl: &ChronoPattern) -> Result<Date> {

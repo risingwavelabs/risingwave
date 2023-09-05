@@ -137,7 +137,7 @@ fn to_char_timestamptz(
     data: Timestamptz,
     zone: &str,
     tmpl: &ChronoPattern,
-    writer: &mut dyn Write,
+    writer: &mut impl Write,
 ) -> Result<()> {
     let format = data
         .to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?)
