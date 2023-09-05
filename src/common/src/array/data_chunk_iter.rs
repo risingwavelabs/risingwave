@@ -16,7 +16,7 @@ use std::hash::Hash;
 use std::iter::{FusedIterator, TrustedLen};
 use std::ops::Range;
 
-use super::ArrayRef;
+use super::{ArrayRef, StreamChunk};
 use crate::array::DataChunk;
 use crate::row::Row;
 use crate::types::DatumRef;
@@ -146,6 +146,10 @@ impl<'a> RowRef<'a> {
             columns: chunk.columns(),
             idx,
         }
+    }
+
+    pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
+        Self { columns, idx }
     }
 
     /// Get the index of this row in the data chunk.

@@ -427,49 +427,6 @@ impl OpRowMutRef<'_> {
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
     }
-
-    pub fn row_ref(&self) -> RowRef<'_> {
-        RowRef {
-            columns: self.c.columns(),
-            idx: self.i,
-        }
-    }
-}
-
-impl<'a> std::fmt::Debug for OpRowMutRef<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
-    }
-}
-impl PartialEq for OpRowMutRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-impl Eq for OpRowMutRef<'_> {}
-
-impl Row for OpRowMutRef<'_> {
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        unsafe { self.c.columns[index].value_at_unchecked(self.i) }
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.c
-            .columns
-            .get_unchecked(index)
-            .value_at_unchecked(self.i)
-    }
-
-    fn len(&self) -> usize {
-        self.c.columns.len()
-    }
-
-    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
-        RowRefIter {
-            columns: self.c.columns.iter(),
-            row_idx: self.i,
-        }
-    }
 }
 
 impl StreamChunkMut {
@@ -486,12 +443,15 @@ impl StreamChunkMut {
     }
 
     /// get the mut reference of the stream chunk.
-    pub fn to_mut_rows(&mut self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+    pub fn to_mut_rows(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
         unsafe {
             (0..self.vis.len()).map(|i| {
                 let p = self as *const StreamChunkMut;
                 let p = p as *mut StreamChunkMut;
-                OpRowMutRef { c: &mut *p, i }
+                (
+                    RowRef::with_columns(self.columns(), i),
+                    OpRowMutRef { c: &mut *p, i },
+                )
             })
         }
     }

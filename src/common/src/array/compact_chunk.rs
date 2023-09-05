@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
+use std::mem;
 
 use itertools::Itertools;
 use prehash::{new_prehashed_map, new_prehashed_map_with_capacity, Passthru, Prehashed};
@@ -43,16 +44,11 @@ struct OpRowMutRefTuple<'a> {
 }
 
 impl<'a> OpRowMutRefTuple<'a> {
+    /// return true if no row left
     fn push(&mut self, mut op_row: OpRowMutRef<'a>) -> bool {
         match (self.latest.op(), op_row.op()) {
-            (Op::Insert, Op::Insert) => panic!(
-                "receive duplicated insert on the stream. old valie {:?}, new value {:?}",
-                self.latest, op_row
-            ),
-            (Op::Delete, Op::Delete) => panic!(
-                "receive duplicated delete on the stream. old valie {:?}, new value {:?}",
-                self.latest, op_row
-            ),
+            (Op::Insert, Op::Insert) => panic!("receive duplicated insert on the stream"),
+            (Op::Delete, Op::Delete) => panic!("receive duplicated delete on the stream"),
             (Op::Insert, Op::Delete) => {
                 self.latest.set_vis(false);
                 op_row.set_vis(false);
@@ -66,8 +62,7 @@ impl<'a> OpRowMutRefTuple<'a> {
                 // The operation for the key must be (+, -, +) or (-, +). And the (+, -) must has
                 // been filtered.
                 debug_assert!(self.previous.is_none());
-
-                todo!();
+                self.previous = Some(mem::replace(&mut self.latest, op_row));
             }
             // `all the updateDelete` and `updateInsert` should be normalized to `delete`
             // and`insert`
@@ -116,32 +111,32 @@ impl StreamChunkCompactor {
                 (hash_values, StreamChunkMut::from(c))
             })
             .collect_vec();
-        {
-            let mut op_row_map: OpRowMap = new_prehashed_map_with_capacity(estimate_size);
-            for (hash_values, c) in &mut chunks {
-                for mut r in c.to_mut_rows() {
-                    if !r.vis() {
-                        continue;
+
+        let mut op_row_map: OpRowMap = new_prehashed_map_with_capacity(estimate_size);
+        for (hash_values, c) in &mut chunks {
+            for (row, mut op_row) in c.to_mut_rows() {
+                if !op_row.vis() {
+                    continue;
+                }
+                op_row.set_op(op_row.op().normalize_update());
+                let hash = hash_values[row.index()];
+                let stream_key = row.project(&key_indices);
+                match op_row_map.entry(Prehashed::new(stream_key, hash)) {
+                    Entry::Vacant(v) => {
+                        v.insert(OpRowMutRefTuple {
+                            previous: None,
+                            latest: op_row,
+                        });
                     }
-                    r.set_op(r.op().normalize_update());
-                    let hash = hash_values[r.index()];
-                    let stream_key = r.row_ref().project(&key_indices);
-                    match op_row_map.entry(Prehashed::new(stream_key, hash)) {
-                        Entry::Vacant(v) => {
-                            v.insert(OpRowMutRefTuple {
-                                previous: None,
-                                latest: r,
-                            });
-                        }
-                        Entry::Occupied(mut o) => {
-                            if o.get_mut().push(r) {
-                                o.remove_entry();
-                            }
+                    Entry::Occupied(mut o) => {
+                        if o.get_mut().push(op_row) {
+                            o.remove_entry();
                         }
                     }
                 }
             }
         }
+
         chunks.into_iter().map(|(_, c)| c.into()).collect_vec()
     }
 }
