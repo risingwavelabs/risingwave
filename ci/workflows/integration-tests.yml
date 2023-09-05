@@ -107,6 +107,7 @@ steps:
           - "debezium-sqlserver"
           - "citus-cdc"
           - "kinesis-s3-source"
+          - "clickhouse-sink"
         format:
           - "json"
           - "protobuf"
@@ -137,5 +138,9 @@ steps:
           skip: true
         - with:
             testcase: "kinesis-s3-source"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "clickhouse-sink"
             format: "protobuf"
           skip: true

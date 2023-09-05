@@ -97,6 +97,7 @@ pub enum DdlCommand {
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
+    AlterSourceColumn(Source),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
 }
@@ -264,6 +265,7 @@ where
                 DdlCommand::DropConnection(connection_id) => {
                     ctrl.drop_connection(connection_id).await
                 }
+                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
             }
         }
         .in_current_span();
@@ -345,6 +347,11 @@ where
             .await;
 
         Ok(version)
+    }
+
+    // Maybe we can unify `alter_source_column` and `alter_source_name`.
+    async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.alter_source_column(source).await
     }
 
     async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {
@@ -937,6 +944,7 @@ where
         let ctx = ReplaceTableContext {
             old_table_fragments,
             merge_updates,
+            dispatchers,
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),

@@ -193,9 +193,7 @@ public class MySQLSourceTest {
                             tableSchema,
                             "test",
                             "orders");
-            assertEquals(
-                    "INVALID_ARGUMENT: MySQL user does not have privilege LOCK TABLES, which is needed for debezium connector",
-                    resp.getError().getErrorMessage());
+            assertEquals("", resp.getError().getErrorMessage());
         } catch (Exception e) {
             Assert.fail("validate rpc fail: " + e.getMessage());
         } finally {

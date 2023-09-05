@@ -31,26 +31,18 @@ impl Vacuum {
     /// Wrapper method that warns on any error and doesn't propagate it.
     /// Returns false if any error.
     pub async fn handle_vacuum_task(
-        vacuum_task: VacuumTask,
         sstable_store: SstableStoreRef,
-    ) -> HummockResult<VacuumTask> {
-        tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_object_ids);
-        let object_ids = vacuum_task.sstable_object_ids;
-        sstable_store
-            .delete_list(&object_ids)
-            .await
-            .map_err(|e| HummockError::meta_error(format!("Failed to vacuum task: {:#?}", e)))?;
-        let vacuum_task = VacuumTask {
-            sstable_object_ids: object_ids,
-        };
-        Ok(vacuum_task)
+        sstable_object_ids: &[u64],
+    ) -> HummockResult<()> {
+        tracing::info!("Try to vacuum SSTs {:?}", sstable_object_ids);
+        sstable_store.delete_list(sstable_object_ids).await?;
+        Ok(())
     }
 
     pub async fn report_vacuum_task(
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> bool {
-        tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_object_ids);
         match hummock_meta_client.report_vacuum_task(vacuum_task).await {
             Ok(_) => {
                 tracing::info!("Finished vacuuming SSTs");
@@ -63,49 +55,6 @@ impl Vacuum {
         true
     }
 
-    /// Wrapper method that warns on any error and doesn't propagate it.
-    /// Returns false if any error.
-    pub async fn full_scan(
-        full_scan_task: FullScanTask,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> bool {
-        tracing::info!(
-            "Try to full scan SSTs with timestamp {}",
-            full_scan_task.sst_retention_time_sec
-        );
-        let metadata_iter = match sstable_store.list_object_metadata_from_object_store().await {
-            Ok(metadata_iter) => metadata_iter,
-            Err(e) => {
-                tracing::warn!("Failed to init object iter: {:#?}", e);
-                return false;
-            }
-        };
-        let (filtered_object_ids, unfiltered_count, unfiltered_size) =
-            match Vacuum::full_scan_inner(full_scan_task, metadata_iter).await {
-                Ok(res) => res,
-                Err(e) => {
-                    tracing::warn!("Failed to iter object: {:#?}", e);
-                    return false;
-                }
-            };
-
-        match hummock_meta_client
-            .report_full_scan_task(filtered_object_ids, unfiltered_count, unfiltered_size)
-            .await
-        {
-            Ok(_) => {
-                tracing::info!("Finished full scan SSTs");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to report full scan task: {:#?}", e);
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Returns **filtered** object ids, and **unfiltered** total object count and size.
     pub async fn full_scan_inner(
         full_scan_task: FullScanTask,
         metadata_iter: ObjectMetadataIter,
@@ -141,5 +90,48 @@ impl Vacuum {
             total_object_count as u64,
             total_object_size as u64,
         ))
+    }
+
+    /// Returns **filtered** object ids, and **unfiltered** total object count and size.
+    pub async fn handle_full_scan_task(
+        full_scan_task: FullScanTask,
+        sstable_store: SstableStoreRef,
+    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64)> {
+        tracing::info!(
+            "Try to full scan SSTs with timestamp {}",
+            full_scan_task.sst_retention_time_sec
+        );
+        let metadata_iter = sstable_store
+            .list_object_metadata_from_object_store()
+            .await?;
+        Vacuum::full_scan_inner(full_scan_task, metadata_iter).await
+    }
+
+    pub async fn report_full_scan_task(
+        filtered_object_ids: Vec<u64>,
+        unfiltered_count: u64,
+        unfiltered_size: u64,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) -> bool {
+        tracing::info!("Try to report full scan task",);
+        tracing::info!(
+            "filtered_object_ids length =  {}, unfiltered_count = {}, unfiltered_size = {}",
+            filtered_object_ids.len(),
+            unfiltered_count,
+            unfiltered_size
+        );
+        match hummock_meta_client
+            .report_full_scan_task(filtered_object_ids, unfiltered_count, unfiltered_size)
+            .await
+        {
+            Ok(_) => {
+                tracing::info!("Finished full scan SSTs");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to report full scan task: {:#?}", e);
+                return false;
+            }
+        }
+        true
     }
 }

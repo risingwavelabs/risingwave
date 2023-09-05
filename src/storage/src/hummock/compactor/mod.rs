@@ -41,6 +41,7 @@ pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, LocalSstableInfo};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
 };
@@ -58,7 +59,10 @@ use tokio::time::Instant;
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
+use super::{
+    CompactionDeleteRanges, GetObjectId, HummockResult, SstableBuilderOptions,
+    SstableObjectIdManager, Xor16FilterBuilder,
+};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -73,6 +77,7 @@ use crate::hummock::{
 pub struct Compactor {
     /// The context of the compactor.
     context: Arc<CompactorContext>,
+    object_id_getter: Box<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
@@ -86,12 +91,14 @@ impl Compactor {
         context: Arc<CompactorContext>,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
         Self {
             context,
             options,
             task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
+            object_id_getter,
         }
     }
 
@@ -137,6 +144,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -148,6 +156,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -162,6 +171,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -173,6 +183,7 @@ impl Compactor {
                     del_agg,
                     filter_key_extractor,
                     task_progress.clone(),
+                    self.object_id_getter.clone(),
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -253,9 +264,10 @@ impl Compactor {
         del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
+        object_id_getter: Box<dyn GetObjectId>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
-            sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
+            object_id_getter,
             limiter: self.context.memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
@@ -297,7 +309,10 @@ impl Compactor {
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
-pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<()>, Sender<()>) {
+pub fn start_compactor(
+    compactor_context: Arc<CompactorContext>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+) -> (JoinHandle<()>, Sender<()>) {
     let hummock_meta_client = compactor_context.hummock_meta_client.clone();
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -358,6 +373,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
             pin_mut!(response_event_stream);
 
             let executor = compactor_context.compaction_executor.clone();
+            let sstable_object_id_manager = sstable_object_id_manager.clone();
             let mut last_workload = CompactorWorkload::default();
 
             // This inner loop is to consume stream or report task progress.
@@ -495,6 +511,7 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                             .observe(consumed_latency_ms as _);
 
                         let meta_client = hummock_meta_client.clone();
+                        let sstable_object_id_manager = sstable_object_id_manager.clone();
                         executor.spawn(async move {
                                 let running_task_count = running_task_count.clone();
                                 match event {
@@ -503,7 +520,26 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats) = compactor_runner::compact(context, compact_task, rx).await;
+                                        let (compact_task, table_stats) = match sstable_object_id_manager.add_watermark_object_id(None).await
+                                        {
+                                            Ok(tracker_id) => {
+                                                let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+                                                let _guard = scopeguard::guard(
+                                                    (tracker_id, sstable_object_id_manager_clone),
+                                                    |(tracker_id, sstable_object_id_manager)| {
+                                                        sstable_object_id_manager.remove_watermark_object_id(tracker_id);
+                                                    },
+                                                );
+                                                compactor_runner::compact(context, compact_task, rx, Box::new(sstable_object_id_manager.clone())).await
+                                            },
+                                            Err(err) => {
+                                                tracing::warn!("Failed to track pending SST object id. {:#?}", err);
+                                                let mut compact_task = compact_task;
+                                                // return TaskStatus::TrackSstObjectIdFailed;
+                                                compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
+                                                (compact_task, HashMap::default())
+                                            }
+                                        };
                                         shutdown.lock().unwrap().remove(&task_id);
                                         running_task_count.fetch_sub(1, Ordering::SeqCst);
 
@@ -523,20 +559,28 @@ pub fn start_compactor(compactor_context: Arc<CompactorContext>) -> (JoinHandle<
                                         }
                                     }
                                     ResponseEvent::VacuumTask(vacuum_task) => {
-                                        let vacuum_task = Vacuum::handle_vacuum_task(
-                                            vacuum_task,
+                                        match Vacuum::handle_vacuum_task(
                                             context.sstable_store.clone(),
+                                            &vacuum_task.sstable_object_ids,
                                         )
-                                        .await.unwrap();
-                                        Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
+                                        .await{
+                                            Ok(_) => {
+                                                Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to vacuum task: {:#?}", e)
+                                            }
+                                        }
                                     }
                                     ResponseEvent::FullScanTask(full_scan_task) => {
-                                        Vacuum::full_scan(
-                                            full_scan_task,
-                                            context.sstable_store.clone(),
-                                            meta_client,
-                                        )
-                                        .await;
+                                        match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone()).await {
+                                            Ok((object_ids, total_object_count, total_object_size)) => {
+                                                Vacuum::report_full_scan_task(object_ids, total_object_count, total_object_size, meta_client).await;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to iter object: {:#?}", e);
+                                            }
+                                        }
                                     }
                                     ResponseEvent::ValidationTask(validation_task) => {
                                         validate_ssts(

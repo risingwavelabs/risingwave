@@ -31,10 +31,10 @@ fn regexp_matches<'a>(
     text: &'a str,
     regex: &'a RegexpContext,
 ) -> impl Iterator<Item = ListValue> + 'a {
-    regex.0.captures_iter(text).map(|capture| {
+    regex.regex.captures_iter(text).map(|capture| {
         // If there are multiple captures, then the first one is the whole match, and should be
         // ignored in PostgreSQL's behavior.
-        let skip_flag = regex.0.captures_len() > 1;
+        let skip_flag = regex.regex.captures_len() > 1;
         let list = capture
             .iter()
             .skip(if skip_flag { 1 } else { 0 })

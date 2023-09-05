@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
@@ -20,9 +22,10 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntGauge, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+#[derive(Clone)]
 pub struct StreamingMetrics {
-    pub registry: Registry,
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -102,6 +105,8 @@ pub struct StreamingMetrics {
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
+    /// The progress made by the earliest in-flight barriers in the local barrier manager.
+    pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
 
@@ -118,6 +123,9 @@ pub struct StreamingMetrics {
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
 
+    /// User source reader error
+    pub user_source_reader_error_count: GenericCounterVec<AtomicU64>,
+
     // Materialize
     pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
     pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
@@ -126,8 +134,11 @@ pub struct StreamingMetrics {
     pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
 }
 
+pub static GLOBAL_STREAMING_METRICS: LazyLock<StreamingMetrics> =
+    LazyLock::new(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl StreamingMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
@@ -597,6 +608,14 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let barrier_manager_progress = register_int_counter_with_registry!(
+            "stream_barrier_manager_progress",
+            "The number of actors that have processed the earliest in-flight barriers",
+            registry
+        )
+        .unwrap();
+
         let sink_commit_duration = register_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
@@ -663,6 +682,20 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let user_source_reader_error_count = register_int_counter_vec_with_registry!(
+            "user_source_reader_error_count",
+            "Source reader error count",
+            &[
+                "error_type",
+                "error_msg",
+                "executor_name",
+                "actor_id",
+                "source_id"
+            ],
+            registry,
+        )
+        .unwrap();
+
         let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_hit_count",
             "Materialize executor cache hit count",
@@ -688,7 +721,6 @@ impl StreamingMetrics {
         .unwrap();
 
         Self {
-            registry,
             executor_row_count,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
@@ -747,6 +779,7 @@ impl StreamingMetrics {
             arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
+            barrier_manager_progress,
             sink_commit_duration,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
@@ -756,6 +789,7 @@ impl StreamingMetrics {
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             user_compute_error_count,
+            user_source_reader_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,
@@ -764,6 +798,6 @@ impl StreamingMetrics {
 
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(prometheus::Registry::new())
+        GLOBAL_STREAMING_METRICS.clone()
     }
 }

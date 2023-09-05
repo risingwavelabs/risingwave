@@ -22,8 +22,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
-    ForceStopActorsRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
@@ -34,7 +33,7 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
-use crate::model::MigrationPlan;
+use crate::model::{BarrierManagerState, MigrationPlan, PausedReason};
 use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
@@ -106,8 +105,16 @@ where
 
     /// Recovery the whole cluster from the latest epoch.
     ///
-    /// Returns the new epoch after recovery.
-    pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
+    /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
+    /// immediately paused after recovery, until the user manually resume them either by restarting
+    /// the cluster or `risectl` command. Used for debugging purpose.
+    ///
+    /// Returns the new state of the barrier manager after recovery.
+    pub(crate) async fn recovery(
+        &self,
+        prev_epoch: TracedEpoch,
+        paused_reason: Option<PausedReason>,
+    ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
@@ -123,9 +130,10 @@ where
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
         let recovery_timer = self.metrics.recovery_latency.start_timer();
-        let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || {
+
+        let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
-                let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
+                let recovery_result: MetaResult<_> = try {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
@@ -158,6 +166,7 @@ where
                         actor_dispatchers: Default::default(),
                         added_actors: Default::default(),
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
+                        pause: paused_reason.is_some(),
                     })));
 
                     // Use a different `curr_epoch` for each recovery attempt.
@@ -170,6 +179,7 @@ where
                         info,
                         prev_epoch.clone(),
                         new_epoch.clone(),
+                        paused_reason,
                         command,
                         BarrierKind::Initial,
                         self.source_manager.clone(),
@@ -180,11 +190,7 @@ where
                     {
                         use risingwave_common::util::epoch::INVALID_EPOCH;
 
-                        let mce = self
-                            .hummock_manager
-                            .get_current_version()
-                            .await
-                            .max_committed_epoch;
+                        let mce = self.hummock_manager.get_current_max_committed_epoch().await;
 
                         if mce != INVALID_EPOCH {
                             command_ctx.wait_epoch_commit(mce).await?;
@@ -209,7 +215,9 @@ where
                             Err(err)
                         }
                     };
-                    res?
+                    let (new_epoch, _) = res?;
+
+                    BarrierManagerState::new(new_epoch, command_ctx.next_paused_reason())
                 };
                 if recovery_result.is_err() {
                     self.metrics.recovery_failure_cnt.inc();
@@ -220,11 +228,17 @@ where
         })
         .await
         .expect("Retry until recovery success.");
+
         recovery_timer.observe_duration();
         self.scheduled_barriers.mark_ready().await;
-        tracing::info!("recovery success");
 
-        new_epoch
+        tracing::info!(
+            epoch = state.in_flight_prev_epoch().value().0,
+            paused = ?state.paused_reason(),
+            "recovery success"
+        );
+
+        state
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
@@ -242,7 +256,7 @@ where
             debug!("no expired workers, skipping.");
             return Ok(false);
         }
-        let migration_plan = self.generate_migration_plan(info, expired_workers).await?;
+        let migration_plan = self.generate_migration_plan(expired_workers).await?;
         // 2. start to migrate fragment one-by-one.
         self.fragment_manager
             .migrate_fragment_actors(&migration_plan)
@@ -258,18 +272,25 @@ where
     /// in-used parallel unit to a new one.
     async fn generate_migration_plan(
         &self,
-        info: &BarrierActorInfo,
         expired_workers: HashSet<WorkerId>,
     ) -> MetaResult<MigrationPlan> {
         let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
 
         let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
 
-        let mut to_migrate_parallel_units: BTreeSet<_> = all_worker_parallel_units
-            .iter()
-            .filter(|(worker, _)| expired_workers.contains(worker))
-            .flat_map(|(_, pu)| pu.iter().cloned())
+        let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_parallel_units
+            .into_iter()
+            .partition(|(worker, _)| expired_workers.contains(worker));
+
+        let mut to_migrate_parallel_units: BTreeSet<_> = expired_inuse_workers
+            .into_iter()
+            .flat_map(|(_, pu)| pu.into_iter())
             .collect();
+        let mut inuse_parallel_units: HashSet<_> = inuse_workers
+            .into_iter()
+            .flat_map(|(_, pu)| pu.into_iter())
+            .collect();
+
         cached_plan.parallel_unit_plan.retain(|from, to| {
             if to_migrate_parallel_units.contains(from) {
                 if !to_migrate_parallel_units.contains(&to.id) {
@@ -282,6 +303,7 @@ where
             false
         });
         to_migrate_parallel_units.retain(|id| !cached_plan.parallel_unit_plan.contains_key(id));
+        inuse_parallel_units.extend(cached_plan.parallel_unit_plan.values().map(|pu| pu.id));
 
         if to_migrate_parallel_units.is_empty() {
             // all expired parallel units are already in migration plan.
@@ -298,33 +320,21 @@ where
         let start = Instant::now();
         // if in-used expire parallel units are not empty, should wait for newly joined worker.
         'discovery: while !to_migrate_parallel_units.is_empty() {
-            let current_nodes = self
+            let mut new_parallel_units = self
                 .cluster_manager
-                .list_active_streaming_compute_nodes()
+                .list_active_streaming_parallel_units()
                 .await;
-            let new_nodes = current_nodes
-                .into_iter()
-                .filter(|node| {
-                    !info.actor_map.contains_key(&node.id)
-                        && !cached_plan
-                            .parallel_unit_plan
-                            .values()
-                            .map(|pu| pu.worker_node_id)
-                            .contains(&node.id)
-                })
-                .collect_vec();
-            if !new_nodes.is_empty() {
-                debug!("new workers joined: {:#?}", new_nodes);
-                let target_parallel_units = new_nodes
-                    .into_iter()
-                    .flat_map(|node| node.parallel_units)
-                    .collect_vec();
-                for target_parallel_unit in target_parallel_units {
+            new_parallel_units.retain(|pu| !inuse_parallel_units.contains(&pu.id));
+
+            if !new_parallel_units.is_empty() {
+                debug!("new parallel units found: {:#?}", new_parallel_units);
+                for target_parallel_unit in new_parallel_units {
                     if let Some(from) = to_migrate_parallel_units.pop() {
                         debug!(
                             "plan to migrate from parallel unit {} to {}",
                             from, target_parallel_unit.id
                         );
+                        inuse_parallel_units.insert(target_parallel_unit.id);
                         cached_plan
                             .parallel_unit_plan
                             .insert(from, target_parallel_unit);

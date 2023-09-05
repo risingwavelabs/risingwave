@@ -89,6 +89,14 @@ impl SplitReader for KinesisSplitReader {
             start_position => start_position.to_owned(),
         };
 
+        if !matches!(start_position, KinesisOffset::SequenceNumber(_))
+            && properties.seq_offset.is_some()
+        {
+            return Err(
+                anyhow!("scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number")
+            );
+        }
+
         let stream_name = properties.common.stream_name.clone();
         let client = properties.common.build_client().await?;
 
@@ -118,7 +126,12 @@ impl KinesisSplitReader {
         self.new_shard_iter().await?;
         loop {
             if self.shard_iter.is_none() {
-                tracing::warn!("shard iterator is none unexpectedly, renew it");
+                tracing::warn!(
+                    "shard iterator is none unexpectedly, may reach the end of shard {}, latest seq {}, retrying in one second",
+                    self.shard_id,
+                    self.latest_offset.as_ref().unwrap_or(&"None".to_string())
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 self.new_shard_iter().await?;
             }
             match self.get_records().await {
@@ -180,7 +193,16 @@ impl KinesisSplitReader {
                     self.new_shard_iter().await?;
                     continue;
                 }
-                Err(e) => return Err(anyhow!(DisplayErrorContext(e))),
+                Err(e) => {
+                    let error_msg = format!(
+                        "Kinesis got a unhandled error: {:?}, stream {:?}, shard {:?}",
+                        DisplayErrorContext(e),
+                        self.stream_name,
+                        self.shard_id,
+                    );
+                    tracing::error!("{}", error_msg);
+                    return Err(anyhow!("{}", error_msg));
+                }
             }
         }
     }
@@ -269,6 +291,41 @@ mod tests {
     use super::*;
     use crate::common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
+
+    #[tokio::test]
+    async fn test_reject_redundant_seq_props() {
+        let properties = KinesisProperties {
+            common: KinesisCommon {
+                assume_role_arn: None,
+                credentials_access_key: None,
+                credentials_secret_access_key: None,
+                stream_name: "kinesis_debug".to_string(),
+                stream_region: "cn-northwest-1".to_string(),
+                endpoint: None,
+                session_token: None,
+                assume_role_external_id: None,
+            },
+
+            scan_startup_mode: None,
+            seq_offset: Some(
+                // redundant seq number
+                "49629139817504901062972448413535783695568426186596941842".to_string(),
+            ),
+        };
+        let client = KinesisSplitReader::new(
+            properties,
+            vec![SplitImpl::Kinesis(KinesisSplit {
+                shard_id: "shardId-000000000001".to_string().into(),
+                start_position: KinesisOffset::Earliest,
+                end_position: KinesisOffset::None,
+            })],
+            Default::default(),
+            Default::default(),
+            None,
+        )
+        .await;
+        assert!(client.is_err());
+    }
 
     #[tokio::test]
     #[ignore]

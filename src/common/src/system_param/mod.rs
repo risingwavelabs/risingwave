@@ -17,7 +17,7 @@
 //!
 //! To add a new system parameter:
 //! - Add a new field to [`PbSystemParams`] in `meta.proto`.
-//! - Add a new entry to [`for_all_undeprecated_params`] in this file.
+//! - Add a new entry to `for_all_undeprecated_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod local_manager;
@@ -56,7 +56,8 @@ macro_rules! for_all_undeprecated_params {
             { backup_storage_directory, String, Some("backup".to_string()), false },
             { telemetry_enabled, bool, Some(true), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
-            $({ $field, $type, $default },)*
+            { pause_on_next_bootstrap, bool, Some(false), true },
+            $({ $field, $type, $default, $is_mutable },)*
         }
     };
 }
@@ -67,7 +68,7 @@ macro_rules! for_all_params {
     ($macro:ident) => {
         for_all_undeprecated_params!(
             $macro /* Define future deprecated params here, such as
-                    * ,{ backup_storage_directory, String, "backup".to_string() } */
+                    * ,{ backup_storage_directory, String, "backup".to_string(), true } */
         );
     };
 }
@@ -370,6 +371,7 @@ mod tests {
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (TELEMETRY_ENABLED_KEY, "false"),
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
+            (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
         ];
 
         // To kv - missing field.

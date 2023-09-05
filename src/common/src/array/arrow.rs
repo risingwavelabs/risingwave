@@ -184,7 +184,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Timestamp => Ok(Self::Timestamp(arrow_schema::TimeUnit::Microsecond, None)),
             DataType::Timestamptz => Ok(Self::Timestamp(
                 arrow_schema::TimeUnit::Microsecond,
-                Some("UTC".into()),
+                Some("+00:00".into()),
             )),
             DataType::Time => Ok(Self::Time64(arrow_schema::TimeUnit::Microsecond)),
             DataType::Interval => Ok(Self::Interval(arrow_schema::IntervalUnit::MonthDayNano)),
