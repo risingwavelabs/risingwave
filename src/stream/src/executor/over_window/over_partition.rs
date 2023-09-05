@@ -455,7 +455,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         tracing::debug!(partition=?self.this_partition_key, "loading the whole partition into cache");
 
-        let mut new_cache = new_empty_partition_cache();
+        let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
         let table_iter = table
             .iter_row_with_pk_prefix(
                 self.this_partition_key,
