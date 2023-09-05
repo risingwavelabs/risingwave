@@ -348,7 +348,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 }
             }
         }
-        for (z, level) in parent_levels.levels.iter_mut().enumerate() {
+        for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
             let insert_table_infos = split_sst_info_for_level(
                 &member_table_ids,
                 allow_trivial_split,
@@ -356,21 +356,23 @@ impl HummockVersionUpdateExt for HummockVersion {
                 &mut split_id_vers,
                 &mut new_sst_id,
             );
-            cur_levels.levels[z].total_file_size += insert_table_infos
+            cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.file_size)
                 .sum::<u64>();
-            cur_levels.levels[z].uncompressed_file_size += insert_table_infos
+            cur_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.uncompressed_file_size)
                 .sum::<u64>();
-            cur_levels.levels[z].table_infos.extend(insert_table_infos);
-            cur_levels.levels[z].table_infos.sort_by(|sst1, sst2| {
+            cur_levels.levels[idx]
+                .table_infos
+                .extend(insert_table_infos);
+            cur_levels.levels[idx].table_infos.sort_by(|sst1, sst2| {
                 let a = sst1.key_range.as_ref().unwrap();
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
-            assert!(can_concat(&cur_levels.levels[z].table_infos));
+            assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
                 .drain_filter(|sst_info| sst_info.table_ids.is_empty())
