@@ -212,7 +212,7 @@ mod tests {
             },
         ];
         let json_schema = generate_json_schema("test", &fields).schema;
-        let json_schema_ans = "{\"$schema\":\"https://json-schema.org/draft-07/schema\",\"properties\":{\"v1\":{\"type\":\"boolean\"},\"v2\":{\"type\":\"string\"},\"v3\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"v4\":{\"properties\":{\"a\":{\"type\":\"number\"},\"b\":{\"type\":\"number\"}},\"type\":\"object\"}},\"schemaType\":\"JSON\",\"title\":\"test\"}";
+        let json_schema_ans = "{\"$schema\":\"https://json-schema.org/draft-07/schema\",\"properties\":{\"v1\":{\"type\":\"boolean\"},\"v2\":{\"type\":\"string\"},\"v3\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"v4\":{\"properties\":{\"a\":{\"type\":\"number\"},\"b\":{\"type\":\"number\"}},\"type\":\"object\"}},\"title\":\"test\",\"type\":\"object\"}";
         assert_eq!(json_schema, json_schema_ans);
     }
 }
