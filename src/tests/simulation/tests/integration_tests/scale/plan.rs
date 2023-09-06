@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 
 use anyhow::Result;
 use itertools::Itertools;
@@ -26,7 +27,7 @@ use risingwave_pb::meta::PbReschedule;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -65,7 +66,7 @@ async fn test_resize_normal() -> Result<()> {
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: removed_workers,
-                    target_parallelism: None,
+                    ..Default::default()
                 },
             )]),
         }))
@@ -92,7 +93,7 @@ async fn test_resize_normal() -> Result<()> {
 
     Ok(())
 }
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_single() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -135,7 +136,7 @@ async fn test_resize_single() -> Result<()> {
                 .parallel_units
                 .iter()
                 .map(|parallel_unit| parallel_unit.id)
-                .contains(&used_parallel_unit_id)
+                .contains(used_parallel_unit_id)
         })
         .collect_vec();
 
@@ -148,7 +149,7 @@ async fn test_resize_single() -> Result<()> {
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: vec![prev_worker.id],
-                    target_parallelism: None,
+                    ..Default::default()
                 },
             )]),
         }))
@@ -175,7 +176,7 @@ async fn test_resize_single() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_single_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -223,7 +224,7 @@ async fn test_resize_single_failed() -> Result<()> {
                     WorkerChanges {
                         include_worker_ids: vec![],
                         exclude_worker_ids: vec![worker_a.id],
-                        target_parallelism: None,
+                        ..Default::default()
                     },
                 ),
                 (
@@ -231,7 +232,7 @@ async fn test_resize_single_failed() -> Result<()> {
                     WorkerChanges {
                         include_worker_ids: vec![],
                         exclude_worker_ids: vec![worker_b.id],
-                        target_parallelism: None,
+                        ..Default::default()
                     },
                 ),
             ]),
@@ -242,7 +243,7 @@ async fn test_resize_single_failed() -> Result<()> {
 
     Ok(())
 }
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_no_shuffle() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -302,7 +303,7 @@ join mv5 on mv1.v = mv5.v;",
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: removed_worker_ids,
-                    target_parallelism: None,
+                    ..Default::default()
                 },
             )]),
         }))

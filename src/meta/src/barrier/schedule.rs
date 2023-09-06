@@ -26,8 +26,8 @@ use tokio::sync::{oneshot, watch, RwLock};
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
+use crate::model::PausedReason;
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
 /// A queue for scheduling barriers.
@@ -121,18 +121,18 @@ impl Inner {
 /// The sender side of the barrier scheduling queue.
 /// Can be cloned and held by other managers to schedule and run barriers.
 #[derive(Clone)]
-pub struct BarrierScheduler<S: MetaStore> {
+pub struct BarrierScheduler {
     inner: Arc<Inner>,
 
     /// Used for getting the latest snapshot after `FLUSH`.
-    hummock_manager: HummockManagerRef<S>,
+    hummock_manager: HummockManagerRef,
 }
 
-impl<S: MetaStore> BarrierScheduler<S> {
+impl BarrierScheduler {
     /// Create a pair of [`BarrierScheduler`] and [`ScheduledBarriers`], for scheduling barriers
     /// from different managers, and executing them in the barrier manager, respectively.
     pub fn new_pair(
-        hummock_manager: HummockManagerRef<S>,
+        hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
         checkpoint_frequency: usize,
     ) -> (Self, ScheduledBarriers) {
@@ -289,9 +289,13 @@ impl<S: MetaStore> BarrierScheduler<S> {
 
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
-    pub async fn run_command_with_paused(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![Command::pause(), command, Command::resume()])
-            .await
+    pub async fn run_config_change_command_with_pause(&self, command: Command) -> MetaResult<()> {
+        self.run_multiple_commands(vec![
+            Command::pause(PausedReason::ConfigChange),
+            command,
+            Command::resume(PausedReason::ConfigChange),
+        ])
+        .await
     }
 
     /// Run a command and return when it's completely finished.

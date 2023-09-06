@@ -246,6 +246,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
+
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,

@@ -45,6 +45,7 @@
 #![feature(is_sorted)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
+#![feature(async_fn_in_trait)]
 
 #[macro_use]
 extern crate tracing;

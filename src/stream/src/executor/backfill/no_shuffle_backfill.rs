@@ -163,16 +163,20 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(
-                    &self.upstream_table,
-                    init_epoch,
-                    None,
-                    false,
-                    self.chunk_size,
-                    &mut builder,
-                );
-                pin_mut!(snapshot);
-                snapshot.try_next().await?.unwrap().is_none()
+                let snapshot_is_empty = {
+                    let snapshot = Self::snapshot_read(
+                        &self.upstream_table,
+                        init_epoch,
+                        None,
+                        false,
+                        &mut builder,
+                    );
+                    pin_mut!(snapshot);
+                    snapshot.try_next().await?.unwrap().is_none()
+                };
+                let snapshot_buffer_is_empty = builder.is_empty();
+                builder.clear();
+                snapshot_is_empty && snapshot_buffer_is_empty
             }
         };
 
@@ -254,7 +258,6 @@ where
                         snapshot_read_epoch,
                         current_pos.clone(),
                         true,
-                        self.chunk_size,
                         &mut builder
                     )
                     .map(Either::Right),);
@@ -348,9 +351,9 @@ where
                 // - switch snapshot
 
                 // Consume snapshot rows left in builder
-                let chunk = builder.build_data_chunk();
-                let chunk_cardinality = chunk.cardinality() as u64;
-                if chunk_cardinality > 0 {
+                let chunk = builder.consume_all();
+                if let Some(chunk) = chunk {
+                    let chunk_cardinality = chunk.cardinality() as u64;
                     let ops = vec![Op::Insert; chunk.capacity()];
                     let chunk = StreamChunk::from_parts(ops, chunk);
                     current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
@@ -476,13 +479,18 @@ where
         }
     }
 
+    /// Snapshot read the upstream mv.
+    /// The rows from upstream snapshot read will be buffered inside the `builder`.
+    /// If snapshot is dropped before its rows are consumed,
+    /// remaining data in `builder` must be flushed manually.
+    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
+    /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read<'a>(
         upstream_table: &'a StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
-        chunk_size: usize,
         builder: &'a mut DataChunkBuilder,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
@@ -510,7 +518,7 @@ where
         pin_mut!(row_iter);
 
         #[for_await]
-        for chunk in iter_chunks(row_iter, chunk_size, builder) {
+        for chunk in iter_chunks(row_iter, builder) {
             yield chunk?;
         }
     }
