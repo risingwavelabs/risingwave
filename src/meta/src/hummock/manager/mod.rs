@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
-use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
@@ -2776,7 +2775,7 @@ fn gen_version_delta<'a>(
         .or_default()
         .group_deltas;
     let mut gc_object_ids = vec![];
-    let mut removed_table_ids_map = BTreeMap::default();
+    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
 
     for level in &compact_task.input_ssts {
         let level_idx = level.level_idx;
@@ -2800,15 +2799,10 @@ fn gen_version_delta<'a>(
             })
             .collect_vec();
 
-        match removed_table_ids_map.entry(level_idx) {
-            Vacant(entry) => {
-                entry.insert(removed_table_ids);
-            }
-
-            Occupied(mut entry) => {
-                entry.get_mut().append(&mut removed_table_ids);
-            }
-        };
+        removed_table_ids_map
+            .entry(level_idx)
+            .or_default()
+            .append(&mut removed_table_ids);
     }
 
     for (level_idx, removed_table_ids) in removed_table_ids_map {
