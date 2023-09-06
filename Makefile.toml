@@ -636,17 +636,6 @@ alias = "kill-risedev"
 [tasks.k]
 alias = "kill-risedev"
 
-[tasks.kill-risingwave-components]
-category = "RiseDev - Start/Stop"
-description = "Kill RisingWave components only."
-script = '''
-#!/usr/bin/env bash
-
-tmux list-windows -F '#{window_name} #{pane_id}' \
-| grep -E '(compute|meta|frontend|compactor|connector)' \
-| sed -E 's/.* (%[0-9])/\1/' | xargs -I {} tmux send-keys -t {} C-c C-d
-'''
-
 [tasks.down]
 category = "RiseDev - Start/Stop"
 description = "Kill RisingWave dev cluster and clean the data"
