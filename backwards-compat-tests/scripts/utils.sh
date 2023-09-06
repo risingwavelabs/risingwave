@@ -130,8 +130,11 @@ get_rw_versions() {
   #
   # First we obtain a list of versions from git branch names.
   # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
+  echo "--- git branch output"
+  git branch
   local branches=$(git branch | grep -E "v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrc' | tr -d ' ')
   echo "--- BRANCHES"
+  echo "$branches"
 
   # Then we sort them in descending order.
   local sorted_versions=$(echo -e "$branches" | sort -t '.' -n)
