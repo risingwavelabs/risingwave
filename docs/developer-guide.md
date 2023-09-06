@@ -479,7 +479,7 @@ and latest minor version of Risingwave (e.g. 1.0.0 vs 1.1.0).
 
 You can run it locally with:
 ```bash
-./backwards-compat-tests/scripts/run_local.sh
+./risedev backwards-compat-test
 ```
 
 In CI, you can make sure the PR runs it by adding the label `ci/run-backwards-compat-tests`.
