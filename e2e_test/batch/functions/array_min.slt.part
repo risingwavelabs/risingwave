@@ -49,6 +49,7 @@ select array_min(array[-9223372036854775808, 9223372036854775807, -9223372036854
 query I
 select array_min(array['a', '', 'c']);
 ----
+(empty)
 
 query I
 select array_min(array[3.14, 1.14, 1.14514]);
