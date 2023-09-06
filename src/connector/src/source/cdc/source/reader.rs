@@ -17,11 +17,12 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
-use jni::objects::{JObject, JValue};
+use jni::objects::JValue;
+use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::GetEventStreamJniSender;
-use risingwave_pb::connector_service::GetEventStreamResponse;
+use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
@@ -122,10 +123,16 @@ impl CommonSplitReader for CdcSplitReader {
 
         let tx: Box<GetEventStreamJniSender> = Box::new(tx);
 
-        let source_type = self.conn_props.get_source_type_pb()?;
-
         JVM.as_ref()
             .ok_or_else(|| anyhow!("JVM is not initialized, so fail to create cdc table"))?;
+
+        let get_event_stream_request = GetEventStreamRequest {
+            source_id: self.source_id,
+            source_type: self.conn_props.get_source_type_pb()? as _,
+            start_offset: self.start_offset.unwrap_or_default(),
+            properties,
+            snapshot_done: self.snapshot_done,
+        };
 
         std::thread::spawn(move || {
             let mut env = JVM
@@ -134,58 +141,21 @@ impl CommonSplitReader for CdcSplitReader {
                 .attach_current_thread_as_daemon()
                 .unwrap();
 
-            let st = env
-                .call_static_method(
-                    "com/risingwave/proto/ConnectorServiceProto$SourceType",
-                    "forNumber",
-                    "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;",
-                    &[JValue::from(source_type as i32)],
-                )
-                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+            let get_event_stream_request_bytes = env
+                .byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))
                 .unwrap();
-
-            let st = env.call_static_method(
-                "com/risingwave/connector/api/source/SourceTypeE",
-                "valueOf",
-                "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;",
-                &[(&st).into()]
-                )
-                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
-                .unwrap();
-
-            let start_offset = match self.start_offset {
-                Some(start_offset) => {
-                    let start_offset = env.new_string(start_offset).unwrap();
-                    env.call_method(start_offset, "toString", "()Ljava/lang/String;", &[])
-                        .unwrap()
-                }
-                None => jni::objects::JValueGen::Object(JObject::null()),
-            };
-
-            let java_map = env.new_object("java/util/HashMap", "()V", &[]).unwrap();
-
-            for (key, value) in &properties {
-                let key = env.new_string(key.to_string()).unwrap();
-                let value = env.new_string(value.to_string()).unwrap();
-                let args = [JValue::Object(&key), JValue::Object(&value)];
-                env.call_method(
-                    &java_map,
-                    "put",
-                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
-                    &args,
-                )
-                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
-                .unwrap();
-            }
 
             let channel_ptr = Box::into_raw(tx) as i64;
-            let channel_ptr = JValue::from(channel_ptr);
 
-            let _ = env.call_static_method(
-                "com/risingwave/connector/source/core/JniDbzSourceHandler",
-                "runJniDbzSourceThread",
-                "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZJ)V",
-                &[(&st).into(), JValue::from(self.source_id as i64), (&start_offset).into(), JValue::Object(&java_map), JValue::from(self.snapshot_done), channel_ptr]
+            let _ = env
+                .call_static_method(
+                    "com/risingwave/connector/source/core/JniDbzSourceHandler",
+                    "runJniDbzSourceThread",
+                    "([BJ)V",
+                    &[
+                        JValue::Object(&get_event_stream_request_bytes),
+                        JValue::from(channel_ptr),
+                    ],
                 )
                 .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
                 .unwrap();
