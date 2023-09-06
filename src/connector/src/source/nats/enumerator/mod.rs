@@ -44,7 +44,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
         // TODO: to simplify the logic, return 1 split for first version
         let nats_split = NatsSplit {
             subject: self.subject.clone(),
-            split_num: 1,
+            split_num: 0, // be the same as `from_nats_jetstream_message`
             start_sequence: None,
         };
 

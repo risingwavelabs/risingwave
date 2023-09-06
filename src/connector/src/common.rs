@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Ok;
+use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use clickhouse::Client;
@@ -396,35 +397,24 @@ impl NatsCommon {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone()).await?;
         let name = format!("risingwave-consumer-{}-{}", self.subject, split_id);
+        let mut config = jetstream::consumer::pull::Config {
+            ack_policy: jetstream::consumer::AckPolicy::None,
+            ..Default::default()
+        };
         match start_sequence {
             Some(v) => {
                 let consumer = stream
-                    .get_or_create_consumer(
-                        &name,
-                        async_nats::jetstream::consumer::pull::Config {
-                            ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
-                            // rw have no mechanism to ack messages, no need to use client durable
-                            deliver_policy:
-                                async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
-                                    start_sequence: (v),
-                                },
-                            ..Default::default()
-                        },
-                    )
+                    .get_or_create_consumer(&name, {
+                        config.deliver_policy = DeliverPolicy::ByStartSequence {
+                            start_sequence: v + 1,
+                        };
+                        config
+                    })
                     .await?;
                 Ok(consumer)
             }
             None => {
-                let consumer = stream
-                    .get_or_create_consumer(
-                        &name,
-                        async_nats::jetstream::consumer::pull::Config {
-                            ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
-                            // rw have no mechanism to ack messages, no need to use client durable
-                            ..Default::default()
-                        },
-                    )
-                    .await?;
+                let consumer = stream.get_or_create_consumer(&name, config).await?;
                 Ok(consumer)
             }
         }
