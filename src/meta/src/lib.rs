@@ -192,7 +192,6 @@ use std::future::Future;
 use std::pin::Pin;
 
 use risingwave_common::config::{load_config, MetaBackend, RwConfig};
-use risingwave_jni_core::jvm_runtime;
 use tracing::info;
 
 /// Start meta node
@@ -247,8 +246,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-
-        jvm_runtime::register_native_method_for_jvm();
 
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
