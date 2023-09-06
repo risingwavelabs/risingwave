@@ -16,10 +16,13 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::pin_mut;
 use futures_async_stream::try_stream;
+use jni::objects::{JObject, JValue};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_jni_core::GetEventStreamJniSender;
 use risingwave_pb::connector_service::GetEventStreamResponse;
+use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -95,12 +98,8 @@ impl SplitReader for CdcSplitReader {
 }
 
 impl CommonSplitReader for CdcSplitReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
-        let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
-            anyhow!("connector node endpoint not specified or unable to connect to connector node")
-        })?;
-
         // rewrite the hostname and port for the split
         let mut properties = self.conn_props.props.clone();
 
@@ -119,38 +118,82 @@ impl CommonSplitReader for CdcSplitReader {
             properties.insert("table.name".into(), table_name);
         }
 
-        let cdc_stream = cdc_client
-            .start_source_stream(
-                self.source_id,
-                self.conn_props.get_source_type_pb()?,
-                self.start_offset,
-                properties,
-                self.snapshot_done,
-            )
-            .await
-            .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
-        pin_mut!(cdc_stream);
-        #[for_await]
-        for event_res in cdc_stream {
-            match event_res {
-                Ok(GetEventStreamResponse { events, .. }) => {
-                    if events.is_empty() {
-                        continue;
-                    }
-                    let mut msgs = Vec::with_capacity(events.len());
-                    for event in events {
-                        msgs.push(SourceMessage::from(event));
-                    }
-                    yield msgs;
+        let (tx, mut rx) = mpsc::channel(1024);
+
+        let tx: Box<GetEventStreamJniSender> = Box::new(tx);
+
+        let source_type = self.conn_props.get_source_type_pb()?;
+
+        std::thread::spawn(move || {
+            let mut env = JVM.attach_current_thread_as_daemon().unwrap();
+
+            let st = env
+                .call_static_method(
+                    "com/risingwave/proto/ConnectorServiceProto$SourceType",
+                    "forNumber",
+                    "(I)Lcom/risingwave/proto/ConnectorServiceProto$SourceType;",
+                    &[JValue::from(source_type as i32)],
+                )
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+                .unwrap();
+
+            let st = env.call_static_method(
+                "com/risingwave/connector/api/source/SourceTypeE",
+                "valueOf",
+                "(Lcom/risingwave/proto/ConnectorServiceProto$SourceType;)Lcom/risingwave/connector/api/source/SourceTypeE;",
+                &[(&st).into()]
+                )
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+                .unwrap();
+
+            let start_offset = match self.start_offset {
+                Some(start_offset) => {
+                    let start_offset = env.new_string(start_offset).unwrap();
+                    env.call_method(start_offset, "toString", "()Ljava/lang/String;", &[])
+                        .unwrap()
                 }
-                Err(e) => {
-                    return Err(anyhow!(
-                        "Cdc service error: code {}, msg {}",
-                        e.code(),
-                        e.message()
-                    ))
-                }
+                None => jni::objects::JValueGen::Object(JObject::null()),
+            };
+
+            let java_map = env.new_object("java/util/HashMap", "()V", &[]).unwrap();
+
+            for (key, value) in &properties {
+                let key = env.new_string(key.to_string()).unwrap();
+                let value = env.new_string(value.to_string()).unwrap();
+                let args = [JValue::Object(&key), JValue::Object(&value)];
+                env.call_method(
+                    &java_map,
+                    "put",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    &args,
+                )
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+                .unwrap();
             }
+
+            let channel_ptr = Box::into_raw(tx) as i64;
+            let channel_ptr = JValue::from(channel_ptr);
+
+            let _ = env.call_static_method(
+                "com/risingwave/connector/source/core/JniDbzSourceHandler",
+                "runJniDbzSourceThread",
+                "(Lcom/risingwave/connector/api/source/SourceTypeE;JLjava/lang/String;Ljava/util/Map;ZJ)V",
+                &[(&st).into(), JValue::from(self.source_id as i64), (&start_offset).into(), JValue::Object(&java_map), JValue::from(self.snapshot_done), channel_ptr]
+                )
+                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+                .unwrap();
+        });
+
+        while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
+            tracing::debug!("receive events {:?}", events.len());
+            if events.is_empty() {
+                continue;
+            }
+            let mut msgs = Vec::with_capacity(events.len());
+            for event in events {
+                msgs.push(SourceMessage::from(event));
+            }
+            yield msgs;
         }
     }
 }

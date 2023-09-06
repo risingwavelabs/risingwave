@@ -39,6 +39,7 @@ use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+use risingwave_jni_core::jvm_runtime;
 use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
@@ -212,6 +213,8 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .parse()
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
+
+        jvm_runtime::register_native_method_for_jvm();
 
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts).await;

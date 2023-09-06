@@ -3853,6 +3853,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af150ab688ff2122fcef229be89cb50dd66af9e01a4ff320cc137eecc9bacc38"
 
 [[package]]
+name = "java-locator"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90003f2fd9c52f212c21d8520f1128da0080bad6fff16b68fe6e7f2f0c3780c2"
+dependencies = [
+ "glob",
+ "lazy_static",
+]
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3861,7 +3871,9 @@ dependencies = [
  "cesu8",
  "cfg-if",
  "combine",
+ "java-locator",
  "jni-sys",
+ "libloading",
  "log",
  "thiserror",
  "walkdir",
@@ -6815,6 +6827,7 @@ dependencies = [
  "futures-async-stream",
  "hyper",
  "itertools 0.11.0",
+ "jni",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -6878,6 +6891,7 @@ dependencies = [
  "hyper-tls",
  "icelake",
  "itertools 0.11.0",
+ "jni",
  "jsonschema-transpiler",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -10114,6 +10128,7 @@ dependencies = [
  "hyper",
  "indexmap 1.9.3",
  "itertools 0.10.5",
+ "jni",
  "lexical-core",
  "lexical-parse-float",
  "lexical-parse-integer",
