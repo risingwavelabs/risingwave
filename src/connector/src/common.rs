@@ -402,6 +402,7 @@ impl NatsCommon {
                     .get_or_create_consumer(
                         &name,
                         async_nats::jetstream::consumer::pull::Config {
+                            ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
                             // rw have no mechanism to ack messages, no need to use client durable
                             deliver_policy:
                                 async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
@@ -418,6 +419,7 @@ impl NatsCommon {
                     .get_or_create_consumer(
                         &name,
                         async_nats::jetstream::consumer::pull::Config {
+                            ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
                             // rw have no mechanism to ack messages, no need to use client durable
                             ..Default::default()
                         },

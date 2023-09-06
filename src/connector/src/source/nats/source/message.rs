@@ -23,7 +23,7 @@ impl SourceMessage {
             key: None,
             payload: Some(message.message.payload.to_vec()),
             // For nats jetstream, use sequence id as offset
-            offset: message.info().unwrap().consumer_sequence.to_string(),
+            offset: message.info().unwrap().stream_sequence.to_string(),
             split_id: "0".into(),
             meta: SourceMeta::Empty,
         }
