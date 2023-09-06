@@ -26,7 +26,7 @@ cp -r backwards-compat-tests/slt/* $TEST_DIR
 ################################### TEST UTILIIES
 
 wait_kafka_exit() {
-  # Copied from kafka-server-stop.sh
+  # Follow kafka-server-stop.sh
   while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
     echo "Waiting for kafka to exit"
     sleep 1
@@ -34,7 +34,7 @@ wait_kafka_exit() {
 }
 
 wait_zookeeper_exit() {
-  # Copied from zookeeper-server-stop.sh
+  # Follow zookeeper-server-stop.sh
   while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
     echo "Waiting for zookeeper to exit"
     sleep 1
@@ -67,7 +67,7 @@ kill_cluster() {
     echo "kill kafka"
     kill_kafka
 
-    echo "kill zookeeper, wait 5s"
+    echo "kill zookeeper"
     kill_zookeeper
 
     # Kill their tmux sessions

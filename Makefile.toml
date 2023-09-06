@@ -581,6 +581,32 @@ script = '''
 
 set -euo pipefail
 
+wait_kafka_exit() {
+  # Follow kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Follow zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
 # Kill other components
 tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
 | grep -v 'kafka' \
@@ -588,21 +614,17 @@ tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
 | awk '{ print $2 }' \
 | xargs -I {} tmux send-keys -t {} C-c C-d
 
-set +e
 if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
 then
-  echo "kill kafka, wait 5s"
-  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
-  sleep 5
+  echo "kill kafka"
+  kill_kafka
 
-  echo "kill zookeeper, wait 5s"
-  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
-  sleep 5
+  echo "kill zookeeper"
+  kill_zookeeper
+
   # Kill their tmux sessions
   tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
-
 fi
-set -e
 
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
