@@ -197,7 +197,7 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        for (input, _target_file_size, target_level_files) in input_levels {
+        for (input, target_file_size, target_level_files) in input_levels {
             let mut select_level_inputs = input
                 .sstable_infos
                 .into_iter()
@@ -208,6 +208,7 @@ impl LevelCompactionPicker {
                 })
                 .collect_vec();
             select_level_inputs.reverse();
+            let target_file_count = target_level_files.len();
             select_level_inputs.push(InputLevel {
                 level_idx: target_level.level_idx,
                 level_type: target_level.level_type,
@@ -217,7 +218,10 @@ impl LevelCompactionPicker {
             let result = CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: self.target_level,
-                target_sub_level_id: 0,
+                select_input_size: input.total_file_size,
+                target_input_size: target_file_size,
+                total_file_count: (input.total_file_count + target_file_count) as u64,
+                ..Default::default()
             };
 
             if !self.compaction_task_validator.valid_compact_task(
@@ -274,6 +278,8 @@ impl LevelCompactionPicker {
             }
 
             let validator = CompactionTaskValidator::new(self.config.clone());
+            let mut select_input_size = 0;
+            let mut total_file_count = 0;
             for input in l0_select_tables_vec {
                 let mut max_level_size = 0;
                 for level_select_table in &input.sstable_infos {
@@ -295,13 +301,18 @@ impl LevelCompactionPicker {
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: level_select_sst,
                     });
+
+                    select_input_size += input.total_file_size;
+                    total_file_count += input.total_file_count;
                 }
                 select_level_inputs.reverse();
 
                 let result = CompactionInput {
                     input_levels: select_level_inputs,
-                    target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count: total_file_count as u64,
+                    ..Default::default()
                 };
 
                 if !validator.valid_compact_task(&result, CompactionTaskOptimizeRule::Intra, stats)
@@ -369,6 +380,7 @@ impl LevelCompactionPicker {
                 target_level_idx -= 1;
             }
 
+            let select_input_size = select_sst.file_size;
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -385,6 +397,9 @@ impl LevelCompactionPicker {
                 input_levels,
                 target_level: 0,
                 target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                select_input_size,
+                total_file_count: 1,
+                ..Default::default()
             });
         }
         None
@@ -868,6 +883,7 @@ pub mod tests {
             }],
             target_level: 1,
             target_sub_level_id: pending_level.sub_level_id,
+            ..Default::default()
         };
         assert!(!levels_handler[0].is_level_pending_compact(&pending_level));
         tier_task_input.add_pending_task(1, &mut levels_handler);

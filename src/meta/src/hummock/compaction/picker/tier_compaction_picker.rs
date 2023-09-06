@@ -84,9 +84,16 @@ impl TierCompactionPicker {
 
             if can_concat(&input_level.table_infos) {
                 return Some(CompactionInput {
+                    select_input_size: input_level
+                        .table_infos
+                        .iter()
+                        .map(|sst| sst.file_size)
+                        .sum(),
+                    total_file_count: input_level.table_infos.len() as u64,
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    ..Default::default()
                 });
             }
 
@@ -136,6 +143,9 @@ impl TierCompactionPicker {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
+                select_input_size: compaction_bytes,
+                target_input_size: 0,
+                total_file_count: compact_file_count,
             };
 
             if !self.compaction_task_validator.valid_compact_task(

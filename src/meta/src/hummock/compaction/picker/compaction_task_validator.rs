@@ -58,24 +58,6 @@ impl CompactionTaskValidator {
                 * self.config.level0_overlapping_sub_level_compact_level_count as u64,
         );
 
-        let compaction_bytes: u64 = input
-            .input_levels
-            .iter()
-            .map(|overlapping_sub_level| {
-                overlapping_sub_level
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.file_size)
-                    .sum::<u64>()
-            })
-            .sum();
-
-        let compact_file_count: u64 = input
-            .input_levels
-            .iter()
-            .map(|overlapping_sub_level| overlapping_sub_level.table_infos.len() as u64)
-            .sum();
-
         // Limit sstable file count to avoid using too much memory.
         let overlapping_max_compact_file_numer = std::cmp::min(
             self.config.level0_max_compact_file_number,
@@ -83,10 +65,10 @@ impl CompactionTaskValidator {
         );
 
         let waiting_enough_files = {
-            if compaction_bytes > max_compaction_bytes {
+            if input.select_input_size > max_compaction_bytes {
                 false
             } else {
-                compact_file_count <= overlapping_max_compact_file_numer
+                input.total_file_count <= overlapping_max_compact_file_numer
             }
         };
 
@@ -115,8 +97,6 @@ impl CompactionTaskValidator {
         }
 
         let mut max_level_size = 0;
-        let mut total_file_size = 0;
-        let mut total_file_count = 0;
         for select_level in &input.input_levels {
             let level_select_size = select_level
                 .table_infos
@@ -125,9 +105,6 @@ impl CompactionTaskValidator {
                 .sum::<u64>();
 
             max_level_size = std::cmp::max(max_level_size, level_select_size);
-
-            total_file_size += level_select_size;
-            total_file_count += select_level.table_infos.len();
         }
 
         // This limitation would keep our write-amplification no more than
@@ -136,17 +113,16 @@ impl CompactionTaskValidator {
         // of level0_sub_level_compact_level_count just for convenient.
         let is_write_amp_large =
             max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
-                >= total_file_size;
+                >= input.select_input_size;
 
-        if is_write_amp_large
-            && total_file_count < self.config.level0_max_compact_file_number as usize
+        if is_write_amp_large && input.total_file_count < self.config.level0_max_compact_file_number
         {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }
 
         if input.input_levels.len() < intra_sub_level_compact_level_count
-            && total_file_count < self.config.level0_max_compact_file_number as usize
+            && input.total_file_count < self.config.level0_max_compact_file_number
         {
             stats.skip_by_count_limit += 1;
             return false;
@@ -160,37 +136,14 @@ impl CompactionTaskValidator {
         input: &CompactionInput,
         stats: &mut LocalPickerStatistic,
     ) -> bool {
-        let target_level_size: u64 = input
-            .input_levels
-            .last()
-            .as_ref()
-            .unwrap()
-            .table_infos
-            .iter()
-            .map(|sst| sst.file_size)
-            .sum();
-
-        let select_file_size: u64 = input
-            .input_levels
-            .iter()
-            .map(|level| {
-                level
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.file_size)
-                    .sum::<u64>()
-            })
-            .sum::<u64>()
-            - target_level_size;
-
         // The size of target level may be too large, we shall skip this compact task and wait
         //  the data in base level compact to lower level.
-        if target_level_size > self.config.max_compaction_bytes {
+        if input.target_input_size > self.config.max_compaction_bytes {
             stats.skip_by_count_limit += 1;
             return false;
         }
 
-        if select_file_size < target_level_size {
+        if input.select_input_size < input.target_input_size {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }
