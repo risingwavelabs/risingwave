@@ -1059,6 +1059,10 @@ def section_streaming_actors(outer_panels):
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
                         ),
 
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Over window cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_latency(
@@ -1067,14 +1071,14 @@ def section_streaming_actors(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_barrier_align_duration_bucket')}[$__rate_interval])) by (le, actor_id, wait_side, job, instance))",
-                                f"p{legend} {{{{actor_id}}}}.{{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_barrier_align_duration_bucket')}[$__rate_interval])) by (le, fragment_id, wait_side, job, instance))",
+                                f"p{legend} - fragment {{{{fragment_id}}}} {{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}",
                             ),
                             [90, 99, 999, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, actor_id, wait_side, job, instance)(rate({metric('stream_join_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate({metric('stream_join_barrier_align_duration_count')}[$__rate_interval]))",
-                            "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}",
+                            f"sum by(le, fragment_id, wait_side, job, instance)(rate({metric('stream_join_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,fragment_id,wait_side,job,instance) (rate({metric('stream_join_barrier_align_duration_count')}[$__rate_interval]))",
+                            "avg - fragment {{fragment_id}} {{wait_side}} - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1131,14 +1135,14 @@ def section_streaming_actors(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, actor_id, table_id, job, instance))",
-                                f"p{legend} - actor_id {{{{actor_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, fragment_id, table_id, job, instance))",
+                                f"p{legend} - fragment {{{{fragment_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
                             ),
                             [90, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, actor_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
-                            "avg - actor_id {{actor_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
+                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, fragment_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
+                            "avg - fragment {{fragment_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1230,6 +1234,25 @@ def section_streaming_actors(outer_panels):
                                       "lookup cached count | table {{table_id}} actor {{actor_id}}"),
 
                     ],
+                ),
+
+                panels.timeseries_actor_ops(
+                    "Over Window Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cached_entry_count')}[$__rate_interval])",
+                            "cached entry count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
+                            "cache lookup count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
+                            "cache miss count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ]
                 ),
             ],
         )

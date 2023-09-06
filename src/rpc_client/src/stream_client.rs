@@ -52,7 +52,9 @@ impl StreamClient {
             .await?
             .tracing_injected();
 
-        Ok(Self(StreamServiceClient::new(channel)))
+        Ok(Self(
+            StreamServiceClient::new(channel).max_decoding_message_size(usize::MAX),
+        ))
     }
 }
 
