@@ -7585,7 +7585,6 @@ dependencies = [
  "sled",
  "spin 0.9.8",
  "sync-point",
- "sysinfo",
  "tempfile",
  "thiserror",
  "tokio-retry",
