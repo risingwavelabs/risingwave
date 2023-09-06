@@ -25,6 +25,32 @@ cp -r backwards-compat-tests/slt/* $TEST_DIR
 
 ################################### TEST UTILIIES
 
+wait_kafka_exit() {
+  # Copied from kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Copied from zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  $KAFKA_PATH/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  $KAFKA_PATH/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
@@ -38,13 +64,12 @@ kill_cluster() {
   set +e
   if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
   then
-    echo "kill kafka, wait 5s"
-    $KAFKA_PATH/bin/kafka-server-stop.sh
-    sleep 5
+    echo "kill kafka"
+    kill_kafka
 
     echo "kill zookeeper, wait 5s"
-    $KAFKA_PATH/bin/zookeeper-server-stop.sh
-    sleep 5
+    kill_zookeeper
+
     # Kill their tmux sessions
     tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
   fi
