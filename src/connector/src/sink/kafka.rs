@@ -523,7 +523,8 @@ impl KafkaSinkWriter {
                         match delivery_future_result {
                             // Successfully sent the record
                             // Will return the partition and offset of the message (i32, i64)
-                            Ok(Ok(val)) => Ok(val),
+                            // Note that `Vec<()>` won't cause memory allocation
+                            Ok(Ok(_)) => Ok(()),
                             // If the message failed to be delivered. (i.e., flush)
                             // The error & the copy of the original message will be returned
                             // i.e., (KafkaError, OwnedMessage)
