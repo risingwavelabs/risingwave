@@ -5,16 +5,10 @@ set -euo pipefail
 ORIGINAL_BRANCH=$(git branch --show-current)
 
 on_exit() {
-  # set +e
   git checkout "$ORIGINAL_BRANCH"
-  # ./risedev k
-  # set -e
 }
 
 trap on_exit EXIT
-
-OLD_TAG=1.0.0
-NEW_TAG=1.1.0
 
 source backwards-compat-tests/scripts/utils.sh
 
@@ -63,6 +57,7 @@ setup_new_cluster() {
 
 main() {
   set -euo pipefail
+  get_rw_version_tag
   setup_old_cluster
   configure_rw
   seed_old_cluster $OLD_TAG
