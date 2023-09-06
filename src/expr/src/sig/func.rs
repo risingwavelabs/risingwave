@@ -201,6 +201,8 @@ mod tests {
                 ],
                 ArrayMax: [
                     "array_max(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
+                ArrayMin: [
+                    "array_min(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
                 ],
             }
         "#]];

@@ -31,18 +31,14 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::CatalogManagerRef;
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::storage::MetaStore;
 
-pub struct CloudServiceImpl<S>
-where
-    S: MetaStore,
-{
-    catalog_manager: CatalogManagerRef<S>,
+pub struct CloudServiceImpl {
+    catalog_manager: CatalogManagerRef,
     aws_client: Option<AwsEc2Client>,
 }
 
-impl<S: MetaStore> CloudServiceImpl<S> {
-    pub fn new(catalog_manager: CatalogManagerRef<S>, aws_client: Option<AwsEc2Client>) -> Self {
+impl CloudServiceImpl {
+    pub fn new(catalog_manager: CatalogManagerRef, aws_client: Option<AwsEc2Client>) -> Self {
         Self {
             catalog_manager,
             aws_client,
@@ -65,10 +61,7 @@ fn new_rwc_validate_fail_response(
 }
 
 #[async_trait]
-impl<S> CloudService for CloudServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl CloudService for CloudServiceImpl {
     async fn rw_cloud_validate_source(
         &self,
         request: Request<RwCloudValidateSourceRequest>,

@@ -411,12 +411,6 @@ impl SinkWriter for IcebergWriter {
         // TODO: abort should clean up all the data written in this epoch.
         Ok(())
     }
-
-    /// Update the vnode bitmap of current sink writer
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        // Just skip it.
-        Ok(())
-    }
 }
 
 pub struct IcebergSinkCommitter {
