@@ -68,9 +68,12 @@ ENABLE_BUILD_RUST=false
 
 # Ensure it will link the all-in-one binary from our release.
 ENABLE_ALL_IN_ONE=true
-EOF
 
-echo "ENABLE_RELEASE_PROFILE=$ENABLE_RELEASE_PROFILE" >> risedev-components.user.env
+# Even if CI is release profile, we won't ever
+# build the binaries from scratch.
+# So we just use `/target/debug` for simplicity.
+ENABLE_RELEASE_PROFILE=false
+EOF
 }
 
 setup_old_cluster() {
@@ -81,12 +84,7 @@ setup_old_cluster() {
   OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_TAG}/risingwave-v${OLD_TAG}-x86_64-unknown-linux.tar.gz
   wget $OLD_URL
   tar -xvf risingwave-v${OLD_TAG}-x86_64-unknown-linux.tar.gz
-  if [[ $ENABLE_RELEASE_PROFILE == 'true' ]]; then
-    RW_DIR=target/release
-  else
-    RW_DIR=target/debug
-  fi
-  mv risingwave $RW_DIR/risingwave
+  mv risingwave target/debug/risingwave
 
 #  echo "--- Setup old release $OLD_TAG"
 #  pushd ..
