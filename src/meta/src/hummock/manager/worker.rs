@@ -23,7 +23,6 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use crate::hummock::utils::RetryableError;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::LocalNotification;
-use crate::storage::MetaStore;
 
 pub type HummockManagerEventSender = tokio::sync::mpsc::UnboundedSender<HummockManagerEvent>;
 pub type HummockManagerEventReceiver = tokio::sync::mpsc::UnboundedReceiver<HummockManagerEvent>;
@@ -34,12 +33,9 @@ pub enum HummockManagerEvent {
     Shutdown,
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     pub(crate) async fn start_worker(
-        self: &HummockManagerRef<S>,
+        self: &HummockManagerRef,
         mut receiver: HummockManagerEventReceiver,
     ) -> JoinHandle<()> {
         let (local_notification_tx, mut local_notification_rx) =
