@@ -133,6 +133,7 @@ impl FunctionAttr {
             _ => (0..num_args).collect_vec(),
         };
         let children_indices = match optimize_const {
+            #[allow(clippy::redundant_clone)] // false-positive
             true => non_prebuilt_indices.clone(),
             false => (0..num_args).collect_vec(),
         };
@@ -336,6 +337,8 @@ impl FunctionAttr {
 
                 match input.vis() {
                     Vis::Bitmap(vis) => {
+                        // allow using `zip` for performance
+                        #[allow(clippy::disallowed_methods)]
                         for ((#(#inputs,)*), visible) in #array_zip.zip(vis.iter()) {
                             if !visible {
                                 builder.append_null();
@@ -802,7 +805,6 @@ impl FunctionAttr {
                 )*
 
                 #[derive(Debug)]
-                #[allow(non_camel_case_types)]
                 struct #struct_name {
                     return_type: DataType,
                     chunk_size: usize,
