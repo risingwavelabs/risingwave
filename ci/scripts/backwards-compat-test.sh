@@ -86,7 +86,7 @@ setup_old_cluster() {
   else
     RW_DIR=target/debug
   fi
-  mv risingwave-v${OLD_TAG}-x86_64-unknown-linux/risingwave $RW_DIR/risingwave
+  mv risingwave $RW_DIR/risingwave
 
 #  echo "--- Setup old release $OLD_TAG"
 #  pushd ..
