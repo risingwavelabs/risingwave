@@ -464,11 +464,11 @@ impl HummockVersionUpdateExt for HummockVersion {
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
         let mut sst_split_info = vec![];
-        let is_trival = version_delta.trivial_move;
+        let is_trivial = version_delta.trivial_move;
         for (index, (compaction_group_id, group_deltas)) in
             version_delta.group_deltas.iter().enumerate()
         {
-            let reclaim_sub_level = !is_trival || index == version_delta.group_deltas.len();
+            let reclaim_sub_level = !is_trivial || index == version_delta.group_deltas.len();
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
                 let mut new_levels = build_initial_compaction_group_levels(
