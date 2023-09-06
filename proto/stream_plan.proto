@@ -24,6 +24,9 @@ message AddMutation {
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
+  // We may embed a pause mutation here.
+  // TODO: we may allow multiple mutations in a single barrier.
+  bool pause = 4;
 }
 
 message StopMutation {
@@ -171,6 +174,10 @@ message SinkDesc {
   map<string, string> properties = 8;
   catalog.SinkType sink_type = 9;
   repeated plan_common.ColumnCatalog column_catalogs = 10;
+  string db_name = 11;
+  // If the sink is from table or mv, this is name of the table/mv. Otherwise
+  // it is the name of the sink itself.
+  string sink_from_name = 12;
 }
 
 enum SinkLogStoreType {
@@ -584,12 +591,20 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
-// Note this is not exactly the same as EowcOverWindowNode in terms of future extension, so better to split as 2 different nodes.
+enum OverWindowCachePolicy {
+  OVER_WINDOW_CACHE_POLICY_UNSPECIFIED = 0;
+  OVER_WINDOW_CACHE_POLICY_FULL = 1;
+  OVER_WINDOW_CACHE_POLICY_RECENT = 2;
+  OVER_WINDOW_CACHE_POLICY_RECENT_FIRST_N = 3;
+  OVER_WINDOW_CACHE_POLICY_RECENT_LAST_N = 4;
+}
+
 message OverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
+  OverWindowCachePolicy cache_policy = 5;
 }
 
 message StreamNode {

@@ -420,12 +420,15 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
+    #[serde(default = "default::streaming::streaming_metric_level")]
+    pub streaming_metric_level: MetricLevel,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
-pub enum StorageMetricLevel {
+pub enum MetricLevel {
     #[default]
     Disabled = 0,
     Critical = 1,
@@ -433,13 +436,13 @@ pub enum StorageMetricLevel {
     Debug = 3,
 }
 
-impl PartialEq<Self> for StorageMetricLevel {
+impl PartialEq<Self> for MetricLevel {
     fn eq(&self, other: &Self) -> bool {
         (*self as u8).eq(&(*other as u8))
     }
 }
 
-impl PartialOrd for StorageMetricLevel {
+impl PartialOrd for MetricLevel {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
@@ -518,6 +521,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub meta_file_cache: FileCacheConfig,
 
+    #[serde(default)]
+    pub cache_refill: CacheRefillConfig,
+
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
@@ -564,7 +570,22 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
 
     #[serde(default = "default::storage::storage_metric_level")]
-    pub storage_metric_level: StorageMetricLevel,
+    pub storage_metric_level: MetricLevel,
+
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct CacheRefillConfig {
+    #[serde(default = "default::cache_refill::data_refill_levels")]
+    pub data_refill_levels: Vec<u32>,
+
+    #[serde(default = "default::cache_refill::timeout_ms")]
+    pub timeout_ms: u64,
+
+    #[serde(default = "default::cache_refill::concurrency")]
+    pub concurrency: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -616,9 +637,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
-
-    #[serde(default = "default::file_cache::refill_levels")]
-    pub refill_levels: Vec<u32>,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -775,6 +793,10 @@ pub struct SystemConfig {
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
+
+    /// Whether to pause all data sources on next bootstrap.
+    #[serde(default = "default::system::pause_on_next_bootstrap")]
+    pub pause_on_next_bootstrap: Option<bool>,
 }
 
 impl SystemConfig {
@@ -792,6 +814,7 @@ impl SystemConfig {
             backup_storage_directory: self.backup_storage_directory,
             telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
+            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
         }
     }
 }
@@ -918,7 +941,7 @@ pub mod default {
     }
 
     pub mod storage {
-        use crate::config::StorageMetricLevel;
+        use crate::config::MetricLevel;
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -1025,13 +1048,13 @@ pub mod default {
             512 * 1024 * 1024 // 512m
         }
 
-        pub fn storage_metric_level() -> StorageMetricLevel {
-            StorageMetricLevel::Info
+        pub fn storage_metric_level() -> MetricLevel {
+            MetricLevel::Info
         }
     }
 
     pub mod streaming {
-        use crate::config::AsyncStackTraceOption;
+        use crate::config::{AsyncStackTraceOption, MetricLevel};
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -1045,6 +1068,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn streaming_metric_level() -> MetricLevel {
+            MetricLevel::Info
         }
     }
 
@@ -1105,9 +1132,19 @@ pub mod default {
         pub fn reclaim_rate_limit_mb() -> usize {
             0
         }
+    }
 
-        pub fn refill_levels() -> Vec<u32> {
+    pub mod cache_refill {
+        pub fn data_refill_levels() -> Vec<u32> {
             vec![]
+        }
+
+        pub fn timeout_ms() -> u64 {
+            6000
+        }
+
+        pub fn concurrency() -> usize {
+            100
         }
     }
 
@@ -1165,55 +1202,7 @@ pub mod default {
     }
 
     pub mod system {
-        use crate::system_param;
-
-        pub fn barrier_interval_ms() -> Option<u32> {
-            system_param::default::barrier_interval_ms()
-        }
-
-        pub fn checkpoint_frequency() -> Option<u64> {
-            system_param::default::checkpoint_frequency()
-        }
-
-        pub fn parallel_compact_size_mb() -> Option<u32> {
-            system_param::default::parallel_compact_size_mb()
-        }
-
-        pub fn sstable_size_mb() -> Option<u32> {
-            system_param::default::sstable_size_mb()
-        }
-
-        pub fn block_size_kb() -> Option<u32> {
-            system_param::default::block_size_kb()
-        }
-
-        pub fn bloom_false_positive() -> Option<f64> {
-            system_param::default::bloom_false_positive()
-        }
-
-        pub fn state_store() -> Option<String> {
-            system_param::default::state_store()
-        }
-
-        pub fn data_directory() -> Option<String> {
-            system_param::default::data_directory()
-        }
-
-        pub fn backup_storage_url() -> Option<String> {
-            system_param::default::backup_storage_url()
-        }
-
-        pub fn backup_storage_directory() -> Option<String> {
-            system_param::default::backup_storage_directory()
-        }
-
-        pub fn telemetry_enabled() -> Option<bool> {
-            system_param::default::telemetry_enabled()
-        }
-
-        pub fn max_concurrent_creating_streaming_jobs() -> Option<u32> {
-            system_param::default::max_concurrent_creating_streaming_jobs()
-        }
+        pub use crate::system_param::default::*;
     }
 
     pub mod batch {

@@ -19,16 +19,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::kafka::{
     KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
@@ -36,8 +36,6 @@ use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
 };
-
-impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<PrivateLinkConsumerContext>,
@@ -159,7 +157,9 @@ impl SplitReader for KafkaSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
@@ -176,9 +176,11 @@ impl KafkaSplitReader {
             ])
             .set(offset);
     }
+}
 
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_data_stream(self) {
+impl CommonSplitReader for KafkaSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
                 (Some(start), Some(stop)) if (*start + 1) >= *stop => true,

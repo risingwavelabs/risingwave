@@ -20,13 +20,13 @@ use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
-use url::Url;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
 use super::schema_registry::Client;
 use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
 use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::parser::avro::util::avro_schema_to_column_descs;
+use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
@@ -151,8 +151,7 @@ pub async fn schema_to_columns(
     use_schema_registry: bool,
     props: &HashMap<String, String>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
-    let url = Url::parse(schema_location)
-        .map_err(|e| InternalError(format!("failed to parse url ({}): {}", schema_location, e)))?;
+    let url = handle_sr_list(schema_location)?;
     let schema_content = if use_schema_registry {
         let schema_registry_auth = SchemaRegistryAuth::from(props);
         let client = Client::new(url, &schema_registry_auth)?;
@@ -163,9 +162,10 @@ pub async fn schema_to_columns(
             .await?
             .content
     } else {
+        let url = url.get(0).unwrap();
         match url.scheme() {
             "file" => read_schema_from_local(url.path()),
-            "https" | "http" => read_schema_from_http(&url).await,
+            "https" | "http" => read_schema_from_http(url).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
