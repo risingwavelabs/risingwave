@@ -18,8 +18,9 @@ use tokio::sync::oneshot;
 
 use crate::{MetaError, MetaResult};
 
+/// The barrier info sent back to the caller when a barrier is injected.
 #[derive(Debug, Clone, Copy)]
-pub struct Injected {
+pub struct BarrierInfo {
     pub prev_epoch: Epoch,
     pub curr_epoch: Epoch,
 
@@ -31,7 +32,7 @@ pub struct Injected {
 #[derive(Debug, Default)]
 pub(super) struct Notifier {
     /// Get notified when scheduled barrier is injected to compute nodes.
-    pub injected: Option<oneshot::Sender<Injected>>,
+    pub injected: Option<oneshot::Sender<BarrierInfo>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
@@ -42,9 +43,9 @@ pub(super) struct Notifier {
 
 impl Notifier {
     /// Notify when we have injected a barrier to compute nodes.
-    pub fn notify_injected(&mut self, injected: Injected) {
+    pub fn notify_injected(&mut self, info: BarrierInfo) {
         if let Some(tx) = self.injected.take() {
-            tx.send(injected).ok();
+            tx.send(info).ok();
         }
     }
 

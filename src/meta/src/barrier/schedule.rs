@@ -24,7 +24,7 @@ use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::PausedReason;
 use tokio::sync::{oneshot, watch, RwLock};
 
-use super::notifier::{Injected, Notifier};
+use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
 use crate::rpc::metrics::MetaMetrics;
@@ -238,8 +238,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// Run multiple commands and return when they're all completely finished. It's ensured that
     /// multiple commands are executed continuously.
     ///
+    /// Returns the barrier info of each command.
+    ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<Injected>> {
+    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<BarrierInfo>> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -262,14 +264,14 @@ impl<S: MetaStore> BarrierScheduler<S> {
 
         self.push(scheduleds).await?;
 
-        let mut injected_results = Vec::with_capacity(contexts.len());
+        let mut infos = Vec::with_capacity(contexts.len());
 
         for (injected_rx, collect_rx, finish_rx) in contexts {
             // Wait for this command to be injected, and record the result.
-            let injected = injected_rx
+            let info = injected_rx
                 .await
                 .map_err(|e| anyhow!("failed to inject barrier: {}", e))?;
-            injected_results.push(injected);
+            infos.push(info);
 
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
@@ -282,15 +284,17 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 .map_err(|e| anyhow!("failed to finish command: {}", e))?;
         }
 
-        Ok(injected_results)
+        Ok(infos)
     }
 
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
+    ///
+    /// Returns the barrier info of the actual command.
     pub async fn run_config_change_command_with_pause(
         &self,
         command: Command,
-    ) -> MetaResult<Injected> {
+    ) -> MetaResult<BarrierInfo> {
         self.run_multiple_commands(vec![
             Command::pause(PausedReason::ConfigChange),
             command,
@@ -301,7 +305,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 
     /// Run a command and return when it's completely finished.
-    pub async fn run_command(&self, command: Command) -> MetaResult<Injected> {
+    ///
+    /// Returns the barrier info of the actual command.
+    pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
         self.run_multiple_commands(vec![command])
             .await
             .map(|i| i[0])

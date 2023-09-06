@@ -49,7 +49,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::TrackingCommand;
-use crate::barrier::notifier::Injected;
+use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
@@ -723,15 +723,13 @@ where
         let prev_paused_reason = state.paused_reason();
         let curr_paused_reason = command_ctx.next_paused_reason();
 
-        let injected = Injected {
+        let info = BarrierInfo {
             prev_epoch: prev_epoch.value(),
             curr_epoch: curr_epoch.value(),
             prev_paused_reason,
             curr_paused_reason,
         };
-        notifiers
-            .iter_mut()
-            .for_each(|n| n.notify_injected(injected));
+        notifiers.iter_mut().for_each(|n| n.notify_injected(info));
 
         // Update the paused state after the barrier is injected.
         state.set_paused_reason(curr_paused_reason);
