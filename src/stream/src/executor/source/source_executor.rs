@@ -120,40 +120,6 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
-    fn check_split_assignment_is_migration(
-        &self,
-        actor_splits: &HashMap<ActorId, Vec<SplitImpl>>,
-    ) -> bool {
-        let core = self.stream_source_core.as_ref().unwrap();
-
-        let mut split_to_actors_index = HashMap::new();
-
-        for (actor_id, splits) in actor_splits {
-            for split in splits {
-                split_to_actors_index
-                    .entry(split.id())
-                    .or_insert(vec![])
-                    .push(*actor_id);
-            }
-        }
-
-        for split_id in core.state_cache.keys() {
-            if let Some(actor_ids) = split_to_actors_index.remove(split_id) {
-                if !actor_ids.contains(&self.actor_ctx.id) {
-                    tracing::warn!(
-                        "split {} migration from {} detected, target might be {:?}",
-                        split_id,
-                        self.actor_ctx.id,
-                        actor_ids
-                    );
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
     #[inline]
     fn get_metric_labels(&self) -> [String; 3] {
         [
@@ -457,12 +423,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                         actor_splits = ?actor_splits,
                                         "source change split received"
                                     );
-
-                                    // In the context of split changes, we do not allow split
-                                    // migration because it can lead to inconsistent states.
-                                    // Therefore, all split migration must be done via update
-                                    // mutation and pause/resume
-                                    assert!(!self.check_split_assignment_is_migration(actor_splits));
 
                                     target_state = self
                                         .apply_split_change(&source_desc, &mut stream, actor_splits)
