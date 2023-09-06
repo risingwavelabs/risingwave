@@ -46,7 +46,7 @@ EOF
 
 setup_old_cluster() {
   echo "--- Setting up old cluster"
-  git checkout "v${OLD_VERSION}"
+  git checkout "v${OLD_VERSION}-rc"
 }
 
 setup_new_cluster() {
