@@ -930,7 +930,7 @@ pub mod tests {
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = ::default();
+        let mut local_stats = LocalPickerStatistic::default();
 
         let config = Arc::new(
             CompactionConfigBuilder::new()
