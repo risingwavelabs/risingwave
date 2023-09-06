@@ -7160,13 +7160,8 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
- "prost",
- "risingwave_common",
  "risingwave_expr",
  "risingwave_jni_core",
- "risingwave_pb",
- "serde",
- "serde_json",
 ]
 
 [[package]]
