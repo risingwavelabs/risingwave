@@ -575,9 +575,8 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let compactor_context = Arc::new(CompactorContext {
+    let compactor_context = CompactorContext {
         storage_opts,
-        hummock_meta_client: meta_client,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
@@ -589,8 +588,8 @@ fn run_compactor_thread(
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
-    });
-    start_compactor(compactor_context, sstable_object_id_manager)
+    };
+    start_compactor(compactor_context, meta_client, sstable_object_id_manager)
 }
 
 #[cfg(test)]

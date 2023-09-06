@@ -60,7 +60,7 @@ pub struct CompactorRunner {
 impl CompactorRunner {
     pub fn new(
         split_index: usize,
-        context: Arc<CompactorContext>,
+        context: CompactorContext,
         task: CompactTask,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
@@ -109,7 +109,7 @@ impl CompactorRunner {
         Self {
             compactor,
             compact_task: task,
-            sstable_store: context.sstable_store.clone(),
+            sstable_store: context.sstable_store,
             key_range,
             split_index,
         }
@@ -235,7 +235,7 @@ impl CompactorRunner {
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact(
-    compactor_context: Arc<CompactorContext>,
+    compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
@@ -543,7 +543,7 @@ pub async fn compact(
 /// Fills in the compact task and tries to report the task result to meta node.
 fn compact_done(
     mut compact_task: CompactTask,
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     output_ssts: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
