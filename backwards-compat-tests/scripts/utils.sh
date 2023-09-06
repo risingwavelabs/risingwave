@@ -121,7 +121,7 @@ seed_json_kafka() {
 ################################### Entry Points
 
 # Get $OLD_VERSION and $NEW_VERSION for Risingwave
-get_rw_version_tag() {
+get_rw_versions() {
   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
   # against the Nth latest release candidate, where N > 1. N can be larger,
   local VERSION_OFFSET=4

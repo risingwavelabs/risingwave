@@ -57,7 +57,7 @@ setup_new_cluster() {
 
 main() {
   set -euo pipefail
-  get_rw_version_tag
+  get_rw_versions
   setup_old_cluster
   configure_rw
   seed_old_cluster "$OLD_VERSION"

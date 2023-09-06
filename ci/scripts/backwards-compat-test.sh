@@ -38,9 +38,6 @@ source backwards-compat-tests/scripts/utils.sh
 
 ################################### Main
 
-OLD_TAG=1.0.0
-NEW_TAG=1.1.0
-
 configure_rw() {
 echo "--- Setting up cluster config"
 cat <<EOF > risedev-profiles.user.yml
@@ -77,25 +74,25 @@ EOF
 }
 
 setup_old_cluster() {
-  echo "--- Build risedev for $OLD_TAG, it may not be backwards compatible"
+  echo "--- Build risedev for $OLD_VERSION, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
-  git checkout "v${OLD_TAG}-rc"
+  git checkout "v${OLD_VERSION}-rc"
   cargo build -p risedev
-  OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_TAG}/risingwave-v${OLD_TAG}-x86_64-unknown-linux.tar.gz
+  OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_VERSION}/risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   wget $OLD_URL
-  tar -xvf risingwave-v${OLD_TAG}-x86_64-unknown-linux.tar.gz
+  tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   mv risingwave target/debug/risingwave
 
-#  echo "--- Setup old release $OLD_TAG"
+#  echo "--- Setup old release $OLD_VERSION"
 #  pushd ..
-#  git clone --depth 1 --branch "v${OLD_TAG}-rc" "https://github.com/risingwavelabs/risingwave.git"
+#  git clone --depth 1 --branch "v${OLD_VERSION}-rc" "https://github.com/risingwavelabs/risingwave.git"
 #  pushd risingwave
 #  mkdir -p target/debug
 #  echo "Branch:"
 #  git branch
 #  cp risingwave target/debug/risingwave
 
-  echo "--- Start cluster on tag $OLD_TAG"
+  echo "--- Start cluster on tag $OLD_VERSION"
   git config --global --add safe.directory /risingwave
 }
 
@@ -108,13 +105,15 @@ setup_new_cluster() {
 }
 
 main() {
+  set -euo pipefail
+  get_rw_versions
   setup_old_cluster
   configure_rw
-  seed_old_cluster $OLD_TAG
+  seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
   configure_rw
-  validate_new_cluster $NEW_TAG
+  validate_new_cluster "$NEW_VERSION"
 }
 
 main
